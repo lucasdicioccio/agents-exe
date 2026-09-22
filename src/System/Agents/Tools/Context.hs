@@ -57,7 +57,7 @@ module System.Agents.Tools.Context (
     isSubcallContext,
 ) where
 
-import Control.Concurrent.STM (TQueue)
+import Control.Concurrent.STM (STM, TQueue)
 import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
@@ -69,7 +69,8 @@ import qualified Data.Map.Strict as Map
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
-import System.Agents.Session.Types (Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
+import System.Agents.Session.Mailbox (MailRouter, SpawnSession, UnwatchSession, WatchSession)
+import System.Agents.Session.Types (Envelope, Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
 import System.Agents.Tools.Bindings.Types (DerivedNarrowing (..), ScopedBinding (..))
 import System.Agents.Tools.Params.Types (ParamValue (..), Params)
 
@@ -308,6 +309,45 @@ data ToolExecutionContext = ToolExecutionContext
     interrupts the background thread and returns 'False' when the engine
     does not own a running call with that id.
     -}
+    , ctxRecordChildSession :: Maybe (SessionId -> IO ())
+    {- ^ Phase 4 (@todos/session-mailbox.md@ §5): optional hook a
+    @prompt_agent_\<slug\>@ call uses to report its own child session id
+    back to its tracking entity, once the child session exists. Built by
+    the async engine per call (it alone knows the call's own 'EntityId')
+    and written onto the call's 'System.Agents.OS.Conversation.Types.ToolCallConfig'
+    component; 'System.Agents.Session.Step.pollRunningCall' copies it onto
+    'TrackedToolCall.tcChildSessionId' so a detached placeholder can show it
+    (see 'System.Agents.Session.Types.partialToolMessages'). 'Nothing' for
+    calls with no OS entity (inline calls) or outside the async engine.
+    -}
+    , ctxAwaitMail :: Maybe (STM [Envelope])
+    {- ^ Phase 2 (@todos/session-mailbox.md@ §3): optional hook the @wait@
+    capability uses to block (in the same 'Control.Concurrent.STM.orElse'
+    transaction as its other arms) until mail arrives past the session's
+    current 'Session.Types.mailCursor'. Built once per turn from the
+    agent's mailbox and that cursor (see 'System.Agents.Session.Step.buildContext'),
+    so every call in the turn shares the same view of "what's new".
+    'Nothing' when the agent has no mailbox.
+    -}
+    , ctxMailRouter :: Maybe MailRouter
+    {- ^ Phase 4 (@todos/session-mailbox.md@ §5): optional process-wide
+    table of live mailboxes, used by @send-message@ \/ @spawn-session@ to
+    address another session by id. Copied straight from 'Agent.ctxMailRouter'.
+    'Nothing' when the agent has no router.
+    -}
+    , ctxSpawnSession :: Maybe SpawnSession
+    {- ^ Phase 4 (@todos/session-mailbox.md@ §5): optional @spawn-session@
+    hook. Copied straight from 'Agent.ctxSpawnSession'. 'Nothing' when the
+    front-end has not installed one.
+    -}
+    , ctxWatchSession :: Maybe WatchSession
+    {- ^ Phase 6 (@todos/session-mailbox.md@ §7): optional @watch-session@
+    hook. Copied straight from 'Agent.ctxWatchSession'.
+    -}
+    , ctxUnwatchSession :: Maybe UnwatchSession
+    {- ^ Phase 6 (@todos/session-mailbox.md@ §7): optional @unwatch-session@
+    hook, paired with 'ctxWatchSession'.
+    -}
     , ctxSessionToolCalls :: [TrackedToolCall]
     {- ^ Tracked calls of the session's unfinished turns. Lets the
     tool-call capabilities answer about calls that have no OS entity —
@@ -389,6 +429,8 @@ instance Show ToolExecutionContext where
             ++ progressCallbackStr
             ++ ", ctxCancelToolCall = "
             ++ cancelHookStr
+            ++ ", ctxRecordChildSession = "
+            ++ recordChildSessionStr
             ++ ", ctxSessionToolCalls = "
             ++ show (length (ctxSessionToolCalls ctx))
             ++ ", ctxParams = "
@@ -404,6 +446,7 @@ instance Show ToolExecutionContext where
         eventQueueStr = "<eventQueue>"
         progressCallbackStr = "<progressCallback>"
         cancelHookStr = "<cancelToolCall>"
+        recordChildSessionStr = "<recordChildSession>"
 
 {- | JSON serialization support for 'ToolExecutionContext'.
 Note: The tool portal function, world, and event queue are not serialized.
@@ -445,6 +488,12 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> pure Nothing
             <*> v .: "parentConversation"
+            <*> pure Nothing
+            <*> pure Nothing
+            <*> pure Nothing
+            <*> pure Nothing
+            <*> pure Nothing
+            <*> pure Nothing
             <*> pure Nothing
             <*> pure Nothing
             <*> pure []
@@ -522,6 +571,12 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxParentConversation = tecsParentConversation snap
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
+        , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxWatchSession = Nothing
+        , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = tecsParams snap
         , ctxInheritedBindings = tecsInheritedBindings snap
@@ -557,6 +612,12 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
+        , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxWatchSession = Nothing
+        , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = Map.empty
         , ctxInheritedBindings = []
@@ -600,6 +661,12 @@ mkMinimalContext sessId convId tId portal =
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
+        , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxWatchSession = Nothing
+        , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = Map.empty
         , ctxInheritedBindings = []
@@ -651,6 +718,12 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
+        , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxWatchSession = Nothing
+        , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = Map.empty
         , ctxInheritedBindings = []
@@ -704,6 +777,12 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
+        , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxWatchSession = Nothing
+        , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = Map.empty
         , ctxInheritedBindings = []
@@ -750,6 +829,12 @@ mkSubcallContext baseCtx mWorld mEventQueue parentConvId =
           -- sub-agent's own steps install hooks for its calls.
           ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
+        , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxWatchSession = Nothing
+        , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
         }
 

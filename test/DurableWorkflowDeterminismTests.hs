@@ -109,6 +109,10 @@ mkAsyncAgent policy =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -129,6 +133,7 @@ mkSessionWithCalls calls =
         , turnId = TurnId nil
         , sessionVersion = Just 2
         , sessionExecutionMode = Just Asynchronous
+        , mailCursor = 0
         }
 
 -- | Test suite entry point.

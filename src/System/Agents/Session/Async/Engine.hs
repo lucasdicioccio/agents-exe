@@ -55,7 +55,7 @@ import Control.Concurrent (QSem, newQSem, signalQSem, waitQSem)
 import Control.Concurrent.Async (Async, async, cancel, poll, waitAnyCatch)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTQueue)
 import Control.Exception (SomeAsyncException, SomeException, bracket_, catch, displayException, finally, fromException, throwIO)
-import Control.Monad (forM, forM_, when)
+import Control.Monad (forM, forM_, void, when)
 import Data.Aeson (Value, object, toJSON, (.=))
 import Data.Maybe (isJust)
 import Data.Map.Strict (Map)
@@ -70,6 +70,7 @@ import System.Agents.OS.Conversation.Types (ProgressKind (..), ToolCallProgress 
 import System.Agents.OS.Core.Types (EntityId)
 import System.Agents.OS.Core.World (World, getComponent)
 import System.Agents.OS.Events (OSEvent (..), ToolCallActivity (..), ToolCallPhase (..))
+import System.Agents.Session.Mailbox (Mailbox (..))
 import System.Agents.Session.Types (
     LlmToolCall (..),
     ToolCallId (..),
@@ -78,6 +79,7 @@ import System.Agents.Session.Types (
     llmToolCallName,
     providerToolCallId,
  )
+import qualified System.Agents.Session.Types as ST
 import System.Agents.Tools.Context (ToolExecutionContext (..))
 
 -------------------------------------------------------------------------------
@@ -99,6 +101,15 @@ data AsyncEngine = AsyncEngine
     -- ^ Seconds after which a call is given up on ('Nothing': never)
     , aeSemaphore :: QSem
     , aeRegistry :: TVar (Map ToolCallId AsyncBatch)
+    , aeMailbox :: Maybe Mailbox
+    {- ^ Optional mailbox (@todos/session-mailbox.md@, Phase 1). When
+    present, every call's final result (completed or failed) is also
+    posted as 'ST.ToolCallFinished' mail right after its OS entity is
+    marked final, so the owning session's next receive point (R1/R2) sees
+    it without polling. Best-effort: a full mailbox drops the notification,
+    the OS entity state is still the source of truth for
+    'get-tool-call-status' and late-result delivery.
+    -}
     }
 
 {- | A running batch of async calls.
@@ -148,10 +159,12 @@ mkAsyncEngine ::
     Int ->
     -- | Seconds after which a call is given up on ('Nothing': never)
     Maybe Int ->
+    -- | Mailbox to post 'ST.ToolCallFinished' mail to, if any
+    Maybe Mailbox ->
     IO AsyncEngine
-mkAsyncEngine world executor maxConcurrency callTimeout = do
+mkAsyncEngine world executor maxConcurrency callTimeout mailbox = do
     sem <- newAsyncConcurrencyLimit maxConcurrency
-    mkAsyncEngineSharing sem world executor maxConcurrency callTimeout
+    mkAsyncEngineSharing sem world executor maxConcurrency callTimeout mailbox
 
 {- | A concurrency limit that several engines can share.
 
@@ -169,10 +182,11 @@ mkAsyncEngineSharing ::
     (ToolExecutionContext -> LlmToolCall -> IO UserToolResponse) ->
     Int ->
     Maybe Int ->
+    Maybe Mailbox ->
     IO AsyncEngine
-mkAsyncEngineSharing sem world executor maxConcurrency callTimeout = do
+mkAsyncEngineSharing sem world executor maxConcurrency callTimeout mailbox = do
     registry <- newTVarIO Map.empty
-    pure $ AsyncEngine world executor maxConcurrency callTimeout sem registry
+    pure $ AsyncEngine world executor maxConcurrency callTimeout sem registry mailbox
 
 -------------------------------------------------------------------------------
 -- Batch lifecycle
@@ -269,7 +283,11 @@ cancelAsyncBatch batch = do
 {- | Cancel a single running call by its 'ToolCallId'.
 
 Looks up the call in the engine registry, cancels its background thread
-(waiting for it to terminate), and marks the OS entity as cancelled.
+(waiting for it to terminate), and marks the OS entity as cancelled. A
+successful cancellation also posts 'ST.ToolCallFinished' \/ 'ST.Failed' mail
+(@todos/session-mailbox.md@ §4, "'CancelCalls': the engine's cancel;
+results come back as 'ToolCallFinished' ... 'Failed'"), the same way a call
+that fails on its own does (see 'startCall').
 Returns 'True' if the call ended up cancelled, 'False' otherwise (unknown
 to this engine, or it reached a final state before the cancellation).
 -}
@@ -292,7 +310,9 @@ cancelToolCall engine callId = do
                             TCT.cancelToolCall (abWorld batch) eid
                             mState <- atomically $ getComponent @ToolCallState (abWorld batch) eid
                             let cancelled = fmap tcStatus mState == Just TcCancelled
-                            when cancelled $ achEmit h ToolCallCancelled
+                            when cancelled $ do
+                                achEmit h ToolCallCancelled
+                                notifyMailbox engine (achTracked h) ST.Failed (TextResponse "tool call cancelled")
                             pure cancelled
                         Nothing -> pure False
 
@@ -326,7 +346,11 @@ startCall engine _batch baseCtx tc = do
     eid <- requireEntityId tc
     let emit = emitActivity baseCtx tc
     let onProgress payload = makeProgressCallback world eid payload >> emit (ToolCallProgressed payload)
-    let ctx = baseCtx{ctxProgressCallback = Just onProgress}
+    let ctx =
+            baseCtx
+                { ctxProgressCallback = Just onProgress
+                , ctxRecordChildSession = Just (TCT.recordChildSession world eid)
+                }
     a <- async $ (`finally` unregister) $ do
         bracket_ (waitQSem sem) (signalQSem sem) $ do
             TCT.startToolCall world eid
@@ -336,17 +360,43 @@ startCall engine _batch baseCtx tc = do
             case result of
                 Right response -> do
                     TCT.completeToolCall world eid (toJSON response)
+                    notifyMailbox engine tc ST.Completed response
                     emit ToolCallCompleted
                     pure response
                 Left err -> do
                     let response = TextResponse $ "async tool call failed: " <> err
                     TCT.failToolCall world eid err
+                    notifyMailbox engine tc ST.Failed response
                     emit (ToolCallFailed err)
                     pure response
     pure $ AsyncCallHandle tc a emit
   where
     sem = aeSemaphore engine
     unregister = atomically $ modifyTVar' (aeRegistry engine) $ Map.delete (tcId tc)
+
+{- | Post a call's final result as mail, if the engine has a mailbox.
+
+Best-effort and not literally the same STM transaction as the OS entity
+update right above it in 'startCall' ('mbSend' on the in-memory mailbox
+does its own 'getCurrentTime' \/ 'atomically'); nothing else can complete
+the same call concurrently, so the two updates cannot observably race, but
+a crash between them could still drop the notification. The OS entity
+remains authoritative either way (poll \/ late-result delivery covers it).
+-}
+notifyMailbox :: AsyncEngine -> TrackedToolCall -> ST.ToolCallState -> UserToolResponse -> IO ()
+notifyMailbox engine tc state response =
+    case engine.aeMailbox of
+        Nothing -> pure ()
+        Just mb ->
+            void $
+                mb.mbSend
+                    ST.Outgoing
+                        { ST.outId = Nothing
+                        , ST.outFrom = ST.FromToolCall (tcId tc)
+                        , ST.outPriority = ST.Normal
+                        , ST.outHops = 0
+                        , ST.outBody = ST.ToolCallFinished (tcId tc) state response
+                        }
 
 {- | Run a call, giving up after 'aeCallTimeout' seconds.
 

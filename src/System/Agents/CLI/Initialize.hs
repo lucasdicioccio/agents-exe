@@ -57,6 +57,11 @@ handleInitialize apiKeysFile agentFiles = do
                 , asyncCallTimeoutSeconds = Nothing
                 , bindings = Nothing
                 , parameters = Nothing
+                , pauseCancelsCalls = Nothing
+                , resumeOnAnyMail = Nothing
+                , interruptCompletions = Nothing
+                , mailScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                 }
 
     forM_ (take 1 agentFiles) $ \agentFile -> do

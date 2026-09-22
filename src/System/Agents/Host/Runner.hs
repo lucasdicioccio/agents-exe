@@ -12,8 +12,14 @@ A 'SessionRunner' owns, per session:
 * at most one run: a background thread stepping the session until it
   stops, is blocked on deferred calls, or (in 'StepOnce' mode) took a step;
 * the session's agent, kept between runs so that background tool calls
-  started by one run are picked up by the next;
-* a queue of external results for deferred calls, applied by the run.
+  started by one run are picked up by the next.
+
+External results for deferred calls (@completeCall@) are delivered as
+'ContinuationResult' mail on the session's durable mailbox
+(@todos/session-mailbox.md@, a Phase 3 follow-up) rather than a
+runner-private queue; 'Session.Step.applyContinuationMail' is what a run
+actually applies them with, at the same point it processes every other
+kind of mail.
 
 Every write goes through 'sbCompareAndStore', so a second process writing
 the same session is detected rather than silently overwritten.
@@ -33,11 +39,17 @@ module System.Agents.Host.Runner (
     RunnerError (..),
     createSession,
     createSessionAs,
+    spawnSession,
     sessionOwner,
     postMessage,
+    cancelAttachedCalls,
     resume,
     completeCall,
     cancelRun,
+    serverMailRouter,
+    serverSpawnSession,
+    serverWatchSession,
+    serverUnwatchSession,
     getSession,
     awaitRun,
     recoverOnStartup,
@@ -62,6 +74,7 @@ import Control.Concurrent.STM
 import Control.Exception (Exception, SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
 import Control.Monad (filterM, forM, forM_, forever, unless, void, when)
 import qualified Data.Aeson as Aeson
+import Data.Aeson ((.=))
 import Data.Foldable (for_)
 import Data.List (nub)
 import Data.Map.Strict (Map)
@@ -70,7 +83,7 @@ import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
+import Data.Time (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
 import Prod.Tracer (contramap, runTracer)
 import System.Timeout (timeout)
 
@@ -81,8 +94,10 @@ import System.Agents.Host
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
+import qualified System.Agents.Session.Async.Engine as Engine
+import System.Agents.Session.AgentConfig (matchGlob)
 import System.Agents.Session.Base hiding (SessionProgress (..))
-import System.Agents.Session.Step (buildContext, refreshHeadPartialTurn, runStepM)
+import System.Agents.Session.Step (applyContinuationMail, buildContext, refreshHeadPartialTurn, runStepM)
 import System.Agents.Session.Wake (WakeOutcome (..), findSessionForToken, wakeSessionWith)
 import System.Agents.SessionStore (
     SessionMeta (..),
@@ -117,6 +132,14 @@ data RunMode
 data NewMessage = NewMessage
     { nmText :: Text
     , nmMedia :: [MediaAttachment]
+    , nmInterrupt :: Bool
+    {- ^ Post this as 'Interrupt'-priority mail rather than 'Normal'
+    (@todos/session-mailbox.md@ R3a\/R4): a running session's attached tool
+    calls are detached and, if @interruptCompletions@ is on, an in-flight
+    LLM completion is cancelled, either way asked again with this message
+    folded in. Only meaningful for 'acceptAsMail' (a busy session); ignored
+    on the idle path, where there is nothing to interrupt.
+    -}
     }
 
 data RunnerError
@@ -137,6 +160,8 @@ data RunnerError
       InvalidParams [ParamName]
     | -- | Required parameters still unbound once caller-supplied values are merged in.
       MissingRequiredParams [ParamName]
+    | -- | The session's mailbox refused the message (full, per 'mailboxMaxUnread').
+      MailboxRejected SessionId
     deriving (Show, Eq)
 
 -- | What happened to a session, in the order it happened.
@@ -150,6 +175,10 @@ data SessionEvent
     | SessionFailed SessionId Text
     | -- | A piece of the LLM's answer, when the host streams tokens.
       TextDelta SessionId Text
+    | -- | A tracked tool call started running (@todos/session-mailbox.md@ §7).
+      ToolCallStarted SessionId ToolCallId Text
+    | -- | A tracked tool call reached a final state (@todos/session-mailbox.md@ §7).
+      ToolCallCompleted SessionId ToolCallId Text Bool
     deriving (Show)
 
 -- | The event's name in the HTTP events stream.
@@ -161,6 +190,8 @@ sessionEventKind = \case
     RunStopped{} -> "run.stopped"
     SessionFailed{} -> "session.failed"
     TextDelta{} -> "text.delta"
+    ToolCallStarted{} -> "tool.started"
+    ToolCallCompleted{} -> "tool.completed"
 
 sessionEventSession :: SessionEvent -> SessionId
 sessionEventSession = \case
@@ -170,6 +201,8 @@ sessionEventSession = \case
     RunStopped sid _ -> sid
     SessionFailed sid _ -> sid
     TextDelta sid _ -> sid
+    ToolCallStarted sid _ _ -> sid
+    ToolCallCompleted sid _ _ _ -> sid
 
 data DeleteMode = DryRun | DeleteForReal
     deriving (Show, Eq)
@@ -191,6 +224,14 @@ data SessionRunner = SessionRunner
     , srEvents :: TChan SessionEvent
     -- ^ Broadcast; subscribers filter by session, so eviction loses nothing.
     , srReaper :: Async ()
+    , srWatches :: TVar (Map Text WatchHandle)
+    -- ^ Active @watch-session@ registrations (@todos/session-mailbox.md@ §7), keyed by watch id.
+    }
+
+-- | One active watch: who is watching, and the thread forwarding matches.
+data WatchHandle = WatchHandle
+    { whWatcher :: SessionId
+    , whAsync :: Async ()
     }
 
 -- | In-memory state of a session this process has touched.
@@ -201,8 +242,6 @@ data LiveSession = LiveSession
     , lsAgent :: TVar (Maybe RunnerAgent)
     , lsLatest :: TVar (Maybe (Session, SessionMeta))
     -- ^ The last version this process stored or loaded.
-    , lsInbox :: TVar [(ContinuationToken, UserToolResponse)]
-    -- ^ Results accepted while a run is active; the run applies them.
     , lsLastTouched :: TVar UTCTime
     , lsEvicted :: TVar Bool
     , lsParams :: TVar Params
@@ -233,6 +272,7 @@ newSessionRunner :: Host -> IO SessionRunner
 newSessionRunner host = do
     live <- newTVarIO Map.empty
     events <- newBroadcastTChanIO
+    watches <- newTVarIO Map.empty
     let ttl = host.hostLiveSessionTtl
     self <- newEmptyTMVarIO
     reaper <- async $ do
@@ -240,7 +280,7 @@ newSessionRunner host = do
         forever $ do
             threadDelay (reaperInterval ttl)
             evictIdle runner
-    let runner = SessionRunner host live events reaper
+    let runner = SessionRunner host live events reaper watches
     atomically $ putTMVar self runner
     pure runner
 
@@ -252,6 +292,8 @@ reaperInterval ttl = max 50_000 (min 60_000_000 (round (realToFrac ttl * 500_000
 shutdownSessionRunner :: SessionRunner -> IO ()
 shutdownSessionRunner runner = do
     cancel runner.srReaper
+    watches <- Map.elems <$> readTVarIO runner.srWatches
+    forM_ watches $ \wh -> cancel wh.whAsync
     lives <- Map.elems <$> readTVarIO runner.srLive
     forM_ lives $ \live -> do
         active <- readTVarIO live.lsRun
@@ -290,7 +332,6 @@ getLive runner sid = do
             <*> newTVarIO Nothing
             <*> newTVarIO Nothing
             <*> newTVarIO Nothing
-            <*> newTVarIO []
             <*> newTVarIO now
             <*> newTVarIO False
             <*> newTVarIO Map.empty
@@ -446,7 +487,244 @@ newAgent runner live node = do
             | otherwise = host.hostDeps
         deps = deps0{adLiveParams = readTVarIO live.lsParams}
     agent <- buildAgent (contramap HostAgentTrace host.hostTracer) deps RootAgent (sessionIdToConversationId sid) node
-    pure $ withExecutionMode Asynchronous agent
+    -- Phase 3 (@todos/session-mailbox.md@): every server-run session has a
+    -- durable mailbox, hydrated from 'hostMail', so 'postMessage' can always
+    -- accept mail (G2) and R1/R2 fold it into the session's turns.
+    mailbox <- newDurableMailbox host.hostMail sid
+    pure $
+        withWatchSession (serverWatchSession runner sid) (serverUnwatchSession runner) $
+            withSpawnSession (serverSpawnSession runner sid) $
+                withMailRouter (serverMailRouter runner) $
+                    withMailbox mailbox $
+                        withExecutionMode Asynchronous agent
+
+{- | The server's @spawn-session@ hook (§5): reuses 'spawnSession'
+(durable, recorded with 'sid' as parent) and reports only the new
+'SessionId' as text, or an error, to the calling LLM.
+-}
+serverSpawnSession :: SessionRunner -> SessionId -> Text -> Text -> IO (Either Text SessionId)
+serverSpawnSession runner sid slug text = do
+    result <- spawnSession runner sid slug (NewMessage text [] False)
+    pure $ either (Left . runnerErrorText) (Right . (.smSessionId)) result
+
+-- | Render a 'RunnerError' as text, for hooks that report to the LLM rather than the HTTP API.
+runnerErrorText :: RunnerError -> Text
+runnerErrorText = Text.pack . show
+
+{- | The server's 'MailRouter' (@todos/session-mailbox.md@, Phase 4, §5,
+D12). Every session on the server is durable, so unlike the TUI or @run@
+there is nothing to register: any session id can be looked up on demand by
+loading its 'SessionMeta' and opening its durable mailbox, per the spec's
+own routing table ("durable mail; unknown-but-stored sessions are loaded
+on demand").
+-}
+serverMailRouter :: SessionRunner -> MailRouter
+serverMailRouter runner =
+    MailRouter
+        { mrRegister = \_sid _info _mb -> pure (pure ())
+        , mrLookup = \sid -> do
+            mLive <- lookupLiveMailbox sid
+            case mLive of
+                Just found -> pure (Just found)
+                Nothing ->
+                    sbLoadMeta runner.srHost.hostBackend sid >>= \case
+                        Nothing -> pure Nothing
+                        Just (_sess, meta) -> do
+                            mb <- newDurableMailbox runner.srHost.hostMail sid
+                            info <- mailboxInfoFor meta
+                            pure $ Just (info, mb)
+        , mrList = do
+            metas <- sbQuery runner.srHost.hostBackend allSessionsQuery
+            mapM (\meta -> (,) meta.smSessionId <$> mailboxInfoFor meta) metas
+        }
+  where
+    {- | If this session already has a live agent in this process, its
+    'ctxMailbox' is the one whose in-memory 'TVar' any active run actually
+    reads. Opening a *second* 'newDurableMailbox' for the same session
+    (what this function used to do unconditionally) hydrates its own,
+    separate 'TVar' from the store, so mail sent through it would sit in
+    the database until the session's next run re-hydrates -- invisible to
+    the run reading mail right now. Fall back to a fresh durable mailbox
+    only for a session with no live agent (idle, evicted, or on another
+    process, where the store is the only shared state).
+    -}
+    lookupLiveMailbox :: SessionId -> IO (Maybe (MailboxInfo, Mailbox))
+    lookupLiveMailbox sid = do
+        mLive <- lookupLive runner sid
+        case mLive of
+            Nothing -> pure Nothing
+            Just live -> do
+                mAgent <- readTVarIO live.lsAgent
+                mLatest <- readTVarIO live.lsLatest
+                case (mAgent, mLatest) of
+                    (Just agent, Just (_, meta)) -> case agent.ctxMailbox of
+                        Just mb -> do
+                            info <- mailboxInfoFor meta
+                            pure $ Just (info, mb)
+                        Nothing -> pure Nothing
+                    _ -> pure Nothing
+
+    mailboxInfoFor :: SessionMeta -> IO MailboxInfo
+    mailboxInfoFor meta = do
+        (scope, iscope) <- agentMailScopes meta
+        pure
+            MailboxInfo
+                { miAgentSlug = meta.smAgent
+                , miParent = meta.smParent
+                , miStatus = sessionStatusText meta.smStatus
+                , miMailScope = scope
+                , miInterruptScope = iscope
+                }
+
+    {- | A session's own @mailScope@\/@interruptScope@ (§5 Permissions),
+    read from its agent's JSON config, defaulting to the spec's own
+    'MailScopeSubtree'\/'MailScopeChildren' when unset or the agent is
+    unknown.
+    -}
+    agentMailScopes :: SessionMeta -> IO (MailScope, MailScope)
+    agentMailScopes meta = do
+        mNode <- maybe (pure Nothing) (lookupAgent runner.srHost) meta.smAgent
+        let mCfg = osNodeConfig <$> mNode
+        pure
+            ( fromMaybe MailScopeSubtree (mCfg >>= Base.mailScope)
+            , fromMaybe MailScopeChildren (mCfg >>= Base.interruptScope)
+            )
+
+-------------------------------------------------------------------------------
+-- Watches (todos/session-mailbox.md, Phase 6, §7)
+-------------------------------------------------------------------------------
+
+-- | Hard cap on concurrently active watches per watching session.
+maxWatchesPerSession :: Int
+maxWatchesPerSession = 32
+
+-- | Default TTL for a watch that did not specify one.
+defaultWatchTtlSeconds :: Int
+defaultWatchTtlSeconds = 600
+
+{- | The server's @watch-session@ hook (§7): scoped like mail (the watcher
+must be the target or one of its descendants, mirroring @send-message@'s
+own @mailScope: subtree@ default), capped per watcher, and forwarding
+matching events as 'WatchedEvent' mail until its TTL elapses or
+'serverUnwatchSession' is called.
+-}
+serverWatchSession :: SessionRunner -> SessionId -> WatchRequest -> IO (Either Text Text)
+serverWatchSession runner watcherSid req = do
+    mOwnInfo <- fmap fst <$> (serverMailRouter runner).mrLookup watcherSid
+    let ownScope = maybe MailScopeSubtree miMailScope mOwnInfo
+    withinSubtree <- isWithinScope runner ownScope watcherSid req.wrTarget
+    if not withinSubtree
+        then pure $ Left "not permitted to watch this session"
+        else do
+            activeForWatcher <- length . filter ((== watcherSid) . whWatcher) . Map.elems <$> readTVarIO runner.srWatches
+            if activeForWatcher >= maxWatchesPerSession
+                then pure $ Left "too many active watches for this session"
+                else do
+                    watchId <- Text.pack . show <$> newContinuationToken
+                    next <- subscribe runner req.wrTarget
+                    deadline <- addUTCTime (fromIntegral (fromMaybe defaultWatchTtlSeconds req.wrTtlSeconds)) <$> getCurrentTime
+                    handle <- async $ forwardLoop watchId next deadline
+                    atomically $ modifyTVar' runner.srWatches (Map.insert watchId (WatchHandle watcherSid handle))
+                    pure $ Right watchId
+  where
+    forwardLoop :: Text -> IO SessionEvent -> UTCTime -> IO ()
+    forwardLoop watchId next deadline = do
+        now <- getCurrentTime
+        let remainingMicros = round (max 0 (diffUTCTime deadline now)) * 1_000_000
+        if remainingMicros <= 0
+            then dropWatch watchId
+            else do
+                result <- timeout remainingMicros next
+                case result of
+                    Nothing -> dropWatch watchId
+                    Just event -> do
+                        when (eventMatches req event) $ forwardEvent watcherSid req.wrTarget event
+                        forwardLoop watchId next deadline
+
+    dropWatch :: Text -> IO ()
+    dropWatch watchId = atomically $ modifyTVar' runner.srWatches (Map.delete watchId)
+
+    forwardEvent :: SessionId -> SessionId -> SessionEvent -> IO ()
+    forwardEvent watcher target event = do
+        mTarget <- (serverMailRouter runner).mrLookup watcher
+        forM_ mTarget $ \(_, mb) ->
+            void $
+                mb.mbSend
+                    Outgoing
+                        { outId = Nothing
+                        , outFrom = FromSystem "watch-session"
+                        , outPriority = Normal
+                        , outHops = 0
+                        , outBody = WatchedEvent target (sessionEventKind event) (watchedEventPayload event)
+                        }
+
+-- | Stop a previously registered watch (§7).
+serverUnwatchSession :: SessionRunner -> Text -> IO Bool
+serverUnwatchSession runner watchId = do
+    mHandle <- atomically $ do
+        table <- readTVar runner.srWatches
+        writeTVar runner.srWatches (Map.delete watchId table)
+        pure (Map.lookup watchId table)
+    case mHandle of
+        Nothing -> pure False
+        Just wh -> cancel wh.whAsync >> pure True
+
+{- | Whether a 'SessionEvent' matches a watch request's @events@\/@tool@
+filter. 'Nothing' for @wrEvents@ matches every kind; @wrTool@ only applies
+to the two @tool.*@ events (per §7, other events always match it).
+-}
+eventMatches :: WatchRequest -> SessionEvent -> Bool
+eventMatches req event = kindMatches && toolMatches
+  where
+    kindMatches = maybe True (sessionEventKind event `elem`) req.wrEvents
+    toolMatches = case (req.wrTool, event) of
+        (Nothing, _) -> True
+        (Just pat, ToolCallStarted _ _ toolName) -> matchGlob pat toolName
+        (Just pat, ToolCallCompleted _ _ toolName _) -> matchGlob pat toolName
+        (Just _, _) -> True
+
+-- | A small JSON view of a 'SessionEvent', for 'WatchedEvent' mail.
+watchedEventPayload :: SessionEvent -> Aeson.Value
+watchedEventPayload event = case event of
+    RunStarted sid mode -> Aeson.object ["session_id" .= sid, "mode" .= Text.pack (show mode)]
+    SessionUpdated sid meta _turn -> Aeson.object ["session_id" .= sid, "status" .= sessionStatusText meta.smStatus]
+    CallsDeferred sid calls -> Aeson.object ["session_id" .= sid, "deferred_count" .= length calls]
+    RunStopped sid status -> Aeson.object ["session_id" .= sid, "status" .= sessionStatusText status]
+    SessionFailed sid msg -> Aeson.object ["session_id" .= sid, "message" .= msg]
+    TextDelta sid _ -> Aeson.object ["session_id" .= sid]
+    ToolCallStarted sid callId toolName -> Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName]
+    ToolCallCompleted sid callId toolName succeeded ->
+        Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
+
+{- | Whether 'targetSid' is reachable from 'ownSid' under the given
+'MailScope', walking each session's recorded parent up from the target for
+'MailScopeSubtree' (bounded depth so a corrupt or cyclic parent chain
+cannot hang). Mirrors
+"System.Agents.Tools.SystemToolbox.Mail"'s @isWithinScope@, which is not
+reusable here without threading a 'MailRouter' value through -- both read
+the same 'MailboxInfo.miParent' shape via 'mrLookup'.
+-}
+isWithinScope :: SessionRunner -> MailScope -> SessionId -> SessionId -> IO Bool
+isWithinScope _runner MailScopeAll _ownSid _targetSid = pure True
+isWithinScope _runner _scope ownSid targetSid
+    | ownSid == targetSid = pure True
+isWithinScope _runner MailScopeOwn _ownSid _targetSid = pure False
+isWithinScope runner MailScopeChildren ownSid targetSid = do
+    mTarget <- (serverMailRouter runner).mrLookup targetSid
+    pure $ maybe False ((== Just ownSid) . miParent . fst) mTarget
+isWithinScope runner MailScopeSubtree ownSid targetSid = go targetSid (32 :: Int)
+  where
+    router = serverMailRouter runner
+    go _ 0 = pure False
+    go sid depthLeft = do
+        mInfo <- router.mrLookup sid
+        case mInfo of
+            Nothing -> pure False
+            Just (info, _) -> case info.miParent of
+                Nothing -> pure False
+                Just parentSid
+                    | parentSid == ownSid -> pure True
+                    | otherwise -> go parentSid (depthLeft - 1)
 
 -------------------------------------------------------------------------------
 -- Session-level parameters (todos/tool-partial-application.md, Phase 4)
@@ -574,14 +852,37 @@ runLoop runner live mode agent0 = do
     go :: RunnerAgent -> Int -> Bool -> IO ()
     go agent steps finished = do
         next <- withMVar live.lsLock $ \_ -> do
-            (sess, meta) <- applyInbox runner live
-            let stop =
+            (sess0, meta) <- applyInbox runner agent live
+            -- Phase 3/6 (@todos/session-mailbox.md@ §4): unread 'Control'
+            -- mail this run reacts to without waiting for the next receive
+            -- point. When every envelope currently unread is a 'Control'
+            -- one, the cursor is committed past them here ("consumed...
+            -- but render nothing", §2) so a 'Pause'/'StopRun' that stops
+            -- the run before it ever steps doesn't leave that same
+            -- envelope to immediately re-trigger on the next run. A batch
+            -- that mixes in other mail is left alone: the next real R1
+            -- (once this run, or a later one, actually steps) is what
+            -- renders it, and advancing the cursor here would silently
+            -- drop it unread.
+            (sess, controls) <- applyControlMail agent sess0
+            forM_ [ids | CancelCalls ids <- controls] $ mapM_ (cancelAttachedCall agent)
+            when (CancelAllAttached `elem` controls) $ mapM_ (cancelAttachedCall agent) (runningToolCallIds sess)
+            let stopRequested = StopRun `elem` controls
+                pauseRequested = Pause `elem` controls
+                stop =
                     finished
+                        || stopRequested
+                        || pauseRequested
                         || (mode == StepOnce && steps >= 1)
                         || isBlockedOnDeferredCalls sess
             if stop
                 then do
-                    let status = sessionStatusOf sess
+                    when pauseRequested $ do
+                        cancelsCalls <- agentBoolOption runner meta Base.pauseCancelsCalls
+                        when cancelsCalls $ mapM_ (cancelAttachedCall agent) (runningToolCallIds sess)
+                    let status
+                            | pauseRequested = StatusPaused
+                            | otherwise = sessionStatusOf sess
                     _ <- storeOrThrow runner live meta sess status
                     atomically $ writeTVar live.lsRun Nothing
                     when (status == StatusWaitingExternal) $
@@ -596,26 +897,163 @@ runLoop runner live mode agent0 = do
             let (sess', done) = case result of
                     Left (_, final) -> (final, True)
                     Right s -> (s, False)
+            emitToolCallEvents runner sid sess sess'
             withMVar live.lsLock $ \_ -> do
                 (_, meta) <- latestOrThrow live
                 void $ storeOrThrow runner live meta sess' StatusRunning
             go agent' (steps + 1) done
 
--- | Apply the queued external results to the latest version (under the lock).
-applyInbox :: SessionRunner -> LiveSession -> IO (Session, SessionMeta)
-applyInbox runner live = do
+    -- | Every unread 'Control' message waiting in the session's mailbox.
+    -- | Read unread 'Control' mail; when the whole unread batch is
+    -- 'Control', commit the cursor past it. See the call site for why a
+    -- mixed batch is left uncommitted.
+    applyControlMail :: RunnerAgent -> Session -> IO (Session, [ControlMsg])
+    applyControlMail agent sess = case agent.ctxMailbox of
+        Nothing -> pure (sess, [])
+        Just mb -> do
+            envelopes <- atomically (mbUnread mb sess.mailCursor)
+            let controls = [msg | e <- envelopes, Control msg <- [e.envBody]]
+                allControl = not (null envelopes) && length controls == length envelopes
+                sess' =
+                    if allControl
+                        then sess{mailCursor = maximum (map (.envSeq) envelopes)}
+                        else sess
+            pure (sess', controls)
+
+    -- | Cancel one attached call through the agent's async engine, if any.
+    -- A no-op (per 'Engine.cancelToolCall') for an unknown or already-final
+    -- call id, so it is safe to call again for a 'Control' envelope this
+    -- loop has already reacted to on an earlier iteration.
+    cancelAttachedCall :: RunnerAgent -> ToolCallId -> IO ()
+    cancelAttachedCall agent callId = for_ agent.ctxAsyncEngine $ \engine -> void $ Engine.cancelToolCall engine callId
+
+-- | Every tool-call id still tracked as 'Running' anywhere in a session
+-- (the head turn's attached calls, and any left behind in earlier partial
+-- turns).
+runningToolCallIds :: Session -> [ToolCallId]
+runningToolCallIds sess =
+    [tc.tcId | PartialUserTurn partial _ <- sess.turns, tc <- partial.pTrackedToolCalls, tc.tcState == Running]
+
+-- | Whether an agent's JSON config enables a given boolean option, looked
+-- up by the session's recorded agent slug.
+agentBoolOption :: SessionRunner -> SessionMeta -> (Base.Agent -> Maybe Bool) -> IO Bool
+agentBoolOption runner meta field = do
+    mNode <- maybe (pure Nothing) (lookupAgent runner.srHost) meta.smAgent
+    pure $ fromMaybe False (mNode >>= field . osNodeConfig)
+
+{- | Whether the given 'WakeOnKind' is in an agent's configured @wakeOn@
+list (§5 "Scheduling rule"), defaulting to 'defaultWakeOn' when unset.
+-}
+agentWakesOn :: SessionRunner -> SessionMeta -> WakeOnKind -> IO Bool
+agentWakesOn runner meta kind = do
+    mNode <- maybe (pure Nothing) (lookupAgent runner.srHost) meta.smAgent
+    let kinds = fromMaybe defaultWakeOn (mNode >>= Base.wakeOn . osNodeConfig)
+    pure (kind `elem` kinds)
+
+{- | Every tracked call visible in the head turn, if it is a
+'PartialUserTurn' -- the only turn shape that still carries per-call state
+(a finalized 'UserTurn' has already folded each call into a plain
+@userToolResponses@ pair, with no 'ToolCallState' left to diff against).
+-}
+headTrackedCalls :: Session -> Map.Map ToolCallId (Text, ToolCallState)
+headTrackedCalls sess = case take 1 sess.turns of
+    [PartialUserTurn partial _] ->
+        Map.fromList [(tc.tcId, (llmToolCallName tc.tcCall, tc.tcState)) | tc <- partial.pTrackedToolCalls]
+    _ -> Map.empty
+
+{- | Emit 'ToolCallStarted' \/ 'ToolCallCompleted' for whatever changed
+between the turn the step started with and the turn it produced (§7).
+
+Only observes calls while the head turn stays a 'PartialUserTurn': a call
+that starts and reaches a final state within the same step, ending in a
+finalized 'UserTurn', is not caught here (its 'ToolCallState' is gone by
+the time this compares 'before'\/'after') -- an accepted gap, since such a
+call was never visible to anything waiting on 'tool.started' either. A call
+still 'Running' before this step whose turn is fully finalized after it is
+reported 'ToolCallCompleted' with @succeeded = True@: the exact
+success\/failure only survives in @userToolResponses@, keyed by
+'LlmToolCall' rather than 'ToolCallId', which is not worth walking for an
+event that is informational rather than authoritative (the stored session
+and 'get-tool-call-status' remain the source of truth).
+-}
+emitToolCallEvents :: SessionRunner -> SessionId -> Session -> Session -> IO ()
+emitToolCallEvents runner sid before after = do
+    forM_ (Map.toList afterCalls) $ \(callId, (toolName, state)) ->
+        when (state == Running && not (wasRunning callId)) $
+            emit runner (ToolCallStarted sid callId toolName)
+    forM_ (Map.toList beforeCalls) $ \(callId, (toolName, state)) ->
+        when (state == Running) $ case Map.lookup callId afterCalls of
+            Just (_, Completed) -> emit runner (ToolCallCompleted sid callId toolName True)
+            Just (_, Failed) -> emit runner (ToolCallCompleted sid callId toolName False)
+            Just (_, Running) -> pure ()
+            Just (_, Ready) -> pure ()
+            Just (_, Deferred) -> pure ()
+            Nothing -> emit runner (ToolCallCompleted sid callId toolName True)
+  where
+    beforeCalls = headTrackedCalls before
+    afterCalls = headTrackedCalls after
+    wasRunning callId = case Map.lookup callId beforeCalls of
+        Just (_, Running) -> True
+        _ -> False
+
+{- | Apply unread 'ContinuationResult' mail to the latest version, before this
+iteration's blocked-on-deferred-calls check (under the lock).
+
+@completeCall@ posts a deferred call's external result as mail rather than
+writing it to a runner-private queue (a Phase 3 follow-up to
+@todos/session-mailbox.md@: "'autoResume' becomes 'post
+`ContinuationResult`'", 'lsInbox' is gone). This still has to run here,
+ahead of 'runStepM', rather than only relying on the ordinary R1 receive
+point inside the step: a session blocked on deferred calls never reaches R1
+at all if 'isBlockedOnDeferredCalls' below still sees it as blocked, so the
+result would sit applied-but-invisible in the mailbox forever. Mirrors
+'applyControlMail': the cursor only advances when the whole unread batch is
+'ContinuationResult' mail, so mail mixed in with something else is left for
+the step's own R1 to render\/consume\/advance past as usual.
+-}
+applyInbox :: SessionRunner -> RunnerAgent -> LiveSession -> IO (Session, SessionMeta)
+applyInbox runner agent live = do
     (sess, meta) <- latestOrThrow live
-    inbox <- atomically $ swapTVar live.lsInbox []
-    if null inbox
-        then pure (sess, meta)
-        else do
-            outcome <- wakeSessionWith (Just runner.srHost.hostContinuations) Nothing sess inbox
-            meta' <- storeOrThrow runner live meta outcome.woSession StatusRunning
-            pure (outcome.woSession, meta')
+    case agent.ctxMailbox of
+        Nothing -> pure (sess, meta)
+        Just mb -> do
+            envelopes <- atomically (mbUnread mb sess.mailCursor)
+            let results = [e | e <- envelopes, ContinuationResult{} <- [e.envBody]]
+            if null results
+                then pure (sess, meta)
+                else do
+                    woken <- applyContinuationMail agent results sess
+                    let allResults = length results == length envelopes
+                        woken' = if allResults then woken{mailCursor = maximum (map (.envSeq) results)} else woken
+                    meta' <- storeOrThrow runner live meta woken' StatusRunning
+                    pure (woken', meta')
 
 latestOrThrow :: LiveSession -> IO (Session, SessionMeta)
 latestOrThrow live =
     readTVarIO live.lsLatest >>= maybe (throwIO $ userError "runner: session state missing") pure
+
+{- | The mailbox to post to for a given session: the live agent's own
+'ctxMailbox' when this process is actively running or holding it (so a
+post lands in the same in-memory 'TVar' an active run reads, not a second,
+separately-hydrated durable mailbox -- the same live-vs-durable distinction
+'serverMailRouter' has to get right), otherwise a fresh durable mailbox
+opened directly from the store, or 'Nothing' for a session this host
+doesn't know about at all.
+-}
+sessionMailbox :: SessionRunner -> SessionId -> IO (Maybe Mailbox)
+sessionMailbox runner sid = do
+    mLive <- lookupLive runner sid
+    mAgentMailbox <- case mLive of
+        Nothing -> pure Nothing
+        Just live -> do
+            mAgent <- readTVarIO live.lsAgent
+            pure (mAgent >>= \a -> a.ctxMailbox)
+    case mAgentMailbox of
+        Just mb -> pure (Just mb)
+        Nothing ->
+            runner.srHost.hostBackend.sbLoadMeta sid >>= \case
+                Nothing -> pure Nothing
+                Just _ -> Just <$> newDurableMailbox runner.srHost.hostMail sid
 
 -- | Record a failed run: the last stored version, marked failed.
 failRun :: SessionRunner -> LiveSession -> Text -> IO ()
@@ -638,6 +1076,16 @@ createSession runner slug message mode = createSessionAs runner Nothing slug mes
 -- | Like 'createSession', for an owner, with caller-supplied parameter values.
 createSessionAs :: SessionRunner -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
 createSessionAs runner owner slug message mode supplied =
+    createSessionAsWithParent runner Nothing owner slug message mode supplied
+
+{- | Create a session as a child (in lineage only, not call\/return -- see
+'spawnSession') of another one (@todos/session-mailbox.md@, Phase 4, §5).
+Shared by 'createSessionAs' (no parent) and 'spawnSession' (a parent, and
+never a run mode -- a spawned session always starts running and answers by
+mail, not by handing its final result back to the caller).
+-}
+createSessionAsWithParent :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+createSessionAsWithParent runner parent owner slug message mode supplied =
     lookupAgent runner.srHost slug >>= \case
         Nothing -> pure $ Left $ UnknownAgent slug
         Just node -> do
@@ -647,7 +1095,7 @@ createSessionAs runner owner slug message mode supplied =
                     Left err -> pure (Left err)
                     Right overlay -> do
                         now <- getCurrentTime
-                        let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner}
+                        let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner, smParent = parent}
                         sessionAgent runner live meta0 >>= \case
                             Left err -> pure (Left err)
                             Right agent -> case missingRequiredParams node agent overlay of
@@ -660,34 +1108,123 @@ createSessionAs runner owner slug message mode supplied =
                                         Left conflict -> pure (Left (Conflict conflict))
                                         Right meta -> maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
 
+{- | @spawn-session@ (§5): start a new, durable, detached child session
+running a caller's helper agent, recorded with 'parentSid' as parent in
+lineage, and return as soon as it exists -- unlike 'createSessionAs' with a
+run mode, this never waits for or returns the child's answer; the caller
+gets it later by mail (a 'ToolCallFinished'-shaped reply is not produced,
+since there is no call to complete -- the child answers with @send-message@
+whenever it has something to say).
+-}
+spawnSession :: SessionRunner -> SessionId -> Text -> NewMessage -> IO (Either RunnerError SessionMeta)
+spawnSession runner parentSid slug message =
+    createSessionAsWithParent runner (Just parentSid) Nothing slug message (Just UntilBlocked) Map.empty
+
 -- | Add a user message to an idle session, and start a run unless the mode is 'Nothing'.
+{- | Add a user message to a session.
+
+Per @todos/session-mailbox.md@ (Phase 3, closing G2), a message is always
+accepted: an idle session gets it as a new turn (unchanged from before) and
+starts a run unless the mode is 'Nothing'; a busy session gets it posted as
+'UserMessage' mail on its durable mailbox instead of being refused — the
+run already in progress folds it in at its next R1\/R2 receive point (see
+"System.Agents.Session.Step").
+-}
 postMessage :: SessionRunner -> SessionId -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
 postMessage runner sid message mode supplied =
-    withLive runner sid $ \live ->
-        withIdle runner live $ \sess meta -> do
-            let status = sessionStatusOf sess
-            if status /= StatusIdle
-                then pure $ Left $ NotAcceptingMessages sid status
-                else
-                    agentNodeFor runner meta >>= \case
-                        Left err -> pure (Left err)
-                        Right node ->
-                            prepareParams runner live node supplied >>= \case
-                                Left err -> pure (Left err)
-                                Right overlay ->
-                                    sessionAgent runner live meta >>= \case
+    withLive runner sid $ \live -> do
+        active <- readTVarIO live.lsRun
+        if isJust active
+            then acceptAsMail live
+            else
+                withIdle runner live $ \sess meta ->
+                    -- Phase 6 (@todos/session-mailbox.md@ §4): a paused
+                    -- session (no active run, so it fell to this branch)
+                    -- has a persisted status -- not derivable from turns,
+                    -- so 'sessionStatusOf' can't see it -- of
+                    -- 'StatusPaused'. Its turns are exactly as they were
+                    -- when it paused (e.g. a 'PartialUserTurn' with a
+                    -- background call still going), so it is not safe to
+                    -- append a plain new 'UserTurn' as the ordinary idle
+                    -- path below does; treat the message as mail instead
+                    -- (like the "busy" case above) and, since nothing is
+                    -- running to fold it in, start a run so something does.
+                    -- Only when 'resumeOnAnyMail' says so, and only when
+                    -- 'WakeOnUser' mail (this is always a 'postMessage',
+                    -- hence 'FromUser') is in the agent's 'wakeOn' list
+                    -- (§5 "Scheduling rule": mail outside 'wakeOn' does not
+                    -- wake a session by itself). An explicit 'resume' call
+                    -- always works regardless ('resume' only checks for an
+                    -- active run, not status or 'wakeOn').
+                    if meta.smStatus == StatusPaused
+                        then do
+                            resumeOk <- agentBoolOption runner meta Base.resumeOnAnyMail
+                            wakesOnUser <- agentWakesOn runner meta WakeOnUser
+                            if not resumeOk || not wakesOnUser
+                                then pure $ Left $ NotAcceptingMessages sid meta.smStatus
+                                else
+                                    acceptAsMail live >>= \case
                                         Left err -> pure (Left err)
-                                        Right agent -> case missingRequiredParams node agent overlay of
-                                            missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
-                                            [] -> do
-                                                sPrompt <- agent.sysPrompt
-                                                sTools <- agent.sysTools
-                                                tid <- newTurnId
-                                                let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) []) Nothing
-                                                    sess' = sess{turns = turn : sess.turns, turnId = tid}
-                                                store runner live meta sess' StatusReady Nothing >>= \case
-                                                    Left conflict -> pure (Left (Conflict conflict))
-                                                    Right meta' -> maybe (pure (Right meta')) (\m -> startRun runner live m overlay sess' meta') mode
+                                        Right _ ->
+                                            -- Start a run directly (not via 'resume', which
+                                            -- would re-take 'live.lsLock' this callback
+                                            -- already holds): the new run's own first
+                                            -- receive point folds in the mail just posted.
+                                            case mode of
+                                                Nothing -> pure (Right meta)
+                                                Just m ->
+                                                    agentNodeFor runner meta >>= \case
+                                                        Left err -> pure (Left err)
+                                                        Right node ->
+                                                            prepareParams runner live node supplied >>= \case
+                                                                Left err -> pure (Left err)
+                                                                Right overlay -> startRun runner live m overlay sess meta
+                        else
+                            let status = sessionStatusOf sess
+                             in if status /= StatusIdle
+                                    then pure $ Left $ NotAcceptingMessages sid status
+                                    else
+                                        agentNodeFor runner meta >>= \case
+                                            Left err -> pure (Left err)
+                                            Right node ->
+                                                prepareParams runner live node supplied >>= \case
+                                                    Left err -> pure (Left err)
+                                                    Right overlay ->
+                                                        sessionAgent runner live meta >>= \case
+                                                            Left err -> pure (Left err)
+                                                            Right agent -> case missingRequiredParams node agent overlay of
+                                                                missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
+                                                                [] -> do
+                                                                    sPrompt <- agent.sysPrompt
+                                                                    sTools <- agent.sysTools
+                                                                    tid <- newTurnId
+                                                                    let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) [] []) Nothing
+                                                                        sess' = sess{turns = turn : sess.turns, turnId = tid}
+                                                                    store runner live meta sess' StatusReady Nothing >>= \case
+                                                                        Left conflict -> pure (Left (Conflict conflict))
+                                                                        Right meta' -> maybe (pure (Right meta')) (\m -> startRun runner live m overlay sess' meta') mode
+  where
+    acceptAsMail live =
+        loadLatest runner live >>= \case
+            Nothing -> pure $ Left $ UnknownSession sid
+            Just (_, meta) ->
+                sessionAgent runner live meta >>= \case
+                    Left err -> pure (Left err)
+                    Right agent -> case agent.ctxMailbox of
+                        -- Every runner agent gets one in 'newAgent'; this
+                        -- would only trip if that invariant broke.
+                        Nothing -> pure $ Left $ MailboxRejected sid
+                        Just mb -> do
+                            sent <-
+                                mb.mbSend
+                                    Outgoing
+                                        { outId = Nothing
+                                        , outFrom = FromUser Nothing
+                                        , outPriority = if message.nmInterrupt then Interrupt else Normal
+                                        , outHops = 0
+                                        , outBody = UserMessage (UserQuery message.nmText message.nmMedia)
+                                        }
+                            pure $ either (const (Left (MailboxRejected sid))) (const (Right meta)) sent
 
 -- | Start a run on a session that has none.
 resume :: SessionRunner -> SessionId -> RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
@@ -747,11 +1284,30 @@ completeCall runner token result autoResume supplied = do
   where
     enqueue live = do
         (sess, meta) <- latestOrThrow live
-        queued <- map fst <$> readTVarIO live.lsInbox
         outcome <- wakeSessionWith Nothing Nothing sess [(token, result)]
-        classify outcome (token `elem` queued) $ do
-            atomically $ modifyTVar' live.lsInbox (<> [(token, result)])
+        mMailbox <- sessionMailbox runner live.lsSessionId
+        alreadyQueued <- case mMailbox of
+            Nothing -> pure False
+            Just mb -> do
+                unread <- atomically (mbUnread mb sess.mailCursor)
+                pure $ any isSameToken unread
+        classify outcome alreadyQueued $ do
+            forM_ mMailbox $ \mb ->
+                void $
+                    mb.mbSend
+                        Outgoing
+                            { outId = Nothing
+                            , outFrom = FromSystem "completeCall"
+                            , outPriority = Normal
+                            , outHops = 0
+                            , outBody = ContinuationResult token result
+                            }
             pure (Right meta)
+      where
+        isSameToken :: Envelope -> Bool
+        isSameToken e = case e.envBody of
+            ContinuationResult t _ -> t == token
+            _ -> False
 
     applyNow live overlay node =
         loadLatest runner live >>= \case
@@ -810,7 +1366,9 @@ cancelRun runner sid = do
             Nothing -> pure $ Left $ UnknownSession sid
             Just (sess0, meta0) -> do
                 atomically $ writeTVar live.lsLatest (Just (sess0, meta0))
-                (sess1, meta1) <- applyInbox runner live
+                (sess1, meta1) <- case mAgent of
+                    Just agent -> applyInbox runner agent live
+                    Nothing -> pure (sess0, meta0)
                 sess2 <- case mAgent of
                     Just agent -> refreshHeadPartialTurn (buildContext agent sess1 (sessionIdToConversationId sid)) sess1
                     Nothing -> pure sess1
@@ -824,6 +1382,41 @@ cancelRun runner sid = do
         runner.srHost.hostBackend.sbLoadMeta sid >>= \case
             Nothing -> pure $ Left $ UnknownSession sid
             Just _ -> pure $ Left $ NoActiveRun sid
+
+{- | Hard-cancel every tool call currently attached to a session: posts
+'CancelAllAttached' 'Control' mail, which the runner loop reacts to on its
+next iteration by killing each call still tracked as 'Running' through the
+agent's async engine (see 'runningToolCallIds', 'cancelAttachedCall').
+
+Unlike 'cancelRun' (which tears down the whole run and its async engine),
+this only targets attached calls; the run itself keeps going and the LLM
+is asked again once the calls are gone. Unlike an 'Interrupt'-priority
+'UserMessage' (a soft interrupt, only detaches), a cancelled call's result
+never arrives -- there is nothing left to deliver. Works whether or not
+the session currently has an active run, since 'Control' mail is picked
+up the next time one does.
+-}
+cancelAttachedCalls :: SessionRunner -> SessionId -> IO (Either RunnerError SessionMeta)
+cancelAttachedCalls runner sid =
+    withLive runner sid $ \live ->
+        loadLatest runner live >>= \case
+            Nothing -> pure $ Left $ UnknownSession sid
+            Just (_, meta) ->
+                sessionAgent runner live meta >>= \case
+                    Left err -> pure (Left err)
+                    Right agent -> case agent.ctxMailbox of
+                        Nothing -> pure $ Left $ MailboxRejected sid
+                        Just mb -> do
+                            sent <-
+                                mb.mbSend
+                                    Outgoing
+                                        { outId = Nothing
+                                        , outFrom = FromUser Nothing
+                                        , outPriority = Normal
+                                        , outHops = 0
+                                        , outBody = Control CancelAllAttached
+                                        }
+                            pure $ either (const (Left (MailboxRejected sid))) (const (Right meta)) sent
 
 {- | Who a session belongs to: the owner of its root session, since
 sub-sessions record none. 'Nothing' when the session does not exist.

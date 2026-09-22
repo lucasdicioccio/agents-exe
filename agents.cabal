@@ -158,6 +158,7 @@ library agents-lib
                     , System.Agents.Tools.SystemToolbox.SystemInfo
                     , System.Agents.Tools.SystemToolbox.Types
                     , System.Agents.Tools.SystemToolbox.ToolCallStatus
+                    , System.Agents.Tools.SystemToolbox.Mail
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Validation
                     , System.Agents.LLMs.OpenAI
@@ -169,6 +170,8 @@ library agents-lib
                     , System.Agents.Session.AgentConfig
                     , System.Agents.Session.Base
                     , System.Agents.Session.Durable
+                    , System.Agents.Session.Mailbox
+                    , System.Agents.Session.MailStore
                     , System.Agents.Session.Isolation
                     , System.Agents.Session.Async
                     , System.Agents.Session.Async.Engine
@@ -357,6 +360,7 @@ test-suite agents-postgres-tests
                       postgresql-simple,
                       process,
                       prodapi,
+                      stm,
                       tasty,
                       tasty-hunit,
                       temporary,
@@ -516,6 +520,7 @@ test-suite agents-tests
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          Main.hs
+    ghc-options:      -threaded
     other-modules:    ActivationSessionTests
                     , AgentFactoryTests
                     , BindingsTests
@@ -533,6 +538,7 @@ test-suite agents-tests
                     , FileSandboxPredicateTests
                     , LuaToolboxJsonValueTests
                     , LuaToolboxHttpTests
+                    , MailboxTests
                     , McpImplementationTests
                     , ModelCatalogTests
                     , OpenAPIToolboxTests

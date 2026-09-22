@@ -5,10 +5,11 @@
 
 module System.Agents.Base where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), (.!=), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
+import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (UUID)
@@ -22,7 +23,7 @@ import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
-import System.Agents.Session.Types (AsyncYieldStrategy, ExecutionMode, ToolCallDisposition)
+import System.Agents.Session.Types (AsyncYieldStrategy, Decorator, ExecutionMode, MailScope, ToolCallDisposition, WakeOnKind)
 
 -- Import FileSandbox types for unified sandboxing
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
@@ -900,6 +901,20 @@ data SystemToolCapability
       SystemToolListRunningToolCalls
     | -- | Cancel a running async tool call
       SystemToolCancelToolCall
+    | -- | Block until a named call is final, any call is final, mail
+      -- arrives, or a timeout elapses (@todos/session-mailbox.md@ §3)
+      SystemToolWait
+    | -- | Send agent-to-agent mail to another session by id
+      -- (@todos/session-mailbox.md@ §5, Phase 4)
+      SystemToolSendMessage
+    | -- | Start one of this agent's own helpers running as a detached
+      -- child session (@todos/session-mailbox.md@ §5, Phase 4)
+      SystemToolSpawnSession
+    | -- | Watch another session's events, forwarded as mail
+      -- (@todos/session-mailbox.md@ §7, Phase 6)
+      SystemToolWatchSession
+    | -- | Stop a previously registered watch (@todos/session-mailbox.md@ §7, Phase 6)
+      SystemToolUnwatchSession
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -922,6 +937,11 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolGetToolCallStatus = Aeson.String "get-tool-call-status"
     toJSON SystemToolListRunningToolCalls = Aeson.String "list-running-tool-calls"
     toJSON SystemToolCancelToolCall = Aeson.String "cancel-tool-call"
+    toJSON SystemToolWait = Aeson.String "wait"
+    toJSON SystemToolSendMessage = Aeson.String "send-message"
+    toJSON SystemToolSpawnSession = Aeson.String "spawn-session"
+    toJSON SystemToolWatchSession = Aeson.String "watch-session"
+    toJSON SystemToolUnwatchSession = Aeson.String "unwatch-session"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -945,7 +965,12 @@ instance FromJSON SystemToolCapability where
             "get-tool-call-status" -> return SystemToolGetToolCallStatus
             "list-running-tool-calls" -> return SystemToolListRunningToolCalls
             "cancel-tool-call" -> return SystemToolCancelToolCall
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call."
+            "wait" -> return SystemToolWait
+            "send-message" -> return SystemToolSendMessage
+            "spawn-session" -> return SystemToolSpawnSession
+            "watch-session" -> return SystemToolWatchSession
+            "unwatch-session" -> return SystemToolUnwatchSession
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait, send-message, spawn-session, watch-session, unwatch-session."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 
@@ -1536,6 +1561,11 @@ data ToolCallPolicyConfig = ToolCallPolicyConfig
     -- ^ Default disposition when no rule matches
     , tpcRules :: [ToolCallPolicyRule]
     -- ^ Per-tool disposition rules
+    , tpcWrappers :: [ToolCallWrapperRule]
+    -- ^ Decorators contributed by every matching wrapper rule, applied
+    -- outermost-first in file order, composed onto whichever disposition
+    -- 'tpcRules' \/ 'tpcDefaultDisposition' picked. Unlike 'tpcRules'
+    -- (first match wins), every matching wrapper rule applies.
     }
     deriving (Show, Eq, Generic)
 
@@ -1544,6 +1574,7 @@ instance ToJSON ToolCallPolicyConfig where
         Aeson.object
             [ "default" .= tpcDefaultDisposition cfg
             , "rules" .= tpcRules cfg
+            , "wrappers" .= tpcWrappers cfg
             ]
 
 instance FromJSON ToolCallPolicyConfig where
@@ -1551,6 +1582,7 @@ instance FromJSON ToolCallPolicyConfig where
         ToolCallPolicyConfig
             <$> v .: "default"
             <*> v .: "rules"
+            <*> v .:? "wrappers" .!= []
 
 {- | A single rule mapping a tool name to a disposition.
 -}
@@ -1574,6 +1606,54 @@ instance FromJSON ToolCallPolicyRule where
         ToolCallPolicyRule
             <$> v .: "tool"
             <*> v .: "disposition"
+
+{- | A wrapper rule: every tool call whose name matches 'wmTool' (a glob)
+gets 'twrDecorators' composed onto its disposition, in addition to whatever
+'tpcRules' \/ 'tpcDefaultDisposition' picked as the base. All matching
+wrapper rules apply (unlike 'ToolCallPolicyRule', where the first match
+wins), which is what lets a decorator (a timeout, a retry policy, a
+truncation cap) reach many tools without repeating it in every rule.
+-}
+data ToolCallWrapperRule = ToolCallWrapperRule
+    { twrMatch :: WrapperMatch
+    -- ^ Which tool calls this rule contributes decorators to
+    , twrDecorators :: [Decorator]
+    -- ^ Decorators contributed by this rule, outermost-first
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ToolCallWrapperRule where
+    toJSON rule =
+        Aeson.object
+            [ "match" .= twrMatch rule
+            , "decorators" .= twrDecorators rule
+            ]
+
+instance FromJSON ToolCallWrapperRule where
+    parseJSON = Aeson.withObject "ToolCallWrapperRule" $ \v ->
+        ToolCallWrapperRule
+            <$> v .: "match"
+            <*> v .: "decorators"
+
+{- | Predicate selecting which tool calls a 'ToolCallWrapperRule' applies to.
+
+Only 'wmTool' (a glob on the LLM-visible tool name, e.g. @"http_*"@) is
+matched today. A toolbox-name predicate is part of the spec but has no
+runtime source to match against yet; add 'wmToolbox' matching once a
+call's toolbox identity is threaded through 'ToolExecutionContext'.
+-}
+newtype WrapperMatch = WrapperMatch
+    { wmTool :: Maybe Text
+    -- ^ Glob on the LLM-visible tool name; 'Nothing' matches every tool
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON WrapperMatch where
+    toJSON m = Aeson.object $ catMaybes [("tool" .=) <$> wmTool m]
+
+instance FromJSON WrapperMatch where
+    parseJSON = Aeson.withObject "WrapperMatch" $ \v ->
+        WrapperMatch <$> v .:? "tool"
 
 
 -------------------------------------------------------------------------------
@@ -1662,6 +1742,38 @@ data Agent
     name directly, so bindings can target tools from any toolbox,
     including bash tools (which have no toolbox name to hang a
     toolbox-level binding on). Applied after toolbox-level bindings.
+    -}
+    , pauseCancelsCalls :: Maybe Bool
+    -- ^ @todos/session-mailbox.md@ §4: whether a 'Control' 'Pause' also
+    -- cancels this session's attached/running tool calls. Default 'False':
+    -- they keep running, orphaned, the same as any other detached call.
+    , resumeOnAnyMail :: Maybe Bool
+    {- ^ @todos/session-mailbox.md@ §4: whether any mail (not only an
+    explicit 'Control' 'Resume') is enough for 'postMessage' to accept a
+    message into a paused session and run again. Default 'False'.
+    -}
+    , interruptCompletions :: Maybe Bool
+    {- ^ @todos/session-mailbox.md@ R4/D5: whether an 'Interrupt'-priority
+    envelope arriving while this agent's 'complete' is in flight cancels
+    that completion and amends the head turn with the mail instead of
+    waiting for it to finish. Opt-in: default 'False' leaves an in-flight
+    completion running and the mail is picked up at the next R1\/R2.
+    -}
+    , mailScope :: Maybe MailScope
+    {- ^ @todos/session-mailbox.md@ §5 "Permissions": how far this agent's
+    mail may reach, relative to its own place in session lineage. Default
+    'MailScopeSubtree' when unset.
+    -}
+    , interruptScope :: Maybe MailScope
+    {- ^ @todos/session-mailbox.md@ §5 "Permissions": how far this agent's
+    'Interrupt' priority may reach. Default 'MailScopeChildren' when unset.
+    -}
+    , wakeOn :: Maybe [WakeOnKind]
+    {- ^ @todos/session-mailbox.md@ §5 "Scheduling rule": which senders'
+    mail alone may make this session runnable again when it is otherwise
+    idle (paused, today, via @resumeOnAnyMail@ -- mail is still queued
+    either way, this only gates whether it wakes the session by itself).
+    Default @[\"user\", \"tool\", \"parent\", \"child\"]@ when unset.
     -}
     }
     deriving (Show, Eq, Generic)

@@ -266,6 +266,11 @@ capabilityFromName name = case name of
     "get-tool-call-status" -> Just SystemToolGetToolCallStatus
     "list-running-tool-calls" -> Just SystemToolListRunningToolCalls
     "cancel-tool-call" -> Just SystemToolCancelToolCall
+    "wait" -> Just SystemToolWait
+    "send-message" -> Just SystemToolSendMessage
+    "spawn-session" -> Just SystemToolSpawnSession
+    "watch-session" -> Just SystemToolWatchSession
+    "unwatch-session" -> Just SystemToolUnwatchSession
     _ -> Nothing
 
 -- | Get the name for a capability.
@@ -288,6 +293,11 @@ capabilityToName SystemToolExecuteCommand = "execute-command"
 capabilityToName SystemToolGetToolCallStatus = "get-tool-call-status"
 capabilityToName SystemToolListRunningToolCalls = "list-running-tool-calls"
 capabilityToName SystemToolCancelToolCall = "cancel-tool-call"
+capabilityToName SystemToolWait = "wait"
+capabilityToName SystemToolSendMessage = "send-message"
+capabilityToName SystemToolSpawnSession = "spawn-session"
+capabilityToName SystemToolWatchSession = "watch-session"
+capabilityToName SystemToolUnwatchSession = "unwatch-session"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -349,6 +359,11 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
             SystemToolGetToolCallStatus -> error "Use getToolCallStatus"
             SystemToolListRunningToolCalls -> error "Use listRunningToolCalls"
             SystemToolCancelToolCall -> error "Use cancelToolCallById"
+            SystemToolWait -> error "Use waitForCallsOrMail"
+            SystemToolSendMessage -> error "Use sendMessageToSession"
+            SystemToolSpawnSession -> error "Use spawnSession"
+            SystemToolWatchSession -> error "Use watchSession"
+            SystemToolUnwatchSession -> error "Use unwatchSession"
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e

@@ -25,6 +25,7 @@ import Control.Concurrent.STM (TQueue, atomically, newTVarIO, readTVarIO, writeT
 import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
+import Data.Foldable (traverse_)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.Map.Strict as Map
@@ -60,10 +61,15 @@ import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
     LlmTurnContent (..),
+    MailBody (UserMessage),
+    Outgoing (..),
     PartialUserTurnContent (..),
+    Priority (Normal),
+    Sender (FromUser),
     Session (..),
     Turn (..),
     UserQuery (..),
+    newInMemoryMailbox,
     newTurnId,
  )
 import qualified System.Agents.Session.Base as SessionBase
@@ -347,15 +353,31 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                     , SessionBase.ctxEventQueue = mEventQueue
                     , SessionBase.ctxParams = Map.union withOverlay sessionAgent0.ctxParams
                     , SessionBase.ctxInheritedBindings = restBindings
+                    , -- Phase 4 (@todos/session-mailbox.md@ §5, D12): handed
+                      -- down the same way as ctxWorld/ctxEventQueue, so a
+                      -- deeply-nested helper can still send-message /
+                      -- spawn-session.
+                      SessionBase.ctxMailRouter = Ctx.ctxMailRouter ctx
+                    , SessionBase.ctxSpawnSession = Ctx.ctxSpawnSession ctx
+                    , -- Phase 6 (@todos/session-mailbox.md@ §7): handed down the same way.
+                      SessionBase.ctxWatchSession = Ctx.ctxWatchSession ctx
+                    , SessionBase.ctxUnwatchSession = Ctx.ctxUnwatchSession ctx
                     }
 
         -- Set the query on the agent
-        let agentWithQuery = agentSetQuery (UserQuery query []) sessionAgent
+        agentWithQuery <- agentSetQuery (UserQuery query []) sessionAgent
 
         -- Create a fresh session with media support (version 1), identified
         -- like its conversation so that its own sub-agents can name it as parent
         let subcallSessionId = SessionStore.conversationIdToSessionId subcallBaseConvId
-        session0 <- Session [] subcallSessionId Nothing <$> newTurnId <*> pure (Just 1) <*> pure Nothing
+        session0 <- Session [] subcallSessionId Nothing <$> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
+
+        -- Phase 4 (@todos/session-mailbox.md@ §5): report this call's own
+        -- child session id back to its tracking entity (if one is watching,
+        -- i.e. this call is running through the async engine), so a
+        -- detached placeholder can show it and the caller can
+        -- @send-message@ a helper that is still working.
+        traverse_ ($ subcallSessionId) (Ctx.ctxRecordChildSession ctx)
 
         -- Get current time for timestamps
         now <- getCurrentTime
@@ -630,10 +652,17 @@ resolveCallBindings callerParams = go []
                 Fail -> Left $ "binding for argument '" <> abArg b <> "' has no value for parameter '" <> p <> "'"
                 _ -> go acc bs
 
--- | Set the user query on an agent.
-agentSetQuery :: UserQuery -> Agent r -> Agent r
-agentSetQuery query agent =
-    agent{usrQuery = pure (Just query)}
+{- | Set the user query on an agent.
+
+Pre-loads it as one 'UserMessage' envelope on a fresh in-memory mailbox
+rather than answering 'usrQuery' (@todos/session-mailbox.md@, Phase 1); see
+'System.Agents.OneShot.agentSetQuery'.
+-}
+agentSetQuery :: UserQuery -> Agent r -> IO (Agent r)
+agentSetQuery query agent = do
+    mb <- newInMemoryMailbox
+    _ <- mb.mbSend Outgoing{outId = Nothing, outFrom = FromUser Nothing, outPriority = Normal, outHops = 0, outBody = UserMessage query}
+    pure agent{ctxMailbox = Just mb}
 
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =

@@ -138,7 +138,7 @@ wakeSessionWith mStore mCache session responses = do
     makeTurn :: PartialUserTurnContent -> [TrackedToolCall] -> Turn
     makeTurn partial tracked
         | all (isFinalToolCallState . tcState) tracked =
-            let content = PartialUserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked
+            let content = PartialUserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked (pUserMail partial)
                 completed = partialToolMessages content
                 byteUsage =
                     calculateUserTurnByteUsage
@@ -146,9 +146,9 @@ wakeSessionWith mStore mCache session responses = do
                         (pUserTools partial)
                         (pUserQuery partial)
                         (map snd completed)
-             in UserTurn (UserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) completed) (Just byteUsage)
+             in UserTurn (UserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) completed (pUserMail partial)) (Just byteUsage)
         | otherwise =
-            let content = PartialUserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked
+            let content = PartialUserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked (pUserMail partial)
                 byteUsage = calculatePartialTurnByteUsage (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked
              in PartialUserTurn content (Just byteUsage)
 

@@ -632,6 +632,7 @@ jsonRoundTripTests =
                         , tcSessionId = Session.SessionId (read "550e8400-e29b-41d4-a716-446655440002")
                         , tcConversationId = Base.ConversationId (read "550e8400-e29b-41d4-a716-446655440003")
                         , tcProviderCallId = Nothing
+                        , tcChildSessionId = Nothing
                         }
             let json = encode config
             let mDecoded = decode json
@@ -946,6 +947,10 @@ mkAgentWithWorld world mode policy =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }
 
 -------------------------------------------------------------------------------
@@ -966,7 +971,7 @@ asyncEngineTests =
             world <- atomically newWorld
             world' <- atomically $ registerToolCallComponents world
             let delayMicros = 200000 -- 200 ms per call
-            engine <- AsyncEngine.mkAsyncEngine world' (sleepExecutor delayMicros) 2 Nothing
+            engine <- AsyncEngine.mkAsyncEngine world' (sleepExecutor delayMicros) 2 Nothing Nothing
             (tc1, eid1) <- mkAsyncTrackedCall world' "sleep_a"
             (tc2, eid2) <- mkAsyncTrackedCall world' "sleep_b"
             let baseCtx = mkMinimalContext asyncSessId asyncConvId asyncTurnId stepDummyPortal
@@ -986,7 +991,7 @@ asyncEngineTests =
         , testCase "progress callback emits ToolCallProgress entries" $ do
             world <- atomically newWorld
             world' <- atomically $ registerToolCallComponents world
-            engine <- AsyncEngine.mkAsyncEngine world' progressExecutor 2 Nothing
+            engine <- AsyncEngine.mkAsyncEngine world' progressExecutor 2 Nothing Nothing
             (tc, eid) <- mkAsyncTrackedCall world' "progress_tool"
             let baseCtx = mkMinimalContext asyncSessId asyncConvId asyncTurnId stepDummyPortal
             batch <- AsyncEngine.startAsyncBatch engine baseCtx [tc]
@@ -1000,7 +1005,7 @@ asyncEngineTests =
         , testCase "cancelToolCall marks entity cancelled and engine completion does not overwrite" $ do
             world <- atomically newWorld
             world' <- atomically $ registerToolCallComponents world
-            engine <- AsyncEngine.mkAsyncEngine world' (sleepExecutor 500000) 2 Nothing
+            engine <- AsyncEngine.mkAsyncEngine world' (sleepExecutor 500000) 2 Nothing Nothing
             (tcSlow, eidSlow) <- mkAsyncTrackedCall world' "slow_tool"
             (tcFast, eidFast) <- mkAsyncTrackedCall world' "fast_tool"
             let baseCtx = mkMinimalContext asyncSessId asyncConvId asyncTurnId stepDummyPortal
@@ -1046,7 +1051,7 @@ mkAsyncTrackedCall world toolName = do
                 , Session.tcState = Session.Running
                 , Session.tcResult = Nothing
                 , Session.tcContinuation = Nothing
-                , Session.tcPolicy = Session.AppliedPolicy Session.RunAsync Nothing
+                , Session.tcPolicy = Session.AppliedPolicy (Session.RunAsync Nothing) Nothing
                 , Session.tcEntityId = Just eid
                 , Session.tcDeliveredLate = False
                 }
@@ -1144,13 +1149,13 @@ toolCallStatusTests =
                         , Session.tcState = Session.Running
                         , Session.tcResult = Nothing
                         , Session.tcContinuation = Nothing
-                        , Session.tcPolicy = Session.AppliedPolicy Session.RunAsync Nothing
+                        , Session.tcPolicy = Session.AppliedPolicy (Session.RunAsync Nothing) Nothing
                         , Session.tcEntityId = Nothing
                         , Session.tcDeliveredLate = False
                         }
             let session =
                     Session.Session
-                        { Session.turns = [Session.PartialUserTurn (Session.PartialUserTurnContent (Session.SystemPrompt "test") [] Nothing [tracked]) Nothing]
+                        { Session.turns = [Session.PartialUserTurn (Session.PartialUserTurnContent (Session.SystemPrompt "test") [] Nothing [tracked] []) Nothing]
                         , Session.sessionId = sessId
                         , Session.forkedFromSessionId = Nothing
                         , Session.turnId = turnId

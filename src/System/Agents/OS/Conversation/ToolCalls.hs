@@ -31,6 +31,7 @@ module System.Agents.OS.Conversation.ToolCalls (
     failToolCall,
     cancelToolCall,
     addToolCallProgress,
+    recordChildSession,
 
     -- * Queries
     findToolCallEntityBySessionId,
@@ -146,6 +147,7 @@ createToolCallEntityWithProviderId world sessId convId turnId mParentEntityId to
                 , tcSessionId = sessId
                 , tcConversationId = convId
                 , tcProviderCallId = mProviderId
+                , tcChildSessionId = Nothing
                 }
         st =
             ToolCallState
@@ -224,6 +226,15 @@ addToolCallProgress :: World -> EntityId -> ToolCallProgress -> IO ()
 addToolCallProgress world eid progress =
     atomically $ World.modifyComponent @ToolCallState world eid $ \st ->
         st{tcProgress = take maxToolCallProgressEntries (progress : tcProgress st)}
+
+{- | Record the child session a @prompt_agent_\<slug\>@ call started, once it
+exists (@todos/session-mailbox.md@ Phase 4, §5). A no-op if the entity has
+no 'ToolCallConfig' (e.g. it was never registered).
+-}
+recordChildSession :: World -> EntityId -> Session.SessionId -> IO ()
+recordChildSession world eid childSessionId =
+    atomically $ World.modifyComponent @ToolCallConfig world eid $ \cfg ->
+        cfg{tcChildSessionId = Just childSessionId}
 
 {- | Number of progress entries kept per tool call (newest first), so chatty
 tools cannot grow the entity without bound.

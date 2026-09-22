@@ -12,18 +12,53 @@ module System.Agents.Session.AgentConfig (
     applyAgentDurableConfig,
     buildToolCallPolicy,
     llmToolCallName,
+    matchGlob,
 ) where
 
 import Data.List (find)
+import Data.Text (Text)
+import qualified Data.Text as Text
 
 import qualified System.Agents.Base as Base
 import System.Agents.Session.Base
 
--- | Build a runtime 'ToolCallPolicy' from a declarative policy config.
+{- | Build a runtime 'ToolCallPolicy' from a declarative policy config.
+
+The base disposition still comes from the first matching 'tpcRules' entry
+(or 'tpcDefaultDisposition'), exact tool name match, first match wins. Every
+'tpcWrappers' rule whose glob matches the call's tool name then contributes
+its decorators, in file order (outermost first), composed as a single
+'Decorate' around that base.
+-}
 buildToolCallPolicy :: Base.ToolCallPolicyConfig -> ToolCallPolicy
 buildToolCallPolicy cfg _ctx call =
-    maybe (Base.tpcDefaultDisposition cfg) Base.tprDisposition $
-        find (\rule -> Base.tprToolName rule == llmToolCallName call) (Base.tpcRules cfg)
+    let base =
+            maybe (Base.tpcDefaultDisposition cfg) Base.tprDisposition $
+                find (\rule -> Base.tprToolName rule == toolName) (Base.tpcRules cfg)
+        decorators =
+            concat
+                [ Base.twrDecorators rule
+                | rule <- Base.tpcWrappers cfg
+                , wrapperMatches (Base.twrMatch rule)
+                ]
+     in if null decorators then base else Decorate decorators base
+  where
+    toolName = llmToolCallName call
+    wrapperMatches m = maybe True (`matchGlob` toolName) (Base.wmTool m)
+
+{- | Match a name against a glob pattern that supports only the @*@
+wildcard (matches any run of characters, including none).
+-}
+matchGlob :: Text -> Text -> Bool
+matchGlob pattern = go (Text.unpack pattern) . Text.unpack
+  where
+    go [] [] = True
+    go ('*' : ps) cs = go ps cs || case cs of
+        [] -> False
+        (_ : rest) -> go ('*' : ps) rest
+    go (p : ps) (c : cs) = p == c && go ps cs
+    go [] (_ : _) = False
+    go (_ : _) [] = False
 
 {- | Apply execution settings from the JSON agent config to a runtime agent.
 
@@ -36,6 +71,7 @@ applyAgentDurableConfig jsonAgent =
         . setMaybe (Base.asyncYieldStrategy jsonAgent) withAsyncYieldStrategy
         . setMaybe (Base.toolCallPolicyConfig jsonAgent) (withToolCallPolicy . buildToolCallPolicy)
         . setMaybe (Base.executionMode jsonAgent) withExecutionMode
+        . setMaybe (Base.interruptCompletions jsonAgent) withInterruptCompletions
   where
     setMaybe :: Maybe a -> (a -> b -> b) -> b -> b
     setMaybe m f x = maybe x (`f` x) m

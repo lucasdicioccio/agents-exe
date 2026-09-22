@@ -485,6 +485,7 @@ openApiTest = do
                 , "/v1/sessions"
                 , "/v1/sessions/{id}"
                 , "/v1/sessions/{id}/cancel"
+                , "/v1/sessions/{id}/cancel-attached"
                 , "/v1/sessions/{id}/events"
                 , "/v1/sessions/{id}/messages"
                 , "/v1/sessions/{id}/pending"

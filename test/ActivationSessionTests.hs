@@ -229,7 +229,7 @@ sessionFoldingTests =
         , testCase "user turns don't affect state" $ do
             let sessionId = SessionId (UUID.nil)
                 turnId = TurnId (UUID.nil)
-                userContent = UserTurnContent (SystemPrompt "test") [] Nothing []
+                userContent = UserTurnContent (SystemPrompt "test") [] Nothing [] []
                 userTurn = UserTurn userContent Nothing
                 session = Session {turns = [userTurn], sessionId = sessionId, forkedFromSessionId = Nothing, turnId = turnId}
             foldSession session @?= mempty

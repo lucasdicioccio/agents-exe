@@ -119,6 +119,15 @@ type SessionsAPI =
                             :<|> Summary "Stop the active run and its background calls"
                                 :> "cancel"
                                 :> Post '[JSON] SessionMetaBody
+                            :<|> Summary "Kill the session's currently-attached tool calls"
+                                :> Description
+                                    "Cancels every tool call still tracked as running, through the \
+                                    \async engine, without stopping the run itself. A cancelled \
+                                    \call's result never arrives; contrast with posting a message \
+                                    \with `interrupt: true`, which only detaches attached calls \
+                                    \and lets them finish."
+                                :> "cancel-attached"
+                                :> Post '[JSON] SessionMetaBody
                             :<|> Summary "The deferred calls this session waits on"
                                 :> "pending"
                                 :> Get '[JSON] PendingBody

@@ -35,6 +35,18 @@ module System.Agents.Tools.SystemToolbox.Types (
     RunningToolCallInfo (..),
     CancelToolCallParams (..),
     CancelToolCallResult (..),
+    WaitParams (..),
+    WaitResult (..),
+    maxWaitSeconds,
+    SendMessageParams (..),
+    SendMessageResult (..),
+    SpawnSessionParams (..),
+    SpawnSessionResult (..),
+    WatchSessionParams (..),
+    WatchSessionResult (..),
+    UnwatchSessionParams (..),
+    UnwatchSessionResult (..),
+    maxWatchesPerSession,
 
     -- * Query errors
     QueryError (..),
@@ -427,6 +439,252 @@ instance ToJSON CancelToolCallResult where
 
 instance FromJSON CancelToolCallResult where
     parseJSON = Aeson.genericParseJSON cancelToolCallResultOptions
+
+-------------------------------------------------------------------------------
+-- wait (todos/session-mailbox.md, Phase 2, §3)
+-------------------------------------------------------------------------------
+
+{- | Parameters for the @wait@ capability.
+
+'waitFor' is one of: a specific @tool_call_id@ (the LLM's own provider id,
+as shown on a running placeholder or by @list-running-tool-calls@),
+@"any-call"@ (any of the caller's own running calls), or @"mail"@ (only
+mail). Unlike the spec's @{"for": [...]}@ list form, this accepts a single
+target — reporting which one woke the call needs no list disambiguation,
+and a caller that wants several calls covered can use @"any-call"@.
+-}
+data WaitParams = WaitParams
+    { waitFor :: Text
+    -- ^ A @tool_call_id@, @"any-call"@, or @"mail"@
+    , waitTimeoutSeconds :: Int
+    -- ^ Maximum seconds to wait, capped by 'maxWaitSeconds' (default 30)
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON WaitParams where
+    parseJSON = Aeson.withObject "WaitParams" $ \v ->
+        WaitParams
+            <$> v .: "for"
+            <*> v .:? "timeout_seconds" .!= 30
+
+instance ToJSON WaitParams where
+    toJSON p =
+        Aeson.object
+            [ "for" .= waitFor p
+            , "timeout_seconds" .= waitTimeoutSeconds p
+            ]
+
+{- | Result of a @wait@ query: which of the first-to-happen conditions woke
+it (@"call"@, @"mail"@, or @"timeout"@), and the specific tool-call id when
+woken by a call.
+-}
+data WaitResult = WaitResult
+    { wrWokenBy :: Text
+    -- ^ @"call"@, @"mail"@, or @"timeout"@
+    , wrToolCallId :: Maybe Text
+    -- ^ The tool-call id that became final, when 'wrWokenBy' is @"call"@
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON WaitResult where
+    toJSON r =
+        Aeson.object $
+            ["woken_by" .= wrWokenBy r]
+                ++ ["tool_call_id" .= tid | Just tid <- [wrToolCallId r]]
+
+instance FromJSON WaitResult where
+    parseJSON = Aeson.withObject "WaitResult" $ \v ->
+        WaitResult
+            <$> v .: "woken_by"
+            <*> v .:? "tool_call_id"
+
+-- | Hard cap on 'waitTimeoutSeconds', per the spec: "two agents waiting on
+-- each other time out instead of deadlocking".
+maxWaitSeconds :: Int
+maxWaitSeconds = 300
+
+-------------------------------------------------------------------------------
+-- send-message (todos/session-mailbox.md, Phase 4, §5)
+-------------------------------------------------------------------------------
+
+{- | Parameters for a @send-message@ call: agent-to-agent mail, addressed by
+'SessionId' text.
+-}
+data SendMessageParams = SendMessageParams
+    { smpTo :: Text
+    -- ^ The recipient session's id, as text
+    , smpText :: Text
+    , smpInReplyTo :: Maybe Text
+    -- ^ A 'System.Agents.Session.Types.MessageId' this message answers, as text
+    , smpExpectsReply :: Bool
+    , smpInterrupt :: Bool
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON SendMessageParams where
+    parseJSON = Aeson.withObject "SendMessageParams" $ \v ->
+        SendMessageParams
+            <$> v .: "to"
+            <*> v .: "text"
+            <*> v .:? "in_reply_to"
+            <*> v .:? "expects_reply" .!= False
+            <*> v .:? "interrupt" .!= False
+
+instance ToJSON SendMessageParams where
+    toJSON p =
+        Aeson.object $
+            [ "to" .= smpTo p
+            , "text" .= smpText p
+            , "expects_reply" .= smpExpectsReply p
+            , "interrupt" .= smpInterrupt p
+            ]
+                ++ ["in_reply_to" .= r | Just r <- [smpInReplyTo p]]
+
+-- | Result of a @send-message@ call: the receipt plus the recipient's status.
+data SendMessageResult = SendMessageResult
+    { smrMessageId :: Text
+    , smrSeq :: Int
+    , smrDuplicate :: Bool
+    , smrRecipientStatus :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON SendMessageResult where
+    toJSON r =
+        Aeson.object
+            [ "message_id" .= smrMessageId r
+            , "seq" .= smrSeq r
+            , "duplicate" .= smrDuplicate r
+            , "recipient_status" .= smrRecipientStatus r
+            ]
+
+instance FromJSON SendMessageResult where
+    parseJSON = Aeson.withObject "SendMessageResult" $ \v ->
+        SendMessageResult
+            <$> v .: "message_id"
+            <*> v .: "seq"
+            <*> v .: "duplicate"
+            <*> v .: "recipient_status"
+
+-------------------------------------------------------------------------------
+-- spawn-session (todos/session-mailbox.md, Phase 4, §5)
+-------------------------------------------------------------------------------
+
+{- | Parameters for a @spawn-session@ call: start one of this agent's own
+helpers running as a detached child session (not call\/return -- it
+outlives this tool call and answers by mail via @send-message@).
+-}
+data SpawnSessionParams = SpawnSessionParams
+    { sspAgent :: Text
+    -- ^ One of the caller's helper slugs, as for @prompt_agent_\<slug\>@
+    , sspMessage :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON SpawnSessionParams where
+    parseJSON = Aeson.withObject "SpawnSessionParams" $ \v ->
+        SpawnSessionParams
+            <$> v .: "agent"
+            <*> v .: "message"
+
+instance ToJSON SpawnSessionParams where
+    toJSON p =
+        Aeson.object
+            [ "agent" .= sspAgent p
+            , "message" .= sspMessage p
+            ]
+
+-- | Result of a @spawn-session@ call: the new session's id.
+newtype SpawnSessionResult = SpawnSessionResult
+    { ssrSessionId :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON SpawnSessionResult where
+    toJSON r = Aeson.object ["session_id" .= ssrSessionId r]
+
+instance FromJSON SpawnSessionResult where
+    parseJSON = Aeson.withObject "SpawnSessionResult" $ \v ->
+        SpawnSessionResult <$> v .: "session_id"
+
+-------------------------------------------------------------------------------
+-- watch-session / unwatch-session (todos/session-mailbox.md, Phase 6, §7)
+-------------------------------------------------------------------------------
+
+-- | Hard cap on concurrently active watches per watching session.
+maxWatchesPerSession :: Int
+maxWatchesPerSession = 32
+
+{- | Parameters for a @watch-session@ call: forward a target session's
+matching events into this session's mailbox as 'WatchedEvent' mail.
+-}
+data WatchSessionParams = WatchSessionParams
+    { wspSession :: Text
+    -- ^ The session to watch, as text
+    , wspEvents :: Maybe [Text]
+    -- ^ Event kinds to forward (e.g. @"run.stopped"@, @"tool.completed"@); 'Nothing' forwards all kinds
+    , wspTool :: Maybe Text
+    -- ^ Glob on the tool name, for @tool.*@ events only; other events always match
+    , wspTtlSeconds :: Maybe Int
+    -- ^ How long the watch stays active; 'Nothing' uses a default
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON WatchSessionParams where
+    parseJSON = Aeson.withObject "WatchSessionParams" $ \v ->
+        WatchSessionParams
+            <$> v .: "session"
+            <*> v .:? "events"
+            <*> v .:? "tool"
+            <*> v .:? "ttl_seconds"
+
+instance ToJSON WatchSessionParams where
+    toJSON p =
+        Aeson.object $
+            ["session" .= wspSession p]
+                ++ ["events" .= es | Just es <- [wspEvents p]]
+                ++ ["tool" .= t | Just t <- [wspTool p]]
+                ++ ["ttl_seconds" .= t | Just t <- [wspTtlSeconds p]]
+
+-- | Result of a @watch-session@ call: an id to pass to @unwatch-session@.
+newtype WatchSessionResult = WatchSessionResult
+    { wsrWatchId :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON WatchSessionResult where
+    toJSON r = Aeson.object ["watch_id" .= wsrWatchId r]
+
+instance FromJSON WatchSessionResult where
+    parseJSON = Aeson.withObject "WatchSessionResult" $ \v ->
+        WatchSessionResult <$> v .: "watch_id"
+
+-- | Parameters for an @unwatch-session@ call: the id a @watch-session@ call returned.
+newtype UnwatchSessionParams = UnwatchSessionParams
+    { uspWatchId :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON UnwatchSessionParams where
+    parseJSON = Aeson.withObject "UnwatchSessionParams" $ \v ->
+        UnwatchSessionParams <$> v .: "watch_id"
+
+instance ToJSON UnwatchSessionParams where
+    toJSON p = Aeson.object ["watch_id" .= uspWatchId p]
+
+-- | Result of an @unwatch-session@ call: whether a matching watch was found and stopped.
+newtype UnwatchSessionResult = UnwatchSessionResult
+    { uwrStopped :: Bool
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON UnwatchSessionResult where
+    toJSON r = Aeson.object ["stopped" .= uwrStopped r]
+
+instance FromJSON UnwatchSessionResult where
+    parseJSON = Aeson.withObject "UnwatchSessionResult" $ \v ->
+        UnwatchSessionResult <$> v .: "stopped"
+
 -------------------------------------------------------------------------------
 -- Query Errors
 -------------------------------------------------------------------------------

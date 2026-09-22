@@ -54,6 +54,36 @@ module System.Agents.Session.Base (
     CacheKey (..),
     AsyncYieldStrategy (..),
 
+    -- * Session mailbox (re-exported from Session.Types / Session.Mailbox)
+    Cursor,
+    MessageId (..),
+    newMessageId,
+    messageIdText,
+    Priority (..),
+    Sender (..),
+    ControlMsg (..),
+    MailScope (..),
+    WakeOnKind (..),
+    defaultWakeOn,
+    senderWakeKind,
+    MailBody (..),
+    Envelope (..),
+    Outgoing (..),
+    SendError (..),
+    Receipt (..),
+    Mailbox (..),
+    newInMemoryMailbox,
+    awaitMail,
+    mailboxMaxUnread,
+    MailStore (..),
+    newDurableMailbox,
+    MailboxInfo (..),
+    MailRouter (..),
+    newMailRouter,
+    WatchRequest (..),
+    WatchSession,
+    UnwatchSession,
+
     -- * Byte usage tracking
     StepByteUsage (..),
     calculateStepByteUsage,
@@ -116,6 +146,14 @@ module System.Agents.Session.Base (
     mkDurableExecutor,
     flattenDisposition,
     isolatedExecutor,
+    AsyncToolResponse (..),
+    Exec,
+    ToolMiddleware,
+    WrapperEnv (..),
+    defaultWrapperEnv,
+    interpretDecorator,
+    applyDecorators,
+    mkToolInvoker,
     mkIsolationEnvelope,
     mkIsolationSuccessEnvelope,
     mkIsolationErrorEnvelope,
@@ -146,6 +184,12 @@ module System.Agents.Session.Base (
     withDurableExecutor,
     withAsyncEngine,
     withAsyncYieldStrategy,
+    withMailbox,
+    withMailRouter,
+    withSpawnSession,
+    withWatchSession,
+    withInterruptCompletions,
+    SpawnSession,
 ) where
 
 import Control.Concurrent.STM (TQueue)
@@ -156,25 +200,48 @@ import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
+import System.Agents.Session.Mailbox (
+    Mailbox (..),
+    MailboxInfo (..),
+    MailRouter (..),
+    SpawnSession,
+    UnwatchSession,
+    WatchRequest (..),
+    WatchSession,
+    newMailRouter,
+    MailStore (..),
+    awaitMail,
+    mailboxMaxUnread,
+    newDurableMailbox,
+    newInMemoryMailbox,
+ )
 import System.Agents.Session.Durable (
+    AsyncToolResponse (..),
     DeploymentRunner (..),
+    Exec,
     IsolationEnvelope (..),
     IsolationError (..),
     IsolationResultEnvelope (..),
     IsolationResultStatus (..),
     ToolCallPolicy,
     ToolExecutor (..),
+    ToolMiddleware,
+    WrapperEnv (..),
+    applyDecorators,
     cachingExecutor,
     cachedInProcessExecutor,
     composeExecutors,
     defaultToolCallPolicy,
+    defaultWrapperEnv,
     dockerRunner,
     flattenDisposition,
     functionRunner,
     inProcessExecutor,
+    interpretDecorator,
     isolatedExecutor,
     localProcessRunner,
     mkDurableExecutor,
+    mkToolInvoker,
     mkIsolationEnvelope,
     mkIsolationErrorEnvelope,
     mkIsolationSuccessEnvelope,
@@ -357,6 +424,43 @@ data Agent r = Agent
     Copied into every tool call's 'ToolExecutionContext' by 'buildContext',
     same as 'ctxParams'.
     -}
+    , ctxMailbox :: Maybe Mailbox
+    {- ^ Optional mailbox (@todos/session-mailbox.md@, Phase 1). When
+    present, the receive points in "System.Agents.Session.Step" fold unread
+    mail into the user turn being built (R1), and block on it when the step
+    has nothing else to do (R2). 'Nothing' keeps every existing code path
+    (including 'usrQuery') unchanged.
+    -}
+    , ctxMailRouter :: Maybe MailRouter
+    {- ^ Optional process-wide table of live mailboxes (@todos/session-mailbox.md@,
+    Phase 4, D12). When present, 'System.Agents.Tools.SystemToolbox' capabilities
+    like @send-message@ can address another session by id. Handed down to
+    sub-agents the same way 'ctxWorld' \/ 'ctxEventQueue' are.
+    -}
+    , ctxSpawnSession :: Maybe SpawnSession
+    {- ^ Optional @spawn-session@ hook (@todos/session-mailbox.md@, Phase 4,
+    §5): given a helper's agent slug and an initial message, start it
+    running as a detached child session (not call\/return -- it outlives
+    the tool call that spawned it and answers by mail) and return its new
+    'SessionId' at once. Front-end-specific (durable\/'createSessionAs'-like
+    on the server; a new conversation in the TUI; a thread in @run@), so it
+    is a hook rather than a shared implementation, the same shape as
+    'ctxCancelToolCall' on 'ToolExecutionContext'. Handed down to sub-agents
+    the same way 'ctxMailRouter' is.
+    -}
+    , ctxWatchSession :: Maybe WatchSession
+    -- ^ Optional @watch-session@ hook (@todos/session-mailbox.md@, Phase 6,
+    -- §7). Front-end-specific, the same shape as 'ctxSpawnSession'; handed
+    -- down to sub-agents the same way.
+    , ctxUnwatchSession :: Maybe UnwatchSession
+    -- ^ Optional @unwatch-session@ hook (Phase 6, §7), paired with 'ctxWatchSession'.
+    , ctxInterruptCompletions :: Bool
+    {- ^ @todos/session-mailbox.md@ R4/D5: whether an 'Interrupt'-priority
+    envelope arriving while 'complete' is in flight cancels it and amends
+    the head turn with the mail instead of leaving it for the next R1\/R2.
+    Opt-in; 'False' (the default every existing 'Agent' gets) leaves R4
+    unused and every other receive point's behaviour unaffected.
+    -}
     }
     deriving (Functor)
 
@@ -374,6 +478,48 @@ yieldingAgent = withAsyncYieldStrategy YieldOnAnyProgress baseAgent
 -}
 withAsyncYieldStrategy :: AsyncYieldStrategy -> Agent r -> Agent r
 withAsyncYieldStrategy strategy agent = agent{ctxAsyncYieldStrategy = strategy}
+
+{- | Install a mailbox on an agent (@todos/session-mailbox.md@, Phase 1).
+
+Example:
+
+@
+mb <- newInMemoryMailbox
+mailboxAgent = withMailbox mb baseAgent
+@
+-}
+withMailbox :: Mailbox -> Agent r -> Agent r
+withMailbox mb agent = agent{ctxMailbox = Just mb}
+
+{- | Install a mail router on an agent (@todos/session-mailbox.md@, Phase 4).
+
+Example:
+
+@
+router <- newMailRouter
+routedAgent = withMailRouter router baseAgent
+@
+-}
+withMailRouter :: MailRouter -> Agent r -> Agent r
+withMailRouter router agent = agent{ctxMailRouter = Just router}
+
+{- | Install a @spawn-session@ hook on an agent (@todos/session-mailbox.md@,
+Phase 4).
+-}
+withSpawnSession :: SpawnSession -> Agent r -> Agent r
+withSpawnSession spawn agent = agent{ctxSpawnSession = Just spawn}
+
+{- | Install @watch-session@\/@unwatch-session@ hooks on an agent
+(@todos/session-mailbox.md@, Phase 6).
+-}
+withWatchSession :: WatchSession -> UnwatchSession -> Agent r -> Agent r
+withWatchSession watch unwatch agent = agent{ctxWatchSession = Just watch, ctxUnwatchSession = Just unwatch}
+
+{- | Set whether an 'Interrupt'-priority envelope may cancel an in-flight
+LLM completion (@todos/session-mailbox.md@, R4/D5).
+-}
+withInterruptCompletions :: Bool -> Agent r -> Agent r
+withInterruptCompletions enabled agent = agent{ctxInterruptCompletions = enabled}
 
 {- | Set the execution mode for an agent.
 
@@ -556,12 +702,30 @@ withAsyncEngine maxConcurrency agent =
             -- Register the tool-call stores first so the engine and the
             -- agent share the same world value.
             world <- TCT.ensureToolCallComponentsIO world0
-            engine <- mkAsyncEngine world (executeCall agent) maxConcurrency agent.ctxAsyncCallTimeout
+            engine <- mkAsyncEngine world (executeCallSync agent) maxConcurrency agent.ctxAsyncCallTimeout agent.ctxMailbox
             pure agent{ctxWorld = Just world, ctxAsyncEngine = Just engine}
+
+{- | Execute a call synchronously through the agent's executor (or its
+native 'toolCall'), applying the decorators its resolved policy carries.
+
+Mirrors 'System.Agents.Session.Step.executeCall' (minus the
+'DeploymentRunner' fallback, which 'ctxToolExecutor' already covers for
+every agent built through 'withDurableExecutor'). It lives here, rather
+than being shared with that module, because 'Step' imports this module and
+a shared definition would make the two modules depend on each other.
+-}
+executeCallSync :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
+executeCallSync agent ctx call = do
+    response <- applyDecorators wrapperEnv decorators baseExec ctx call
+    case response of
+        ToolComplete result -> pure result
+        ToolYield{} -> pure $ TextResponse "tool call yielded unexpectedly under a synchronous executor"
   where
-    executeCall :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
-    executeCall a ctx call =
-        case a.ctxToolExecutor of
-            Just executor -> executor.execSync ctx call
-            Nothing -> a.toolCall ctx call
+    wrapperEnv = WrapperEnv{weCache = agent.ctxToolCache, weInvokeTool = Just (mkToolInvoker agent.toolCall ctx)}
+    (decorators, _base) = flattenDisposition (agent.ctxToolCallPolicy ctx call)
+    baseExec ctx' call' = ToolComplete <$> baseExecSync ctx' call'
+    baseExecSync ctx' call' =
+        case agent.ctxToolExecutor of
+            Just executor -> executor.execSync ctx' call'
+            Nothing -> agent.toolCall ctx' call'
 

@@ -63,9 +63,27 @@ module System.Agents.Tools.SystemToolbox (
     RunningToolCallInfo (..),
     CancelToolCallParams (..),
     CancelToolCallResult (..),
+    WaitParams (..),
+    WaitResult (..),
     getToolCallStatus,
     listRunningToolCalls,
     cancelToolCallById,
+    waitForCallsOrMail,
+    clampWaitSeconds,
+
+    -- * Agent-to-agent mail (re-exported from Mail)
+    SendMessageParams (..),
+    SendMessageResult (..),
+    sendMessageToSession,
+    SpawnSessionParams (..),
+    SpawnSessionResult (..),
+    spawnSession,
+    WatchSessionParams (..),
+    WatchSessionResult (..),
+    UnwatchSessionParams (..),
+    UnwatchSessionResult (..),
+    watchSession,
+    unwatchSession,
 
     -- * Initialization (re-exported from Core)
     initializeToolbox,
@@ -128,4 +146,5 @@ import System.Agents.Tools.SystemToolbox.Formatting
 import System.Agents.Tools.SystemToolbox.Media
 import System.Agents.Tools.SystemToolbox.Session
 import System.Agents.Tools.SystemToolbox.ToolCallStatus
+import System.Agents.Tools.SystemToolbox.Mail
 import System.Agents.Tools.SystemToolbox.Types

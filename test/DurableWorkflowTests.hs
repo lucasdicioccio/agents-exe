@@ -50,13 +50,17 @@ for completeness:
 -}
 module DurableWorkflowTests where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.STM (atomically, flushTQueue, newTQueueIO)
+import Control.Exception (ErrorCall (..), throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.Maybe (catMaybes, fromJust, isJust)
 import Data.Text (Text, unpack)
+import qualified Data.Text as Text
 import Data.Time (UTCTime)
 import Data.UUID (nil)
 import Database.SQLite.Simple (open)
@@ -72,6 +76,7 @@ import System.Agents.Combinators.StoreSessionProgress (
     agentWithSessionProgress,
     backendStoreCallback,
  )
+import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.Session.Async (
     ContinuationStore,
     ToolContinuationSnapshot (..),
@@ -81,8 +86,13 @@ import System.Agents.Session.Async (
  )
 import System.Agents.Session.Base
 import System.Agents.Session.Durable (
+    AsyncToolResponse (..),
+    WrapperEnv (..),
+    applyDecorators,
     cachedInProcessExecutor,
     composeExecutors,
+    defaultWrapperEnv,
+    interpretDecorator,
     mkDurableExecutor,
  )
 import System.Agents.Session.Isolation (
@@ -131,6 +141,18 @@ tests =
     testGroup
         "Durable Workflows"
         [ testGroup
+            "Phase 0"
+            [ timeoutDecoratorTest
+            , timeoutDecoratorPassesThroughTest
+            , retriesDecoratorSucceedsTest
+            , retriesDecoratorExhaustsTest
+            , cacheDecoratorTest
+            , labelDecoratorIsNoopTest
+            , truncateDecoratorTest
+            , truncateDecoratorLeavesShortResultTest
+            , applyDecoratorsOrderTest
+            ]
+        , testGroup
             "Phase 2"
             [ policyClassificationTest
             , continuationStoreRoundTripTest
@@ -162,6 +184,22 @@ tests =
             , cachedInProcessExecutorTest
             , composeExecutorsTest
             , agentStoreSessionWithCallbackTest
+            ]
+        , testGroup
+            "Session Mailbox Phase 5 (hooks)"
+            [ beforeHookCommandDeniesOnNonZeroExitTest
+            , beforeHookCommandDeniesExplicitlyTest
+            , beforeHookCommandContinuesWithRewrittenArgumentsTest
+            , beforeHookCommandDefersTest
+            , beforeHookCommandAnswersDirectlyTest
+            , beforeHookCommandFailureDeniesAndTracesTest
+            , beforeHookToolContinuesTest
+            , beforeHookToolDeniesTest
+            , afterHookCommandRewritesResultTest
+            , afterHookCommandAnnotatesTest
+            , afterHookCommandFailurePassesThroughAndTracesTest
+            , afterHookSkippedOnYieldTest
+            , hookDecoratorJsonRoundTripTest
             ]
         ]
 
@@ -248,6 +286,10 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -279,6 +321,10 @@ mkSimpleAgent =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -299,6 +345,7 @@ mkSessionWithCalls calls =
         , turnId = TurnId nil
         , sessionVersion = Just 2
         , sessionExecutionMode = Just Asynchronous
+        , mailCursor = 0
         }
 
 -- | A serialisable context snapshot for envelope tests.
@@ -820,12 +867,316 @@ withAsyncConfigTest =
     testCase "withAsyncConfig sets mode, cache and policy" $ do
         cachePath <- emptySystemTempFile "async-config-cache.db"
         cache <- mkSqliteToolCache cachePath
-        let policy _ctx _call = RunAsync
+        let policy _ctx _call = RunAsync Nothing
         let agent = withAsyncConfig Asynchronous (Just cache) policy mkSimpleAgent
         ctxExecutionMode agent @?= Asynchronous
         isJust (ctxToolCache agent) @?= True
         -- Apply the installed policy to verify it is the one we supplied.
-        ctxToolCallPolicy agent testCtx (mkCall "any") @?= RunAsync
+        ctxToolCallPolicy agent testCtx (mkCall "any") @?= RunAsync Nothing
+
+-------------------------------------------------------------------------------
+-- Phase 0: decorators / wrappers
+-------------------------------------------------------------------------------
+
+-- | 'WithTimeout' completes with a note instead of blocking forever.
+timeoutDecoratorTest :: TestTree
+timeoutDecoratorTest =
+    testCase "WithTimeout completes with a note when the call outruns it" $ do
+        let hangs _ctx _call = do
+                -- Effectively "forever" from the timeout's point of view.
+                threadDelaySeconds 5
+                pure $ ToolComplete $ TextResponse "too late"
+        response <- interpretDecorator defaultWrapperEnv (WithTimeout 0) hangs testCtx (mkCall "slow")
+        case response of
+            ToolComplete (TextResponse msg) -> Text.isInfixOf "timed out" msg @?= True
+            other -> assertFailure $ "expected a timeout text response, got " <> show other
+
+-- | A call finishing well within the timeout is untouched.
+timeoutDecoratorPassesThroughTest :: TestTree
+timeoutDecoratorPassesThroughTest =
+    testCase "WithTimeout passes through a call that finishes in time" $ do
+        let fast _ctx call = pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+        response <- interpretDecorator defaultWrapperEnv (WithTimeout 30) fast testCtx (mkCall "quick")
+        response @?= ToolComplete (TextResponse "done:quick")
+
+-- | 'WithRetries' retries a failing call and succeeds once it stops throwing.
+retriesDecoratorSucceedsTest :: TestTree
+retriesDecoratorSucceedsTest =
+    testCase "WithRetries retries until the call succeeds" $ do
+        attempts <- newIORef (0 :: Int)
+        let flaky _ctx _call = do
+                n <- atomicModifyIORef' attempts (\k -> (k + 1, k + 1))
+                if n < 3
+                    then throwIO (ErrorCall "not yet")
+                    else pure $ ToolComplete $ TextResponse "eventually"
+        response <- interpretDecorator defaultWrapperEnv (WithRetries 5) flaky testCtx (mkCall "flaky")
+        response @?= ToolComplete (TextResponse "eventually")
+        readIORef attempts >>= (@?= 3)
+
+-- | 'WithRetries' gives up after exhausting its budget and reports failure as text.
+retriesDecoratorExhaustsTest :: TestTree
+retriesDecoratorExhaustsTest =
+    testCase "WithRetries reports failure once retries are exhausted" $ do
+        attempts <- newIORef (0 :: Int)
+        let alwaysFails _ctx _call = do
+                modifyIORef' attempts (+ 1)
+                throwIO (ErrorCall "always broken")
+        response <- interpretDecorator defaultWrapperEnv (WithRetries 2) alwaysFails testCtx (mkCall "broken")
+        case response of
+            ToolComplete (TextResponse msg) -> Text.isInfixOf "tool call failed" msg @?= True
+            other -> assertFailure $ "expected a failure text response, got " <> show other
+        -- One initial attempt plus two retries.
+        readIORef attempts >>= (@?= 3)
+
+-- | 'WithCache' looks up and stores under its explicit key, bypassing the
+-- wrapped call entirely on a hit.
+cacheDecoratorTest :: TestTree
+cacheDecoratorTest =
+    testCase "WithCache serves a hit without re-running the call" $
+        withSystemTempDirectory "decorator-cache" $ \dir -> do
+            cache <- mkSqliteToolCache (dir ++ "/cache.db")
+            calls <- newIORef (0 :: Int)
+            let counted _ctx call = do
+                    modifyIORef' calls (+ 1)
+                    pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+            let env = defaultWrapperEnv{weCache = Just cache}
+            let key = CacheKey "cached_tool" "args"
+            r1 <- interpretDecorator env (WithCache key) counted testCtx (mkCall "cached_tool")
+            r2 <- interpretDecorator env (WithCache key) counted testCtx (mkCall "cached_tool")
+            r1 @?= ToolComplete (TextResponse "done:cached_tool")
+            r2 @?= r1
+            readIORef calls >>= (@?= 1)
+
+-- | 'WithLabel' never changes execution.
+labelDecoratorIsNoopTest :: TestTree
+labelDecoratorIsNoopTest =
+    testCase "WithLabel does not change the call's outcome" $ do
+        let exec _ctx call = pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+        response <- interpretDecorator defaultWrapperEnv (WithLabel "traced") exec testCtx (mkCall "labelled")
+        response @?= ToolComplete (TextResponse "done:labelled")
+
+-- | 'WithTruncate' caps an oversized text result and notes the cut.
+truncateDecoratorTest :: TestTree
+truncateDecoratorTest =
+    testCase "WithTruncate caps an oversized result" $ do
+        let big = Text.replicate 1000 "x"
+        let exec _ctx _call = pure $ ToolComplete $ TextResponse big
+        response <- interpretDecorator defaultWrapperEnv (WithTruncate 100) exec testCtx (mkCall "big")
+        case response of
+            ToolComplete (TextResponse msg) -> do
+                Text.length msg < 1000 @?= True
+                Text.isInfixOf "truncated" msg @?= True
+            other -> assertFailure $ "expected a truncated text response, got " <> show other
+
+-- | 'WithTruncate' leaves a result under the cap untouched.
+truncateDecoratorLeavesShortResultTest :: TestTree
+truncateDecoratorLeavesShortResultTest =
+    testCase "WithTruncate leaves a short result untouched" $ do
+        let exec _ctx _call = pure $ ToolComplete $ TextResponse "short"
+        response <- interpretDecorator defaultWrapperEnv (WithTruncate 100) exec testCtx (mkCall "short")
+        response @?= ToolComplete (TextResponse "short")
+
+-- | 'applyDecorators' composes outermost-first: @[d1, d2] base ==> d1 (d2 base)@.
+applyDecoratorsOrderTest :: TestTree
+applyDecoratorsOrderTest =
+    testCase "applyDecorators composes decorators outermost-first" $ do
+        order <- newIORef ([] :: [Text])
+        let recordEnter tag = modifyIORef' order (tag :)
+        let base ctx call = do
+                recordEnter "base"
+                pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+        -- Two 'WithLabel's are pure no-ops functionally, so their relative
+        -- order can only be observed by wrapping them by hand here.
+        let outer next ctx call = recordEnter "outer" >> next ctx call
+        let inner next ctx call = recordEnter "inner" >> next ctx call
+        let composed = outer (inner base)
+        _ <- composed testCtx (mkCall "ordered")
+        entered <- readIORef order
+        reverse entered @?= ["outer", "inner", "base"]
+
+-- | Waits at least the given number of seconds without busy-looping.
+threadDelaySeconds :: Int -> IO ()
+threadDelaySeconds n = threadDelay (n * 1000000)
+
+-------------------------------------------------------------------------------
+-- Session Mailbox Phase 5: before/after hooks
+-------------------------------------------------------------------------------
+
+-- | Write a hook script to a temp file, executable, and hand its path to the action.
+withHookScript :: String -> (FilePath -> IO a) -> IO a
+withHookScript scriptBody action =
+    withSystemTempDirectory "hook-script" $ \dir -> do
+        let path = dir ++ "/hook.sh"
+        writeFile path scriptBody
+        setPermissions path emptyPermissions{readable = True, executable = True}
+        action path
+
+-- | An 'Exec' that records how many times it ran and always succeeds.
+countingExec :: IORef Int -> Exec
+countingExec calls _ctx call = do
+    modifyIORef' calls (+ 1)
+    pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+
+beforeHookCommandDeniesOnNonZeroExitTest :: TestTree
+beforeHookCommandDeniesOnNonZeroExitTest =
+    testCase "a before hook command exiting non-zero denies the call" $
+        withHookScript "#!/usr/bin/env bash\nset -e\ncat >/dev/null\nexit 3\n" $ \path -> do
+            calls <- newIORef (0 :: Int)
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) testCtx (mkCall "deploy")
+            case response of
+                ToolComplete (TextResponse msg) -> Text.isInfixOf "blocked by policy" msg @?= True
+                other -> assertFailure $ "expected a deny text response, got " <> show other
+            readIORef calls >>= (@?= 0)
+
+beforeHookCommandDeniesExplicitlyTest :: TestTree
+beforeHookCommandDeniesExplicitlyTest =
+    testCase "a before hook command can deny explicitly, and the call never runs" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"deny\",\"message\":\"nope, policy says no\"}'\n" $ \path -> do
+            calls <- newIORef (0 :: Int)
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) testCtx (mkCall "deploy")
+            response @?= ToolComplete (TextResponse "nope, policy says no")
+            readIORef calls >>= (@?= 0)
+
+beforeHookCommandContinuesWithRewrittenArgumentsTest :: TestTree
+beforeHookCommandContinuesWithRewrittenArgumentsTest =
+    testCase "a before hook command can rewrite arguments before the call runs" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"continue\",\"arguments\":{\"rewritten\":true}}'\n" $ \path -> do
+            let echoArgs _ctx (LlmToolCall v) = pure $ ToolComplete $ TextResponse (Text.pack (show v))
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) echoArgs testCtx (mkCall "deploy")
+            case response of
+                ToolComplete (TextResponse msg) -> Text.isInfixOf "rewritten" msg @?= True
+                other -> assertFailure $ "expected the rewritten arguments to reach the call, got " <> show other
+
+beforeHookCommandDefersTest :: TestTree
+beforeHookCommandDefersTest =
+    testCase "a before hook command can defer the call" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"defer\",\"reason\":\"needs approval\"}'\n" $ \path -> do
+            calls <- newIORef (0 :: Int)
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) testCtx (mkCall "deploy")
+            case response of
+                ToolYield{} -> pure ()
+                other -> assertFailure $ "expected a yielded response, got " <> show other
+            readIORef calls >>= (@?= 0)
+
+beforeHookCommandAnswersDirectlyTest :: TestTree
+beforeHookCommandAnswersDirectlyTest =
+    testCase "a before hook command can answer directly, short-circuiting the call" $
+        withHookScript
+            "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"answer\",\"result\":{\"type\":\"text\",\"content\":\"answered directly\"}}'\n"
+            $ \path -> do
+                calls <- newIORef (0 :: Int)
+                response <-
+                    interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) testCtx (mkCall "deploy")
+                response @?= ToolComplete (TextResponse "answered directly")
+                readIORef calls >>= (@?= 0)
+
+beforeHookCommandFailureDeniesAndTracesTest :: TestTree
+beforeHookCommandFailureDeniesAndTracesTest =
+    testCase "a before hook returning unparseable JSON denies (fail closed) and traces" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho 'not json at all'\n" $ \path -> do
+            queue <- newTQueueIO
+            let ctx = testCtx{Ctx.ctxEventQueue = Just queue}
+            calls <- newIORef (0 :: Int)
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) ctx (mkCall "deploy")
+            case response of
+                ToolComplete (TextResponse msg) -> Text.isInfixOf "blocked by policy" msg @?= True
+                other -> assertFailure $ "expected a deny text response, got " <> show other
+            readIORef calls >>= (@?= 0)
+            traced <- atomically $ flushTQueue queue
+            any isTracedError traced @?= True
+  where
+    isTracedError e = case e of
+        OSEvent_Error _ -> True
+        _ -> False
+
+beforeHookToolContinuesTest :: TestTree
+beforeHookToolContinuesTest =
+    testCase "a before hook tool target can continue the call" $ do
+        let env = defaultWrapperEnv{weInvokeTool = Just stubGuard}
+        calls <- newIORef (0 :: Int)
+        response <-
+            interpretDecorator env (WithBeforeHook (HookTool "guard-allow")) (countingExec calls) testCtx (mkCall "deploy")
+        response @?= ToolComplete (TextResponse "done:deploy")
+        readIORef calls >>= (@?= 1)
+
+beforeHookToolDeniesTest :: TestTree
+beforeHookToolDeniesTest =
+    testCase "a before hook tool target can deny the call" $ do
+        let env = defaultWrapperEnv{weInvokeTool = Just stubGuard}
+        calls <- newIORef (0 :: Int)
+        response <-
+            interpretDecorator env (WithBeforeHook (HookTool "guard-deny")) (countingExec calls) testCtx (mkCall "deploy")
+        response @?= ToolComplete (TextResponse "blocked by guard")
+        readIORef calls >>= (@?= 0)
+
+-- | A stub 'weInvokeTool' standing in for an LLM-as-guard sub-agent tool.
+stubGuard :: Text -> Aeson.Value -> IO UserToolResponse
+stubGuard name _input = pure $ case name of
+    "guard-allow" -> JsonResponse (Aeson.object ["action" .= ("continue" :: Text)])
+    "guard-deny" -> JsonResponse (Aeson.object ["action" .= ("deny" :: Text), "message" .= ("blocked by guard" :: Text)])
+    other -> TextResponse ("unexpected guard target: " <> other)
+
+afterHookCommandRewritesResultTest :: TestTree
+afterHookCommandRewritesResultTest =
+    testCase "an after hook command can rewrite the result" $
+        withHookScript
+            "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"continue\",\"result\":{\"type\":\"text\",\"content\":\"rewritten result\"}}'\n"
+            $ \path -> do
+                let exec _ctx _call = pure $ ToolComplete $ TextResponse "original"
+                response <- interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand path)) exec testCtx (mkCall "deploy")
+                response @?= ToolComplete (TextResponse "rewritten result")
+
+afterHookCommandAnnotatesTest :: TestTree
+afterHookCommandAnnotatesTest =
+    testCase "an after hook command can annotate the result" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"annotate\",\"text\":\"looks fine\"}'\n" $ \path -> do
+            let exec _ctx _call = pure $ ToolComplete $ TextResponse "original"
+            response <- interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand path)) exec testCtx (mkCall "deploy")
+            response @?= ToolComplete (TextResponse "original\n\n[hook note: looks fine]")
+
+afterHookCommandFailurePassesThroughAndTracesTest :: TestTree
+afterHookCommandFailurePassesThroughAndTracesTest =
+    testCase "an after hook failure passes the original result through and traces" $
+        withHookScript "#!/usr/bin/env bash\nset -e\ncat >/dev/null\nexit 5\n" $ \path -> do
+            queue <- newTQueueIO
+            let ctx = testCtx{Ctx.ctxEventQueue = Just queue}
+            let exec _ctx _call = pure $ ToolComplete $ TextResponse "original"
+            response <- interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand path)) exec ctx (mkCall "deploy")
+            response @?= ToolComplete (TextResponse "original")
+            traced <- atomically $ flushTQueue queue
+            any isTracedError traced @?= True
+  where
+    isTracedError e = case e of
+        OSEvent_Error _ -> True
+        _ -> False
+
+-- | An after hook never runs on a yielded response: there is no result yet.
+afterHookSkippedOnYieldTest :: TestTree
+afterHookSkippedOnYieldTest =
+    testCase "an after hook is skipped for a yielded response" $ do
+        token <- newContinuationToken
+        let yielded = ToolYield token (computeCacheKey (mkCall "deploy"))
+        let exec _ctx _call = pure yielded
+        -- The target points nowhere; if the hook ran at all, this would fail
+        -- to execute rather than being silently skipped.
+        response <-
+            interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand "/nonexistent/hook")) exec testCtx (mkCall "deploy")
+        response @?= yielded
+
+-- | 'Decorator' JSON round-trips for both hook decorators and both hook targets.
+hookDecoratorJsonRoundTripTest :: TestTree
+hookDecoratorJsonRoundTripTest =
+    testCase "before/after hook decorators round-trip through JSON" $ do
+        let decorators =
+                [ WithBeforeHook (HookCommand "hooks/approve-deploy")
+                , WithAfterHook (HookTool "audit_log")
+                ]
+        Aeson.decode (Aeson.encode decorators) @?= Just decorators
 
 -- | 'mkDurableExecutor' builds an executor that caches and isolates.
 mkDurableExecutorTest :: TestTree

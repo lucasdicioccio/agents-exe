@@ -270,6 +270,11 @@ buildAgentConfig catalog opts = do
                 , asyncCallTimeoutSeconds = Nothing
                 , bindings = Nothing
                 , parameters = Nothing
+                , pauseCancelsCalls = Nothing
+                , resumeOnAnyMail = Nothing
+                , interruptCompletions = Nothing
+                , mailScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                 }
 
     pure (presetName, agent)

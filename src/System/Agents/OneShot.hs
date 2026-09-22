@@ -29,13 +29,19 @@ module System.Agents.OneShot (
     -- * Utility functions
     mapProgressiveDisclosureTrace,
     parseModelFlavor,
+
+    -- * Agent-to-agent (session-mailbox Phase 4), exposed for testing
+    oneShotSpawnSession,
 ) where
 
-import Control.Exception (Exception)
+import Control.Concurrent.Async (Async, async, cancel)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import Control.Exception (Exception, finally)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (traverse_)
+import qualified Data.List as List
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
@@ -58,6 +64,7 @@ import System.Agents.AgentTree (
     Props (..),
     withAgentTree,
  )
+import qualified System.Agents.Base as Base
 import System.Agents.Base (ConversationId, newConversationId)
 import qualified System.Agents.LLMs.OpenAI as OpenAI
 import System.Agents.Media.Types (MediaAttachment)
@@ -131,19 +138,33 @@ runOneShotWithConfig ::
 runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     agent1 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput config.mediaAttachments convId tracer loadedApiKeys node
 
-    let agent =
-            agentSetQuery (UserQuery query []) $
-                agentWithSessionProgress (config.onSessionProgress convId) $
-                    agent1
-
     -- Create or use initial session with media support (version 1)
     session0 <- case config.initialSession of
         Just s -> pure s
-        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
+        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
+
+    -- Phase 4 (@todos/session-mailbox.md@, D12): one 'MailRouter' for this
+    -- run, so a spawned session (and, through it, further descendants) can
+    -- be addressed by 'send-message'/'watch-session'. Spawned sessions run
+    -- as threads with their own in-memory mailbox, tracked here so they can
+    -- be cancelled together with the root, the same way background calls
+    -- already are via 'withEngineShutdown' inside 'runUntilBlocked'.
+    router <- newMailRouter
+    spawnedVar <- newTVarIO []
+
+    agentWithQuery <-
+        agentSetQuery (UserQuery query []) $
+            agentWithSessionProgress (config.onSessionProgress convId) $
+                agent1
+    let agent =
+            withSpawnSession (oneShotSpawnSession store tracer loadedApiKeys router spawnedVar session0.sessionId node) $
+                withMailRouter router $
+                    agentWithQuery
+    registerOwnMailbox router session0.sessionId Nothing agent
 
     config.onSessionProgress convId (SessionStarted session0)
     -- The agent returns the final session as part of its stop result.
-    result <- runUntilBlocked convId agent session0
+    result <- runUntilBlocked convId agent session0 `finally` cancelSpawnedSessions spawnedVar
     case result of
         Left (llmTurn, finalSession) -> do
             config.onSessionProgress convId (SessionCompleted finalSession)
@@ -303,6 +324,76 @@ fileStoringCallback store convId progress =
         SessionStarted sess -> SessionStore.storeSession store convId sess
         SessionFailed sess _ -> SessionStore.storeSession store convId sess
 
-agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
-agentSetQuery query agent =
-    agent{usrQuery = pure (Just query)}
+{- | Set a one-shot agent's query.
+
+Per @todos/session-mailbox.md@ (Phase 1, "TUI and one-shot post
+'UserMessage'"), the query is pre-loaded as one 'UserMessage' envelope on a
+fresh in-memory mailbox rather than answered through 'usrQuery': the first
+receive point (R1) folds it into the run's first user turn. 'usrQuery' is
+left untouched for embedders that still rely on it with
+@ctxMailbox = Nothing@.
+-}
+agentSetQuery :: forall r. UserQuery -> Agent r -> IO (Agent r)
+agentSetQuery query agent = do
+    mb <- newInMemoryMailbox
+    _ <- mb.mbSend Outgoing{outId = Nothing, outFrom = FromUser Nothing, outPriority = Normal, outHops = 0, outBody = UserMessage query}
+    pure agent{ctxMailbox = Just mb}
+
+{- | Register an agent's own mailbox on the router under its session id
+(Phase 4, D12), so a spawned descendant -- or a sibling, if one is ever
+addressable in this process -- can 'send-message' back to it. A no-op if
+the agent has no mailbox (e.g. 'ctxInterruptCompletions'-style embedding
+without one).
+-}
+registerOwnMailbox :: MailRouter -> SessionId -> Maybe SessionId -> Agent r -> IO ()
+registerOwnMailbox router sid mParent agent = case agent.ctxMailbox of
+    Nothing -> pure ()
+    Just mb -> do
+        _ <- router.mrRegister sid (MailboxInfo Nothing mParent "running" MailScopeSubtree MailScopeChildren) mb
+        pure ()
+
+-- | Cancel every session thread started by 'oneShotSpawnSession' for this run.
+cancelSpawnedSessions :: TVar [Async ()] -> IO ()
+cancelSpawnedSessions spawnedVar = readTVarIO spawnedVar >>= mapM_ cancel
+
+{- | The @run@ front-end's @spawn-session@ hook (@todos/session-mailbox.md@,
+Phase 4, §5): @<slug>@ is resolved among the caller's own declared helpers
+(@'osNodeChildren'@), the same universe @prompt_agent_\<slug\>@ draws from,
+narrowed the same way a fresh call/return sub-agent is built (via
+'nodeToAgent') -- unlike the server's @spawn-session@, which resolves
+against every agent the host knows about, since @run@ has no such registry.
+
+The child runs as its own thread with its own in-memory mailbox, tracked in
+'spawnedVar' so 'runOneShotWithConfig' can cancel it alongside the root
+(the spec's "a thread ... cancelled with the root like background calls
+are"). It is not call\/return: this returns as soon as the child session
+exists, without waiting for (or ever returning) its answer, which arrives
+by mail instead.
+-}
+oneShotSpawnSession ::
+    SessionStore ->
+    Tracer IO Trace ->
+    LoadedApiKeys ->
+    MailRouter ->
+    TVar [Async ()] ->
+    SessionId ->
+    OSAgentNode ->
+    Text ->
+    Text ->
+    IO (Either Text SessionId)
+oneShotSpawnSession store tracer loadedApiKeys router spawnedVar ownSid node slug text =
+    case List.find (\child -> Base.slug child.osNodeConfig == slug) node.osNodeChildren of
+        Nothing -> pure $ Left ("no such helper: " <> slug)
+        Just childNode -> do
+            childConvId <- newConversationId
+            childSession <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
+            childAgent0 <- nodeToAgent store Nothing childConvId tracer loadedApiKeys childNode
+            childAgentWithQuery <- agentSetQuery (UserQuery text []) childAgent0
+            let childAgent =
+                    withSpawnSession (oneShotSpawnSession store tracer loadedApiKeys router spawnedVar childSession.sessionId childNode) $
+                        withMailRouter router $
+                            childAgentWithQuery
+            registerOwnMailbox router childSession.sessionId (Just ownSid) childAgent
+            a <- async $ () <$ runUntilBlocked childConvId childAgent childSession
+            atomically $ modifyTVar' spawnedVar (a :)
+            pure $ Right childSession.sessionId

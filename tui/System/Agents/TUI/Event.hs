@@ -357,6 +357,14 @@ handleNormalEvent tracer ev = do
                 resetQuitConfirmation
                 handleTogglePauseConversation
         VtyEvent vtyEv
+            | matchesEvent keymap EventInterruptRun vtyEv -> do
+                resetQuitConfirmation
+                handleInterruptConversation
+        VtyEvent vtyEv
+            | matchesEvent keymap EventCancelAttached vtyEv -> do
+                resetQuitConfirmation
+                handleCancelAttachedConversation
+        VtyEvent vtyEv
             | matchesEvent keymap EventAttachFile vtyEv -> do
                 resetQuitConfirmation
                 openFilePathDialog
@@ -430,6 +438,7 @@ handleForkAtTurn tracer navState = do
                 , turnId = newTurnId'
                 , sessionVersion = Just 1
                 , sessionExecutionMode = Nothing
+                , mailCursor = 0
                 }
     mAgent <- use (tuiUI . agentList . to listSelectedElement)
     case mAgent of

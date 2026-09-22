@@ -54,6 +54,7 @@ module System.Agents.Session.Types (
     IsolationSpec (..),
     Reason (..),
     Decorator (..),
+    HookTarget (..),
     AppliedPolicy (..),
     TrackedToolCall (..),
 
@@ -63,6 +64,24 @@ module System.Agents.Session.Types (
     newContinuationToken,
     CacheKey (..),
     AsyncYieldStrategy (..),
+
+    -- * Session mailbox (Phase 1 of the session-mailbox spec)
+    Cursor,
+    MessageId (..),
+    newMessageId,
+    messageIdText,
+    Priority (..),
+    Sender (..),
+    ControlMsg (..),
+    MailScope (..),
+    WakeOnKind (..),
+    defaultWakeOn,
+    senderWakeKind,
+    MailBody (..),
+    Envelope (..),
+    Outgoing (..),
+    SendError (..),
+    Receipt (..),
 
     -- * Byte usage tracking
     StepByteUsage (..),
@@ -113,6 +132,7 @@ import Data.Aeson.Types ((.!=))
 import qualified Data.Aeson.Types as Aeson.Types
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Time (UTCTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
@@ -142,8 +162,8 @@ newTurnId =
 
 {- | Where a session stands, as recorded next to it in storage.
 
-'StatusRunning' and 'StatusFailed' are set by whoever runs the session;
-'sessionStatusOf' derives the others from the turns.
+'StatusRunning', 'StatusPaused' and 'StatusFailed' are set by whoever runs
+the session; 'sessionStatusOf' derives the others from the turns.
 -}
 data SessionStatus
     = -- | The LLM gave a final answer; the session waits for a user message.
@@ -154,6 +174,10 @@ data SessionStatus
       StatusRunning
     | -- | Only deferred calls remain, which an external worker must complete.
       StatusWaitingExternal
+    | -- | Stopped by a 'Control' 'Pause' envelope (@todos/session-mailbox.md@
+      -- §4); runnable again on 'Resume', or on any mail if the agent's
+      -- @resumeOnAnyMail@ option is set.
+      StatusPaused
     | -- | The last run failed.
       StatusFailed
     deriving (Show, Eq, Ord, Enum, Bounded, Generic)
@@ -164,6 +188,7 @@ sessionStatusText = \case
     StatusReady -> "ready"
     StatusRunning -> "running"
     StatusWaitingExternal -> "waiting_external"
+    StatusPaused -> "paused"
     StatusFailed -> "failed"
 
 parseSessionStatus :: Text -> Maybe SessionStatus
@@ -256,8 +281,8 @@ Nothing is sent to the LLM yet: the first step of an agent does that.
 newSessionFromPrompt :: SessionId -> SystemPrompt -> [SystemTool] -> UserQuery -> IO Session
 newSessionFromPrompt sid sPrompt sTools query = do
     tid <- newTurnId
-    let initialTurn = UserTurn (UserTurnContent sPrompt sTools (Just query) []) Nothing
-    pure $ Session [initialTurn] sid Nothing tid (Just 2) (Just Asynchronous)
+    let initialTurn = UserTurn (UserTurnContent sPrompt sTools (Just query) [] []) Nothing
+    pure $ Session [initialTurn] sid Nothing tid (Just 2) (Just Asynchronous) 0
 
 -------------------------------------------------------------------------------
 -- Async/Continuation Types
@@ -460,6 +485,27 @@ instance FromJSON IsolationSpec where
             "functionRunner" -> FunctionRunner <$> v .: "target"
             _ -> fail $ "Unknown IsolationSpec tag: " ++ Text.unpack tag
 
+{- | Where a @before@\/@after@ hook decorator (Phase 5 of
+@todos/session-mailbox.md@, §6) runs:
+
+* 'HookCommand' - a subprocess; JSON on stdin, JSON on stdout.
+* 'HookTool' - any tool registered on the agent, visible to the LLM or not,
+  including a sub-agent (LLM-as-guard).
+-}
+data HookTarget
+    = HookCommand FilePath
+    | HookTool Text
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON HookTarget where
+    toJSON target = case target of
+        HookCommand path -> Aeson.object ["command" .= path]
+        HookTool toolName -> Aeson.object ["tool" .= toolName]
+
+instance FromJSON HookTarget where
+    parseJSON = Aeson.withObject "HookTarget" $ \v ->
+        (HookCommand <$> v .: "command") <|> (HookTool <$> v .: "tool")
+
 {- | Decorators that can be attached to a tool-call disposition.
 
 These modify how a call is executed without changing the core
@@ -474,6 +520,14 @@ data Decorator
     -- ^ Use a specific cache key (overrides default)
     | WithLabel Text
     -- ^ Human-readable label for observability
+    | WithTruncate Int
+    -- ^ Cap the result to at most this many bytes, noting the cut to the model
+    | WithBeforeHook HookTarget
+    -- ^ Run before the call: continue (optionally rewriting arguments), deny,
+    -- defer, or answer directly. See "System.Agents.Session.Durable".
+    | WithAfterHook HookTarget
+    -- ^ Run after the call completes: continue (optionally rewriting the
+    -- result) or annotate it. See "System.Agents.Session.Durable".
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Decorator where
@@ -499,6 +553,21 @@ instance ToJSON Decorator where
                     [ "tag" .= ("label" :: Text)
                     , "label" .= label
                     ]
+            WithTruncate maxBytes ->
+                Aeson.object
+                    [ "tag" .= ("truncate" :: Text)
+                    , "maxBytes" .= maxBytes
+                    ]
+            WithBeforeHook target ->
+                Aeson.object
+                    [ "tag" .= ("before" :: Text)
+                    , "hook" .= target
+                    ]
+            WithAfterHook target ->
+                Aeson.object
+                    [ "tag" .= ("after" :: Text)
+                    , "hook" .= target
+                    ]
 
 instance FromJSON Decorator where
     parseJSON = Aeson.withObject "Decorator" $ \v -> do
@@ -508,19 +577,28 @@ instance FromJSON Decorator where
             "retries" -> WithRetries <$> v .: "count"
             "cache" -> WithCache <$> v .: "key"
             "label" -> WithLabel <$> v .: "label"
+            "truncate" -> WithTruncate <$> v .: "maxBytes"
+            "before" -> WithBeforeHook <$> v .: "hook"
+            "after" -> WithAfterHook <$> v .: "hook"
             _ -> fail $ "Unknown Decorator tag: " ++ Text.unpack tag
 
 {- | Decision made for a single tool call.
 
-* 'RunSync' - Execute immediately in the current process
-* 'RunAsync' - Yield a continuation token and complete externally
-* 'RunIsolated' - Execute outside the current process
+* 'RunSync' - In asynchronous mode (Phase 2 of @todos/session-mailbox.md@),
+  attached until done: the step blocks on it (only an 'Interrupt' detaches
+  it). Still executes in the current process, now through the async engine
+  rather than the step's own thread, so it CAN be detached by an interrupt.
+* 'RunAsync' - Runs through the async engine. With 'Nothing', attached per
+  the agent's 'AsyncYieldStrategy' (unchanged historical behaviour). With
+  @'Just' n@, attached for @n@ seconds and then detached regardless of the
+  yield strategy (@n <= 0@: detached at once).
+* 'RunIsolated' - Execute outside the current process; attached until done.
 * 'Defer' - Intentionally pause (e.g., pending approval)
 * 'Decorate' - Attach modifiers to an underlying disposition
 -}
 data ToolCallDisposition
     = RunSync
-    | RunAsync
+    | RunAsync (Maybe Int)
     | RunIsolated IsolationSpec
     | Defer Reason
     | Decorate [Decorator] ToolCallDisposition
@@ -530,7 +608,10 @@ instance ToJSON ToolCallDisposition where
     toJSON disp =
         case disp of
             RunSync -> Aeson.object ["tag" .= ("runSync" :: Text)]
-            RunAsync -> Aeson.object ["tag" .= ("runAsync" :: Text)]
+            RunAsync attachSeconds ->
+                Aeson.object $
+                    ["tag" .= ("runAsync" :: Text)]
+                        ++ ["attachSeconds" .= s | Just s <- [attachSeconds]]
             RunIsolated spec ->
                 Aeson.object
                     [ "tag" .= ("runIsolated" :: Text)
@@ -553,7 +634,7 @@ instance FromJSON ToolCallDisposition where
         tag <- v .: "tag"
         case tag :: Text of
             "runSync" -> pure RunSync
-            "runAsync" -> pure RunAsync
+            "runAsync" -> RunAsync <$> v .:? "attachSeconds"
             "runIsolated" -> RunIsolated <$> v .: "spec"
             "defer" -> Defer . Reason <$> v .: "reason"
             "decorate" -> Decorate <$> v .: "decorators" <*> v .: "inner"
@@ -649,6 +730,30 @@ data TrackedToolCall = TrackedToolCall
     this call keeps rendering the placeholder so history matches what the
     model saw.
     -}
+    , tcAttachDeadline :: Maybe UTCTime
+    {- ^ Phase 2 (@todos/session-mailbox.md@ §3): for a call started with
+    @'RunAsync' ('Just' n)@, the absolute wall-clock time at which the step
+    stops waiting on it and detaches it (with 'tcDetachedReason' set). Fixed
+    at start time so it survives across the several steps a 'PartialUserTurn'
+    may be resumed over. 'Nothing' for calls attached forever ('RunSync',
+    'RunIsolated') or attached per the yield strategy (@'RunAsync' 'Nothing'@).
+    -}
+    , tcDetachedReason :: Maybe Text
+    {- ^ Phase 2: set when the step stops waiting on this call before it
+    finished — either its 'tcAttachDeadline' elapsed, or an 'Interrupt'
+    envelope arrived while it was attached. Rendered on the @running@
+    placeholder so the LLM knows why (see 'partialToolMessages').
+    -}
+    , tcChildSessionId :: Maybe SessionId
+    {- ^ Phase 4 (@todos/session-mailbox.md@ §5): for a @prompt_agent_\<slug\>@
+    call, the id of the sub-agent session it started, once known. Copied
+    from the call's OS entity by 'System.Agents.Session.Step.pollRunningCall'
+    (see 'ctxRecordChildSession' on 'System.Agents.Tools.Context.ToolExecutionContext').
+    'Nothing' for every other kind of call, and for a sub-agent call whose
+    child session isn't known yet. Rendered on a detached @running@
+    placeholder (see 'partialToolMessages') so the parent can
+    @send-message@ a helper that is still working.
+    -}
     }
     deriving (Show, Eq, Ord, Generic)
 
@@ -664,6 +769,9 @@ instance ToJSON TrackedToolCall where
                 ++ ["continuation" .= c | Just c <- [tc.tcContinuation]]
                 ++ ["entityId" .= e | Just e <- [tc.tcEntityId]]
                 ++ ["deliveredLate" .= True | tc.tcDeliveredLate]
+                ++ ["attachDeadline" .= d | Just d <- [tc.tcAttachDeadline]]
+                ++ ["detachedReason" .= r | Just r <- [tc.tcDetachedReason]]
+                ++ ["childSessionId" .= s | Just s <- [tc.tcChildSessionId]]
 
 instance FromJSON TrackedToolCall where
     parseJSON = Aeson.withObject "TrackedToolCall" $ \v ->
@@ -676,6 +784,328 @@ instance FromJSON TrackedToolCall where
             <*> v .: "policy"
             <*> v .:? "entityId"
             <*> v .:? "deliveredLate" .!= False
+            <*> v .:? "attachDeadline"
+            <*> v .:? "detachedReason"
+            <*> v .:? "childSessionId"
+
+-------------------------------------------------------------------------------
+-- Session Mailbox (Phase 1 of the session-mailbox spec, see
+-- todos/session-mailbox.md)
+-------------------------------------------------------------------------------
+
+{- | A position in a mailbox's total order: everything with 'envSeq' at or
+below a session's 'mailCursor' has been folded into that session.
+-}
+type Cursor = Int
+
+-- | Idempotency key for an 'Envelope'. The sender may supply one; if not,
+-- one is generated when the envelope is accepted.
+newtype MessageId = MessageId UUID
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON MessageId where
+    toJSON (MessageId uuid) = Aeson.toJSON $ UUID.toText uuid
+
+instance FromJSON MessageId where
+    parseJSON val = do
+        txt <- Aeson.parseJSON val
+        case UUID.fromText txt of
+            Just uuid -> pure $ MessageId uuid
+            Nothing -> fail $ "Invalid MessageId UUID: " ++ Text.unpack txt
+
+newMessageId :: IO MessageId
+newMessageId = MessageId <$> UUID.nextRandom
+
+-- | Render a 'MessageId' as text, for logs and mail rendered to the LLM.
+messageIdText :: MessageId -> Text
+messageIdText (MessageId uuid) = UUID.toText uuid
+
+-- | Whether an envelope may pre-empt a wait (see receive points R3/R4,
+-- Phase 2). Phase 1 only defines the type; nothing acts on 'Interrupt' yet.
+data Priority = Normal | Interrupt
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Priority where
+    toJSON Normal = Aeson.String "normal"
+    toJSON Interrupt = Aeson.String "interrupt"
+
+instance FromJSON Priority where
+    parseJSON = Aeson.withText "Priority" $ \case
+        "normal" -> pure Normal
+        "interrupt" -> pure Interrupt
+        other -> fail $ "Unknown Priority: " ++ Text.unpack other
+
+-- | Who an envelope came from.
+data Sender
+    = FromUser (Maybe Text)
+    -- ^ The owner, when known.
+    | FromSession SessionId (Maybe Text)
+    -- ^ Another session, and its agent slug when known.
+    | FromToolCall ToolCallId
+    | FromSystem Text
+    -- ^ Timers, watchers, the runner.
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Sender where
+    toJSON sender = case sender of
+        FromUser owner -> Aeson.object $ ["tag" .= ("user" :: Text)] ++ ["owner" .= o | Just o <- [owner]]
+        FromSession sid agent ->
+            Aeson.object $
+                ["tag" .= ("session" :: Text), "sessionId" .= sid] ++ ["agent" .= a | Just a <- [agent]]
+        FromToolCall tcid -> Aeson.object ["tag" .= ("toolCall" :: Text), "toolCallId" .= tcid]
+        FromSystem source -> Aeson.object ["tag" .= ("system" :: Text), "source" .= source]
+
+instance FromJSON Sender where
+    parseJSON = Aeson.withObject "Sender" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "user" -> FromUser <$> v .:? "owner"
+            "session" -> FromSession <$> v .: "sessionId" <*> v .:? "agent"
+            "toolCall" -> FromToolCall <$> v .: "toolCallId"
+            "system" -> FromSystem <$> v .: "source"
+            _ -> fail $ "Unknown Sender tag: " ++ Text.unpack tag
+
+-- | A control instruction delivered as mail. Phase 1 only defines the type
+-- and makes it consumable (advances the cursor, renders nothing); the
+-- runtime does not yet act on any of these (Phase 2/3/6).
+data ControlMsg
+    = Pause
+    | Resume
+    | CancelCalls [ToolCallId]
+    | CancelAllAttached
+    -- ^ Cancel every tool call currently attached to the session, without
+    -- the sender needing to know their ids (the "hard cancel" interrupt,
+    -- as opposed to an 'Interrupt'-priority 'UserMessage' which only
+    -- detaches).
+    | StopRun
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON ControlMsg where
+    toJSON msg = case msg of
+        Pause -> Aeson.object ["tag" .= ("pause" :: Text)]
+        Resume -> Aeson.object ["tag" .= ("resume" :: Text)]
+        CancelCalls ids -> Aeson.object ["tag" .= ("cancelCalls" :: Text), "toolCallIds" .= ids]
+        CancelAllAttached -> Aeson.object ["tag" .= ("cancelAllAttached" :: Text)]
+        StopRun -> Aeson.object ["tag" .= ("stopRun" :: Text)]
+
+instance FromJSON ControlMsg where
+    parseJSON = Aeson.withObject "ControlMsg" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "pause" -> pure Pause
+            "resume" -> pure Resume
+            "cancelCalls" -> CancelCalls <$> v .: "toolCallIds"
+            "cancelAllAttached" -> pure CancelAllAttached
+            "stopRun" -> pure StopRun
+            _ -> fail $ "Unknown ControlMsg tag: " ++ Text.unpack tag
+
+{- | How far a sending agent's mail (or its 'Interrupt' priority) may reach,
+relative to its own place in session lineage (@todos/session-mailbox.md@
+§5 "Permissions": @mailScope@, default 'MailScopeSubtree'; @interruptScope@,
+default 'MailScopeChildren').
+-}
+data MailScope
+    = MailScopeOwn
+    -- ^ Only the sender's own session.
+    | MailScopeChildren
+    -- ^ The sender itself, or a direct child.
+    | MailScopeSubtree
+    -- ^ The sender itself, or any descendant (children, grandchildren, ...).
+    | MailScopeAll
+    -- ^ Any session.
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON MailScope where
+    toJSON scope = Aeson.String $ case scope of
+        MailScopeOwn -> "own"
+        MailScopeChildren -> "children"
+        MailScopeSubtree -> "subtree"
+        MailScopeAll -> "all"
+
+instance FromJSON MailScope where
+    parseJSON = Aeson.withText "MailScope" $ \t -> case t of
+        "own" -> pure MailScopeOwn
+        "children" -> pure MailScopeChildren
+        "subtree" -> pure MailScopeSubtree
+        "all" -> pure MailScopeAll
+        _ -> fail $ "Unknown MailScope: " ++ Text.unpack t
+
+{- | §5 "Scheduling rule": which senders' mail alone may make an idle
+session runnable again. Mail from a sender not in an agent's @wakeOn@ list
+is still queued (delivered whenever something else does start a run) —
+this only gates whether the mail *by itself* is enough.
+-}
+data WakeOnKind
+    = WakeOnUser
+    | WakeOnTool
+    | WakeOnParent
+    | WakeOnChild
+    | WakeOnPeer
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON WakeOnKind where
+    toJSON kind = Aeson.String $ case kind of
+        WakeOnUser -> "user"
+        WakeOnTool -> "tool"
+        WakeOnParent -> "parent"
+        WakeOnChild -> "child"
+        WakeOnPeer -> "peer"
+
+instance FromJSON WakeOnKind where
+    parseJSON = Aeson.withText "WakeOnKind" $ \t -> case t of
+        "user" -> pure WakeOnUser
+        "tool" -> pure WakeOnTool
+        "parent" -> pure WakeOnParent
+        "child" -> pure WakeOnChild
+        "peer" -> pure WakeOnPeer
+        _ -> fail $ "Unknown WakeOnKind: " ++ Text.unpack t
+
+-- | The default @wakeOn@ list (§5): every category but 'WakeOnPeer'.
+defaultWakeOn :: [WakeOnKind]
+defaultWakeOn = [WakeOnUser, WakeOnTool, WakeOnParent, WakeOnChild]
+
+{- | Best-effort classification of an envelope's sender into a 'WakeOnKind'
+(§5). 'FromSession' is classified as 'WakeOnPeer': distinguishing a parent
+from a child from a genuine peer needs the *recipient's* lineage, which a
+pure function over the envelope alone cannot resolve (a caller with a
+'System.Agents.Session.Mailbox.MailRouter' in scope, e.g. a future watch or
+send-message auto-wake, can classify more precisely by walking lineage
+itself before falling back to this).
+-}
+senderWakeKind :: Sender -> WakeOnKind
+senderWakeKind sender = case sender of
+    FromUser _ -> WakeOnUser
+    FromToolCall _ -> WakeOnTool
+    FromSystem _ -> WakeOnTool
+    FromSession{} -> WakeOnPeer
+
+{- | The payload of an 'Envelope'.
+
+Only 'UserMessage' and 'ToolCallFinished' are produced in Phase 1 (by
+front-ends posting user text, and by the async engine posting background
+results). The rest of the constructors exist so the type matches the full
+design in todos/session-mailbox.md; nothing produces them yet:
+'AgentMessage' and 'ContinuationResult' are agent-to-agent mail (Phase 4),
+'WatchedEvent' is Phase 7, 'Control' is Phase 2\/3\/6.
+-}
+data MailBody
+    = UserMessage UserQuery
+    | AgentMessage Text (Maybe MessageId) Bool
+    -- ^ Text, in-reply-to, expects-reply.
+    | ToolCallFinished ToolCallId ToolCallState UserToolResponse
+    | ContinuationResult ContinuationToken UserToolResponse
+    | WatchedEvent SessionId Text Aeson.Value
+    | Control ControlMsg
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON MailBody where
+    toJSON body = case body of
+        UserMessage q -> Aeson.object ["tag" .= ("userMessage" :: Text), "query" .= q]
+        AgentMessage txt inReplyTo expectsReply ->
+            Aeson.object
+                [ "tag" .= ("agentMessage" :: Text)
+                , "text" .= txt
+                , "inReplyTo" .= inReplyTo
+                , "expectsReply" .= expectsReply
+                ]
+        ToolCallFinished tcid state result ->
+            Aeson.object
+                [ "tag" .= ("toolCallFinished" :: Text)
+                , "toolCallId" .= tcid
+                , "state" .= state
+                , "result" .= result
+                ]
+        ContinuationResult token result ->
+            Aeson.object ["tag" .= ("continuationResult" :: Text), "token" .= token, "result" .= result]
+        WatchedEvent sid eventName payload ->
+            Aeson.object
+                ["tag" .= ("watchedEvent" :: Text), "sessionId" .= sid, "name" .= eventName, "payload" .= payload]
+        Control msg -> Aeson.object ["tag" .= ("control" :: Text), "message" .= msg]
+
+instance FromJSON MailBody where
+    parseJSON = Aeson.withObject "MailBody" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "userMessage" -> UserMessage <$> v .: "query"
+            "agentMessage" -> AgentMessage <$> v .: "text" <*> v .:? "inReplyTo" <*> v .: "expectsReply"
+            "toolCallFinished" -> ToolCallFinished <$> v .: "toolCallId" <*> v .: "state" <*> v .: "result"
+            "continuationResult" -> ContinuationResult <$> v .: "token" <*> v .: "result"
+            "watchedEvent" -> WatchedEvent <$> v .: "sessionId" <*> v .: "name" <*> v .: "payload"
+            "control" -> Control <$> v .: "message"
+            _ -> fail $ "Unknown MailBody tag: " ++ Text.unpack tag
+
+{- | A single piece of mail, accepted into a mailbox with a total order
+('envSeq') per session.
+-}
+data Envelope = Envelope
+    { envId :: MessageId
+    -- ^ Idempotency key; resending the same one returns the original receipt.
+    , envSeq :: Int
+    -- ^ Assigned on accept; total order per session.
+    , envFrom :: Sender
+    , envPriority :: Priority
+    , envHops :: Int
+    -- ^ Agent-to-agent loop guard (Phase 4); user mail resets this to 0.
+    , envSentAt :: UTCTime
+    , envBody :: MailBody
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Envelope where
+    toJSON e =
+        Aeson.object
+            [ "id" .= e.envId
+            , "seq" .= e.envSeq
+            , "from" .= e.envFrom
+            , "priority" .= e.envPriority
+            , "hops" .= e.envHops
+            , "sentAt" .= e.envSentAt
+            , "body" .= e.envBody
+            ]
+
+instance FromJSON Envelope where
+    parseJSON = Aeson.withObject "Envelope" $ \v ->
+        Envelope
+            <$> v .: "id"
+            <*> v .: "seq"
+            <*> v .: "from"
+            <*> v .: "priority"
+            <*> v .: "hops"
+            <*> v .: "sentAt"
+            <*> v .: "body"
+
+{- | What a caller hands to 'System.Agents.Session.Mailbox.mbSend'.
+
+'outId' lets the sender supply their own idempotency key; when absent, one
+is generated on accept.
+-}
+data Outgoing = Outgoing
+    { outId :: Maybe MessageId
+    , outFrom :: Sender
+    , outPriority :: Priority
+    , outHops :: Int
+    , outBody :: MailBody
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+-- | Why 'System.Agents.Session.Mailbox.mbSend' refused an envelope.
+data SendError
+    = UnknownRecipient
+    | MailboxFull
+    | NotPermitted
+    | TooManyHops
+    deriving (Show, Eq, Ord, Generic)
+
+-- | Proof of acceptance for a sent envelope.
+data Receipt = Receipt
+    { rcptId :: MessageId
+    , rcptSeq :: Int
+    , rcptDuplicate :: Bool
+    -- ^ True when 'outId' matched an envelope already accepted; 'rcptSeq'
+    -- is then the original envelope's sequence number, not a new one.
+    }
+    deriving (Show, Eq, Ord, Generic)
+
 -------------------------------------------------------------------------------
 -- Signal Types (Trajectory Analysis)
 -------------------------------------------------------------------------------
@@ -1124,10 +1554,33 @@ data UserTurnContent
     , userTools :: [SystemTool]
     , userQuery :: Maybe UserQuery
     , userToolResponses :: [(LlmToolCall, UserToolResponse)]
+    , userMail :: [Envelope]
+    {- ^ Mail folded into this turn's 'userQuery' (see receive point R1 in
+    todos/session-mailbox.md §2). Kept alongside the rendered text so UIs
+    and the audit trail can show senders properly. Empty for turns built
+    without a mailbox, or predating this field.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
-instance FromJSON UserTurnContent
-instance ToJSON UserTurnContent
+
+instance ToJSON UserTurnContent where
+    toJSON c =
+        Aeson.object $
+            [ "userPrompt" .= c.userPrompt
+            , "userTools" .= c.userTools
+            , "userQuery" .= c.userQuery
+            , "userToolResponses" .= c.userToolResponses
+            ]
+                ++ ["userMail" .= c.userMail | not (null c.userMail)]
+
+instance FromJSON UserTurnContent where
+    parseJSON = Aeson.withObject "UserTurnContent" $ \v ->
+        UserTurnContent
+            <$> v .: "userPrompt"
+            <*> v .: "userTools"
+            <*> v .:? "userQuery"
+            <*> v .: "userToolResponses"
+            <*> v .:? "userMail" .!= []
 
 -- Bundle llm-turn content.
 data LlmTurnContent
@@ -1154,17 +1607,20 @@ data PartialUserTurnContent = PartialUserTurnContent
     -- ^ User query if any
     , pTrackedToolCalls :: [TrackedToolCall]
     -- ^ All tool calls in this turn with their lifecycle state
+    , pUserMail :: [Envelope]
+    -- ^ Mail folded into 'pUserQuery' (see 'userMail').
     }
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON PartialUserTurnContent where
     toJSON content =
-        Aeson.object
+        Aeson.object $
             [ "userPrompt" .= content.pUserPrompt
             , "userTools" .= content.pUserTools
             , "userQuery" .= content.pUserQuery
             , "trackedToolCalls" .= content.pTrackedToolCalls
             ]
+                ++ ["userMail" .= content.pUserMail | not (null content.pUserMail)]
 
 instance FromJSON PartialUserTurnContent where
     parseJSON = Aeson.withObject "PartialUserTurnContent" $ \v ->
@@ -1176,6 +1632,7 @@ instance FromJSON PartialUserTurnContent where
                 <*> trackedV .: "userTools"
                 <*> trackedV .:? "userQuery"
                 <*> trackedV .: "trackedToolCalls"
+                <*> trackedV .:? "userMail" .!= []
 
         parseLegacy legacyV = do
             prompt <- legacyV .: "userPrompt"
@@ -1187,7 +1644,7 @@ instance FromJSON PartialUserTurnContent where
             unless (null continuations) $
                 fail "Legacy pending continuations cannot be migrated; use the new durable format"
             tracked <- migrateLegacyPartialTurn completed pending
-            pure $ PartialUserTurnContent prompt tools query tracked
+            pure $ PartialUserTurnContent prompt tools query tracked []
 
 -- | Convert a legacy partial turn (completed + pending calls) into tracked calls.
 migrateLegacyPartialTurn ::
@@ -1208,6 +1665,9 @@ migrateLegacyPartialTurn completed pending =
             , tcPolicy = AppliedPolicy RunSync Nothing
             , tcEntityId = Nothing
             , tcDeliveredLate = False
+            , tcAttachDeadline = Nothing
+            , tcDetachedReason = Nothing
+            , tcChildSessionId = Nothing
             }
     mkPending idx call =
         TrackedToolCall
@@ -1219,6 +1679,9 @@ migrateLegacyPartialTurn completed pending =
             , tcPolicy = AppliedPolicy RunSync Nothing
             , tcEntityId = Nothing
             , tcDeliveredLate = False
+            , tcAttachDeadline = Nothing
+            , tcDetachedReason = Nothing
+            , tcChildSessionId = Nothing
             }
 
 -- | Completed tool calls with their responses (backward-compatible view).
@@ -1256,16 +1719,21 @@ partialToolMessages content =
                 Deferred -> "deferred"
                 Ready -> "pending"
                 _ -> "running"
+            message :: Text
+            message = case tc.tcDetachedReason of
+                Just _ ->
+                    "Its result will arrive as mail. Use wait, get-tool-call-status or cancel-tool-call."
+                Nothing ->
+                    "This tool call has not finished yet. Its result will be delivered in a later message. \
+                    \Use get-tool-call-status with this tool_call_id to inspect it, or cancel-tool-call to stop it."
          in JsonResponse $
                 Aeson.object $
                     [ "status" .= status
-                    , "message"
-                        .= ( "This tool call has not finished yet. Its result will be delivered in a later message. \
-                             \Use get-tool-call-status with this tool_call_id to inspect it, or cancel-tool-call to stop it." ::
-                                Text
-                           )
+                    , "message" .= message
                     ]
+                        ++ ["detached" .= reason | Just reason <- [tc.tcDetachedReason]]
                         ++ ["tool_call_id" .= tid | Just tid <- [providerToolCallId tc.tcCall]]
+                        ++ ["childSessionId" .= sid | Just sid <- [tc.tcChildSessionId]]
 
 -- | Tool calls that still need execution (backward-compatible view).
 partialPendingCalls :: PartialUserTurnContent -> [LlmToolCall]
@@ -1392,6 +1860,12 @@ data Session
     {- ^ Execution mode used for this session.
     Nothing = default to Synchronous for backward compatibility.
     -}
+    , mailCursor :: Cursor
+    {- ^ Everything with 'envSeq' at or below this has been folded into a
+    turn (see todos/session-mailbox.md §1, D1: the versioned session store
+    is the mailbox's ack). Defaults to 0 for sessions predating the mailbox,
+    equivalent to "nothing read yet".
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1406,6 +1880,7 @@ instance ToJSON Session where
             ]
                 ++ ["sessionVersion" .= v | Just v <- [s.sessionVersion]]
                 ++ ["sessionExecutionMode" .= m | Just m <- [s.sessionExecutionMode]]
+                ++ ["mailCursor" .= s.mailCursor | s.mailCursor /= 0]
 
 -- | Custom FromJSON for Session that handles missing fields.
 instance FromJSON Session where
@@ -1417,6 +1892,7 @@ instance FromJSON Session where
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
             <*> v .:? "sessionExecutionMode"
+            <*> v .:? "mailCursor" .!= 0
 
 -------------------------------------------------------------------------------
 -- Session Migration

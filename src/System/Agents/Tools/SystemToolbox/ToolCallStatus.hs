@@ -19,9 +19,12 @@ module System.Agents.Tools.SystemToolbox.ToolCallStatus (
     getToolCallStatus,
     listRunningToolCalls,
     cancelToolCallById,
+    waitForCallsOrMail,
+    clampWaitSeconds,
 ) where
 
-import Control.Concurrent.STM (atomically, retry)
+import Control.Concurrent.STM (STM, TVar, atomically, orElse, readTVar, registerDelay, retry)
+import Control.Monad (forM, unless)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (parseMaybe)
@@ -61,6 +64,9 @@ import System.Agents.Tools.SystemToolbox.Types (
     QueryError (..),
     RunningToolCallInfo (..),
     ToolCallStatusResult (..),
+    WaitParams (..),
+    WaitResult (..),
+    maxWaitSeconds,
  )
 
 -------------------------------------------------------------------------------
@@ -171,6 +177,109 @@ cancelToolCallById ctx params =
             , ccrCancelled = cancelled
             , ccrPreviousStatus = statusText (tcStatus st)
             }
+
+-------------------------------------------------------------------------------
+-- wait (todos/session-mailbox.md, Phase 2, §3)
+-------------------------------------------------------------------------------
+
+-- | What a @wait@ call is watching.
+data WaitTarget
+    = WaitMail
+    | WaitAnyCall
+    | WaitCall EntityId
+
+-- | Why a @wait@ call returned.
+data WaitOutcome
+    = WokenByCall EntityId
+    | WokenByMail
+    | WokenByTimeout
+
+{- | Block until the first of: a named call is final, any of the caller's
+own running calls is final, mail arrives, or the timeout elapses.
+
+Peeks mail (via 'ctxAwaitMail'), never consumes it: the caller's next
+ordinary receive point (R1) folds it into the turn, so a model that wakes
+on mail sees both this result and the mail itself in the same reply.
+
+The timeout is capped by 'maxWaitSeconds' so two agents waiting on each
+other cannot deadlock forever.
+-}
+waitForCallsOrMail :: ToolExecutionContext -> WaitParams -> IO (Either QueryError WaitResult)
+waitForCallsOrMail ctx params = do
+    targetE <- resolveTarget ctx (waitFor params)
+    case targetE of
+        Left err -> pure $ Left err
+        Right target -> do
+            eids <- targetEntities ctx target
+            let seconds = clampWaitSeconds (waitTimeoutSeconds params)
+            timeoutVar <- registerDelay (seconds * 1000000)
+            outcome <-
+                atomically $
+                    (WokenByTimeout <$ timeoutArm timeoutVar)
+                        `orElse` callArm (ctxWorld ctx) eids
+                        `orElse` mailArm ctx
+            case outcome of
+                WokenByCall eid -> do
+                    tcidText <- entityToolCallIdText ctx eid
+                    pure $ Right $ WaitResult "call" (Just tcidText)
+                WokenByMail -> pure $ Right $ WaitResult "mail" Nothing
+                WokenByTimeout -> pure $ Right $ WaitResult "timeout" Nothing
+  where
+    timeoutArm :: TVar Bool -> STM ()
+    timeoutArm tvar = readTVar tvar >>= \fired -> unless fired retry
+
+    callArm :: Maybe World -> [EntityId] -> STM WaitOutcome
+    callArm Nothing _ = retry
+    callArm (Just world) eids = do
+        finals <- forM eids $ \eid -> do
+            mSt <- getComponent @ToolCallState world eid
+            pure (eid, maybe True isToolCallCompleted mSt)
+        case [eid | (eid, True) <- finals] of
+            (eid : _) -> pure $ WokenByCall eid
+            [] -> retry
+
+    mailArm :: ToolExecutionContext -> STM WaitOutcome
+    mailArm c = case ctxAwaitMail c of
+        Nothing -> retry
+        Just hook -> WokenByMail <$ hook
+
+-- | Clamp a requested wait timeout to @[0, maxWaitSeconds]@.
+clampWaitSeconds :: Int -> Int
+clampWaitSeconds requested = min maxWaitSeconds (max 0 requested)
+
+-- | Resolve the textual @for@ parameter to what to watch.
+resolveTarget :: ToolExecutionContext -> Text -> IO (Either QueryError WaitTarget)
+resolveTarget _ "mail" = pure $ Right WaitMail
+resolveTarget _ "any-call" = pure $ Right WaitAnyCall
+resolveTarget ctx txt = do
+    mEid <- resolveEntity ctx txt
+    pure $ maybe (Left $ SystemInfoError "tool call not found") (Right . WaitCall) mEid
+
+-- | The OS entities a 'WaitTarget' watches (empty for 'WaitMail').
+targetEntities :: ToolExecutionContext -> WaitTarget -> IO [EntityId]
+targetEntities _ WaitMail = pure []
+targetEntities _ (WaitCall eid) = pure [eid]
+targetEntities ctx WaitAnyCall =
+    case ctxWorld ctx of
+        Nothing -> pure []
+        Just world -> do
+            entities <-
+                atomically $
+                    listToolCallsBySessionAndConversation
+                        world
+                        (ctxSessionId ctx)
+                        (ctxConversationId ctx)
+            pure [eid | (eid, _cfg, st) <- entities, not (isToolCallCompleted st)]
+
+-- | Render an entity as the tool-call id text the LLM knows: the provider
+-- id when known, else the internal id.
+entityToolCallIdText :: ToolExecutionContext -> EntityId -> IO Text
+entityToolCallIdText ctx eid =
+    case ctxWorld ctx of
+        Nothing -> pure $ UUID.toText (unEntityId eid)
+        Just world -> do
+            mCfg <- atomically $ getComponent @ToolCallConfig world eid
+            pure $ fromMaybe (UUID.toText (unEntityId eid)) (mCfg >>= tcProviderCallId)
 
 -------------------------------------------------------------------------------
 -- Internal helpers

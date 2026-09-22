@@ -8,17 +8,17 @@ module System.Agents.Session.Step where
 
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (race)
-import Control.Concurrent.STM (STM, atomically, retry)
-import Control.Monad (unless, void)
+import Control.Concurrent.STM (STM, TVar, atomically, orElse, registerDelay, readTVar, retry)
+import Control.Monad (filterM, forM, forM_, unless, void)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (partition)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Time
-import System.Timeout (timeout)
+import qualified System.Timeout
 
 import Data.Void (Void)
 
@@ -27,7 +27,7 @@ import qualified System.Agents.OS.Conversation as OSConv
 import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Core.Types (EntityId)
 import System.Agents.OS.Core.World (World, getComponent, newWorld)
-import System.Agents.Session.Async (mkToolContinuationSnapshot, storeContinuation)
+import System.Agents.Session.Async (ContinuationStore (..), mkToolContinuationSnapshot, storeContinuation)
 import System.Agents.Session.Async.Engine (
     mkAsyncEngine,
     startAsyncBatch,
@@ -87,7 +87,9 @@ runStepMSync convId agent sess =
                 let ctx = buildContext agent0' sess0 convId
                 (uQuery0, blockForLate) <- askUserQuery ctx agent0' missing sess0
                 (sessLate, late) <- collectLateResults ctx agent0'.ctxAsyncYieldStrategy blockForLate sess0
-                let uQuery = mergeUserQueries uQuery0 (lateResultsQuery late)
+                let shouldBlockForMail = blockForLate && null late && null missing.missingToolCalls
+                (sessMail, mailEnvelopes) <- receiveMailForTurn agent0' shouldBlockForMail sessLate
+                let uQuery = mergeUserQueries (mergeUserQueries uQuery0 (lateResultsQuery late)) (mailQuery mailEnvelopes)
                 -- Execute tool calls with optional OS entity tracking
                 tracked <- traverse (mkReadyTrackedCall ctx agent0') missing.missingToolCalls
                 trackedWithEntities <- ensureTrackedCallEntities ctx tracked
@@ -96,14 +98,20 @@ runStepMSync convId agent sess =
                 let uToolResponses = zip missing.missingToolCalls toolResponses
                 -- Calculate byte usage for this user turn
                 let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery toolResponses
-                sess1 <- addTurn sessLate (UserTurn (UserTurnContent{userPrompt = sPrompt, userTools = sTools, userQuery = uQuery, userToolResponses = uToolResponses}) (Just byteUsage))
+                sess1 <- addTurn sessMail (UserTurn (UserTurnContent{userPrompt = sPrompt, userTools = sTools, userQuery = uQuery, userToolResponses = uToolResponses, userMail = mailEnvelopes}) (Just byteUsage))
                 pure (agent0', Right sess1)
             AskLlmCompletion completion -> do
-                (llmRsp, llmTool) <- agent0'.complete completion
-                -- Calculate byte usage for this LLM turn, including token usage
-                let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
-                sess1 <- addTurn sess0 (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
-                pure (agent0', Right sess1)
+                outcome <- askForCompletionOrInterrupt agent0' sess0 completion
+                case outcome of
+                    Left (llmRsp, llmTool) -> do
+                        -- Calculate byte usage for this LLM turn, including token usage
+                        let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
+                        sess1 <- addTurn sess0 (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
+                        pure (agent0', Right sess1)
+                    Right envelopes ->
+                        -- R4: the completion was cancelled by an 'Interrupt'
+                        -- envelope; amend the head turn and ask again.
+                        go agent0' (amendHeadTurnWithMail envelopes sess0)
 
 -------------------------------------------------------------------------------
 -- Asynchronous Step Execution
@@ -174,10 +182,16 @@ runStepMAsync convId agent sess =
                         (uQuery, blockForLate) <- askUserQuery (buildContext agent0' sessR convId) agent0' missing sessR
                         startNewAsyncTurn convId agent0' sessR sPrompt sTools uQuery blockForLate missing.missingToolCalls
             AskLlmCompletion completion -> do
-                (llmRsp, llmTool) <- agent0'.complete completion
-                let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
-                sess1 <- addTurn sessR (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
-                pure (agent0', Right sess1)
+                outcome <- askForCompletionOrInterrupt agent0' sessR completion
+                case outcome of
+                    Left (llmRsp, llmTool) -> do
+                        let byteUsage = calculateLlmTurnByteUsage llmRsp llmTool
+                        sess1 <- addTurn sessR (LlmTurn (LlmTurnContent llmRsp llmTool) (Just byteUsage))
+                        pure (agent0', Right sess1)
+                    Right envelopes ->
+                        -- R4: the completion was cancelled by an 'Interrupt'
+                        -- envelope; amend the head turn and ask again.
+                        go agent0' (amendHeadTurnWithMail envelopes sessR)
 
 {- | Get the most recent partial turn from a session, if any.
 
@@ -210,10 +224,12 @@ startNewAsyncTurn ::
 startNewAsyncTurn convId agent sess sPrompt sTools uQuery blockForLate calls = do
     let ctx = buildContext agent sess convId
     (sessLate, late) <- collectLateResults ctx agent.ctxAsyncYieldStrategy blockForLate sess
+    let shouldBlockForMail = blockForLate && null late && null calls
+    (sessMail, mailEnvelopes) <- receiveMailForTurn agent shouldBlockForMail sessLate
     tracked <- traverse (mkReadyTrackedCall ctx agent) calls
     trackedWithEntities <- ensureTrackedCallEntities ctx tracked
-    let uQuery' = mergeUserQueries uQuery (lateResultsQuery late)
-    executeTrackedCalls ctx agent sessLate False sPrompt sTools uQuery' trackedWithEntities
+    let uQuery' = mergeUserQueries (mergeUserQueries uQuery (lateResultsQuery late)) (mailQuery mailEnvelopes)
+    executeTrackedCalls ctx agent sessMail False sPrompt sTools uQuery' mailEnvelopes trackedWithEntities
 
 {- | Continue execution of a partial turn.
 
@@ -234,7 +250,9 @@ continuePartialTurn convId agent sess partial = do
     -- Poll running calls from a previous step so completed results are
     -- copied back into the tracked calls before re-scheduling.
     polled <- mapM (pollRunningCall ctx) partial.pTrackedToolCalls
-    executeTrackedCalls ctx agent sess True partial.pUserPrompt partial.pUserTools partial.pUserQuery polled
+    -- Mail already folded into this partial turn (see 'pUserMail') carries
+    -- forward unchanged; a fresh receive happens once a new turn starts.
+    executeTrackedCalls ctx agent sess True partial.pUserPrompt partial.pUserTools partial.pUserQuery partial.pUserMail polled
 
 {- | Execute the scheduler over a list of tracked calls.
 
@@ -264,9 +282,10 @@ executeTrackedCalls ::
     SystemPrompt ->
     [SystemTool] ->
     Maybe UserQuery ->
+    [Envelope] ->
     [TrackedToolCall] ->
     IO (Agent r, Either r Session)
-executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery tracked = do
+executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery mailEnvelopes tracked = do
     -- Ensure every call has an OS entity when a world is available.
     trackedWithEntities <- ensureTrackedCallEntities ctx tracked
 
@@ -275,45 +294,62 @@ executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery tracked = d
 
     let (readyItems, finalCalls) = partitionReady classified
 
-    -- Partition ready calls by disposition.
-    let (inlineItems, asyncItems, deferItems) = partitionByDisposition readyItems
+    -- Every non-deferred ready call is handed to the engine (D4: the
+    -- disposition controls how long the step stays attached, not where the
+    -- call runs); only calls that couldn't be tracked with an OS entity
+    -- fall back to inline execution.
+    let (engineItems, deferItems) = partitionForExecution readyItems
 
-    -- Start async calls first so they run while inline calls execute.
-    (asyncStarted, asyncFallback) <- startAsyncCalls ctx agent asyncItems
+    (engineStarted, engineFallback) <- startAsyncCalls ctx agent engineItems
 
-    -- Execute inline calls (RunSync / RunIsolated, plus untrackable async calls).
-    inlineProcessed <- mapM (executeInlineTrackedCall agent ctx) (inlineItems ++ asyncFallback)
+    -- Execute the calls that could not be tracked with an OS entity.
+    inlineProcessed <- mapM (executeInlineTrackedCall agent ctx) engineFallback
 
     -- Defer calls that asked to be paused.
     deferProcessed <- mapM (deferTrackedCall ctx agent) deferItems
 
-    -- Wait on everything in flight, including calls started in earlier steps.
-    let inFlight = [tc | tc <- asyncStarted ++ finalCalls, tcState tc == Running]
-    waitForRunningCalls ctx agent.ctxAsyncYieldStrategy inFlight
+    -- R3a: wait on everything in flight (including calls started in earlier
+    -- steps), attached per each call's own disposition, detachable at once
+    -- by an 'Interrupt' envelope.
+    let inFlight = [tc | tc <- engineStarted ++ finalCalls, tcState tc == Running]
+    attachOutcome <- waitAttachedCalls ctx agent.ctxMailbox sess.mailCursor agent.ctxAsyncYieldStrategy inFlight
 
     -- Reassemble in the original order using a map keyed by call id.
     let processedMap =
             Map.fromList
                 [ (tcId tc, tc)
-                | tc <- inlineProcessed ++ asyncStarted ++ deferProcessed ++ finalCalls
+                | tc <- inlineProcessed ++ engineStarted ++ deferProcessed ++ finalCalls
                 ]
-    processedOrdered <-
+    processedPolled <-
         mapM
             (pollRunningCall ctx . (\tc -> Map.findWithDefault tc (tcId tc) processedMap))
             trackedWithEntities
+    let processedOrdered = map (applyAttachOutcome attachOutcome) processedPolled
+
+    -- An interrupt detaches every attached call at once and is folded into
+    -- this same turn (R1's mail-rendering, reused rather than duplicated),
+    -- so the LLM sees both the placeholders and why they appeared ("^Z then
+    -- talk"). A non-interrupt outcome (a deadline, or the yield strategy)
+    -- leaves mail for the next ordinary receive point.
+    (sess', uQuery', mailEnvelopes') <-
+        if attachOutcome.awoInterrupted
+            then do
+                (sessMail, moreMail) <- receiveMailForTurn agent False sess
+                pure (sessMail, mergeUserQueries uQuery (mailQuery moreMail), mailEnvelopes ++ moreMail)
+            else pure (sess, uQuery, mailEnvelopes)
 
     -- Decide whether we can emit a full user turn or need a partial one.
-    let content = PartialUserTurnContent sPrompt sTools uQuery processedOrdered
+    let content = PartialUserTurnContent sPrompt sTools uQuery' processedOrdered mailEnvelopes'
     if all (isFinalToolCallState . tcState) processedOrdered
         then do
             let responses = partialToolMessages content
-            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery (map snd responses)
-            sess' <- pushTurn sess (UserTurn (UserTurnContent sPrompt sTools uQuery responses) (Just byteUsage))
-            pure (agent, Right sess')
+            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery' (map snd responses)
+            sess'' <- pushTurn sess' (UserTurn (UserTurnContent sPrompt sTools uQuery' responses mailEnvelopes') (Just byteUsage))
+            pure (agent, Right sess'')
         else do
-            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery processedOrdered
-            sess' <- pushTurn sess (PartialUserTurn content (Just byteUsage))
-            pure (agent, Right sess')
+            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery' processedOrdered
+            sess'' <- pushTurn sess' (PartialUserTurn content (Just byteUsage))
+            pure (agent, Right sess'')
   where
     pushTurn s t = do
         tId <- newTurnId
@@ -354,17 +390,22 @@ partitionReady = foldr go ([], [])
     go (Left tc) (ready, final) = (ready, tc : final)
     go (Right c) (ready, final) = (c : ready, final)
 
-partitionByDisposition :: [ClassifiedCall] -> ([ClassifiedCall], [ClassifiedCall], [ClassifiedCall])
-partitionByDisposition = foldr go ([], [], [])
-  where
-    go c (inline, async, defer)
-        | isAsyncDisposition (ccBase c) = (inline, c : async, defer)
-        | isDeferDisposition (ccBase c) = (inline, async, c : defer)
-        | otherwise = (c : inline, async, defer)
+{- | Split classified, ready calls into those to hand to the engine and
+those to defer.
 
-isAsyncDisposition :: ToolCallDisposition -> Bool
-isAsyncDisposition RunAsync = True
-isAsyncDisposition _ = False
+D4 (@todos/session-mailbox.md@): in asynchronous mode every disposition
+except 'Defer' now goes through the engine — the disposition controls how
+long the step stays *attached* to a call (see 'waitAttachedCalls'), not
+*where* it runs. Only a call with no OS entity ends up running inline
+('startAsyncCalls' falls it back), which preserves the pre-Phase-2 fallback
+for calls that could not be tracked.
+-}
+partitionForExecution :: [ClassifiedCall] -> ([ClassifiedCall], [ClassifiedCall])
+partitionForExecution = foldr go ([], [])
+  where
+    go c (engine, defer)
+        | isDeferDisposition (ccBase c) = (engine, c : defer)
+        | otherwise = (c : engine, defer)
 
 isDeferDisposition :: ToolCallDisposition -> Bool
 isDeferDisposition (Defer _) = True
@@ -383,12 +424,17 @@ executeInlineTrackedCall agent ctx c = do
     (result, tc') <- executeTrackedCallWithEntity agent ctx tc
     pure $ tc'{tcState = Completed, tcResult = Just result, tcPolicy = AppliedPolicy (ccFullDisposition c) Nothing}
 
-{- | Start a batch of 'RunAsync' calls in the background.
+{- | Start a batch of engine calls in the background (D4: every non-deferred
+disposition, not only 'RunAsync').
 
 Returns the calls that were started (in the 'Running' state) and the calls
 that must run inline instead. Calls fall back to inline execution when the
 agent has no OS 'World' or async engine, or when the call has no OS entity
 (e.g. its payload could not be parsed), so that the step remains total.
+
+A call classified @'RunAsync' ('Just' n)@ gets its 'tcAttachDeadline' fixed
+here, at start time, so it survives across however many steps a
+'PartialUserTurn' is resumed over (see 'waitAttachedCalls').
 -}
 startAsyncCalls ::
     forall r.
@@ -397,24 +443,184 @@ startAsyncCalls ::
     [ClassifiedCall] ->
     IO ([TrackedToolCall], [ClassifiedCall])
 startAsyncCalls _ctx _agent [] = pure ([], [])
-startAsyncCalls ctx agent asyncItems =
+startAsyncCalls ctx agent engineItems =
     case (Ctx.ctxWorld ctx, agent.ctxAsyncEngine) of
         (Just _world, Just engine) -> do
-            let (trackable, untrackable) = partition (isJust . tcEntityId . ccCall) asyncItems
+            let (trackable, untrackable) = partition (isJust . tcEntityId . ccCall) engineItems
             unless (null trackable) $ do
                 _batch <- startAsyncBatch engine ctx (map ccCall trackable)
                 pure ()
+            now <- getCurrentTime
             let running =
-                    [ (ccCall c){tcState = Running, tcPolicy = AppliedPolicy (ccFullDisposition c) Nothing}
+                    [ (ccCall c)
+                        { tcState = Running
+                        , tcPolicy = AppliedPolicy (ccFullDisposition c) Nothing
+                        , tcAttachDeadline = attachDeadline now (ccBase c)
+                        }
                     | c <- trackable
                     ]
             pure (running, untrackable)
-        _ -> pure ([], asyncItems)
+        _ -> pure ([], engineItems)
+  where
+    attachDeadline now base = case base of
+        RunAsync (Just secs) -> Just (Data.Time.addUTCTime (fromIntegral secs) now)
+        _ -> Nothing
 
-{- | Block on running calls according to the yield strategy.
+{- | Outcome of the R3a wait (see 'waitAttachedCalls'): which calls, if any,
+should now be marked detached, and why.
+-}
+data AttachWaitOutcome = AttachWaitOutcome
+    { awoDeadlineElapsed :: [ToolCallId]
+    -- ^ Calls whose 'tcAttachDeadline' passed during this wait.
+    , awoInterrupted :: Bool
+    -- ^ An 'Interrupt' envelope pre-empted the wait: every call still
+    -- attached (any bucket) should be detached at once ("^Z then talk").
+    }
 
-The wait watches the calls' OS entities, so it covers calls started in
-this step as well as calls carried over from earlier steps.
+{- | R3a (@todos/session-mailbox.md@ §2, §4): "attached calls vs.
+interrupts, one transaction". Blocks until the first of:
+
+* an unread 'Interrupt'-priority envelope: every attached call detaches at
+  once, in the same transaction (peeked, not consumed — the caller folds it
+  into the turn being built via 'receiveMailForTurn'/R1, reused rather than
+  duplicated);
+* a call's 'tcAttachDeadline' elapses (one 'orElse' arm per distinct
+  deadline, via 'registerDelay'): only that call detaches, the rest keep
+  waiting;
+* the ordinary 'AsyncYieldStrategy' condition holds for calls with no
+  explicit deadline (unchanged pre-Phase-2 behaviour for those calls).
+
+Calls attached "forever" ('RunSync', 'RunIsolated', i.e. no
+'tcAttachDeadline' and not @'RunAsync' 'Nothing'@) are only released by
+finishing or by an interrupt — never by the yield strategy or a deadline,
+per D4.
+
+No OS world, or nothing 'Running', returns immediately with an empty,
+non-interrupted outcome.
+-}
+waitAttachedCalls ::
+    ToolExecutionContext ->
+    Maybe Mailbox ->
+    Cursor ->
+    AsyncYieldStrategy ->
+    [TrackedToolCall] ->
+    IO AttachWaitOutcome
+waitAttachedCalls ctx mMailbox cursor strategy calls =
+    case Ctx.ctxWorld ctx of
+        Nothing -> pure noOutcome
+        Just world
+            | null running -> pure noOutcome
+            | otherwise -> do
+                now <- getCurrentTime
+                deadlineVars <- forM deadlineCalls $ \tc -> do
+                    let deadline = fromMaybe now tc.tcAttachDeadline
+                        micros = max 0 (round (realToFrac (Data.Time.diffUTCTime deadline now) * 1000000 :: Double))
+                    tvar <- registerDelay micros
+                    pure (tc.tcId, tvar)
+                mTimeoutVar <- case strategy of
+                    YieldOnTimeout ms -> Just <$> registerDelay (max 0 ms * 1000)
+                    _ -> pure Nothing
+                atomically $
+                    (noOutcome{awoInterrupted = True} <$ interruptArm)
+                        `orElse` (noOutcome <$ controlArm)
+                        `orElse` deadlineArm deadlineVars
+                        `orElse` (noOutcome <$ mainCondition world mTimeoutVar)
+  where
+    noOutcome = AttachWaitOutcome [] False
+    running = filter ((== Running) . tcState) calls
+    bucketOf :: TrackedToolCall -> AttachBucket
+    bucketOf tc
+        | isJust tc.tcAttachDeadline = BDeadline
+        | otherwise = case snd (flattenDisposition tc.tcPolicy.apDisposition) of
+            RunAsync Nothing -> BStrategy
+            _ -> BForever
+    foreverCalls = [tc | tc <- running, bucketOf tc == BForever]
+    strategyCalls = [tc | tc <- running, bucketOf tc == BStrategy]
+    deadlineCalls = [tc | tc <- running, bucketOf tc == BDeadline]
+    foreverEids = [eid | tc <- foreverCalls, Just eid <- [tc.tcEntityId]]
+    strategyEids = [eid | tc <- strategyCalls, Just eid <- [tc.tcEntityId]]
+
+    interruptArm :: STM ()
+    interruptArm = case mMailbox of
+        Nothing -> retry
+        Just mb -> void (awaitMail mb cursor isInterruptEnvelope)
+    isInterruptEnvelope :: Envelope -> Bool
+    isInterruptEnvelope e = e.envPriority == Interrupt
+
+    {- 'Control' mail (e.g. 'CancelAllAttached', 'CancelCalls') is otherwise
+    only checked between turns; without this arm, mail sent while genuinely
+    attached and waiting here would sit unnoticed until this wait exits on
+    its own -- i.e. until the call it was meant to cancel has already
+    finished. Peeked, not consumed: the caller loop re-reads it and applies
+    it via 'applyControlMail' once this wait returns.
+    -}
+    controlArm :: STM ()
+    controlArm = case mMailbox of
+        Nothing -> retry
+        Just mb -> void (awaitMail mb cursor isControlEnvelope)
+    isControlEnvelope :: Envelope -> Bool
+    isControlEnvelope e = case e.envBody of
+        Control _ -> True
+        _ -> False
+
+    deadlineArm :: [(ToolCallId, TVar Bool)] -> STM AttachWaitOutcome
+    deadlineArm [] = retry
+    deadlineArm vars = do
+        fired <- filterM (readTVar . snd) vars
+        if null fired then retry else pure $ AttachWaitOutcome (map fst fired) False
+
+    mainCondition :: World -> Maybe (TVar Bool) -> STM ()
+    mainCondition world mTimeoutVar = do
+        awaitEntities world all foreverEids
+        case strategy of
+            YieldWhenAllDone -> awaitEntities world all strategyEids
+            YieldOnAnyProgress -> unless (null strategyEids) $ awaitEntities world any strategyEids
+            YieldOnTimeout _ ->
+                unless (null strategyEids) $ case mTimeoutVar of
+                    Just tvar -> awaitEntities world any strategyEids `orElse` (readTVar tvar >>= \fired -> unless fired retry)
+                    Nothing -> awaitEntities world any strategyEids
+
+data AttachBucket = BForever | BStrategy | BDeadline
+    deriving (Eq)
+
+{- | Apply an R3a outcome to a polled call: mark it detached (with a
+human-readable reason for the placeholder, see 'partialToolMessages') when
+it is still 'Running' and either an interrupt fired or its own deadline
+was among those that elapsed. Calls governed by the yield strategy, or
+still within their attach window, are left untouched — that is today's
+ordinary "still running" placeholder, not a new detach.
+-}
+applyAttachOutcome :: AttachWaitOutcome -> TrackedToolCall -> TrackedToolCall
+applyAttachOutcome outcome tc
+    | tc.tcState /= Running = tc
+    | outcome.awoInterrupted = tc{tcDetachedReason = Just "interrupted"}
+    | tc.tcId `elem` outcome.awoDeadlineElapsed = tc{tcDetachedReason = Just (deadlineReason tc)}
+    | otherwise = tc
+  where
+    deadlineReason :: TrackedToolCall -> Text.Text
+    deadlineReason t = case snd (flattenDisposition t.tcPolicy.apDisposition) of
+        RunAsync (Just secs) -> "still running after " <> Text.pack (show secs) <> "s"
+        _ -> "still running"
+
+{- | Retry until the predicate ('any' or 'all') holds over the entities'
+finality.
+-}
+awaitEntities :: World -> ((Bool -> Bool) -> [Bool] -> Bool) -> [EntityId] -> STM ()
+awaitEntities world quantifier eids = do
+    finals <- mapM entityFinal eids
+    unless (quantifier id finals) retry
+  where
+    entityFinal eid = do
+        mState <- getComponent @OSConv.ToolCallState world eid
+        pure $ maybe True OSConv.isToolCallCompleted mState
+
+{- | Block on background calls from an earlier step according to the yield
+strategy (used by 'collectLateResults' and 'askUserQuery' — R1's "late
+results", not R3a's attach/detach wait over the calls the current turn just
+started; see 'waitAttachedCalls' for that).
+
+The wait watches the calls' OS entities, so it covers calls started in an
+earlier step.
 
 * 'YieldOnAnyProgress' blocks until at least one call is final.
 * 'YieldWhenAllDone' blocks until every call is final.
@@ -439,19 +645,7 @@ waitForRunningCalls ctx strategy calls =
                 _ | hasOrphan -> pure ()
                 YieldOnAnyProgress -> atomically $ awaitEntities world any eids
                 YieldOnTimeout ms ->
-                    void $ timeout (max 0 ms * 1000) $ atomically $ awaitEntities world any eids
-
-{- | Retry until the predicate ('any' or 'all') holds over the entities'
-finality.
--}
-awaitEntities :: World -> ((Bool -> Bool) -> [Bool] -> Bool) -> [EntityId] -> STM ()
-awaitEntities world quantifier eids = do
-    finals <- mapM entityFinal eids
-    unless (quantifier id finals) retry
-  where
-    entityFinal eid = do
-        mState <- getComponent @OSConv.ToolCallState world eid
-        pure $ maybe True OSConv.isToolCallCompleted mState
+                    void $ System.Timeout.timeout (max 0 ms * 1000) $ atomically $ awaitEntities world any eids
 
 {- | Ensure the agent has an async engine when it runs asynchronously with
 an OS world, creating one if necessary.
@@ -464,7 +658,7 @@ prepareAsyncEngine agent =
     case (agent.ctxExecutionMode, agent.ctxWorld, agent.ctxAsyncEngine) of
         (Asynchronous, Just world, Nothing) -> do
             let limit = maybe defaultMaxConcurrency (max 1) agent.ctxMaxConcurrency
-            engine <- mkAsyncEngine world (executeCall agent) limit agent.ctxAsyncCallTimeout
+            engine <- mkAsyncEngine world (executeCall agent) limit agent.ctxAsyncCallTimeout agent.ctxMailbox
             pure agent{ctxAsyncEngine = Just engine}
         _ -> pure agent
 
@@ -512,10 +706,15 @@ pollRunningCall ctx tc
     | otherwise =
         case (Ctx.ctxWorld ctx, tcEntityId tc) of
             (Just world, Just eid) -> do
-                mState <- atomically $ getComponent @OSConv.ToolCallState world eid
+                (mState, mChildSessionId) <-
+                    atomically $
+                        (,)
+                            <$> getComponent @OSConv.ToolCallState world eid
+                            <*> ((>>= OSConv.tcChildSessionId) <$> getComponent @OSConv.ToolCallConfig world eid)
+                let tc0 = maybe tc (\sid -> tc{tcChildSessionId = Just sid}) mChildSessionId
                 case mState of
                     Nothing -> pure orphaned
-                    Just st -> updateFromState tc st
+                    Just st -> updateFromState tc0 st
             _ -> pure orphaned
   where
     orphaned =
@@ -565,7 +764,7 @@ refreshHeadPartialTurn ctx sess =
                                 | all (isFinalToolCallState . tcState) polled =
                                     let responses = partialToolMessages content
                                      in UserTurn
-                                            (UserTurnContent sPrompt sTools uQuery responses)
+                                            (UserTurnContent sPrompt sTools uQuery responses partial.pUserMail)
                                             (Just $ calculateUserTurnByteUsage sPrompt sTools uQuery (map snd responses))
                                 | otherwise =
                                     PartialUserTurn content (Just $ calculatePartialTurnByteUsage sPrompt sTools uQuery polled)
@@ -672,6 +871,235 @@ mergeUserQueries q Nothing = q
 mergeUserQueries (Just (UserQuery t1 m1)) (Just (UserQuery t2 m2)) =
     Just $ UserQuery (t1 <> "\n\n" <> t2) (m1 <> m2)
 
+{- | Receive points R1 and R2 (@todos/session-mailbox.md@ §2).
+
+Always peeks unread mail without blocking (R1: "building a user turn,
+before AskLlmCompletion"). When @shouldBlock@ is set — the step has nothing
+else to do this turn (no tool calls to run, no late results, and the query
+would otherwise be a plain idle wait) — and nothing was unread, blocks until
+some mail arrives (R2: "idle").
+
+Advances the returned session's 'mailCursor' to the highest 'envSeq' seen,
+so a crash between this read and storing the session redelivers into a
+session that does not contain the mail yet (D1: exactly-once effect via the
+versioned session store).
+
+A 'Nothing' 'ctxMailbox' (the default) leaves the session and its cursor
+untouched, so every existing code path is unaffected.
+-}
+receiveMailForTurn :: Agent r -> Bool -> Session -> IO (Session, [Envelope])
+receiveMailForTurn agent shouldBlock sess =
+    case agent.ctxMailbox of
+        Nothing -> pure (sess, [])
+        Just mb -> do
+            let cur = sess.mailCursor
+            unread <- atomically (mbUnread mb cur)
+            envelopes <-
+                if null unread && shouldBlock
+                    then atomically (awaitMail mb cur (const True))
+                    else pure unread
+            case envelopes of
+                [] -> pure (sess, [])
+                _ -> do
+                    sess' <- applyContinuationMail agent envelopes sess
+                    pure (sess'{mailCursor = maximum (map envSeq envelopes)}, envelopes)
+
+{- | Apply unread 'ContinuationResult' mail to the session's deferred calls.
+
+Replaces the old per-runner @lsInbox@\/@completeCall@ special case
+(@todos/session-mailbox.md@, a Phase 3 follow-up: "'autoResume' becomes
+'post `ContinuationResult`'"): instead of a side channel only 'Host.Runner'
+understood, an external result now arrives as ordinary mail and is acted on
+here, at the same receive point (R1) that already folds every other kind of
+mail into the turn being built — so every front-end with a mailbox gets
+this behaviour for free, not just the server.
+
+A 'Deferred' call matching a token moves to 'Completed'; once every call in
+the head partial turn is final, it is folded into a full 'UserTurn' exactly
+as 'refreshHeadPartialTurn' already does for a background call finishing.
+Structurally idempotent: a call whose state is no longer 'Deferred' is left
+untouched, so mail delivered again before its cursor advances (mail is
+never consumed by reading, only by the cursor committing, per §1) never
+re-applies the same result twice.
+-}
+applyContinuationMail :: Agent r -> [Envelope] -> Session -> IO Session
+applyContinuationMail agent envelopes sess =
+    case results of
+        [] -> pure sess
+        _ -> case sess.turns of
+            (PartialUserTurn partial _usage : rest) -> do
+                updated <- mapM applyResult partial.pTrackedToolCalls
+                if updated == partial.pTrackedToolCalls
+                    then pure sess
+                    else do
+                        let content = partial{pTrackedToolCalls = updated}
+                            sPrompt = partial.pUserPrompt
+                            sTools = partial.pUserTools
+                            uQuery = partial.pUserQuery
+                            turn
+                                | all (isFinalToolCallState . tcState) updated =
+                                    let responses = partialToolMessages content
+                                     in UserTurn
+                                            (UserTurnContent sPrompt sTools uQuery responses partial.pUserMail)
+                                            (Just $ calculateUserTurnByteUsage sPrompt sTools uQuery (map snd responses))
+                                | otherwise =
+                                    PartialUserTurn content (Just $ calculatePartialTurnByteUsage sPrompt sTools uQuery updated)
+                        pure sess{turns = turn : rest}
+            _ -> pure sess
+  where
+    results = [(token, result) | e <- envelopes, ContinuationResult token result <- [e.envBody]]
+
+    applyResult :: TrackedToolCall -> IO TrackedToolCall
+    applyResult tc
+        | tc.tcState /= Deferred = pure tc
+        | otherwise = case tc.tcContinuation of
+            Nothing -> pure tc
+            Just token -> case lookup token results of
+                Nothing -> pure tc
+                Just result -> do
+                    forM_ agent.ctxToolCache $ \cache -> do
+                        now <- Data.Time.getCurrentTime
+                        cache.cacheStore (Cache.computeCacheKey tc.tcCall) $ CachedResult result now Nothing
+                    forM_ agent.ctxContinuationStore $ \store -> void $ csComplete store token result
+                    pure tc{tcState = Completed, tcResult = Just result}
+
+{- | Render mail as a user message, one block per envelope with a header the
+model can quote back (§2, "What the LLM sees"). 'Control' envelopes are
+consumed (already reflected in the advanced cursor) but render nothing.
+-}
+mailQuery :: [Envelope] -> Maybe UserQuery
+mailQuery envelopes =
+    case filter (not . isControlEnvelope) envelopes of
+        [] -> Nothing
+        rendered -> Just $ UserQuery (Text.intercalate "\n\n" (map renderMailEnvelope rendered)) (concatMap mailMedia rendered)
+  where
+    isControlEnvelope :: Envelope -> Bool
+    isControlEnvelope e = case e.envBody of
+        Control _ -> True
+        _ -> False
+
+-- | Render one non-'Control' envelope as a block of text.
+renderMailEnvelope :: Envelope -> Text.Text
+renderMailEnvelope e =
+    "[mail " <> messageIdText e.envId <> " " <> senderText e.envFrom <> replyHint <> "]\n" <> bodyText
+  where
+    replyHint = case e.envBody of
+        AgentMessage _ _ True -> ", expects reply"
+        _ -> ""
+
+    senderText sender = case sender of
+        FromUser owner -> "from user" <> maybe "" (\o -> " (" <> o <> ")") owner
+        FromSession sid agentSlug ->
+            "from session " <> Text.pack (show sid) <> maybe "" (\a -> " (agent \"" <> a <> "\")") agentSlug
+        FromToolCall tcid -> "from tool call " <> Text.pack (show tcid)
+        FromSystem source -> "from " <> source
+
+    bodyText = case e.envBody of
+        UserMessage q -> q.queryText
+        AgentMessage txt _ _ -> txt
+        ToolCallFinished tcid state result ->
+            "tool call "
+                <> Text.pack (show tcid)
+                <> " "
+                <> (if state == Completed then "completed" else "failed")
+                <> ":\n"
+                <> renderMailResult result
+        ContinuationResult _token result -> renderMailResult result
+        WatchedEvent _sid eventName payload ->
+            eventName <> ":\n" <> Text.decodeUtf8 (LByteString.toStrict (Aeson.encode payload))
+        Control _ -> ""
+
+    renderMailResult (TextResponse txt) = txt
+    renderMailResult (JsonResponse val) = Text.decodeUtf8 (LByteString.toStrict (Aeson.encode val))
+    renderMailResult (MediaResponse m) = "[attached " <> m.mediaMimeType <> "]"
+    renderMailResult (MixedResponse parts) = Text.intercalate "\n" (map renderMailPart parts)
+
+    renderMailPart (TextPart txt) = txt
+    renderMailPart (MediaPart m) = "[attached " <> m.mediaMimeType <> "]"
+
+-- | Media attached to a mail envelope's body, if any.
+mailMedia :: Envelope -> [MediaAttachment]
+mailMedia e = case e.envBody of
+    UserMessage q -> q.queryMedia
+    ToolCallFinished _ _ (MediaResponse m) -> [m]
+    ToolCallFinished _ _ (MixedResponse parts) -> [m | MediaPart m <- parts]
+    ContinuationResult _ (MediaResponse m) -> [m]
+    ContinuationResult _ (MixedResponse parts) -> [m | MediaPart m <- parts]
+    _ -> []
+
+{- | R4 (@todos/session-mailbox.md@ §2, D5): ask for a completion, or, when
+'ctxInterruptCompletions' is set and the agent has a mailbox, let an
+'Interrupt'-priority envelope arriving first cancel it instead.
+
+A genuine 'race' (thread cancellation), per the spec's own note that this
+is one of only two places that need one. On the mail side winning, nothing
+about the completion is kept -- there is no partial 'LlmTurn' to record --
+and the caller is expected to fold the returned envelopes into the head
+turn ('amendHeadTurnWithMail') and ask again, rather than treat this as a
+normal completion result.
+
+With 'ctxInterruptCompletions' off (the default) or no mailbox, this is
+exactly @'Left' \<$\> agent.complete completion@: no behaviour change.
+-}
+askForCompletionOrInterrupt ::
+    Agent r ->
+    Session ->
+    LlmCompletion ->
+    IO (Either (LlmResponse, [LlmToolCall]) [Envelope])
+askForCompletionOrInterrupt agent sess completion =
+    case (agent.ctxInterruptCompletions, agent.ctxMailbox) of
+        (True, Just mb) -> do
+            outcome <-
+                race
+                    (agent.complete completion)
+                    (atomically (awaitMail mb sess.mailCursor isInterruptMail))
+            pure outcome
+        _ -> Left <$> agent.complete completion
+
+-- | Whether an envelope is 'Interrupt' priority (R3a\/R4's trigger).
+isInterruptMail :: Envelope -> Bool
+isInterruptMail e = e.envPriority == Interrupt
+
+{- | Fold newly-arrived mail into the session's head turn in place (R4, D5):
+the turn that was about to be answered is amended, not stacked under a
+second 'UserTurn' or left behind a truncated 'LlmTurn'. Advances
+'mailCursor' past the folded-in envelopes.
+
+A no-op if there is no mail, or if the head turn is not a 'UserTurn' \/
+'PartialUserTurn' (an 'LlmTurn' can't be the head at the point 'AskLlmCompletion'
+is asked, so this is only a defensive fallback).
+-}
+amendHeadTurnWithMail :: [Envelope] -> Session -> Session
+amendHeadTurnWithMail [] sess = sess
+amendHeadTurnWithMail envelopes sess = case sess.turns of
+    (UserTurn content byteUsage : rest) ->
+        sess
+            { turns =
+                UserTurn
+                    content
+                        { userQuery = mergeUserQueries content.userQuery (mailQuery envelopes)
+                        , userMail = content.userMail ++ envelopes
+                        }
+                    byteUsage
+                    : rest
+            , mailCursor = newCursor
+            }
+    (PartialUserTurn content byteUsage : rest) ->
+        sess
+            { turns =
+                PartialUserTurn
+                    content
+                        { pUserQuery = mergeUserQueries content.pUserQuery (mailQuery envelopes)
+                        , pUserMail = content.pUserMail ++ envelopes
+                        }
+                    byteUsage
+                    : rest
+            , mailCursor = newCursor
+            }
+    _ -> sess
+  where
+    newCursor = max sess.mailCursor (maximum (map (.envSeq) envelopes))
+
 {- | Process a single tracked call according to the agent's policy.
 
 This function is retained for backward compatibility with callers that
@@ -693,7 +1121,7 @@ processTrackedCall ctx agent tc = do
         RunSync -> executeAndComplete disp
         RunIsolated _spec -> executeAndComplete disp
         Defer _reason -> deferCall disp
-        RunAsync ->
+        RunAsync _attachSeconds ->
             -- RunAsync is executed via the async engine in executeTrackedCalls.
             -- As a safe fallback for individual processing, degrade to sync.
             executeAndComplete disp
@@ -738,6 +1166,9 @@ mkReadyTrackedCall ctx agent call = do
             , tcPolicy = AppliedPolicy policy Nothing
             , tcEntityId = Nothing
             , tcDeliveredLate = False
+            , tcAttachDeadline = Nothing
+            , tcDetachedReason = Nothing
+            , tcChildSessionId = Nothing
             }
 
 {- | Ensure every tracked call has a corresponding OS entity when a world is
@@ -825,20 +1256,35 @@ executeTrackedCallWithCache agent ctx tc = do
                     pure result
         Nothing -> executeCall agent ctx tc.tcCall
 
--- | Execute a single tool call using the agent's configured executor or toolCall.
--- When a 'DeploymentRunner' is configured but no explicit 'ToolExecutor' is set,
--- isolated calls are dispatched through the runner and non-isolated calls fall
--- back to the agent's 'toolCall'.
+{- | Execute a single tool call using the agent's configured executor or toolCall.
+When a 'DeploymentRunner' is configured but no explicit 'ToolExecutor' is set,
+isolated calls are dispatched through the runner and non-isolated calls fall
+back to the agent's 'toolCall'.
+
+The decorators carried by the call's resolved 'ToolCallDisposition' (see
+'flattenDisposition') wrap the selected execution path, so a 'wrappers' rule
+in the agent's @toolCallPolicyConfig@ (timeout, retries, cache, truncate)
+applies regardless of which branch below runs the call.
+-}
 executeCall :: Agent r -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
-executeCall agent ctx call =
-    case agent.ctxToolExecutor of
-        Just executor -> executor.execSync ctx call
-        Nothing ->
-            case agent.ctxDeploymentRunner of
-                Just runner ->
-                    let executor = isolatedExecutor agent.ctxToolCallPolicy runner (inProcessExecutor agent.toolCall)
-                     in executor.execSync ctx call
-                Nothing -> agent.toolCall ctx call
+executeCall agent ctx call = do
+    response <- applyDecorators wrapperEnv decorators baseExec ctx call
+    case response of
+        ToolComplete result -> pure result
+        ToolYield{} -> pure $ TextResponse "tool call yielded unexpectedly under a synchronous executor"
+  where
+    wrapperEnv = WrapperEnv{weCache = agent.ctxToolCache, weInvokeTool = Just (mkToolInvoker agent.toolCall ctx)}
+    (decorators, _base) = flattenDisposition (agent.ctxToolCallPolicy ctx call)
+    baseExec ctx' call' = ToolComplete <$> baseExecSync ctx' call'
+    baseExecSync ctx' call' =
+        case agent.ctxToolExecutor of
+            Just executor -> executor.execSync ctx' call'
+            Nothing ->
+                case agent.ctxDeploymentRunner of
+                    Just runner ->
+                        let executor = isolatedExecutor agent.ctxToolCallPolicy runner (inProcessExecutor agent.toolCall)
+                         in executor.execSync ctx' call'
+                    Nothing -> agent.toolCall ctx' call'
 
 {- | Build a ToolExecutionContext based on the agent's configuration.
 
@@ -870,6 +1316,18 @@ buildContext agent sess convId =
             { Ctx.ctxWorld = agent.ctxWorld
             , Ctx.ctxEventQueue = agent.ctxEventQueue
             , Ctx.ctxCancelToolCall = fmap Engine.cancelToolCall agent.ctxAsyncEngine
+            , -- Phase 2 (@todos/session-mailbox.md@ §3): built once per turn
+              -- from this session's current cursor, so every tool call in
+              -- the turn shares the same view of "what mail is new".
+              Ctx.ctxAwaitMail = fmap (\mb -> awaitMail mb sess.mailCursor (const True)) agent.ctxMailbox
+            , -- Phase 4 (@todos/session-mailbox.md@ §5): copied straight
+              -- through so send-message/spawn-session can address other
+              -- sessions.
+              Ctx.ctxMailRouter = agent.ctxMailRouter
+            , Ctx.ctxSpawnSession = agent.ctxSpawnSession
+            , -- Phase 6 (@todos/session-mailbox.md@ §7): copied the same way.
+              Ctx.ctxWatchSession = agent.ctxWatchSession
+            , Ctx.ctxUnwatchSession = agent.ctxUnwatchSession
             , -- Cheap view of the calls the capabilities may be asked about,
               -- including calls left behind by an earlier process.
               Ctx.ctxSessionToolCalls = sessionTrackedCalls sess

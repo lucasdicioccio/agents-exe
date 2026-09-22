@@ -133,6 +133,7 @@ fromRunnerError = \case
         ApiError status403 "forbidden_params" ("process-scope or pinned parameter(s) cannot be set here: " <> Text.intercalate ", " names)
     InvalidParams names -> ApiError status422 "invalid_params" ("secret parameter(s) must be given as strings: " <> Text.intercalate ", " names)
     MissingRequiredParams names -> ApiError status422 "params_required" ("required parameter(s) not bound: " <> Text.intercalate ", " names)
+    MailboxRejected sid -> ApiError status429 "mailbox_full" ("session " <> showId sid <> " has too much unread mail; try again later")
 
 orThrow :: IO (Either RunnerError a) -> IO a
 orThrow action = action >>= either (throwIO . fromRunnerError) pure
@@ -189,6 +190,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("POST", ["v1", "sessions", sid, "messages"]) -> withSession sid (messagesH env req)
     ("POST", ["v1", "sessions", sid, "resume"]) -> withSession sid (resumeH env req)
     ("POST", ["v1", "sessions", sid, "cancel"]) -> withSession sid (cancelH env)
+    ("POST", ["v1", "sessions", sid, "cancel-attached"]) -> withSession sid (cancelAttachedH env)
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
     ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env)
     ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
@@ -210,7 +212,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
-        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "pending", "events"]
+        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pending", "events"]
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
         _ -> False
@@ -451,6 +453,13 @@ resumeH env req sid = do
 cancelH :: ServerEnv -> SessionId -> IO Response
 cancelH env sid = json status200 <$> orThrow (cancelRun env.envRunner sid)
 
+{- | Hard-cancel every tool call currently attached to a session, without
+stopping the run itself (unlike 'cancelH', a full teardown). Posts
+'Control' mail directly; a cancelled call's result never arrives.
+-}
+cancelAttachedH :: ServerEnv -> SessionId -> IO Response
+cancelAttachedH env sid = json status200 <$> orThrow (cancelAttachedCalls env.envRunner sid)
+
 pendingH :: ServerEnv -> SessionId -> IO Response
 pendingH env sid = do
     (sess, _) <- loadSession env sid
@@ -565,6 +574,9 @@ eventFrame event = sseFrame (sessionEventKind event) $ case event of
     RunStopped sid status -> Aeson.object ["session_id" .= sid, "status" .= status]
     SessionFailed sid msg -> Aeson.object ["session_id" .= sid, "message" .= msg]
     TextDelta sid text -> Aeson.object ["session_id" .= sid, "text" .= text]
+    ToolCallStarted sid callId toolName -> Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName]
+    ToolCallCompleted sid callId toolName succeeded ->
+        Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
 
 -- | One event; JSON encoding has no raw newlines, so @data@ is one line.
 sseFrame :: Text -> Aeson.Value -> Builder
@@ -666,12 +678,18 @@ jsonBodyOrEmpty req = do
 parseBody :: Aeson.Object -> (Aeson.Object -> Aeson.Parser a) -> IO a
 parseBody o parser = either (badRequest . Text.pack) pure (Aeson.parseEither parser o)
 
--- | @prompt@ and optional @media: [{mime, base64, filename?}]@.
+{- | @prompt@, optional @media: [{mime, base64, filename?}]@, and optional
+@interrupt: false@ (@todos/session-mailbox.md@ R3a\/R4: only has an effect
+against a busy session, where it detaches attached tool calls -- and, with
+@interruptCompletions@ on, cancels an in-flight completion -- rather than
+waiting behind them).
+-}
 messageFields :: Aeson.Object -> Aeson.Parser NewMessage
 messageFields o = do
     prompt <- o .: "prompt"
     media <- fromMaybe [] <$> o .:? "media"
-    NewMessage prompt <$> mapM mediaItem media
+    interrupt <- fromMaybe False <$> o .:? "interrupt"
+    NewMessage prompt <$> mapM mediaItem media <*> pure interrupt
   where
     mediaItem = Aeson.withObject "media" $ \m ->
         MediaAttachment <$> m .: "mime" <*> m .: "base64" <*> m .:? "filename"

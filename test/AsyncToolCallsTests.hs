@@ -14,7 +14,7 @@ import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, flushTQueue, newTQueueIO)
 import Control.Exception (IOException, onException, throwIO, try)
 import Control.Monad (void)
-import Data.Aeson (Value (..), object, (.=))
+import Data.Aeson (Value (..), object, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import System.IO.Error (ioeGetErrorString)
@@ -29,7 +29,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@=?), (@?=))
 
 import qualified System.Agents.Base as Base
-import System.Agents.OS.Conversation.ToolCalls (registerToolCallComponents)
+import System.Agents.OS.Conversation.ToolCalls (createToolCallEntity, recordChildSession, registerToolCallComponents)
 import System.Agents.OS.Core.Types (EntityId (..))
 import System.Agents.OS.Core.World (World, newWorld)
 import System.Agents.OS.Events (OSEvent (..), ToolCallActivity (..), ToolCallPhase (..))
@@ -37,7 +37,7 @@ import System.Agents.Session.Base
 import System.Agents.SessionStore (readSessionFromFile, storeSessionToFile)
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import System.Agents.Session.Loop (isBlockedOnDeferredCalls, runUntilBlocked)
-import System.Agents.Session.Step (buildContext, naiveTilNoToolCallStep, runStepMAsync)
+import System.Agents.Session.Step (buildContext, naiveTilNoToolCallStep, pollRunningCall, runStepMAsync)
 import System.Directory (doesFileExist)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
@@ -55,7 +55,13 @@ import System.Agents.TUI.ToolCallActivity (
  )
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..))
 import qualified System.Agents.Tools.Context as Ctx
-import System.Agents.Tools.SystemToolbox.ToolCallStatus (cancelToolCallById, getToolCallStatus, listRunningToolCalls)
+import System.Agents.Tools.SystemToolbox.ToolCallStatus (
+    cancelToolCallById,
+    clampWaitSeconds,
+    getToolCallStatus,
+    listRunningToolCalls,
+    waitForCallsOrMail,
+ )
 import System.Agents.Tools.SystemToolbox.Types (
     CancelToolCallParams (..),
     CancelToolCallResult (..),
@@ -63,6 +69,8 @@ import System.Agents.Tools.SystemToolbox.Types (
     ListRunningToolCallsResult (..),
     RunningToolCallInfo (..),
     ToolCallStatusResult (..),
+    WaitParams (..),
+    WaitResult (..),
  )
 
 tests :: TestTree
@@ -78,6 +86,7 @@ tests =
         , testCase "asynchronous agent without a World gets a private one" asyncWithoutWorld
         , testCase "ctxMaxConcurrency bounds concurrently running calls" maxConcurrencyBoundsCalls
         , testCase "engine publishes activity events on the event queue" engineEmitsActivity
+        , testCase "a background call's completion is posted as ToolCallFinished mail" backgroundCompletionPostsMail
         , testCase "background results win the race against a pending user query" backgroundWinsUserQueryRace
         , testCase "a user query wins the race against running background calls" userQueryWinsRace
         , testGroup
@@ -90,6 +99,24 @@ tests =
         , testCase "runUntilBlocked returns a session blocked on deferred calls" runUntilBlockedOnDeferred
         , testCase "a failing run cancels background calls" runFailureCancelsBackgroundCalls
         , testCase "a call that outlives ctxAsyncCallTimeout fails" callTimesOut
+        , testGroup
+            "Phase 2: attach / detach"
+            [ testCase "attachSeconds detaches a call after its deadline" attachSecondsDetaches
+            , testCase "an interrupt envelope detaches attached calls (R3a)" interruptDetachesAttachedCalls
+            , testCase "a normal envelope does not detach an attached call" normalMailDoesNotDetach
+            , testCase "wait wakes on a named call becoming final" waitWakesOnNamedCall
+            , testCase "wait wakes on any-call" waitWakesOnAnyCall
+            , testCase "wait wakes on mail without consuming it" waitWakesOnMail
+            , testCase "wait times out when nothing happens" waitTimesOut
+            , testCase "clampWaitSeconds caps at maxWaitSeconds" clampWaitSecondsCapsRequest
+            ]
+        , testGroup
+            "Phase 4: detached sub-agent calls expose their child session id"
+            [ testCase "pollRunningCall copies a recorded child session id onto the tracked call" pollRunningCallCopiesChildSessionId
+            , testCase "pollRunningCall leaves tcChildSessionId absent for an ordinary call" pollRunningCallLeavesChildSessionIdAbsent
+            , testCase "a running placeholder includes childSessionId when known" placeholderIncludesChildSessionId
+            , testCase "a running placeholder omits childSessionId for an ordinary call" placeholderOmitsChildSessionIdByDefault
+            ]
         , testGroup
             "subprocess output"
             [ testCase "reports output lines while the process runs" processReportsOutput
@@ -225,11 +252,11 @@ orphanedCallResolves = do
                 , tcState = Running
                 , tcResult = Nothing
                 , tcContinuation = Nothing
-                , tcPolicy = AppliedPolicy RunAsync Nothing
+                , tcPolicy = AppliedPolicy (RunAsync Nothing) Nothing
                 , tcEntityId = Just (EntityId UUID.nil)
                 , tcDeliveredLate = False
                 }
-    let partial = PartialUserTurnContent (SystemPrompt "test") [] Nothing [tracked]
+    let partial = PartialUserTurnContent (SystemPrompt "test") [] Nothing [tracked] []
     let s0 = (sessionWithCalls [tracked.tcCall]){turns = [PartialUserTurn partial Nothing, llmTurnWith [tracked.tcCall]]}
     let agent = mkAgent world YieldWhenAllDone (\_ _ -> pure $ TextResponse "unused")
     (_, s1) <- stepOk agent s0
@@ -281,7 +308,7 @@ resumeReplacesPartialTurn = do
     gate <- newEmptyMVar
     let policy _ call
             | callName call == "defer_me" = Defer (Reason "external")
-            | otherwise = RunAsync
+            | otherwise = RunAsync Nothing
     let agent = (mkAgent world (YieldOnTimeout 20) (gatedToolCall gate)){ctxToolCallPolicy = policy}
     let s0 = sessionWithCalls [mkCall "call_defer" "defer_me", mkCall "call_slow" "slow"]
     (a1, s1) <- stepOk agent s0
@@ -362,6 +389,26 @@ engineEmitsActivity = do
             , (Just "call_a", "a", ToolCallCompleted)
             ]
 
+{- | Per @todos/session-mailbox.md@ §3, the engine posts a background call's
+final result to the owning session's mailbox as 'ToolCallFinished' mail.
+-}
+backgroundCompletionPostsMail :: Assertion
+backgroundCompletionPostsMail = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    let tool _ call = pure $ TextResponse (callName call <> "-result")
+    let agent = (mkAgent world YieldWhenAllDone tool){ctxMailbox = Just mb}
+    _ <- stepOk agent (sessionWithCalls [mkCall "call_a" "a"])
+    mEnvelopes <- timeout (5 * 1000 * 1000) $ atomically $ awaitMail mb 0 (const True)
+    case mEnvelopes of
+        Nothing -> assertFailure "expected ToolCallFinished mail after the background call completed"
+        Just [e] -> case e.envBody of
+            ToolCallFinished _tcid state response -> do
+                state @?= Completed
+                response @?= TextResponse "a-result"
+            other -> assertFailure $ "expected ToolCallFinished mail, got " <> show other
+        Just other -> assertFailure $ "expected exactly one envelope, got " <> show (length other)
+
 {- | While waiting for user input, a background call finishing delivers its
 result without a user query.
 -}
@@ -413,8 +460,8 @@ activityViewPrune = do
     t <- getCurrentTime
     let done = applyToolCallActivity (activity t ToolCallCompleted) Map.empty
         runningCall = trackedCall Running
-        stillRunning = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [runningCall]) Nothing]}
-        caughtUp = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [trackedCall Completed]) Nothing]}
+        stillRunning = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [runningCall] []) Nothing]}
+        caughtUp = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [trackedCall Completed] []) Nothing]}
     Map.size (pruneToolCallViews stillRunning done) @?= 1
     Map.size (pruneToolCallViews caughtUp done) @?= 0
     let started = applyToolCallActivity (activity t ToolCallStarted) Map.empty
@@ -436,7 +483,7 @@ runUntilBlockedOnDeferred = do
     gate <- newEmptyMVar
     let policy _ call
             | callName call == "defer_me" = Defer (Reason "external")
-            | otherwise = RunAsync
+            | otherwise = RunAsync Nothing
     let agent = (mkAgent world (YieldOnTimeout 20) (gatedToolCall gate)){ctxToolCallPolicy = policy}
     void $ forkIO $ threadDelay 50000 >> putMVar gate ()
     res <- timeout 5000000 $ runUntilBlocked convId agent (sessionWithCalls [mkCall "call_defer" "defer_me", mkCall "call_slow" "slow"])
@@ -483,6 +530,245 @@ callTimesOut = do
             other -> assertFailure $ "unexpected responses: " <> show other
         _ -> assertFailure "expected the call to finish as failed"
     readIORef interrupted >>= (@?= True)
+
+-------------------------------------------------------------------------------
+-- Phase 2 (todos/session-mailbox.md): attach / detach, wait
+-------------------------------------------------------------------------------
+
+{- | A 'RunAsync' call with @attachSeconds = 0@ detaches at once: the step
+yields a 'PartialUserTurn' with the call still 'Running', marked with a
+'tcDetachedReason', instead of blocking on it.
+-}
+attachSecondsDetaches :: Assertion
+attachSecondsDetaches = do
+    world <- mkWorld
+    gate <- newEmptyMVar -- never filled: the call would otherwise block forever
+    let agent =
+            (mkAgent world YieldWhenAllDone (gatedToolCall gate))
+                { ctxToolCallPolicy = \_ _ -> RunAsync (Just 0)
+                }
+    (_, s1) <- stepOk agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case partialTurns s1 of
+        [partial] -> case partial.pTrackedToolCalls of
+            [tc] -> do
+                tc.tcState @?= Running
+                tc.tcDetachedReason @?= Just "still running after 0s"
+            other -> assertFailure $ "expected one tracked call, got " <> show other
+        other -> assertFailure $ "expected one partial turn, got " <> show (length other)
+
+{- | An 'Interrupt'-priority envelope pre-empts R3a: an attached ('RunSync')
+call is detached even though nothing made it finish, and the interrupt mail
+is folded into the same turn.
+-}
+interruptDetachesAttachedCalls :: Assertion
+interruptDetachesAttachedCalls = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gate <- newEmptyMVar -- never filled: proves the call was detached, not completed
+    let agent =
+            (mkAgent world YieldWhenAllDone (gatedToolCall gate))
+                { ctxToolCallPolicy = \_ _ -> RunSync
+                , ctxMailbox = Just mb
+                }
+    _ <-
+        forkIO $ do
+            threadDelay 100000
+            _ <-
+                mb.mbSend
+                    Outgoing
+                        { outId = Nothing
+                        , outFrom = FromUser Nothing
+                        , outPriority = Interrupt
+                        , outHops = 0
+                        , outBody = Control Pause
+                        }
+            pure ()
+    (_, s1) <- stepOk agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case partialTurns s1 of
+        [partial] -> do
+            case partial.pTrackedToolCalls of
+                [tc] -> do
+                    tc.tcState @?= Running
+                    tc.tcDetachedReason @?= Just "interrupted"
+                other -> assertFailure $ "expected one tracked call, got " <> show other
+            assertBool "the interrupt mail was folded into the turn" (not (null partial.pUserMail))
+        other -> assertFailure $ "expected one partial turn, got " <> show (length other)
+
+{- | A non-'Interrupt' envelope must never detach an attached call: only
+'Interrupt' priority pre-empts R3a.
+-}
+normalMailDoesNotDetach :: Assertion
+normalMailDoesNotDetach = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gate <- newEmptyMVar
+    let agent =
+            (mkAgent world YieldWhenAllDone (gatedToolCall gate))
+                { ctxToolCallPolicy = \_ _ -> RunSync
+                , ctxMailbox = Just mb
+                }
+    _ <-
+        forkIO $ do
+            threadDelay 100000
+            _ <-
+                mb.mbSend
+                    Outgoing
+                        { outId = Nothing
+                        , outFrom = FromUser Nothing
+                        , outPriority = Normal
+                        , outHops = 0
+                        , outBody = UserMessage (UserQuery "hello" [])
+                        }
+            pure ()
+    _ <-
+        forkIO $ do
+            threadDelay 300000
+            putMVar gate ()
+    (_, s1) <- stepOk agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case s1.turns of
+        (UserTurn content _ : _) -> map snd content.userToolResponses @?= [TextResponse "slow-result"]
+        other -> assertFailure $ "expected the call to complete normally, got " <> show other
+
+-- | Build a running background call and a context that can watch it, for
+-- the @wait@ tests below.
+mkWaitFixture :: IO (World, Base.ConversationId, Agent (LlmTurnContent, Session), Session, MVar (), Text)
+mkWaitFixture = do
+    world <- mkWorld
+    gate <- newEmptyMVar
+    let agent = (mkAgent world (YieldOnTimeout 0) (gatedToolCall gate))
+    (agent', s1) <- stepOk agent (sessionWithCalls [mkCall "call_wait" "slow"])
+    providerId <- case partialTurns s1 of
+        [partial] -> case partial.pTrackedToolCalls of
+            [tc] -> maybe (assertFailure "expected a provider call id" >> fail "unreachable") pure (providerToolCallId tc.tcCall)
+            other -> assertFailure ("expected one tracked call, got " <> show other) >> fail "unreachable"
+        other -> assertFailure ("expected one partial turn, got " <> show (length other)) >> fail "unreachable"
+    pure (world, convId, agent', s1, gate, providerId)
+
+-- | A context built the same way the stepper builds one for tool execution,
+-- so @ctxAwaitMail@ is wired exactly as it is at runtime.
+waitCtx :: Agent r -> Session -> ToolExecutionContext
+waitCtx agent sess = buildContext agent sess convId
+
+waitWakesOnNamedCall :: Assertion
+waitWakesOnNamedCall = do
+    (_world, _convId, agent, sess, gate, providerId) <- mkWaitFixture
+    let ctx = waitCtx agent sess
+    resultVar <- newEmptyMVar
+    _ <- forkIO $ waitForCallsOrMail ctx (WaitParams providerId 5) >>= putMVar resultVar
+    threadDelay 100000
+    putMVar gate () -- lets the background call finish
+    result <- timeout 3000000 (readMVar resultVar)
+    result @?= Just (Right (WaitResult "call" (Just providerId)))
+
+waitWakesOnAnyCall :: Assertion
+waitWakesOnAnyCall = do
+    (_world, _convId, agent, sess, gate, providerId) <- mkWaitFixture
+    let ctx = waitCtx agent sess
+    resultVar <- newEmptyMVar
+    _ <- forkIO $ waitForCallsOrMail ctx (WaitParams "any-call" 5) >>= putMVar resultVar
+    threadDelay 100000
+    putMVar gate ()
+    result <- timeout 3000000 (readMVar resultVar)
+    result @?= Just (Right (WaitResult "call" (Just providerId)))
+
+waitWakesOnMail :: Assertion
+waitWakesOnMail = do
+    (_world, _convId, agent0, sess, _gate, _providerId) <- mkWaitFixture
+    mb <- newInMemoryMailbox
+    let agent = agent0{ctxMailbox = Just mb}
+    let ctx = waitCtx agent sess
+    resultVar <- newEmptyMVar
+    _ <- forkIO $ waitForCallsOrMail ctx (WaitParams "mail" 5) >>= putMVar resultVar
+    threadDelay 100000
+    _ <-
+        mb.mbSend
+            Outgoing
+                { outId = Nothing
+                , outFrom = FromUser Nothing
+                , outPriority = Normal
+                , outHops = 0
+                , outBody = UserMessage (UserQuery "hi" [])
+                }
+    result <- timeout 3000000 (readMVar resultVar)
+    result @?= Just (Right (WaitResult "mail" Nothing))
+    -- Peeked, not consumed: the mail is still unread on the session's cursor.
+    unread <- atomically (mbUnread mb sess.mailCursor)
+    assertBool "the mail wait peeked is still unread" (not (null unread))
+
+waitTimesOut :: Assertion
+waitTimesOut = do
+    (_world, _convId, agent, sess, _gate, _providerId) <- mkWaitFixture
+    let ctx = waitCtx agent sess
+    result <- timeout 3000000 (waitForCallsOrMail ctx (WaitParams "mail" 0))
+    result @?= Just (Right (WaitResult "timeout" Nothing))
+
+clampWaitSecondsCapsRequest :: Assertion
+clampWaitSecondsCapsRequest = do
+    clampWaitSeconds 10000 @?= 300
+    clampWaitSeconds (-5) @?= 0
+    clampWaitSeconds 30 @?= 30
+
+{- | 'pollRunningCall' copies a child session id from a call's OS entity onto
+the tracked call while it is still 'Running', once
+'System.Agents.OS.Conversation.ToolCalls.recordChildSession' has written it
+(the async engine's 'ctxRecordChildSession' hook does this for a
+@prompt_agent_\<slug\>@ call once its child session exists).
+-}
+pollRunningCallCopiesChildSessionId :: Assertion
+pollRunningCallCopiesChildSessionId = do
+    world <- mkWorld
+    sid <- newSessionId
+    tid <- newTurnId
+    callId <- newToolCallId
+    eid <- createToolCallEntity world sid convId tid Nothing "prompt_agent_helper" Null callId
+    childSid <- newSessionId
+    recordChildSession world eid childSid
+    let agent = mkAgent world YieldWhenAllDone (\_ _ -> pure (TextResponse "unused"))
+    sess <- newSessionFromPrompt sid (SystemPrompt "sys") [] (UserQuery "hi" [])
+    let ctx = buildContext agent sess convId
+        tc = (trackedCall Running){tcId = callId, tcEntityId = Just eid}
+    tc' <- pollRunningCall ctx tc
+    tc'.tcChildSessionId @?= Just childSid
+    tc'.tcState @?= Running
+
+-- | An ordinary call's OS entity never has a recorded child session, so
+-- 'pollRunningCall' leaves 'tcChildSessionId' absent.
+pollRunningCallLeavesChildSessionIdAbsent :: Assertion
+pollRunningCallLeavesChildSessionIdAbsent = do
+    world <- mkWorld
+    sid <- newSessionId
+    tid <- newTurnId
+    callId <- newToolCallId
+    eid <- createToolCallEntity world sid convId tid Nothing "bash_command" Null callId
+    let agent = mkAgent world YieldWhenAllDone (\_ _ -> pure (TextResponse "unused"))
+    sess <- newSessionFromPrompt sid (SystemPrompt "sys") [] (UserQuery "hi" [])
+    let ctx = buildContext agent sess convId
+        tc = (trackedCall Running){tcId = callId, tcEntityId = Just eid}
+    tc' <- pollRunningCall ctx tc
+    tc'.tcChildSessionId @?= Nothing
+
+-- | A detached (@running@) placeholder includes @childSessionId@ when the
+-- tracked call has one, so the caller can @send-message@ a helper that is
+-- still working.
+placeholderIncludesChildSessionId :: Assertion
+placeholderIncludesChildSessionId = do
+    childSid <- newSessionId
+    let tc = (trackedCall Running){tcChildSessionId = Just childSid}
+        content = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [tc] []
+    case partialToolMessages content of
+        [(_, JsonResponse (Object obj))] ->
+            KeyMap.lookup "childSessionId" obj @?= Just (toJSON childSid)
+        other -> assertFailure $ "expected one JSON placeholder, got " <> show other
+
+-- | An ordinary detached call's placeholder has no @childSessionId@ key.
+placeholderOmitsChildSessionIdByDefault :: Assertion
+placeholderOmitsChildSessionIdByDefault = do
+    let tc = trackedCall Running
+        content = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [tc] []
+    case partialToolMessages content of
+        [(_, JsonResponse (Object obj))] ->
+            assertBool "no childSessionId key" (not (KeyMap.member "childSessionId" obj))
+        other -> assertFailure $ "expected one JSON placeholder, got " <> show other
 
 processReportsOutput :: Assertion
 processReportsOutput = do
@@ -544,7 +830,7 @@ markdownPartialTurn :: Assertion
 markdownPartialTurn = do
     let done = (trackedCall Completed){tcCall = mkCall "call_done" "done", tcResult = Just (TextResponse "done-output")}
         running = (trackedCall Running){tcCall = mkCall "call_run" "run"}
-        partial = PartialUserTurnContent (SystemPrompt "p") [] Nothing [done, running]
+        partial = PartialUserTurnContent (SystemPrompt "p") [] Nothing [done, running] []
         sess = (sessionWithCalls []){turns = [PartialUserTurn partial Nothing]}
         opts =
             SessionPrintOptions
@@ -611,9 +897,12 @@ trackedCall st =
         , tcState = st
         , tcResult = Nothing
         , tcContinuation = Nothing
-        , tcPolicy = AppliedPolicy RunAsync Nothing
+        , tcPolicy = AppliedPolicy (RunAsync Nothing) Nothing
         , tcEntityId = Nothing
         , tcDeliveredLate = False
+        , tcAttachDeadline = Nothing
+        , tcDetachedReason = Nothing
+        , tcChildSessionId = Nothing
         }
 
 partialTurns :: Session -> [PartialUserTurnContent]
@@ -703,7 +992,7 @@ initialSession :: Session
 initialSession =
     (sessionWithCalls [])
         { turns =
-            [ UserTurn (UserTurnContent (SystemPrompt "test") [] (Just (UserQuery "go" [])) []) Nothing
+            [ UserTurn (UserTurnContent (SystemPrompt "test") [] (Just (UserQuery "go" [])) [] []) Nothing
             ]
         }
 
@@ -719,6 +1008,7 @@ sessionWithCalls calls =
         , turnId = TurnId nil
         , sessionVersion = Just 2
         , sessionExecutionMode = Just Asynchronous
+        , mailCursor = 0
         }
 
 dummyPortal :: ToolPortal
@@ -748,7 +1038,7 @@ mkAgent world strategy tool =
         , ctxMaxConcurrency = Nothing
         , ctxAsyncCallTimeout = Nothing
         , ctxToolCache = Nothing
-        , ctxToolCallPolicy = \_ _ -> RunAsync
+        , ctxToolCallPolicy = \_ _ -> RunAsync Nothing
         , ctxToolExecutor = Nothing
         , ctxContinuationStore = Nothing
         , ctxDeploymentRunner = Nothing
@@ -756,4 +1046,8 @@ mkAgent world strategy tool =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
+        , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
+        , ctxInterruptCompletions = False
         }

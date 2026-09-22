@@ -20,6 +20,7 @@ module System.Agents.Postgres (
     openPostgresPool,
     mkPostgresSessionStore,
     mkPostgresContinuationStore,
+    mkPostgresMailStore,
     mkPostgresAgentStore,
     isPostgresUrl,
 
@@ -61,7 +62,8 @@ import System.Agents.AgentStore (AgentStore (..), StoredAgent (..))
 import qualified System.Agents.Base as Base
 import System.Agents.Host (HostStores (..))
 import System.Agents.Session.Async (ContinuationStore (..), ContinuationToken (..), ToolContinuationSnapshot (..))
-import System.Agents.Session.Base (Session, SessionId (..), SessionStatus (..), UserToolResponse, parseSessionStatus, sessionStatusOf, sessionStatusText)
+import System.Agents.Session.Base (Envelope (..), Session, SessionId (..), SessionStatus (..), UserToolResponse, messageIdText, parseSessionStatus, sessionStatusOf, sessionStatusText)
+import System.Agents.Session.Mailbox (MailStore (..))
 import System.Agents.SessionStore (
     SessionBackend (..),
     SessionLabels (..),
@@ -83,8 +85,9 @@ withPostgresStores url action =
     bracket (openPostgresPool url 10) destroyAllResources $ \pool -> do
         sessions <- mkPostgresSessionStore pool
         continuations <- mkPostgresContinuationStore pool
+        mail <- mkPostgresMailStore pool
         agents <- mkPostgresAgentStore pool
-        action (HostStores sessions continuations (Just agents))
+        action (HostStores sessions continuations mail (Just agents))
 
 -- | A pool of at most the given number of connections, idle ones closed after a minute.
 openPostgresPool :: ByteString -> Int -> IO (Pool Connection)
@@ -418,6 +421,56 @@ listPending conn sid = do
         query conn "SELECT token, context_json FROM tool_continuations WHERE session_id = ? AND completed_at IS NULL" (Only (sessionIdText sid)) ::
             IO [(Text, Text)]
     pure [(ContinuationToken uuid, snap) | (t, json) <- rows, Just uuid <- [UUID.fromText t], Just snap <- [decodeJson json]]
+
+-------------------------------------------------------------------------------
+-- Mail (@todos/session-mailbox.md@, Phase 3)
+-------------------------------------------------------------------------------
+
+mailMigrations :: [PgMigration]
+mailMigrations =
+    [ PgMigration 1 $
+        statements
+            [ "CREATE TABLE IF NOT EXISTS session_mail (\
+              \ session_id TEXT NOT NULL,\
+              \ seq INTEGER NOT NULL,\
+              \ id TEXT NOT NULL,\
+              \ body_json TEXT NOT NULL,\
+              \ accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),\
+              \ PRIMARY KEY (session_id, id))"
+            , "CREATE INDEX IF NOT EXISTS idx_session_mail_session_seq ON session_mail(session_id, seq)"
+            ]
+    ]
+
+-- | A durable 'MailStore' on the pool, after migrating its table. Mirrors
+-- "System.Agents.Session.MailStore"'s SQLite implementation: one row per
+-- envelope, the envelope itself serialized whole into @body_json@,
+-- idempotent on @(session_id, id)@.
+mkPostgresMailStore :: Pool Connection -> IO MailStore
+mkPostgresMailStore pool = do
+    runPostgresMigrations pool "session_mail" mailMigrations
+    let with = withResource pool
+    pure
+        MailStore
+            { msAppend = \sid envelope -> with $ \c -> appendMail c sid envelope
+            , msLoad = \sid -> with $ \c -> loadMail c sid
+            }
+
+appendMail :: Connection -> SessionId -> Envelope -> IO ()
+appendMail conn sid envelope =
+    void $
+        execute
+            conn
+            "INSERT INTO session_mail (session_id, seq, id, body_json)\
+            \ VALUES (?, ?, ?, ?)\
+            \ ON CONFLICT (session_id, id) DO NOTHING"
+            (sessionIdText sid, envelope.envSeq, messageIdText envelope.envId, encodeJson envelope)
+
+loadMail :: Connection -> SessionId -> IO [Envelope]
+loadMail conn sid = do
+    rows <-
+        query conn "SELECT body_json FROM session_mail WHERE session_id = ? ORDER BY seq ASC" (Only (sessionIdText sid)) ::
+            IO [Only Text]
+    pure $ mapMaybe (decodeJson . fromOnly) rows
 
 -------------------------------------------------------------------------------
 -- Agents

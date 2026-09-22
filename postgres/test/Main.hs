@@ -50,17 +50,28 @@ import System.Agents.Postgres
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Base (
     DeferredCallView (..),
+    Envelope (..),
     LlmCompletion (..),
     LlmResponse (..),
     LlmToolCall (..),
+    MailBody (..),
+    Mailbox (..),
+    Outgoing (..),
+    Priority (..),
+    Receipt (..),
+    Sender (..),
+    SendError (..),
     SessionStatus (..),
     SystemPrompt (..),
     UserQuery (..),
     UserToolResponse (..),
+    awaitMail,
+    newDurableMailbox,
     newSessionFromPrompt,
     newSessionId,
     pendingDeferredCalls,
  )
+import Control.Concurrent.STM (atomically)
 import System.Agents.SessionStore
 
 main :: IO ()
@@ -81,6 +92,7 @@ main = do
                         , testCase "concurrent compare-and-stores: exactly one wins" (concurrentCasTest baseUrl)
                         , testCase "a runner flow: deferred call, completion, cascade delete" (runnerTest baseUrl)
                         , testCase "stored agents: put, replace, list, delete" (agentStoreTest baseUrl)
+                        , testCase "the mail store round-trips envelopes across mailboxes" (mailStoreTest baseUrl)
                         ]
 
 -------------------------------------------------------------------------------
@@ -93,7 +105,7 @@ migrationsTest baseUrl = withDatabase baseUrl $ \url -> do
     withPostgresStores url $ \_ -> pure ()
     bracket (connectPostgreSQL url) close $ \conn -> do
         rows <- query_ conn "SELECT component, version FROM schema_migrations ORDER BY component, version" :: IO [(Text, Int)]
-        rows @?= [("agents", 1), ("continuations", 1), ("sessions", 1), ("sessions", 2)]
+        rows @?= [("agents", 1), ("continuations", 1), ("session_mail", 1), ("sessions", 1), ("sessions", 2)]
 
 casTest :: String -> Assertion
 casTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
@@ -183,7 +195,7 @@ runnerTest baseUrl = withDatabase baseUrl $ \url -> withSystemTempDirectory "age
     withPostgresStores url $ \stores ->
         withHostStores cfg stores silent $ \host ->
             withSessionRunner host $ \runner -> do
-                meta <- expectRight =<< createSessionAs runner (Just "alice") "pg-test" (NewMessage "fetch it" []) (Just UntilBlocked) Map.empty
+                meta <- expectRight =<< createSessionAs runner (Just "alice") "pg-test" (NewMessage "fetch it" [] False) (Just UntilBlocked) Map.empty
                 let sid = meta.smSessionId
                 (blocked, _) <- expectRight =<< awaitRun runner sid 5
                 blocked.smStatus @?= StatusWaitingExternal
@@ -216,6 +228,32 @@ agentStoreTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $
     agentStore.asDelete "pg-test" >>= (@?= True)
     agentStore.asDelete "pg-test" >>= (@?= False)
     agentStore.asList >>= (@?= 0) . length
+
+-- | 'System.Agents.Postgres.mkPostgresMailStore', hydrating a fresh
+-- durable mailbox from what an earlier one wrote (mirrors how the runner
+-- re-hydrates a session's mailbox on load).
+mailStoreTest :: String -> Assertion
+mailStoreTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
+    sid <- newSessionId
+    mb1 <- newDurableMailbox stores.hsMail sid
+    let outgoing =
+            Outgoing
+                { outId = Nothing
+                , outFrom = FromUser Nothing
+                , outPriority = Normal
+                , outHops = 0
+                , outBody = UserMessage (UserQuery "hi" [])
+                }
+    r1 <- mb1.mbSend outgoing :: IO (Either SendError Receipt)
+    either (assertFailure . ("send failed: " <>) . show) (const (pure ())) r1
+    r2 <- mb1.mbSend outgoing{outBody = UserMessage (UserQuery "again" [])}
+    either (assertFailure . ("send failed: " <>) . show) (const (pure ())) r2
+    -- Simulate the session being reloaded on another process: a fresh
+    -- mailbox over the same durable store.
+    mb2 <- newDurableMailbox stores.hsMail sid
+    unread <- atomically (awaitMail mb2 0 (const True))
+    length unread @?= 2
+    map envSeq unread @?= [1, 2]
 
 -------------------------------------------------------------------------------
 -- Mock LLM

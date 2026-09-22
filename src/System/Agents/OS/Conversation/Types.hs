@@ -280,6 +280,15 @@ data ToolCallConfig = ToolCallConfig
     This is the id the model knows, so capabilities accept it in place of
     the internal UUID.
     -}
+    , tcChildSessionId :: Maybe SessionId
+    {- ^ Phase 4 (@todos/session-mailbox.md@ §5): for a @prompt_agent_\<slug\>@
+    call, the id of the sub-agent session it started, once known. Written
+    once via 'System.Agents.OS.Conversation.ToolCalls.recordChildSession'
+    and copied onto the session-layer 'System.Agents.Session.Types.TrackedToolCall'
+    by 'System.Agents.Session.Step.pollRunningCall'. 'Nothing' for every
+    other kind of call, and for a sub-agent call whose child session isn't
+    known yet.
+    -}
     }
     deriving (Show, Eq, Generic)
 

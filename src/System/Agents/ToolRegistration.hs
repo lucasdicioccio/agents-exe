@@ -130,6 +130,7 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import qualified System.Agents.Tools.SystemToolbox.ToolCallStatus as ToolCallStatus
+import qualified System.Agents.Tools.SystemToolbox.Mail as Mail
 
 type Tool call = ToolBase.Tool Trace call
 
@@ -1121,7 +1122,106 @@ buildSystemToolParams box =
             ParamProperty
                 { propertyKey = "timeout_seconds"
                 , propertyType = NumberParamType
-                , propertyDescription = "For get-tool-call-status: Maximum seconds to wait when wait_for_completion is true (default: 5)"
+                , propertyDescription = "For get-tool-call-status: Maximum seconds to wait when wait_for_completion is true (default: 5). For wait: maximum seconds to block, capped at 300 (default: 30)"
+                , propertyRequired = False
+                }
+
+        -- wait target parameter
+        waitForTargetParam =
+            ParamProperty
+                { propertyKey = "for"
+                , propertyType = StringParamType
+                , propertyDescription = "For wait: What to wait for - a specific tool_call_id, \"any-call\" (any of your own running calls), or \"mail\" (only mail; peeked, not consumed - it still arrives normally in your next reply)"
+                , propertyRequired = False
+                }
+
+        -- send-message parameters
+        sendMessageToParam =
+            ParamProperty
+                { propertyKey = "to"
+                , propertyType = StringParamType
+                , propertyDescription = "For send-message: The recipient session's id"
+                , propertyRequired = False
+                }
+        sendMessageTextParam =
+            ParamProperty
+                { propertyKey = "text"
+                , propertyType = StringParamType
+                , propertyDescription = "For send-message: The message text"
+                , propertyRequired = False
+                }
+        sendMessageInReplyToParam =
+            ParamProperty
+                { propertyKey = "in_reply_to"
+                , propertyType = StringParamType
+                , propertyDescription = "For send-message: Optional id of the mail this message answers"
+                , propertyRequired = False
+                }
+        sendMessageExpectsReplyParam =
+            ParamProperty
+                { propertyKey = "expects_reply"
+                , propertyType = BoolParamType
+                , propertyDescription = "For send-message: Hint that the recipient is expected to reply (default: false)"
+                , propertyRequired = False
+                }
+        sendMessageInterruptParam =
+            ParamProperty
+                { propertyKey = "interrupt"
+                , propertyType = BoolParamType
+                , propertyDescription = "For send-message: Send as Interrupt priority (default: false)"
+                , propertyRequired = False
+                }
+
+        -- spawn-session parameters
+        spawnSessionAgentParam =
+            ParamProperty
+                { propertyKey = "agent"
+                , propertyType = StringParamType
+                , propertyDescription = "For spawn-session: One of your own helper agent slugs, as for prompt_agent_<slug>"
+                , propertyRequired = False
+                }
+        spawnSessionMessageParam =
+            ParamProperty
+                { propertyKey = "message"
+                , propertyType = StringParamType
+                , propertyDescription = "For spawn-session: The initial message to start the new session with"
+                , propertyRequired = False
+                }
+
+        -- watch-session / unwatch-session parameters
+        watchSessionSessionParam =
+            ParamProperty
+                { propertyKey = "session"
+                , propertyType = StringParamType
+                , propertyDescription = "For watch-session: The session to watch"
+                , propertyRequired = False
+                }
+        watchSessionEventsParam =
+            ParamProperty
+                { propertyKey = "events"
+                , propertyType = StringParamType
+                , propertyDescription = "For watch-session: JSON array of event kinds to forward (e.g. [\"run.stopped\",\"tool.completed\"]); omit to forward every kind"
+                , propertyRequired = False
+                }
+        watchSessionToolParam =
+            ParamProperty
+                { propertyKey = "tool"
+                , propertyType = StringParamType
+                , propertyDescription = "For watch-session: Glob on the tool name, for tool.* events only (e.g. \"deploy_*\")"
+                , propertyRequired = False
+                }
+        watchSessionTtlParam =
+            ParamProperty
+                { propertyKey = "ttl_seconds"
+                , propertyType = NumberParamType
+                , propertyDescription = "For watch-session: How long the watch stays active (default: 600)"
+                , propertyRequired = False
+                }
+        watchIdParam =
+            ParamProperty
+                { propertyKey = "watch_id"
+                , propertyType = StringParamType
+                , propertyDescription = "For unwatch-session: The id a watch-session call returned"
                 , propertyRequired = False
                 }
 
@@ -1196,11 +1296,34 @@ buildSystemToolParams box =
                         then
                             [ includeProgressParam
                             , waitForCompletionParam
-                            , timeoutSecondsParam
                             ]
                         else []
                    )
+                ++ ( if hasCapability SystemToolGetToolCallStatus || hasCapability SystemToolWait
+                        then [timeoutSecondsParam]
+                        else []
+                   )
                 ++ (if hasCapability SystemToolCancelToolCall then [cancelReasonParam] else [])
+                ++ (if hasCapability SystemToolWait then [waitForTargetParam] else [])
+                ++ ( if hasCapability SystemToolSendMessage
+                        then
+                            [ sendMessageToParam
+                            , sendMessageTextParam
+                            , sendMessageInReplyToParam
+                            , sendMessageExpectsReplyParam
+                            , sendMessageInterruptParam
+                            ]
+                        else []
+                   )
+                ++ ( if hasCapability SystemToolSpawnSession
+                        then [spawnSessionAgentParam, spawnSessionMessageParam]
+                        else []
+                   )
+                ++ ( if hasCapability SystemToolWatchSession
+                        then [watchSessionSessionParam, watchSessionEventsParam, watchSessionToolParam, watchSessionTtlParam]
+                        else []
+                   )
+                ++ (if hasCapability SystemToolUnwatchSession then [watchIdParam] else [])
      in
         baseParams ++ optionalParams
 
@@ -1224,6 +1347,11 @@ capabilityToText SystemToolExecuteCommand = "execute-command"
 capabilityToText SystemToolGetToolCallStatus = "get-tool-call-status"
 capabilityToText SystemToolListRunningToolCalls = "list-running-tool-calls"
 capabilityToText SystemToolCancelToolCall = "cancel-tool-call"
+capabilityToText SystemToolWait = "wait"
+capabilityToText SystemToolSendMessage = "send-message"
+capabilityToText SystemToolSpawnSession = "spawn-session"
+capabilityToText SystemToolWatchSession = "watch-session"
+capabilityToText SystemToolUnwatchSession = "unwatch-session"
 
 {- | Register all tools from a System toolbox.
 
@@ -1832,7 +1960,19 @@ systemTool box =
                                     then handleListRunning ctx
                                     else if cap == "cancel-tool-call"
                                         then handleCancel ctx v
-                                        else do
+                                        else if cap == "wait"
+                                            then handleWait ctx v
+                                            else if cap == "send-message"
+                                                then handleSendMessage ctx v
+                                                else if cap == "spawn-session"
+                                                    then handleSpawnSession ctx v
+                                                    else if cap == "watch-session"
+                                                        then handleWatchSession ctx v
+                                                        else if cap == "unwatch-session"
+                                                            then handleUnwatchSession ctx v
+                                                            else if cap == "list-sessions"
+                                                                then handleListSessions tracer ctx
+                                                                else do
                                             -- Extract optional parameters for session introspection capabilities
                                             let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
                                                     Just (Aeson.String sid) -> Just sid
@@ -1876,6 +2016,84 @@ systemTool box =
             Left err -> pure $ SystemToolError call err
             Right listResult ->
                 pure $ SystemToolResult call $ SystemTools.QueryResult "list-running-tool-calls" (Aeson.toJSON listResult) 0
+
+    -- Handle the wait capability (todos/session-mailbox.md, Phase 2)
+    handleWait :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleWait ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.WaitParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success waitParams -> do
+                result <- ToolCallStatus.waitForCallsOrMail ctx waitParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right waitResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "wait" (Aeson.toJSON waitResult) 0
+
+    -- Handle the send-message capability (todos/session-mailbox.md, Phase 4)
+    handleSendMessage :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleSendMessage ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.SendMessageParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success sendParams -> do
+                result <- Mail.sendMessageToSession ctx sendParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right sendResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "send-message" (Aeson.toJSON sendResult) 0
+
+    -- Handle the spawn-session capability (todos/session-mailbox.md, Phase 4)
+    handleSpawnSession :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleSpawnSession ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.SpawnSessionParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success spawnParams -> do
+                result <- Mail.spawnSession ctx spawnParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right spawnResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "spawn-session" (Aeson.toJSON spawnResult) 0
+
+    -- Handle the watch-session capability (todos/session-mailbox.md, Phase 6)
+    handleWatchSession :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleWatchSession ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.WatchSessionParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success watchParams -> do
+                result <- Mail.watchSession ctx watchParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right watchResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "watch-session" (Aeson.toJSON watchResult) 0
+
+    -- Handle the unwatch-session capability (todos/session-mailbox.md, Phase 6)
+    handleUnwatchSession :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleUnwatchSession ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.UnwatchSessionParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success unwatchParams -> do
+                result <- Mail.unwatchSession ctx unwatchParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right unwatchResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "unwatch-session" (Aeson.toJSON unwatchResult) 0
+
+    {- | Handle the list-sessions capability, merging in the caller's
+    'ctxMailRouter' live sessions (@todos/session-mailbox.md@, Phase 4, §5)
+    on top of the ordinary catalog-only result.
+    -}
+    handleListSessions :: Tracer IO Trace -> ToolExecutionContext -> IO (CallResult ())
+    handleListSessions tracer ctx = do
+        result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box "list-sessions" Nothing Nothing Nothing
+        case result of
+            Left err -> pure $ SystemToolError call err
+            Right rsp -> do
+                merged <- Mail.mergeLiveSessions (Context.ctxMailRouter ctx) (SystemTools.resultData rsp)
+                pure $ SystemToolResult call rsp{SystemTools.resultData = merged}
 
     -- Handle the cancel-tool-call capability
     handleCancel :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
