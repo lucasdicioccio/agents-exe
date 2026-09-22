@@ -82,6 +82,7 @@ import System.Agents.Session.Base (
     Action (..),
     Agent (..),
     ControlMsg (..),
+    ExecutionMode (..),
     MailBody (..),
     MissingUserPrompt (..),
     OnSessionProgress,
@@ -346,6 +347,7 @@ spawnConversationIO config tracer coreRef outChan roster baseTuiAgent session mP
                 , ctxMailbox = Just mailbox
                 , ctxMailRouter = Just router
                 , ctxSpawnSession = Just spawnHook
+                , ctxExecutionMode = Asynchronous
                 }
 
     let a =

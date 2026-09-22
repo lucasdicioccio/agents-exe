@@ -522,6 +522,7 @@ waitAttachedCalls ctx mMailbox cursor strategy calls =
                     _ -> pure Nothing
                 atomically $
                     (noOutcome{awoInterrupted = True} <$ interruptArm)
+                        `orElse` (noOutcome <$ controlArm)
                         `orElse` deadlineArm deadlineVars
                         `orElse` (noOutcome <$ mainCondition world mTimeoutVar)
   where
@@ -545,6 +546,22 @@ waitAttachedCalls ctx mMailbox cursor strategy calls =
         Just mb -> void (awaitMail mb cursor isInterruptEnvelope)
     isInterruptEnvelope :: Envelope -> Bool
     isInterruptEnvelope e = e.envPriority == Interrupt
+
+    {- 'Control' mail (e.g. 'CancelAllAttached', 'CancelCalls') is otherwise
+    only checked between turns; without this arm, mail sent while genuinely
+    attached and waiting here would sit unnoticed until this wait exits on
+    its own -- i.e. until the call it was meant to cancel has already
+    finished. Peeked, not consumed: the caller loop re-reads it and applies
+    it via 'applyControlMail' once this wait returns.
+    -}
+    controlArm :: STM ()
+    controlArm = case mMailbox of
+        Nothing -> retry
+        Just mb -> void (awaitMail mb cursor isControlEnvelope)
+    isControlEnvelope :: Envelope -> Bool
+    isControlEnvelope e = case e.envBody of
+        Control _ -> True
+        _ -> False
 
     deadlineArm :: [(ToolCallId, TVar Bool)] -> STM AttachWaitOutcome
     deadlineArm [] = retry

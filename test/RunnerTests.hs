@@ -88,6 +88,7 @@ tests =
         , testCase "wakeOn excluding \"user\" still refuses an ordinary message" wakeOnExcludesUserTest
         , testCase "Control (CancelCalls ids) cancels one attached call" controlCancelCallsTest
         , testCase "cancelAttachedCalls cancels the running call without needing its id" cancelAllAttachedTest
+        , testCase "cancelAttachedCalls cancels a call while the loop is blocked waiting on it" cancelAllAttachedDuringWaitTest
         , testCase "a background call reports tool.started and tool.completed events" toolCallEventsTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
@@ -919,6 +920,47 @@ cancelAllAttachedTest = do
         sessF <- currentSession runner sid
         assertBool ("call reported cancelled: " <> show (sessionTexts sessF)) (any ("cancelled" `Text.isInfixOf`) (sessionTexts sessF))
 
+{- | 'cancelAttachedCalls' must still work while the run loop is genuinely
+blocked inside 'waitAttachedCalls' on a forever-attached ('RunSync') call
+-- not just when sent between runs, while the loop is idle (as in
+'cancelAllAttachedTest' above). It is sent at 'Normal' priority (unlike the
+test-only 'sendControl' helper's 'Interrupt' priority), so it must not rely
+on the interrupt arm to be noticed mid-wait.
+-}
+cancelAllAttachedDuringWaitTest :: Assertion
+cancelAllAttachedDuringWaitTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAllRunSync
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    counter <- newIORef (0 :: Int)
+    let complete c = do
+            n <- atomicModifyIORef' counter (\k -> (k + 1, k))
+            if n == 1
+                then pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [slowCall])
+                else mockCompletion c
+    host <- testHost [node] (const complete)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner (Base.slug node.osNodeConfig) (message "hi") (Just StepOnce)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+
+        result <-
+            timeout 5000000 $
+                concurrently
+                    (postMessage runner sid (message "go") (Just UntilBlocked) Map.empty)
+                    (threadDelay 200000 >> cancelAttachedCalls runner sid)
+        case result of
+            Nothing -> assertFailure "resume did not return: Control mail sent mid-wait was not observed"
+            Just (runResult, cancelResult) -> do
+                _ <- expectRight runResult
+                _ <- expectRight cancelResult
+                pure ()
+
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        sessF <- currentSession runner sid
+        assertBool ("call reported cancelled: " <> show (sessionTexts sessF)) (any ("cancelled" `Text.isInfixOf`) (sessionTexts sessF))
+
 -- | A background call reports 'ToolCallStarted' while it runs and
 -- 'ToolCallCompleted' once it finishes (@todos/session-mailbox.md@ §7).
 toolCallEventsTest :: Assertion
@@ -1120,6 +1162,14 @@ backgroundAll :: String
 backgroundAll =
     "{\"executionMode\": \"asynchronous\", \"asyncYieldStrategy\": {\"tag\": \"yieldOnTimeout\", \"milliseconds\": 20}, "
         <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runAsync\"}, \"rules\": []}}"
+
+-- | Like 'backgroundAll', but every call attaches forever (only an
+-- interrupt or its own completion releases the wait) rather than yielding
+-- on a timeout -- for exercising the run loop while it is genuinely
+-- blocked inside 'waitAttachedCalls'.
+backgroundAllRunSync :: String
+backgroundAllRunSync =
+    "{\"executionMode\": \"asynchronous\", \"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}}"
 
 -- | Like 'backgroundAll', with 'pauseCancelsCalls' turned on (Phase 6).
 backgroundAllPauseCancelsCalls :: String
