@@ -23,14 +23,19 @@ module System.Agents.Session.Mailbox (
     mailboxMaxUnread,
     MailStore (..),
     newDurableMailbox,
+    MailboxInfo (..),
+    MailRouter (..),
+    newMailRouter,
 ) where
 
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Monad (when)
-import Control.Concurrent.STM (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, retry, writeTVar)
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, retry, writeTVar)
 import qualified Data.Foldable as Foldable
+import qualified Data.Map.Strict as Map
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
+import Data.Text (Text)
 import Data.Time (getCurrentTime)
 
 import System.Agents.Session.Types (
@@ -203,3 +208,49 @@ awaitMail mb cur p = do
     es <- filter p <$> mb.mbUnread cur
     when (null es) retry
     pure es
+
+-------------------------------------------------------------------------------
+-- MailRouter (Phase 4, §5)
+-------------------------------------------------------------------------------
+
+{- | What 'MailRouter.mrList' \/ 'MailRouter.mrLookup' report about a
+registered session, for addressing and discovery: its agent slug (when
+known), its parent session (lineage), and a short status string (e.g.
+@"running"@, @"idle"@, @"paused"@) that a front-end derives however it
+already tracks session status.
+-}
+data MailboxInfo = MailboxInfo
+    { miAgentSlug :: Maybe Text
+    , miParent :: Maybe SessionId
+    , miStatus :: Text
+    }
+    deriving (Show, Eq)
+
+{- | The process-wide table of live mailboxes (§5): "an agent can write to
+another session ... across sessions". Every front-end (the server, the TUI,
+@run@) keeps one and registers a session's mailbox on it while that session
+is live, so a sibling or ancestor session can address it by 'SessionId'
+without knowing anything about where it runs.
+
+This is deliberately the same shape in every front-end (D12): only where it
+lives, and how long an entry stays registered, differs.
+-}
+data MailRouter = MailRouter
+    { mrRegister :: SessionId -> MailboxInfo -> Mailbox -> IO (IO ())
+    -- ^ Register a session's mailbox; returns the action that unregisters it.
+    , mrLookup :: SessionId -> IO (Maybe (MailboxInfo, Mailbox))
+    , mrList :: IO [(SessionId, MailboxInfo)]
+    }
+
+-- | A fresh, empty, in-memory 'MailRouter'.
+newMailRouter :: IO MailRouter
+newMailRouter = do
+    tableVar <- newTVarIO Map.empty
+    pure
+        MailRouter
+            { mrRegister = \sid info mb -> do
+                atomically $ modifyTVar' tableVar (Map.insert sid (info, mb))
+                pure $ atomically $ modifyTVar' tableVar (Map.delete sid)
+            , mrLookup = \sid -> Map.lookup sid <$> readTVarIO tableVar
+            , mrList = fmap (fmap fst) . Map.toList <$> readTVarIO tableVar
+            }

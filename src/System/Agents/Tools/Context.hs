@@ -69,6 +69,7 @@ import qualified Data.Map.Strict as Map
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
+import System.Agents.Session.Mailbox (MailRouter)
 import System.Agents.Session.Types (Envelope, Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
 import System.Agents.Tools.Bindings.Types (DerivedNarrowing (..), ScopedBinding (..))
 import System.Agents.Tools.Params.Types (ParamValue (..), Params)
@@ -317,6 +318,12 @@ data ToolExecutionContext = ToolExecutionContext
     so every call in the turn shares the same view of "what's new".
     'Nothing' when the agent has no mailbox.
     -}
+    , ctxMailRouter :: Maybe MailRouter
+    {- ^ Phase 4 (@todos/session-mailbox.md@ §5): optional process-wide
+    table of live mailboxes, used by @send-message@ \/ @spawn-session@ to
+    address another session by id. Copied straight from 'Agent.ctxMailRouter'.
+    'Nothing' when the agent has no router.
+    -}
     , ctxSessionToolCalls :: [TrackedToolCall]
     {- ^ Tracked calls of the session's unfinished turns. Lets the
     tool-call capabilities answer about calls that have no OS entity —
@@ -457,6 +464,7 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> pure Nothing
             <*> pure Nothing
+            <*> pure Nothing
             <*> pure []
             <*> pure Map.empty
             <*> pure []
@@ -533,6 +541,7 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = tecsParams snap
         , ctxInheritedBindings = tecsInheritedBindings snap
@@ -569,6 +578,7 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = Map.empty
         , ctxInheritedBindings = []
@@ -613,6 +623,7 @@ mkMinimalContext sessId convId tId portal =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = Map.empty
         , ctxInheritedBindings = []
@@ -665,6 +676,7 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = Map.empty
         , ctxInheritedBindings = []
@@ -719,6 +731,7 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
         , ctxSessionToolCalls = []
         , ctxParams = Map.empty
         , ctxInheritedBindings = []
@@ -766,6 +779,7 @@ mkSubcallContext baseCtx mWorld mEventQueue parentConvId =
           ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
         , ctxAwaitMail = Nothing
+        , ctxMailRouter = Nothing
         , ctxSessionToolCalls = []
         }
 

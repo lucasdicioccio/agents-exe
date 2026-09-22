@@ -904,6 +904,9 @@ data SystemToolCapability
     | -- | Block until a named call is final, any call is final, mail
       -- arrives, or a timeout elapses (@todos/session-mailbox.md@ §3)
       SystemToolWait
+    | -- | Send agent-to-agent mail to another session by id
+      -- (@todos/session-mailbox.md@ §5, Phase 4)
+      SystemToolSendMessage
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -927,6 +930,7 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolListRunningToolCalls = Aeson.String "list-running-tool-calls"
     toJSON SystemToolCancelToolCall = Aeson.String "cancel-tool-call"
     toJSON SystemToolWait = Aeson.String "wait"
+    toJSON SystemToolSendMessage = Aeson.String "send-message"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -951,7 +955,8 @@ instance FromJSON SystemToolCapability where
             "list-running-tool-calls" -> return SystemToolListRunningToolCalls
             "cancel-tool-call" -> return SystemToolCancelToolCall
             "wait" -> return SystemToolWait
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait."
+            "send-message" -> return SystemToolSendMessage
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait, send-message."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 

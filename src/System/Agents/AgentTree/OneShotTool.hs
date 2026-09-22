@@ -352,6 +352,10 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                     , SessionBase.ctxEventQueue = mEventQueue
                     , SessionBase.ctxParams = Map.union withOverlay sessionAgent0.ctxParams
                     , SessionBase.ctxInheritedBindings = restBindings
+                    , -- Phase 4 (@todos/session-mailbox.md@ §5, D12): handed
+                      -- down the same way as ctxWorld/ctxEventQueue, so a
+                      -- deeply-nested helper can still send-message.
+                      SessionBase.ctxMailRouter = Ctx.ctxMailRouter ctx
                     }
 
         -- Set the query on the agent

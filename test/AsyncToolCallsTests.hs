@@ -975,4 +975,5 @@ mkAgent world strategy tool =
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing
+        , ctxMailRouter = Nothing
         }

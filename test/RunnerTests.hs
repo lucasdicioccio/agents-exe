@@ -14,10 +14,12 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
+import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (getCurrentTime)
+import qualified Data.UUID as UUID
 import Data.UUID.V4 (nextRandom)
 import Database.SQLite.Simple (open)
 import Prod.Tracer (Tracer (..), silent)
@@ -38,10 +40,15 @@ import System.Agents.Host
 import System.Agents.Host.Runner
 import System.Agents.Session.Async (ContinuationStore (..), mkSqliteContinuationStore)
 import System.Agents.Session.Base hiding (SessionProgress (..))
+import System.Agents.Session.Mailbox (MailboxInfo (..), MailRouter (..))
 import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.SessionStore
 import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM)
 import qualified System.Agents.Tools.IO as IOTools
+import System.Agents.Tools.Context (ToolExecutionContext (..), ToolPortal, ToolResult (..), mkMinimalContext)
+import qualified System.Agents.Tools.Context as Ctx
+import qualified System.Agents.Tools.SystemToolbox.Mail as Mail
+import System.Agents.Tools.SystemToolbox.Types (SendMessageParams (..), SendMessageResult (..))
 
 tests :: TestTree
 tests =
@@ -59,6 +66,8 @@ tests =
         , testCase "withHost loads agents and serves sessions from a database file" withHostTest
         , testCase "a subscriber skips other sessions' events" subscribeFilterTest
         , testCase "stored agents survive a restart; a file agent hides a stored one" storedAgentsTest
+        , testCase "the server's MailRouter resolves a stored session on demand" serverMailRouterTest
+        , testCase "send-message delivers agent-to-agent mail the recipient can read" sendMessageTest
         ]
 
 -------------------------------------------------------------------------------
@@ -369,6 +378,86 @@ storedAgentsTest =
             deleteStoredAgent host "helper" >>= (@?= Left (NoStoredAgent "helper"))
         withHost (cfg ["smoke"]) silent $ \host ->
             Map.keys <$> hostAllAgents host >>= (@?= ["smoke"])
+
+-- | 'serverMailRouter' (@todos/session-mailbox.md@, Phase 4) resolves any
+-- stored session on demand, without needing prior registration.
+serverMailRouterTest :: Assertion
+serverMailRouterTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (const mockCompletion)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
+        _ <- expectRight =<< awaitRun runner meta.smSessionId 5
+        let router = serverMailRouter runner
+        found <- router.mrLookup meta.smSessionId
+        case found of
+            Nothing -> assertFailure "expected the just-created session to be found"
+            Just (info, _mb) -> info.miAgentSlug @?= Just "test-agent"
+        listed <- router.mrList
+        meta.smSessionId `elem` map fst listed @?= True
+        unknownSid <- SessionId <$> nextRandom
+        unknownFound <- router.mrLookup unknownSid
+        isJust unknownFound @?= False
+
+-- | @send-message@ posts an 'AgentMessage' envelope the recipient's own
+-- durable mailbox (hence its own R1/R2) will see.
+sendMessageTest :: Assertion
+sendMessageTest = do
+    senderNode <- testNode "{}"
+    recipientNode <- testNode "{}"
+    host <- testHost [senderNode, recipientNode] (const mockCompletion)
+    withSessionRunner host $ \runner -> do
+        senderMeta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
+        _ <- expectRight =<< awaitRun runner senderMeta.smSessionId 5
+        recipientMeta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        _ <- expectRight =<< awaitRun runner recipientMeta.smSessionId 5
+
+        let router = serverMailRouter runner
+            senderSid = senderMeta.smSessionId
+            recipientSid = recipientMeta.smSessionId
+            recipientText = case recipientSid of SessionId uuid -> UUID.toText uuid
+        turnId <- newTurnId
+        let ctx =
+                (mkMinimalContext senderSid (sessionIdToConversationId senderSid) turnId dummyPortal)
+                    { Ctx.ctxMailRouter = Just router
+                    }
+            params =
+                SendMessageParams
+                    { smpTo = recipientText
+                    , smpText = "how's it going?"
+                    , smpInReplyTo = Nothing
+                    , smpExpectsReply = True
+                    , smpInterrupt = False
+                    }
+        result <- Mail.sendMessageToSession ctx params
+        sendResult <- expectRight result
+        smrRecipientStatus sendResult @?= "idle"
+
+        mb <- newDurableMailbox host.hostMail recipientSid
+        unread <- atomically (mbUnread mb 0)
+        case [e | e <- unread, matchesAgentMessage e] of
+            [e] -> do
+                e.envFrom @?= FromSession senderSid (Just "test-agent")
+                case e.envBody of
+                    AgentMessage txt _ expectsReply -> do
+                        txt @?= "how's it going?"
+                        expectsReply @?= True
+                    other -> assertFailure ("expected AgentMessage, got " <> show other)
+            other -> assertFailure ("expected exactly one AgentMessage envelope, got " <> show (length other))
+  where
+    matchesAgentMessage :: Envelope -> Bool
+    matchesAgentMessage e = case e.envBody of
+        AgentMessage{} -> True
+        _ -> False
+
+    dummyPortal :: ToolPortal
+    dummyPortal _ _ =
+        pure $
+            ToolResult
+                { resultData = Aeson.object []
+                , resultDuration = 0
+                , resultTraceId = "dummy"
+                }
 
 -------------------------------------------------------------------------------
 -- Fixtures

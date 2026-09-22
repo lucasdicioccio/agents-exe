@@ -130,6 +130,7 @@ import qualified System.Agents.Tools.PostgRESToolbox as PostgRESToolbox
 import qualified System.Agents.Tools.SqliteToolbox as SqliteTools
 import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import qualified System.Agents.Tools.SystemToolbox.ToolCallStatus as ToolCallStatus
+import qualified System.Agents.Tools.SystemToolbox.Mail as Mail
 
 type Tool call = ToolBase.Tool Trace call
 
@@ -1134,6 +1135,43 @@ buildSystemToolParams box =
                 , propertyRequired = False
                 }
 
+        -- send-message parameters
+        sendMessageToParam =
+            ParamProperty
+                { propertyKey = "to"
+                , propertyType = StringParamType
+                , propertyDescription = "For send-message: The recipient session's id"
+                , propertyRequired = False
+                }
+        sendMessageTextParam =
+            ParamProperty
+                { propertyKey = "text"
+                , propertyType = StringParamType
+                , propertyDescription = "For send-message: The message text"
+                , propertyRequired = False
+                }
+        sendMessageInReplyToParam =
+            ParamProperty
+                { propertyKey = "in_reply_to"
+                , propertyType = StringParamType
+                , propertyDescription = "For send-message: Optional id of the mail this message answers"
+                , propertyRequired = False
+                }
+        sendMessageExpectsReplyParam =
+            ParamProperty
+                { propertyKey = "expects_reply"
+                , propertyType = BoolParamType
+                , propertyDescription = "For send-message: Hint that the recipient is expected to reply (default: false)"
+                , propertyRequired = False
+                }
+        sendMessageInterruptParam =
+            ParamProperty
+                { propertyKey = "interrupt"
+                , propertyType = BoolParamType
+                , propertyDescription = "For send-message: Send as Interrupt priority (default: false)"
+                , propertyRequired = False
+                }
+
         -- cancel-tool-call optional reason
         cancelReasonParam =
             ParamProperty
@@ -1214,6 +1252,16 @@ buildSystemToolParams box =
                    )
                 ++ (if hasCapability SystemToolCancelToolCall then [cancelReasonParam] else [])
                 ++ (if hasCapability SystemToolWait then [waitForTargetParam] else [])
+                ++ ( if hasCapability SystemToolSendMessage
+                        then
+                            [ sendMessageToParam
+                            , sendMessageTextParam
+                            , sendMessageInReplyToParam
+                            , sendMessageExpectsReplyParam
+                            , sendMessageInterruptParam
+                            ]
+                        else []
+                   )
      in
         baseParams ++ optionalParams
 
@@ -1238,6 +1286,7 @@ capabilityToText SystemToolGetToolCallStatus = "get-tool-call-status"
 capabilityToText SystemToolListRunningToolCalls = "list-running-tool-calls"
 capabilityToText SystemToolCancelToolCall = "cancel-tool-call"
 capabilityToText SystemToolWait = "wait"
+capabilityToText SystemToolSendMessage = "send-message"
 
 {- | Register all tools from a System toolbox.
 
@@ -1848,7 +1897,9 @@ systemTool box =
                                         then handleCancel ctx v
                                         else if cap == "wait"
                                             then handleWait ctx v
-                                            else do
+                                            else if cap == "send-message"
+                                                then handleSendMessage ctx v
+                                                else do
                                             -- Extract optional parameters for session introspection capabilities
                                             let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
                                                     Just (Aeson.String sid) -> Just sid
@@ -1905,6 +1956,19 @@ systemTool box =
                     Left err -> pure $ SystemToolError call err
                     Right waitResult ->
                         pure $ SystemToolResult call $ SystemTools.QueryResult "wait" (Aeson.toJSON waitResult) 0
+
+    -- Handle the send-message capability (todos/session-mailbox.md, Phase 4)
+    handleSendMessage :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleSendMessage ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.SendMessageParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success sendParams -> do
+                result <- Mail.sendMessageToSession ctx sendParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right sendResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "send-message" (Aeson.toJSON sendResult) 0
 
     -- Handle the cancel-tool-call capability
     handleCancel :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())

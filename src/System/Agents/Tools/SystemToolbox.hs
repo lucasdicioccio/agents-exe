@@ -71,6 +71,11 @@ module System.Agents.Tools.SystemToolbox (
     waitForCallsOrMail,
     clampWaitSeconds,
 
+    -- * Agent-to-agent mail (re-exported from Mail)
+    SendMessageParams (..),
+    SendMessageResult (..),
+    sendMessageToSession,
+
     -- * Initialization (re-exported from Core)
     initializeToolbox,
     initializeToolboxWithSessionIntrospection,
@@ -132,4 +137,5 @@ import System.Agents.Tools.SystemToolbox.Formatting
 import System.Agents.Tools.SystemToolbox.Media
 import System.Agents.Tools.SystemToolbox.Session
 import System.Agents.Tools.SystemToolbox.ToolCallStatus
+import System.Agents.Tools.SystemToolbox.Mail
 import System.Agents.Tools.SystemToolbox.Types

@@ -947,6 +947,7 @@ mkAgentWithWorld world mode policy =
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing
+        , ctxMailRouter = Nothing
         }
 
 -------------------------------------------------------------------------------

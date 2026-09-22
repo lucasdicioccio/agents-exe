@@ -1151,6 +1151,10 @@ buildContext agent sess convId =
               -- from this session's current cursor, so every tool call in
               -- the turn shares the same view of "what mail is new".
               Ctx.ctxAwaitMail = fmap (\mb -> awaitMail mb sess.mailCursor (const True)) agent.ctxMailbox
+            , -- Phase 4 (@todos/session-mailbox.md@ §5): copied straight
+              -- through so send-message/spawn-session can address other
+              -- sessions.
+              Ctx.ctxMailRouter = agent.ctxMailRouter
             , -- Cheap view of the calls the capabilities may be asked about,
               -- including calls left behind by an earlier process.
               Ctx.ctxSessionToolCalls = sessionTrackedCalls sess

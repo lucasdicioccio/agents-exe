@@ -38,6 +38,7 @@ module System.Agents.Host.Runner (
     resume,
     completeCall,
     cancelRun,
+    serverMailRouter,
     getSession,
     awaitRun,
     recoverOnStartup,
@@ -452,7 +453,41 @@ newAgent runner live node = do
     -- durable mailbox, hydrated from 'hostMail', so 'postMessage' can always
     -- accept mail (G2) and R1/R2 fold it into the session's turns.
     mailbox <- newDurableMailbox host.hostMail sid
-    pure $ withMailbox mailbox $ withExecutionMode Asynchronous agent
+    pure $
+        withMailRouter (serverMailRouter runner) $
+            withMailbox mailbox $
+                withExecutionMode Asynchronous agent
+
+{- | The server's 'MailRouter' (@todos/session-mailbox.md@, Phase 4, §5,
+D12). Every session on the server is durable, so unlike the TUI or @run@
+there is nothing to register: any session id can be looked up on demand by
+loading its 'SessionMeta' and opening its durable mailbox, per the spec's
+own routing table ("durable mail; unknown-but-stored sessions are loaded
+on demand").
+-}
+serverMailRouter :: SessionRunner -> MailRouter
+serverMailRouter runner =
+    MailRouter
+        { mrRegister = \_sid _info _mb -> pure (pure ())
+        , mrLookup = \sid -> do
+            mMeta <- sbLoadMeta runner.srHost.hostBackend sid
+            case mMeta of
+                Nothing -> pure Nothing
+                Just (_sess, meta) -> do
+                    mb <- newDurableMailbox runner.srHost.hostMail sid
+                    pure $ Just (metaToMailboxInfo meta, mb)
+        , mrList = do
+            metas <- sbQuery runner.srHost.hostBackend allSessionsQuery
+            pure [(meta.smSessionId, metaToMailboxInfo meta) | meta <- metas]
+        }
+  where
+    metaToMailboxInfo :: SessionMeta -> MailboxInfo
+    metaToMailboxInfo meta =
+        MailboxInfo
+            { miAgentSlug = meta.smAgent
+            , miParent = meta.smParent
+            , miStatus = sessionStatusText meta.smStatus
+            }
 
 -------------------------------------------------------------------------------
 -- Session-level parameters (todos/tool-partial-application.md, Phase 4)

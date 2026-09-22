@@ -111,6 +111,7 @@ mkAsyncAgent policy =
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing
+        , ctxMailRouter = Nothing
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

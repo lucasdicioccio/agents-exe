@@ -158,6 +158,7 @@ library agents-lib
                     , System.Agents.Tools.SystemToolbox.SystemInfo
                     , System.Agents.Tools.SystemToolbox.Types
                     , System.Agents.Tools.SystemToolbox.ToolCallStatus
+                    , System.Agents.Tools.SystemToolbox.Mail
                     , System.Agents.Tools.Trace
                     , System.Agents.Tools.Validation
                     , System.Agents.LLMs.OpenAI

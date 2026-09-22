@@ -38,6 +38,8 @@ module System.Agents.Tools.SystemToolbox.Types (
     WaitParams (..),
     WaitResult (..),
     maxWaitSeconds,
+    SendMessageParams (..),
+    SendMessageResult (..),
 
     -- * Query errors
     QueryError (..),
@@ -493,6 +495,69 @@ instance FromJSON WaitResult where
 -- each other time out instead of deadlocking".
 maxWaitSeconds :: Int
 maxWaitSeconds = 300
+
+-------------------------------------------------------------------------------
+-- send-message (todos/session-mailbox.md, Phase 4, §5)
+-------------------------------------------------------------------------------
+
+{- | Parameters for a @send-message@ call: agent-to-agent mail, addressed by
+'SessionId' text.
+-}
+data SendMessageParams = SendMessageParams
+    { smpTo :: Text
+    -- ^ The recipient session's id, as text
+    , smpText :: Text
+    , smpInReplyTo :: Maybe Text
+    -- ^ A 'System.Agents.Session.Types.MessageId' this message answers, as text
+    , smpExpectsReply :: Bool
+    , smpInterrupt :: Bool
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON SendMessageParams where
+    parseJSON = Aeson.withObject "SendMessageParams" $ \v ->
+        SendMessageParams
+            <$> v .: "to"
+            <*> v .: "text"
+            <*> v .:? "in_reply_to"
+            <*> v .:? "expects_reply" .!= False
+            <*> v .:? "interrupt" .!= False
+
+instance ToJSON SendMessageParams where
+    toJSON p =
+        Aeson.object $
+            [ "to" .= smpTo p
+            , "text" .= smpText p
+            , "expects_reply" .= smpExpectsReply p
+            , "interrupt" .= smpInterrupt p
+            ]
+                ++ ["in_reply_to" .= r | Just r <- [smpInReplyTo p]]
+
+-- | Result of a @send-message@ call: the receipt plus the recipient's status.
+data SendMessageResult = SendMessageResult
+    { smrMessageId :: Text
+    , smrSeq :: Int
+    , smrDuplicate :: Bool
+    , smrRecipientStatus :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON SendMessageResult where
+    toJSON r =
+        Aeson.object
+            [ "message_id" .= smrMessageId r
+            , "seq" .= smrSeq r
+            , "duplicate" .= smrDuplicate r
+            , "recipient_status" .= smrRecipientStatus r
+            ]
+
+instance FromJSON SendMessageResult where
+    parseJSON = Aeson.withObject "SendMessageResult" $ \v ->
+        SendMessageResult
+            <$> v .: "message_id"
+            <*> v .: "seq"
+            <*> v .: "duplicate"
+            <*> v .: "recipient_status"
 
 -------------------------------------------------------------------------------
 -- Query Errors

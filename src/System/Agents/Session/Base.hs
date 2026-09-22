@@ -73,6 +73,9 @@ module System.Agents.Session.Base (
     mailboxMaxUnread,
     MailStore (..),
     newDurableMailbox,
+    MailboxInfo (..),
+    MailRouter (..),
+    newMailRouter,
 
     -- * Byte usage tracking
     StepByteUsage (..),
@@ -174,6 +177,7 @@ module System.Agents.Session.Base (
     withAsyncEngine,
     withAsyncYieldStrategy,
     withMailbox,
+    withMailRouter,
 ) where
 
 import Control.Concurrent.STM (TQueue)
@@ -186,6 +190,9 @@ import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
 import System.Agents.Session.Mailbox (
     Mailbox (..),
+    MailboxInfo (..),
+    MailRouter (..),
+    newMailRouter,
     MailStore (..),
     awaitMail,
     mailboxMaxUnread,
@@ -407,6 +414,12 @@ data Agent r = Agent
     has nothing else to do (R2). 'Nothing' keeps every existing code path
     (including 'usrQuery') unchanged.
     -}
+    , ctxMailRouter :: Maybe MailRouter
+    {- ^ Optional process-wide table of live mailboxes (@todos/session-mailbox.md@,
+    Phase 4, D12). When present, 'System.Agents.Tools.SystemToolbox' capabilities
+    like @send-message@ can address another session by id. Handed down to
+    sub-agents the same way 'ctxWorld' \/ 'ctxEventQueue' are.
+    -}
     }
     deriving (Functor)
 
@@ -436,6 +449,18 @@ mailboxAgent = withMailbox mb baseAgent
 -}
 withMailbox :: Mailbox -> Agent r -> Agent r
 withMailbox mb agent = agent{ctxMailbox = Just mb}
+
+{- | Install a mail router on an agent (@todos/session-mailbox.md@, Phase 4).
+
+Example:
+
+@
+router <- newMailRouter
+routedAgent = withMailRouter router baseAgent
+@
+-}
+withMailRouter :: MailRouter -> Agent r -> Agent r
+withMailRouter router agent = agent{ctxMailRouter = Just router}
 
 {- | Set the execution mode for an agent.
 
