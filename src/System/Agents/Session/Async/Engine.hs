@@ -346,7 +346,11 @@ startCall engine _batch baseCtx tc = do
     eid <- requireEntityId tc
     let emit = emitActivity baseCtx tc
     let onProgress payload = makeProgressCallback world eid payload >> emit (ToolCallProgressed payload)
-    let ctx = baseCtx{ctxProgressCallback = Just onProgress}
+    let ctx =
+            baseCtx
+                { ctxProgressCallback = Just onProgress
+                , ctxRecordChildSession = Just (TCT.recordChildSession world eid)
+                }
     a <- async $ (`finally` unregister) $ do
         bracket_ (waitQSem sem) (signalQSem sem) $ do
             TCT.startToolCall world eid

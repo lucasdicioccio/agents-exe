@@ -74,6 +74,9 @@ module System.Agents.Session.Types (
     Sender (..),
     ControlMsg (..),
     MailScope (..),
+    WakeOnKind (..),
+    defaultWakeOn,
+    senderWakeKind,
     MailBody (..),
     Envelope (..),
     Outgoing (..),
@@ -741,6 +744,16 @@ data TrackedToolCall = TrackedToolCall
     envelope arrived while it was attached. Rendered on the @running@
     placeholder so the LLM knows why (see 'partialToolMessages').
     -}
+    , tcChildSessionId :: Maybe SessionId
+    {- ^ Phase 4 (@todos/session-mailbox.md@ §5): for a @prompt_agent_\<slug\>@
+    call, the id of the sub-agent session it started, once known. Copied
+    from the call's OS entity by 'System.Agents.Session.Step.pollRunningCall'
+    (see 'ctxRecordChildSession' on 'System.Agents.Tools.Context.ToolExecutionContext').
+    'Nothing' for every other kind of call, and for a sub-agent call whose
+    child session isn't known yet. Rendered on a detached @running@
+    placeholder (see 'partialToolMessages') so the parent can
+    @send-message@ a helper that is still working.
+    -}
     }
     deriving (Show, Eq, Ord, Generic)
 
@@ -758,6 +771,7 @@ instance ToJSON TrackedToolCall where
                 ++ ["deliveredLate" .= True | tc.tcDeliveredLate]
                 ++ ["attachDeadline" .= d | Just d <- [tc.tcAttachDeadline]]
                 ++ ["detachedReason" .= r | Just r <- [tc.tcDetachedReason]]
+                ++ ["childSessionId" .= s | Just s <- [tc.tcChildSessionId]]
 
 instance FromJSON TrackedToolCall where
     parseJSON = Aeson.withObject "TrackedToolCall" $ \v ->
@@ -772,6 +786,7 @@ instance FromJSON TrackedToolCall where
             <*> v .:? "deliveredLate" .!= False
             <*> v .:? "attachDeadline"
             <*> v .:? "detachedReason"
+            <*> v .:? "childSessionId"
 
 -------------------------------------------------------------------------------
 -- Session Mailbox (Phase 1 of the session-mailbox spec, see
@@ -907,6 +922,55 @@ instance FromJSON MailScope where
         "subtree" -> pure MailScopeSubtree
         "all" -> pure MailScopeAll
         _ -> fail $ "Unknown MailScope: " ++ Text.unpack t
+
+{- | §5 "Scheduling rule": which senders' mail alone may make an idle
+session runnable again. Mail from a sender not in an agent's @wakeOn@ list
+is still queued (delivered whenever something else does start a run) —
+this only gates whether the mail *by itself* is enough.
+-}
+data WakeOnKind
+    = WakeOnUser
+    | WakeOnTool
+    | WakeOnParent
+    | WakeOnChild
+    | WakeOnPeer
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON WakeOnKind where
+    toJSON kind = Aeson.String $ case kind of
+        WakeOnUser -> "user"
+        WakeOnTool -> "tool"
+        WakeOnParent -> "parent"
+        WakeOnChild -> "child"
+        WakeOnPeer -> "peer"
+
+instance FromJSON WakeOnKind where
+    parseJSON = Aeson.withText "WakeOnKind" $ \t -> case t of
+        "user" -> pure WakeOnUser
+        "tool" -> pure WakeOnTool
+        "parent" -> pure WakeOnParent
+        "child" -> pure WakeOnChild
+        "peer" -> pure WakeOnPeer
+        _ -> fail $ "Unknown WakeOnKind: " ++ Text.unpack t
+
+-- | The default @wakeOn@ list (§5): every category but 'WakeOnPeer'.
+defaultWakeOn :: [WakeOnKind]
+defaultWakeOn = [WakeOnUser, WakeOnTool, WakeOnParent, WakeOnChild]
+
+{- | Best-effort classification of an envelope's sender into a 'WakeOnKind'
+(§5). 'FromSession' is classified as 'WakeOnPeer': distinguishing a parent
+from a child from a genuine peer needs the *recipient's* lineage, which a
+pure function over the envelope alone cannot resolve (a caller with a
+'System.Agents.Session.Mailbox.MailRouter' in scope, e.g. a future watch or
+send-message auto-wake, can classify more precisely by walking lineage
+itself before falling back to this).
+-}
+senderWakeKind :: Sender -> WakeOnKind
+senderWakeKind sender = case sender of
+    FromUser _ -> WakeOnUser
+    FromToolCall _ -> WakeOnTool
+    FromSystem _ -> WakeOnTool
+    FromSession{} -> WakeOnPeer
 
 {- | The payload of an 'Envelope'.
 
@@ -1596,6 +1660,7 @@ migrateLegacyPartialTurn completed pending =
             , tcDeliveredLate = False
             , tcAttachDeadline = Nothing
             , tcDetachedReason = Nothing
+            , tcChildSessionId = Nothing
             }
     mkPending idx call =
         TrackedToolCall
@@ -1609,6 +1674,7 @@ migrateLegacyPartialTurn completed pending =
             , tcDeliveredLate = False
             , tcAttachDeadline = Nothing
             , tcDetachedReason = Nothing
+            , tcChildSessionId = Nothing
             }
 
 -- | Completed tool calls with their responses (backward-compatible view).
@@ -1660,6 +1726,7 @@ partialToolMessages content =
                     ]
                         ++ ["detached" .= reason | Just reason <- [tc.tcDetachedReason]]
                         ++ ["tool_call_id" .= tid | Just tid <- [providerToolCallId tc.tcCall]]
+                        ++ ["childSessionId" .= sid | Just sid <- [tc.tcChildSessionId]]
 
 -- | Tool calls that still need execution (backward-compatible view).
 partialPendingCalls :: PartialUserTurnContent -> [LlmToolCall]

@@ -20,6 +20,7 @@ import System.Timeout (timeout)
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import Data.Aeson (decode, encode)
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import Database.SQLite.Simple (open)
 
@@ -43,6 +44,8 @@ tests =
         , durableMailboxHydratesFromStoreTest
         , durableMailboxWritesThroughTest
         , sqliteMailStoreRoundTripsTest
+        , wakeOnKindJsonRoundTripTest
+        , senderWakeKindClassifiesSendersTest
         ]
 
 -------------------------------------------------------------------------------
@@ -291,3 +294,21 @@ sqliteMailStoreRoundTripsTest =
         unread <- atomically (mb2.mbUnread 0)
         length unread @?= 2
         map envSeq unread @?= [1, 2]
+
+-- | 'WakeOnKind' round-trips through its tag-based JSON (§5 "Scheduling rule").
+wakeOnKindJsonRoundTripTest :: TestTree
+wakeOnKindJsonRoundTripTest =
+    testCase "WakeOnKind round-trips through JSON" $ do
+        forM_ [WakeOnUser, WakeOnTool, WakeOnParent, WakeOnChild, WakeOnPeer] $ \kind ->
+            decode (encode kind) @?= Just kind
+        defaultWakeOn @?= [WakeOnUser, WakeOnTool, WakeOnParent, WakeOnChild]
+
+-- | 'senderWakeKind' classifies each 'Sender' constructor it can tell apart
+-- without a lineage lookup.
+senderWakeKindClassifiesSendersTest :: TestTree
+senderWakeKindClassifiesSendersTest =
+    testCase "senderWakeKind classifies user/tool/system senders" $ do
+        senderWakeKind (FromUser Nothing) @?= WakeOnUser
+        senderWakeKind (FromToolCall (ToolCallId nil)) @?= WakeOnTool
+        senderWakeKind (FromSystem "completeCall") @?= WakeOnTool
+        senderWakeKind (FromSession testSessionId Nothing) @?= WakeOnPeer

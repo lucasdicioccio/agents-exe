@@ -14,7 +14,7 @@ import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, flushTQueue, newTQueueIO)
 import Control.Exception (IOException, onException, throwIO, try)
 import Control.Monad (void)
-import Data.Aeson (Value (..), object, (.=))
+import Data.Aeson (Value (..), object, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import System.IO.Error (ioeGetErrorString)
@@ -29,7 +29,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@=?), (@?=))
 
 import qualified System.Agents.Base as Base
-import System.Agents.OS.Conversation.ToolCalls (registerToolCallComponents)
+import System.Agents.OS.Conversation.ToolCalls (createToolCallEntity, recordChildSession, registerToolCallComponents)
 import System.Agents.OS.Core.Types (EntityId (..))
 import System.Agents.OS.Core.World (World, newWorld)
 import System.Agents.OS.Events (OSEvent (..), ToolCallActivity (..), ToolCallPhase (..))
@@ -37,7 +37,7 @@ import System.Agents.Session.Base
 import System.Agents.SessionStore (readSessionFromFile, storeSessionToFile)
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
 import System.Agents.Session.Loop (isBlockedOnDeferredCalls, runUntilBlocked)
-import System.Agents.Session.Step (buildContext, naiveTilNoToolCallStep, runStepMAsync)
+import System.Agents.Session.Step (buildContext, naiveTilNoToolCallStep, pollRunningCall, runStepMAsync)
 import System.Directory (doesFileExist)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
@@ -109,6 +109,13 @@ tests =
             , testCase "wait wakes on mail without consuming it" waitWakesOnMail
             , testCase "wait times out when nothing happens" waitTimesOut
             , testCase "clampWaitSeconds caps at maxWaitSeconds" clampWaitSecondsCapsRequest
+            ]
+        , testGroup
+            "Phase 4: detached sub-agent calls expose their child session id"
+            [ testCase "pollRunningCall copies a recorded child session id onto the tracked call" pollRunningCallCopiesChildSessionId
+            , testCase "pollRunningCall leaves tcChildSessionId absent for an ordinary call" pollRunningCallLeavesChildSessionIdAbsent
+            , testCase "a running placeholder includes childSessionId when known" placeholderIncludesChildSessionId
+            , testCase "a running placeholder omits childSessionId for an ordinary call" placeholderOmitsChildSessionIdByDefault
             ]
         , testGroup
             "subprocess output"
@@ -701,6 +708,68 @@ clampWaitSecondsCapsRequest = do
     clampWaitSeconds (-5) @?= 0
     clampWaitSeconds 30 @?= 30
 
+{- | 'pollRunningCall' copies a child session id from a call's OS entity onto
+the tracked call while it is still 'Running', once
+'System.Agents.OS.Conversation.ToolCalls.recordChildSession' has written it
+(the async engine's 'ctxRecordChildSession' hook does this for a
+@prompt_agent_\<slug\>@ call once its child session exists).
+-}
+pollRunningCallCopiesChildSessionId :: Assertion
+pollRunningCallCopiesChildSessionId = do
+    world <- mkWorld
+    sid <- newSessionId
+    tid <- newTurnId
+    callId <- newToolCallId
+    eid <- createToolCallEntity world sid convId tid Nothing "prompt_agent_helper" Null callId
+    childSid <- newSessionId
+    recordChildSession world eid childSid
+    let agent = mkAgent world YieldWhenAllDone (\_ _ -> pure (TextResponse "unused"))
+    sess <- newSessionFromPrompt sid (SystemPrompt "sys") [] (UserQuery "hi" [])
+    let ctx = buildContext agent sess convId
+        tc = (trackedCall Running){tcId = callId, tcEntityId = Just eid}
+    tc' <- pollRunningCall ctx tc
+    tc'.tcChildSessionId @?= Just childSid
+    tc'.tcState @?= Running
+
+-- | An ordinary call's OS entity never has a recorded child session, so
+-- 'pollRunningCall' leaves 'tcChildSessionId' absent.
+pollRunningCallLeavesChildSessionIdAbsent :: Assertion
+pollRunningCallLeavesChildSessionIdAbsent = do
+    world <- mkWorld
+    sid <- newSessionId
+    tid <- newTurnId
+    callId <- newToolCallId
+    eid <- createToolCallEntity world sid convId tid Nothing "bash_command" Null callId
+    let agent = mkAgent world YieldWhenAllDone (\_ _ -> pure (TextResponse "unused"))
+    sess <- newSessionFromPrompt sid (SystemPrompt "sys") [] (UserQuery "hi" [])
+    let ctx = buildContext agent sess convId
+        tc = (trackedCall Running){tcId = callId, tcEntityId = Just eid}
+    tc' <- pollRunningCall ctx tc
+    tc'.tcChildSessionId @?= Nothing
+
+-- | A detached (@running@) placeholder includes @childSessionId@ when the
+-- tracked call has one, so the caller can @send-message@ a helper that is
+-- still working.
+placeholderIncludesChildSessionId :: Assertion
+placeholderIncludesChildSessionId = do
+    childSid <- newSessionId
+    let tc = (trackedCall Running){tcChildSessionId = Just childSid}
+        content = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [tc] []
+    case partialToolMessages content of
+        [(_, JsonResponse (Object obj))] ->
+            KeyMap.lookup "childSessionId" obj @?= Just (toJSON childSid)
+        other -> assertFailure $ "expected one JSON placeholder, got " <> show other
+
+-- | An ordinary detached call's placeholder has no @childSessionId@ key.
+placeholderOmitsChildSessionIdByDefault :: Assertion
+placeholderOmitsChildSessionIdByDefault = do
+    let tc = trackedCall Running
+        content = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [tc] []
+    case partialToolMessages content of
+        [(_, JsonResponse (Object obj))] ->
+            assertBool "no childSessionId key" (not (KeyMap.member "childSessionId" obj))
+        other -> assertFailure $ "expected one JSON placeholder, got " <> show other
+
 processReportsOutput :: Assertion
 processReportsOutput = do
     reports <- newIORef []
@@ -831,6 +900,9 @@ trackedCall st =
         , tcPolicy = AppliedPolicy (RunAsync Nothing) Nothing
         , tcEntityId = Nothing
         , tcDeliveredLate = False
+        , tcAttachDeadline = Nothing
+        , tcDetachedReason = Nothing
+        , tcChildSessionId = Nothing
         }
 
 partialTurns :: Session -> [PartialUserTurnContent]

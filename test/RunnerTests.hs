@@ -84,6 +84,7 @@ tests =
         , testCase "pauseCancelsCalls makes Control Pause cancel attached calls" controlPauseCancelsCallsTest
         , testCase "a paused session refuses ordinary messages by default" controlPauseRefusesMessagesByDefaultTest
         , testCase "resumeOnAnyMail lets postMessage wake a paused session" controlResumeOnAnyMailTest
+        , testCase "wakeOn excluding \"user\" still refuses an ordinary message" wakeOnExcludesUserTest
         , testCase "Control (CancelCalls ids) cancels one attached call" controlCancelCallsTest
         , testCase "a background call reports tool.started and tool.completed events" toolCallEventsTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
@@ -224,7 +225,7 @@ recoveryTest = do
     sess0 <- newSessionFromPrompt sid (SystemPrompt "sys") [] (UserQuery "hello" [])
     callId <- newToolCallId
     let running =
-            TrackedToolCall callId slowCall Running Nothing Nothing (AppliedPolicy (RunAsync Nothing) Nothing) Nothing False Nothing Nothing
+            TrackedToolCall callId slowCall Running Nothing Nothing (AppliedPolicy (RunAsync Nothing) Nothing) Nothing False Nothing Nothing Nothing
         llm = LlmTurn (LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) [slowCall]) Nothing
         partial = PartialUserTurn (PartialUserTurnContent (SystemPrompt "sys") [] Nothing [running] []) Nothing
         sess = sess0{turns = partial : llm : sess0.turns}
@@ -816,6 +817,32 @@ controlResumeOnAnyMailTest = do
         (final, _) <- expectRight =<< awaitRun runner sid 5
         final.smStatus @?= StatusIdle
 
+{- | Even with 'resumeOnAnyMail' on, a @wakeOn@ that excludes @\"user\"@
+means an ordinary message does not wake a paused session by itself (§5
+"Scheduling rule": mail outside 'wakeOn' is queued, not a wake trigger).
+-}
+wakeOnExcludesUserTest :: Assertion
+wakeOnExcludesUserTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAllResumeOnAnyMailNoUserWake
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        sendControl runner sid Pause
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, _) <- expectRight =<< awaitRun runner sid 5
+        paused.smStatus @?= StatusPaused
+
+        refused <- postMessage runner sid (message "are you there") (Just UntilBlocked) Map.empty
+        refused @?= Left (NotAcceptingMessages sid StatusPaused)
+
+        -- An explicit resume still works regardless of wakeOn.
+        putMVar gate ()
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+
 -- | 'Control' ('CancelCalls' ids) cancels one specific attached call, which
 -- the run then reports as failed, without stopping the run itself.
 controlCancelCallsTest :: Assertion
@@ -1053,6 +1080,13 @@ backgroundAllResumeOnAnyMail :: String
 backgroundAllResumeOnAnyMail =
     "{\"executionMode\": \"asynchronous\", \"asyncYieldStrategy\": {\"tag\": \"yieldOnTimeout\", \"milliseconds\": 20}, "
         <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runAsync\"}, \"rules\": []}, \"resumeOnAnyMail\": true}"
+
+-- | Like 'backgroundAllResumeOnAnyMail', but with a @wakeOn@ that excludes
+-- @\"user\"@ (Phase 4, §5 "Scheduling rule").
+backgroundAllResumeOnAnyMailNoUserWake :: String
+backgroundAllResumeOnAnyMailNoUserWake =
+    "{\"executionMode\": \"asynchronous\", \"asyncYieldStrategy\": {\"tag\": \"yieldOnTimeout\", \"milliseconds\": 20}, "
+        <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runAsync\"}, \"rules\": []}, \"resumeOnAnyMail\": true, \"wakeOn\": [\"tool\"]}"
 
 {- | Post a 'Control' envelope directly to a session's mailbox, bypassing
 any tool: the way something like a future admin endpoint would reach it.

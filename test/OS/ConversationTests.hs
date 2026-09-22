@@ -632,6 +632,7 @@ jsonRoundTripTests =
                         , tcSessionId = Session.SessionId (read "550e8400-e29b-41d4-a716-446655440002")
                         , tcConversationId = Base.ConversationId (read "550e8400-e29b-41d4-a716-446655440003")
                         , tcProviderCallId = Nothing
+                        , tcChildSessionId = Nothing
                         }
             let json = encode config
             let mDecoded = decode json

@@ -23,7 +23,7 @@ import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
-import System.Agents.Session.Types (AsyncYieldStrategy, Decorator, ExecutionMode, MailScope, ToolCallDisposition)
+import System.Agents.Session.Types (AsyncYieldStrategy, Decorator, ExecutionMode, MailScope, ToolCallDisposition, WakeOnKind)
 
 -- Import FileSandbox types for unified sandboxing
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
@@ -1767,6 +1767,13 @@ data Agent
     , interruptScope :: Maybe MailScope
     {- ^ @todos/session-mailbox.md@ §5 "Permissions": how far this agent's
     'Interrupt' priority may reach. Default 'MailScopeChildren' when unset.
+    -}
+    , wakeOn :: Maybe [WakeOnKind]
+    {- ^ @todos/session-mailbox.md@ §5 "Scheduling rule": which senders'
+    mail alone may make this session runnable again when it is otherwise
+    idle (paused, today, via @resumeOnAnyMail@ -- mail is still queued
+    either way, this only gates whether it wakes the session by itself).
+    Default @[\"user\", \"tool\", \"parent\", \"child\"]@ when unset.
     -}
     }
     deriving (Show, Eq, Generic)

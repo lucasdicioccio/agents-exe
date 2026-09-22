@@ -689,10 +689,15 @@ pollRunningCall ctx tc
     | otherwise =
         case (Ctx.ctxWorld ctx, tcEntityId tc) of
             (Just world, Just eid) -> do
-                mState <- atomically $ getComponent @OSConv.ToolCallState world eid
+                (mState, mChildSessionId) <-
+                    atomically $
+                        (,)
+                            <$> getComponent @OSConv.ToolCallState world eid
+                            <*> ((>>= OSConv.tcChildSessionId) <$> getComponent @OSConv.ToolCallConfig world eid)
+                let tc0 = maybe tc (\sid -> tc{tcChildSessionId = Just sid}) mChildSessionId
                 case mState of
                     Nothing -> pure orphaned
-                    Just st -> updateFromState tc st
+                    Just st -> updateFromState tc0 st
             _ -> pure orphaned
   where
     orphaned =
@@ -1146,6 +1151,7 @@ mkReadyTrackedCall ctx agent call = do
             , tcDeliveredLate = False
             , tcAttachDeadline = Nothing
             , tcDetachedReason = Nothing
+            , tcChildSessionId = Nothing
             }
 
 {- | Ensure every tracked call has a corresponding OS entity when a world is

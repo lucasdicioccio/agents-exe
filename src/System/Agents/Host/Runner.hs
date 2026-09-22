@@ -931,6 +931,15 @@ agentBoolOption runner meta field = do
     mNode <- maybe (pure Nothing) (lookupAgent runner.srHost) meta.smAgent
     pure $ fromMaybe False (mNode >>= field . osNodeConfig)
 
+{- | Whether the given 'WakeOnKind' is in an agent's configured @wakeOn@
+list (§5 "Scheduling rule"), defaulting to 'defaultWakeOn' when unset.
+-}
+agentWakesOn :: SessionRunner -> SessionMeta -> WakeOnKind -> IO Bool
+agentWakesOn runner meta kind = do
+    mNode <- maybe (pure Nothing) (lookupAgent runner.srHost) meta.smAgent
+    let kinds = fromMaybe defaultWakeOn (mNode >>= Base.wakeOn . osNodeConfig)
+    pure (kind `elem` kinds)
+
 {- | Every tracked call visible in the head turn, if it is a
 'PartialUserTurn' -- the only turn shape that still carries per-call state
 (a finalized 'UserTurn' has already folded each call into a plain
@@ -1130,13 +1139,18 @@ postMessage runner sid message mode supplied =
                     -- path below does; treat the message as mail instead
                     -- (like the "busy" case above) and, since nothing is
                     -- running to fold it in, start a run so something does.
-                    -- Only when 'resumeOnAnyMail' says so; an explicit
-                    -- 'resume' call always works regardless ('resume' only
-                    -- checks for an active run, not status).
+                    -- Only when 'resumeOnAnyMail' says so, and only when
+                    -- 'WakeOnUser' mail (this is always a 'postMessage',
+                    -- hence 'FromUser') is in the agent's 'wakeOn' list
+                    -- (§5 "Scheduling rule": mail outside 'wakeOn' does not
+                    -- wake a session by itself). An explicit 'resume' call
+                    -- always works regardless ('resume' only checks for an
+                    -- active run, not status or 'wakeOn').
                     if meta.smStatus == StatusPaused
                         then do
                             resumeOk <- agentBoolOption runner meta Base.resumeOnAnyMail
-                            if not resumeOk
+                            wakesOnUser <- agentWakesOn runner meta WakeOnUser
+                            if not resumeOk || not wakesOnUser
                                 then pure $ Left $ NotAcceptingMessages sid meta.smStatus
                                 else
                                     acceptAsMail live >>= \case

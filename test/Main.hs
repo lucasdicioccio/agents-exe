@@ -297,7 +297,7 @@ agentSerializationTests =
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -331,7 +331,7 @@ agentSerializationTests =
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -367,7 +367,7 @@ agentSerializationTests =
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                     }
             let desc = Base.AgentDescription agent
             let json = encode desc
@@ -409,7 +409,7 @@ agentSerializationTests =
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -456,7 +456,7 @@ agentSerializationTests =
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -500,7 +500,7 @@ agentSerializationTests =
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -628,7 +628,7 @@ bashToolboxTests =
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -663,7 +663,7 @@ bashToolboxTests =
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent

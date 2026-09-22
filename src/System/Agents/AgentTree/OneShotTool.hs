@@ -25,6 +25,7 @@ import Control.Concurrent.STM (TQueue, atomically, newTVarIO, readTVarIO, writeT
 import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
+import Data.Foldable (traverse_)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.Map.Strict as Map
@@ -370,6 +371,13 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
         -- like its conversation so that its own sub-agents can name it as parent
         let subcallSessionId = SessionStore.conversationIdToSessionId subcallBaseConvId
         session0 <- Session [] subcallSessionId Nothing <$> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
+
+        -- Phase 4 (@todos/session-mailbox.md@ §5): report this call's own
+        -- child session id back to its tracking entity (if one is watching,
+        -- i.e. this call is running through the async engine), so a
+        -- detached placeholder can show it and the caller can
+        -- @send-message@ a helper that is still working.
+        traverse_ ($ subcallSessionId) (Ctx.ctxRecordChildSession ctx)
 
         -- Get current time for timestamps
         now <- getCurrentTime

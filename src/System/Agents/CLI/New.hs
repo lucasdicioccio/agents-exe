@@ -274,7 +274,7 @@ buildAgentConfig catalog opts = do
                 , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                 }
 
     pure (presetName, agent)

@@ -309,6 +309,17 @@ data ToolExecutionContext = ToolExecutionContext
     interrupts the background thread and returns 'False' when the engine
     does not own a running call with that id.
     -}
+    , ctxRecordChildSession :: Maybe (SessionId -> IO ())
+    {- ^ Phase 4 (@todos/session-mailbox.md@ §5): optional hook a
+    @prompt_agent_\<slug\>@ call uses to report its own child session id
+    back to its tracking entity, once the child session exists. Built by
+    the async engine per call (it alone knows the call's own 'EntityId')
+    and written onto the call's 'System.Agents.OS.Conversation.Types.ToolCallConfig'
+    component; 'System.Agents.Session.Step.pollRunningCall' copies it onto
+    'TrackedToolCall.tcChildSessionId' so a detached placeholder can show it
+    (see 'System.Agents.Session.Types.partialToolMessages'). 'Nothing' for
+    calls with no OS entity (inline calls) or outside the async engine.
+    -}
     , ctxAwaitMail :: Maybe (STM [Envelope])
     {- ^ Phase 2 (@todos/session-mailbox.md@ §3): optional hook the @wait@
     capability uses to block (in the same 'Control.Concurrent.STM.orElse'
@@ -418,6 +429,8 @@ instance Show ToolExecutionContext where
             ++ progressCallbackStr
             ++ ", ctxCancelToolCall = "
             ++ cancelHookStr
+            ++ ", ctxRecordChildSession = "
+            ++ recordChildSessionStr
             ++ ", ctxSessionToolCalls = "
             ++ show (length (ctxSessionToolCalls ctx))
             ++ ", ctxParams = "
@@ -433,6 +446,7 @@ instance Show ToolExecutionContext where
         eventQueueStr = "<eventQueue>"
         progressCallbackStr = "<progressCallback>"
         cancelHookStr = "<cancelToolCall>"
+        recordChildSessionStr = "<recordChildSession>"
 
 {- | JSON serialization support for 'ToolExecutionContext'.
 Note: The tool portal function, world, and event queue are not serialized.
@@ -474,6 +488,7 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> pure Nothing
             <*> v .: "parentConversation"
+            <*> pure Nothing
             <*> pure Nothing
             <*> pure Nothing
             <*> pure Nothing
@@ -556,6 +571,7 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxParentConversation = tecsParentConversation snap
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
@@ -596,6 +612,7 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
@@ -644,6 +661,7 @@ mkMinimalContext sessId convId tId portal =
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
@@ -700,6 +718,7 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
@@ -758,6 +777,7 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
@@ -809,6 +829,7 @@ mkSubcallContext baseCtx mWorld mEventQueue parentConvId =
           -- sub-agent's own steps install hooks for its calls.
           ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
+        , ctxRecordChildSession = Nothing
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing

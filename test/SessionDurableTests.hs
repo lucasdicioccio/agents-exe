@@ -587,7 +587,7 @@ minimalBaseAgent =
         , Base.resumeOnAnyMail = Nothing
         , Base.interruptCompletions = Nothing
         , Base.mailScope = Nothing
-        , Base.interruptScope = Nothing
+        , Base.interruptScope = Nothing, Base.wakeOn = Nothing
         }
 
 -- | Tool-call policy config JSON round-trip tests.

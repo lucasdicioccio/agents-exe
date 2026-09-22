@@ -61,7 +61,7 @@ handleInitialize apiKeysFile agentFiles = do
                 , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
                 }
 
     forM_ (take 1 agentFiles) $ \agentFile -> do

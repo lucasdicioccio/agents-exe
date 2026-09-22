@@ -185,7 +185,7 @@ agentFromOverrides overrides =
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
         }
 
 -- | Merge a reference agent with overrides.
@@ -219,7 +219,7 @@ mergeAgentWithOverrides ref overrides =
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing
         }
 
 -------------------------------------------------------------------------------

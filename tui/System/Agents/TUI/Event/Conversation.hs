@@ -60,7 +60,7 @@ import qualified Brick.Widgets.List as List
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar, readTVar, readTVarIO, writeTVar)
 import Control.Lens (to, use, (%=), (.=), (^.))
-import Control.Monad (when)
+import Control.Monad (forM_, void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -77,16 +77,21 @@ import qualified System.Agents.Runtime.Trace as Runtime
 import System.Agents.Session.Base (
     Action (..),
     Agent (..),
+    MailBody (..),
     MissingUserPrompt (..),
     OnSessionProgress,
+    Outgoing (..),
+    Priority (..),
+    Sender (..),
     Session (..),
+    SessionId,
     SessionProgress (..),
     UserQuery (..),
     newSessionId,
     newTurnId,
  )
 import qualified System.Agents.Session.Loop as Loop
-import System.Agents.Session.Mailbox (MailRouter (..), MailScope (..), MailboxInfo (..), newInMemoryMailbox)
+import System.Agents.Session.Mailbox (MailRouter (..), MailScope (..), Mailbox (..), MailboxInfo (..), newInMemoryMailbox)
 import System.Agents.OS.Events (ToolCallActivity)
 import System.Agents.TUI.ToolCallActivity (applyToolCallActivity, pruneToolCallViews)
 import System.Agents.TUI.Types (
@@ -205,16 +210,54 @@ state, enabling subcall conversations to be visible in the TUI.
 runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
 runConversation tracer baseTuiAgent session = do
     config <- use sessionConfig
-    convId <- liftIO $ newConversationId
     outChan <- use eventChan
-    inChan <- liftIO $ newBChan 100
+    coreRef <- use tuiCore
+    roster <- Vector.toList . List.listElements <$> use (tuiUI . agentList)
+    conv <- liftIO $ spawnConversationIO config tracer coreRef outChan roster baseTuiAgent session Nothing
+    -- Insert the conversation at the top of the list and select it
+    tuiUI . conversationList %= listInsert 0 conv
+    tuiUI . conversationList . listSelectedL .= Just 0
+    -- Mark as read since user just created it
+    tuiUI . unreadConversations %= Set.delete conv.conversationId
+
+    -- Switch to chats tab and focus message editor
+    switchToChatsAndFocusMessage
+
+{- | The plain-'IO' heart of 'runConversation' (Phase 4,
+@todos/session-mailbox.md@ D10): builds the agent, its mailbox, and its
+background thread, and appends the resulting 'Conversation' to 'Core'
+(the shared 'TVar', not 'TuiState' -- see 'appendConversation'). Every
+'EventM'-only concern (the visible widget list, focus, "unread" marking)
+is deliberately left to the caller: 'handleHeartbeat' already rebuilds the
+visible conversation list from 'Core' on every tick, so a conversation
+appended here from outside 'EventM' (a @spawn-session@ hook, not a menu
+action) still shows up, just one heartbeat later.
+
+@mParentSid@ is the id of the session that caused this one to run, if any
+(a @spawn-session@ call): recorded on the mailbox's own 'MailboxInfo' so
+scope checks (@send-message@'s @subtree@, by default) see the lineage.
+'Nothing' for a conversation the user started directly, exactly as before
+this refactor.
+-}
+spawnConversationIO ::
+    SessionConfig ->
+    Tracer IO Trace ->
+    TVar Core ->
+    BChan AppEvent ->
+    [TuiAgent] ->
+    TuiAgent ->
+    Session ->
+    Maybe SessionId ->
+    IO Conversation
+spawnConversationIO config tracer coreRef outChan roster baseTuiAgent session mParentSid = do
+    convId <- newConversationId
+    inChan <- newBChan 100
     let notifyProgress = buildOnProgress convId outChan
     let node = tuiNode baseTuiAgent
-    agent1 <- liftIO $ OneShot.nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
-    coreRef <- use tuiCore
+    agent1 <- OneShot.nodeToAgent config.sessionStore Nothing convId (contramap OneShotTrace tracer) config.sessionApiKeys node
 
     -- Get the World and EventQueue from Core for subcall visibility
-    coreState <- liftIO $ readTVarIO coreRef
+    coreState <- readTVarIO coreRef
     let mWorld = coreState ^. coreWorld
     let mEventQueue = coreState ^. coreOSEventQueue
     let router = coreState ^. coreMailRouter
@@ -227,7 +270,7 @@ runConversation tracer baseTuiAgent session = do
     -- reach it. This is additive: 'usrQuery'/the conversation's own 'BChan'
     -- keep working exactly as they do today (Phase 1 kept the TUI on them
     -- deliberately); a mailbox only adds R1/R2's mail-folding on top.
-    mailbox <- liftIO newInMemoryMailbox
+    mailbox <- newInMemoryMailbox
     -- Keyed by the *session's* id ('ctxSessionId', what 'send-message'/
     -- 'spawn-session' address themselves and each other as -- see
     -- 'System.Agents.Session.Step.buildContext'), not 'convId': the two are
@@ -244,19 +287,49 @@ runConversation tracer baseTuiAgent session = do
     -- target, so unregistering when its run loop merely stops looping
     -- would be wrong.
     _unregisterMail <-
-        liftIO $
-            router.mrRegister
-                sid
-                MailboxInfo
-                    { miAgentSlug = Just (tuiSlug baseTuiAgent)
-                    , miParent = Nothing
-                    , miStatus = "running"
-                    , miMailScope = MailScopeSubtree
-                    , miInterruptScope = MailScopeChildren
-                    }
-                mailbox
+        router.mrRegister
+            sid
+            MailboxInfo
+                { miAgentSlug = Just (tuiSlug baseTuiAgent)
+                , miParent = mParentSid
+                , miStatus = "running"
+                , miMailScope = MailScopeSubtree
+                , miInterruptScope = MailScopeChildren
+                }
+            mailbox
 
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
+
+    -- Phase 4, §5: this conversation's own @spawn-session@ hook. @<slug>@
+    -- is resolved against the roster of top-level agents the TUI already
+    -- knows about (the same universe 'findAgentBySlug' searches for the
+    -- agent-selection menu), not a strict child-of-this-node list -- the
+    -- TUI, unlike @run@, has no single "root node" whose children define
+    -- the caller's helpers. The spawned conversation runs the same way
+    -- this one does (recursively, via 'spawnConversationIO'), so it too
+    -- shows up in the conversation list at the next heartbeat and can
+    -- itself spawn further descendants.
+    let spawnHook slug text =
+            case findAgentBySlug slug (Vector.fromList roster) of
+                Nothing -> pure $ Left ("no such helper: " <> slug)
+                Just childTuiAgent -> do
+                    childSession <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
+                    _childConv <- spawnConversationIO config tracer coreRef outChan roster childTuiAgent childSession (Just sid)
+                    -- Post the initial message as ordinary mail: the
+                    -- child's own R1 folds it into its first turn, the
+                    -- same as any other 'send-message'.
+                    mChildTarget <- router.mrLookup childSession.sessionId
+                    forM_ mChildTarget $ \(_, childMailbox) ->
+                        void $
+                            childMailbox.mbSend
+                                Outgoing
+                                    { outId = Nothing
+                                    , outFrom = FromSession sid (Just (tuiSlug baseTuiAgent))
+                                    , outPriority = Normal
+                                    , outHops = 0
+                                    , outBody = UserMessage (UserQuery text [])
+                                    }
+                    pure $ Right childSession.sessionId
 
     -- Set the World and EventQueue on the agent for subcall visibility
     -- and initialize the call stack with a root entry
@@ -267,6 +340,7 @@ runConversation tracer baseTuiAgent session = do
                 , ctxCallStack = [CallStackEntry "root" convId 0]
                 , ctxMailbox = Just mailbox
                 , ctxMailRouter = Just router
+                , ctxSpawnSession = Just spawnHook
                 }
 
     let a =
@@ -295,7 +369,7 @@ runConversation tracer baseTuiAgent session = do
                         Nothing -> notifyNeedInput >> readBChan inChan
                         Just buftxt -> pure (Just $ UserQuery buftxt [])
                 }
-    threadId <- liftIO $ forkIO $ do
+    threadId <- forkIO $ do
         notifyProgress (SessionStarted session)
         -- 'runUntilBlocked' rather than 'run': a turn waiting only on deferred
         -- calls cannot progress here, and looping on it would spin.
@@ -325,15 +399,8 @@ runConversation tracer baseTuiAgent session = do
                 , conversationParentId = Nothing
                 , conversationSubcallDepth = 0
                 }
-    liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
-    -- Insert the conversation at the top of the list and select it
-    tuiUI . conversationList %= listInsert 0 conv
-    tuiUI . conversationList . listSelectedL .= Just 0
-    -- Mark as read since user just created it
-    tuiUI . unreadConversations %= Set.delete convId
-
-    -- Switch to chats tab and focus message editor
-    switchToChatsAndFocusMessage
+    atomically $ modifyTVar coreRef $ appendConversation conv
+    pure conv
 
 -- | Switch to the Chats tab and focus the message editor.
 switchToChatsAndFocusMessage :: EventM N TuiState ()
