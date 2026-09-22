@@ -35,6 +35,9 @@ module System.Agents.Tools.SystemToolbox.Types (
     RunningToolCallInfo (..),
     CancelToolCallParams (..),
     CancelToolCallResult (..),
+    WaitParams (..),
+    WaitResult (..),
+    maxWaitSeconds,
 
     -- * Query errors
     QueryError (..),
@@ -427,6 +430,70 @@ instance ToJSON CancelToolCallResult where
 
 instance FromJSON CancelToolCallResult where
     parseJSON = Aeson.genericParseJSON cancelToolCallResultOptions
+
+-------------------------------------------------------------------------------
+-- wait (todos/session-mailbox.md, Phase 2, §3)
+-------------------------------------------------------------------------------
+
+{- | Parameters for the @wait@ capability.
+
+'waitFor' is one of: a specific @tool_call_id@ (the LLM's own provider id,
+as shown on a running placeholder or by @list-running-tool-calls@),
+@"any-call"@ (any of the caller's own running calls), or @"mail"@ (only
+mail). Unlike the spec's @{"for": [...]}@ list form, this accepts a single
+target — reporting which one woke the call needs no list disambiguation,
+and a caller that wants several calls covered can use @"any-call"@.
+-}
+data WaitParams = WaitParams
+    { waitFor :: Text
+    -- ^ A @tool_call_id@, @"any-call"@, or @"mail"@
+    , waitTimeoutSeconds :: Int
+    -- ^ Maximum seconds to wait, capped by 'maxWaitSeconds' (default 30)
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON WaitParams where
+    parseJSON = Aeson.withObject "WaitParams" $ \v ->
+        WaitParams
+            <$> v .: "for"
+            <*> v .:? "timeout_seconds" .!= 30
+
+instance ToJSON WaitParams where
+    toJSON p =
+        Aeson.object
+            [ "for" .= waitFor p
+            , "timeout_seconds" .= waitTimeoutSeconds p
+            ]
+
+{- | Result of a @wait@ query: which of the first-to-happen conditions woke
+it (@"call"@, @"mail"@, or @"timeout"@), and the specific tool-call id when
+woken by a call.
+-}
+data WaitResult = WaitResult
+    { wrWokenBy :: Text
+    -- ^ @"call"@, @"mail"@, or @"timeout"@
+    , wrToolCallId :: Maybe Text
+    -- ^ The tool-call id that became final, when 'wrWokenBy' is @"call"@
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON WaitResult where
+    toJSON r =
+        Aeson.object $
+            ["woken_by" .= wrWokenBy r]
+                ++ ["tool_call_id" .= tid | Just tid <- [wrToolCallId r]]
+
+instance FromJSON WaitResult where
+    parseJSON = Aeson.withObject "WaitResult" $ \v ->
+        WaitResult
+            <$> v .: "woken_by"
+            <*> v .:? "tool_call_id"
+
+-- | Hard cap on 'waitTimeoutSeconds', per the spec: "two agents waiting on
+-- each other time out instead of deadlocking".
+maxWaitSeconds :: Int
+maxWaitSeconds = 300
+
 -------------------------------------------------------------------------------
 -- Query Errors
 -------------------------------------------------------------------------------

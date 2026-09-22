@@ -901,6 +901,9 @@ data SystemToolCapability
       SystemToolListRunningToolCalls
     | -- | Cancel a running async tool call
       SystemToolCancelToolCall
+    | -- | Block until a named call is final, any call is final, mail
+      -- arrives, or a timeout elapses (@todos/session-mailbox.md@ §3)
+      SystemToolWait
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -923,6 +926,7 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolGetToolCallStatus = Aeson.String "get-tool-call-status"
     toJSON SystemToolListRunningToolCalls = Aeson.String "list-running-tool-calls"
     toJSON SystemToolCancelToolCall = Aeson.String "cancel-tool-call"
+    toJSON SystemToolWait = Aeson.String "wait"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -946,7 +950,8 @@ instance FromJSON SystemToolCapability where
             "get-tool-call-status" -> return SystemToolGetToolCallStatus
             "list-running-tool-calls" -> return SystemToolListRunningToolCalls
             "cancel-tool-call" -> return SystemToolCancelToolCall
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call."
+            "wait" -> return SystemToolWait
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 

@@ -1121,7 +1121,16 @@ buildSystemToolParams box =
             ParamProperty
                 { propertyKey = "timeout_seconds"
                 , propertyType = NumberParamType
-                , propertyDescription = "For get-tool-call-status: Maximum seconds to wait when wait_for_completion is true (default: 5)"
+                , propertyDescription = "For get-tool-call-status: Maximum seconds to wait when wait_for_completion is true (default: 5). For wait: maximum seconds to block, capped at 300 (default: 30)"
+                , propertyRequired = False
+                }
+
+        -- wait target parameter
+        waitForTargetParam =
+            ParamProperty
+                { propertyKey = "for"
+                , propertyType = StringParamType
+                , propertyDescription = "For wait: What to wait for - a specific tool_call_id, \"any-call\" (any of your own running calls), or \"mail\" (only mail; peeked, not consumed - it still arrives normally in your next reply)"
                 , propertyRequired = False
                 }
 
@@ -1196,11 +1205,15 @@ buildSystemToolParams box =
                         then
                             [ includeProgressParam
                             , waitForCompletionParam
-                            , timeoutSecondsParam
                             ]
                         else []
                    )
+                ++ ( if hasCapability SystemToolGetToolCallStatus || hasCapability SystemToolWait
+                        then [timeoutSecondsParam]
+                        else []
+                   )
                 ++ (if hasCapability SystemToolCancelToolCall then [cancelReasonParam] else [])
+                ++ (if hasCapability SystemToolWait then [waitForTargetParam] else [])
      in
         baseParams ++ optionalParams
 
@@ -1224,6 +1237,7 @@ capabilityToText SystemToolExecuteCommand = "execute-command"
 capabilityToText SystemToolGetToolCallStatus = "get-tool-call-status"
 capabilityToText SystemToolListRunningToolCalls = "list-running-tool-calls"
 capabilityToText SystemToolCancelToolCall = "cancel-tool-call"
+capabilityToText SystemToolWait = "wait"
 
 {- | Register all tools from a System toolbox.
 
@@ -1832,7 +1846,9 @@ systemTool box =
                                     then handleListRunning ctx
                                     else if cap == "cancel-tool-call"
                                         then handleCancel ctx v
-                                        else do
+                                        else if cap == "wait"
+                                            then handleWait ctx v
+                                            else do
                                             -- Extract optional parameters for session introspection capabilities
                                             let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
                                                     Just (Aeson.String sid) -> Just sid
@@ -1876,6 +1892,19 @@ systemTool box =
             Left err -> pure $ SystemToolError call err
             Right listResult ->
                 pure $ SystemToolResult call $ SystemTools.QueryResult "list-running-tool-calls" (Aeson.toJSON listResult) 0
+
+    -- Handle the wait capability (todos/session-mailbox.md, Phase 2)
+    handleWait :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleWait ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.WaitParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success waitParams -> do
+                result <- ToolCallStatus.waitForCallsOrMail ctx waitParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right waitResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "wait" (Aeson.toJSON waitResult) 0
 
     -- Handle the cancel-tool-call capability
     handleCancel :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())

@@ -63,9 +63,13 @@ module System.Agents.Tools.SystemToolbox (
     RunningToolCallInfo (..),
     CancelToolCallParams (..),
     CancelToolCallResult (..),
+    WaitParams (..),
+    WaitResult (..),
     getToolCallStatus,
     listRunningToolCalls,
     cancelToolCallById,
+    waitForCallsOrMail,
+    clampWaitSeconds,
 
     -- * Initialization (re-exported from Core)
     initializeToolbox,

@@ -55,7 +55,13 @@ import System.Agents.TUI.ToolCallActivity (
  )
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..))
 import qualified System.Agents.Tools.Context as Ctx
-import System.Agents.Tools.SystemToolbox.ToolCallStatus (cancelToolCallById, getToolCallStatus, listRunningToolCalls)
+import System.Agents.Tools.SystemToolbox.ToolCallStatus (
+    cancelToolCallById,
+    clampWaitSeconds,
+    getToolCallStatus,
+    listRunningToolCalls,
+    waitForCallsOrMail,
+ )
 import System.Agents.Tools.SystemToolbox.Types (
     CancelToolCallParams (..),
     CancelToolCallResult (..),
@@ -63,6 +69,8 @@ import System.Agents.Tools.SystemToolbox.Types (
     ListRunningToolCallsResult (..),
     RunningToolCallInfo (..),
     ToolCallStatusResult (..),
+    WaitParams (..),
+    WaitResult (..),
  )
 
 tests :: TestTree
@@ -91,6 +99,17 @@ tests =
         , testCase "runUntilBlocked returns a session blocked on deferred calls" runUntilBlockedOnDeferred
         , testCase "a failing run cancels background calls" runFailureCancelsBackgroundCalls
         , testCase "a call that outlives ctxAsyncCallTimeout fails" callTimesOut
+        , testGroup
+            "Phase 2: attach / detach"
+            [ testCase "attachSeconds detaches a call after its deadline" attachSecondsDetaches
+            , testCase "an interrupt envelope detaches attached calls (R3a)" interruptDetachesAttachedCalls
+            , testCase "a normal envelope does not detach an attached call" normalMailDoesNotDetach
+            , testCase "wait wakes on a named call becoming final" waitWakesOnNamedCall
+            , testCase "wait wakes on any-call" waitWakesOnAnyCall
+            , testCase "wait wakes on mail without consuming it" waitWakesOnMail
+            , testCase "wait times out when nothing happens" waitTimesOut
+            , testCase "clampWaitSeconds caps at maxWaitSeconds" clampWaitSecondsCapsRequest
+            ]
         , testGroup
             "subprocess output"
             [ testCase "reports output lines while the process runs" processReportsOutput
@@ -226,7 +245,7 @@ orphanedCallResolves = do
                 , tcState = Running
                 , tcResult = Nothing
                 , tcContinuation = Nothing
-                , tcPolicy = AppliedPolicy RunAsync Nothing
+                , tcPolicy = AppliedPolicy (RunAsync Nothing) Nothing
                 , tcEntityId = Just (EntityId UUID.nil)
                 , tcDeliveredLate = False
                 }
@@ -282,7 +301,7 @@ resumeReplacesPartialTurn = do
     gate <- newEmptyMVar
     let policy _ call
             | callName call == "defer_me" = Defer (Reason "external")
-            | otherwise = RunAsync
+            | otherwise = RunAsync Nothing
     let agent = (mkAgent world (YieldOnTimeout 20) (gatedToolCall gate)){ctxToolCallPolicy = policy}
     let s0 = sessionWithCalls [mkCall "call_defer" "defer_me", mkCall "call_slow" "slow"]
     (a1, s1) <- stepOk agent s0
@@ -457,7 +476,7 @@ runUntilBlockedOnDeferred = do
     gate <- newEmptyMVar
     let policy _ call
             | callName call == "defer_me" = Defer (Reason "external")
-            | otherwise = RunAsync
+            | otherwise = RunAsync Nothing
     let agent = (mkAgent world (YieldOnTimeout 20) (gatedToolCall gate)){ctxToolCallPolicy = policy}
     void $ forkIO $ threadDelay 50000 >> putMVar gate ()
     res <- timeout 5000000 $ runUntilBlocked convId agent (sessionWithCalls [mkCall "call_defer" "defer_me", mkCall "call_slow" "slow"])
@@ -504,6 +523,183 @@ callTimesOut = do
             other -> assertFailure $ "unexpected responses: " <> show other
         _ -> assertFailure "expected the call to finish as failed"
     readIORef interrupted >>= (@?= True)
+
+-------------------------------------------------------------------------------
+-- Phase 2 (todos/session-mailbox.md): attach / detach, wait
+-------------------------------------------------------------------------------
+
+{- | A 'RunAsync' call with @attachSeconds = 0@ detaches at once: the step
+yields a 'PartialUserTurn' with the call still 'Running', marked with a
+'tcDetachedReason', instead of blocking on it.
+-}
+attachSecondsDetaches :: Assertion
+attachSecondsDetaches = do
+    world <- mkWorld
+    gate <- newEmptyMVar -- never filled: the call would otherwise block forever
+    let agent =
+            (mkAgent world YieldWhenAllDone (gatedToolCall gate))
+                { ctxToolCallPolicy = \_ _ -> RunAsync (Just 0)
+                }
+    (_, s1) <- stepOk agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case partialTurns s1 of
+        [partial] -> case partial.pTrackedToolCalls of
+            [tc] -> do
+                tc.tcState @?= Running
+                tc.tcDetachedReason @?= Just "still running after 0s"
+            other -> assertFailure $ "expected one tracked call, got " <> show other
+        other -> assertFailure $ "expected one partial turn, got " <> show (length other)
+
+{- | An 'Interrupt'-priority envelope pre-empts R3a: an attached ('RunSync')
+call is detached even though nothing made it finish, and the interrupt mail
+is folded into the same turn.
+-}
+interruptDetachesAttachedCalls :: Assertion
+interruptDetachesAttachedCalls = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gate <- newEmptyMVar -- never filled: proves the call was detached, not completed
+    let agent =
+            (mkAgent world YieldWhenAllDone (gatedToolCall gate))
+                { ctxToolCallPolicy = \_ _ -> RunSync
+                , ctxMailbox = Just mb
+                }
+    _ <-
+        forkIO $ do
+            threadDelay 100000
+            _ <-
+                mb.mbSend
+                    Outgoing
+                        { outId = Nothing
+                        , outFrom = FromUser Nothing
+                        , outPriority = Interrupt
+                        , outHops = 0
+                        , outBody = Control Pause
+                        }
+            pure ()
+    (_, s1) <- stepOk agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case partialTurns s1 of
+        [partial] -> do
+            case partial.pTrackedToolCalls of
+                [tc] -> do
+                    tc.tcState @?= Running
+                    tc.tcDetachedReason @?= Just "interrupted"
+                other -> assertFailure $ "expected one tracked call, got " <> show other
+            assertBool "the interrupt mail was folded into the turn" (not (null partial.pUserMail))
+        other -> assertFailure $ "expected one partial turn, got " <> show (length other)
+
+{- | A non-'Interrupt' envelope must never detach an attached call: only
+'Interrupt' priority pre-empts R3a.
+-}
+normalMailDoesNotDetach :: Assertion
+normalMailDoesNotDetach = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gate <- newEmptyMVar
+    let agent =
+            (mkAgent world YieldWhenAllDone (gatedToolCall gate))
+                { ctxToolCallPolicy = \_ _ -> RunSync
+                , ctxMailbox = Just mb
+                }
+    _ <-
+        forkIO $ do
+            threadDelay 100000
+            _ <-
+                mb.mbSend
+                    Outgoing
+                        { outId = Nothing
+                        , outFrom = FromUser Nothing
+                        , outPriority = Normal
+                        , outHops = 0
+                        , outBody = UserMessage (UserQuery "hello" [])
+                        }
+            pure ()
+    _ <-
+        forkIO $ do
+            threadDelay 300000
+            putMVar gate ()
+    (_, s1) <- stepOk agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case s1.turns of
+        (UserTurn content _ : _) -> map snd content.userToolResponses @?= [TextResponse "slow-result"]
+        other -> assertFailure $ "expected the call to complete normally, got " <> show other
+
+-- | Build a running background call and a context that can watch it, for
+-- the @wait@ tests below.
+mkWaitFixture :: IO (World, Base.ConversationId, Agent (LlmTurnContent, Session), Session, MVar (), Text)
+mkWaitFixture = do
+    world <- mkWorld
+    gate <- newEmptyMVar
+    let agent = (mkAgent world (YieldOnTimeout 0) (gatedToolCall gate))
+    (agent', s1) <- stepOk agent (sessionWithCalls [mkCall "call_wait" "slow"])
+    providerId <- case partialTurns s1 of
+        [partial] -> case partial.pTrackedToolCalls of
+            [tc] -> maybe (assertFailure "expected a provider call id" >> fail "unreachable") pure (providerToolCallId tc.tcCall)
+            other -> assertFailure ("expected one tracked call, got " <> show other) >> fail "unreachable"
+        other -> assertFailure ("expected one partial turn, got " <> show (length other)) >> fail "unreachable"
+    pure (world, convId, agent', s1, gate, providerId)
+
+-- | A context built the same way the stepper builds one for tool execution,
+-- so @ctxAwaitMail@ is wired exactly as it is at runtime.
+waitCtx :: Agent r -> Session -> ToolExecutionContext
+waitCtx agent sess = buildContext agent sess convId
+
+waitWakesOnNamedCall :: Assertion
+waitWakesOnNamedCall = do
+    (_world, _convId, agent, sess, gate, providerId) <- mkWaitFixture
+    let ctx = waitCtx agent sess
+    resultVar <- newEmptyMVar
+    _ <- forkIO $ waitForCallsOrMail ctx (WaitParams providerId 5) >>= putMVar resultVar
+    threadDelay 100000
+    putMVar gate () -- lets the background call finish
+    result <- timeout 3000000 (readMVar resultVar)
+    result @?= Just (Right (WaitResult "call" (Just providerId)))
+
+waitWakesOnAnyCall :: Assertion
+waitWakesOnAnyCall = do
+    (_world, _convId, agent, sess, gate, providerId) <- mkWaitFixture
+    let ctx = waitCtx agent sess
+    resultVar <- newEmptyMVar
+    _ <- forkIO $ waitForCallsOrMail ctx (WaitParams "any-call" 5) >>= putMVar resultVar
+    threadDelay 100000
+    putMVar gate ()
+    result <- timeout 3000000 (readMVar resultVar)
+    result @?= Just (Right (WaitResult "call" (Just providerId)))
+
+waitWakesOnMail :: Assertion
+waitWakesOnMail = do
+    (_world, _convId, agent0, sess, _gate, _providerId) <- mkWaitFixture
+    mb <- newInMemoryMailbox
+    let agent = agent0{ctxMailbox = Just mb}
+    let ctx = waitCtx agent sess
+    resultVar <- newEmptyMVar
+    _ <- forkIO $ waitForCallsOrMail ctx (WaitParams "mail" 5) >>= putMVar resultVar
+    threadDelay 100000
+    _ <-
+        mb.mbSend
+            Outgoing
+                { outId = Nothing
+                , outFrom = FromUser Nothing
+                , outPriority = Normal
+                , outHops = 0
+                , outBody = UserMessage (UserQuery "hi" [])
+                }
+    result <- timeout 3000000 (readMVar resultVar)
+    result @?= Just (Right (WaitResult "mail" Nothing))
+    -- Peeked, not consumed: the mail is still unread on the session's cursor.
+    unread <- atomically (mbUnread mb sess.mailCursor)
+    assertBool "the mail wait peeked is still unread" (not (null unread))
+
+waitTimesOut :: Assertion
+waitTimesOut = do
+    (_world, _convId, agent, sess, _gate, _providerId) <- mkWaitFixture
+    let ctx = waitCtx agent sess
+    result <- timeout 3000000 (waitForCallsOrMail ctx (WaitParams "mail" 0))
+    result @?= Just (Right (WaitResult "timeout" Nothing))
+
+clampWaitSecondsCapsRequest :: Assertion
+clampWaitSecondsCapsRequest = do
+    clampWaitSeconds 10000 @?= 300
+    clampWaitSeconds (-5) @?= 0
+    clampWaitSeconds 30 @?= 30
 
 processReportsOutput :: Assertion
 processReportsOutput = do
@@ -632,7 +828,7 @@ trackedCall st =
         , tcState = st
         , tcResult = Nothing
         , tcContinuation = Nothing
-        , tcPolicy = AppliedPolicy RunAsync Nothing
+        , tcPolicy = AppliedPolicy (RunAsync Nothing) Nothing
         , tcEntityId = Nothing
         , tcDeliveredLate = False
         }
@@ -770,7 +966,7 @@ mkAgent world strategy tool =
         , ctxMaxConcurrency = Nothing
         , ctxAsyncCallTimeout = Nothing
         , ctxToolCache = Nothing
-        , ctxToolCallPolicy = \_ _ -> RunAsync
+        , ctxToolCallPolicy = \_ _ -> RunAsync Nothing
         , ctxToolExecutor = Nothing
         , ctxContinuationStore = Nothing
         , ctxDeploymentRunner = Nothing

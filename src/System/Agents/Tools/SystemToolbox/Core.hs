@@ -266,6 +266,7 @@ capabilityFromName name = case name of
     "get-tool-call-status" -> Just SystemToolGetToolCallStatus
     "list-running-tool-calls" -> Just SystemToolListRunningToolCalls
     "cancel-tool-call" -> Just SystemToolCancelToolCall
+    "wait" -> Just SystemToolWait
     _ -> Nothing
 
 -- | Get the name for a capability.
@@ -288,6 +289,7 @@ capabilityToName SystemToolExecuteCommand = "execute-command"
 capabilityToName SystemToolGetToolCallStatus = "get-tool-call-status"
 capabilityToName SystemToolListRunningToolCalls = "list-running-tool-calls"
 capabilityToName SystemToolCancelToolCall = "cancel-tool-call"
+capabilityToName SystemToolWait = "wait"
 
 -- | Default timeout for system info gathering (5 seconds).
 defaultTimeoutSeconds :: Int
@@ -349,6 +351,7 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
             SystemToolGetToolCallStatus -> error "Use getToolCallStatus"
             SystemToolListRunningToolCalls -> error "Use listRunningToolCalls"
             SystemToolCancelToolCall -> error "Use cancelToolCallById"
+            SystemToolWait -> error "Use waitForCallsOrMail"
         pure (name, value)
     case result of
         Left (e :: SomeException) -> pure $ Left $ Text.pack $ show e

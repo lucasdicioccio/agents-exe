@@ -429,7 +429,7 @@ policyConfigTests =
                     Base.ToolCallPolicyConfig
                         RunSync
                         [ Base.ToolCallPolicyRule "bash_command" (Defer (Reason "approval"))
-                        , Base.ToolCallPolicyRule "fetch_remote" RunAsync
+                        , Base.ToolCallPolicyRule "fetch_remote" (RunAsync Nothing)
                         ]
                         []
             let json = Aeson.encode cfg

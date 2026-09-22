@@ -843,12 +843,12 @@ withAsyncConfigTest =
     testCase "withAsyncConfig sets mode, cache and policy" $ do
         cachePath <- emptySystemTempFile "async-config-cache.db"
         cache <- mkSqliteToolCache cachePath
-        let policy _ctx _call = RunAsync
+        let policy _ctx _call = RunAsync Nothing
         let agent = withAsyncConfig Asynchronous (Just cache) policy mkSimpleAgent
         ctxExecutionMode agent @?= Asynchronous
         isJust (ctxToolCache agent) @?= True
         -- Apply the installed policy to verify it is the one we supplied.
-        ctxToolCallPolicy agent testCtx (mkCall "any") @?= RunAsync
+        ctxToolCallPolicy agent testCtx (mkCall "any") @?= RunAsync Nothing
 
 -------------------------------------------------------------------------------
 -- Phase 0: decorators / wrappers

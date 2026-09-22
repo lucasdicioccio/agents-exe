@@ -535,15 +535,21 @@ instance FromJSON Decorator where
 
 {- | Decision made for a single tool call.
 
-* 'RunSync' - Execute immediately in the current process
-* 'RunAsync' - Yield a continuation token and complete externally
-* 'RunIsolated' - Execute outside the current process
+* 'RunSync' - In asynchronous mode (Phase 2 of @todos/session-mailbox.md@),
+  attached until done: the step blocks on it (only an 'Interrupt' detaches
+  it). Still executes in the current process, now through the async engine
+  rather than the step's own thread, so it CAN be detached by an interrupt.
+* 'RunAsync' - Runs through the async engine. With 'Nothing', attached per
+  the agent's 'AsyncYieldStrategy' (unchanged historical behaviour). With
+  @'Just' n@, attached for @n@ seconds and then detached regardless of the
+  yield strategy (@n <= 0@: detached at once).
+* 'RunIsolated' - Execute outside the current process; attached until done.
 * 'Defer' - Intentionally pause (e.g., pending approval)
 * 'Decorate' - Attach modifiers to an underlying disposition
 -}
 data ToolCallDisposition
     = RunSync
-    | RunAsync
+    | RunAsync (Maybe Int)
     | RunIsolated IsolationSpec
     | Defer Reason
     | Decorate [Decorator] ToolCallDisposition
@@ -553,7 +559,10 @@ instance ToJSON ToolCallDisposition where
     toJSON disp =
         case disp of
             RunSync -> Aeson.object ["tag" .= ("runSync" :: Text)]
-            RunAsync -> Aeson.object ["tag" .= ("runAsync" :: Text)]
+            RunAsync attachSeconds ->
+                Aeson.object $
+                    ["tag" .= ("runAsync" :: Text)]
+                        ++ ["attachSeconds" .= s | Just s <- [attachSeconds]]
             RunIsolated spec ->
                 Aeson.object
                     [ "tag" .= ("runIsolated" :: Text)
@@ -576,7 +585,7 @@ instance FromJSON ToolCallDisposition where
         tag <- v .: "tag"
         case tag :: Text of
             "runSync" -> pure RunSync
-            "runAsync" -> pure RunAsync
+            "runAsync" -> RunAsync <$> v .:? "attachSeconds"
             "runIsolated" -> RunIsolated <$> v .: "spec"
             "defer" -> Defer . Reason <$> v .: "reason"
             "decorate" -> Decorate <$> v .: "decorators" <*> v .: "inner"
@@ -672,6 +681,20 @@ data TrackedToolCall = TrackedToolCall
     this call keeps rendering the placeholder so history matches what the
     model saw.
     -}
+    , tcAttachDeadline :: Maybe UTCTime
+    {- ^ Phase 2 (@todos/session-mailbox.md@ §3): for a call started with
+    @'RunAsync' ('Just' n)@, the absolute wall-clock time at which the step
+    stops waiting on it and detaches it (with 'tcDetachedReason' set). Fixed
+    at start time so it survives across the several steps a 'PartialUserTurn'
+    may be resumed over. 'Nothing' for calls attached forever ('RunSync',
+    'RunIsolated') or attached per the yield strategy (@'RunAsync' 'Nothing'@).
+    -}
+    , tcDetachedReason :: Maybe Text
+    {- ^ Phase 2: set when the step stops waiting on this call before it
+    finished — either its 'tcAttachDeadline' elapsed, or an 'Interrupt'
+    envelope arrived while it was attached. Rendered on the @running@
+    placeholder so the LLM knows why (see 'partialToolMessages').
+    -}
     }
     deriving (Show, Eq, Ord, Generic)
 
@@ -687,6 +710,8 @@ instance ToJSON TrackedToolCall where
                 ++ ["continuation" .= c | Just c <- [tc.tcContinuation]]
                 ++ ["entityId" .= e | Just e <- [tc.tcEntityId]]
                 ++ ["deliveredLate" .= True | tc.tcDeliveredLate]
+                ++ ["attachDeadline" .= d | Just d <- [tc.tcAttachDeadline]]
+                ++ ["detachedReason" .= r | Just r <- [tc.tcDetachedReason]]
 
 instance FromJSON TrackedToolCall where
     parseJSON = Aeson.withObject "TrackedToolCall" $ \v ->
@@ -699,6 +724,8 @@ instance FromJSON TrackedToolCall where
             <*> v .: "policy"
             <*> v .:? "entityId"
             <*> v .:? "deliveredLate" .!= False
+            <*> v .:? "attachDeadline"
+            <*> v .:? "detachedReason"
 
 -------------------------------------------------------------------------------
 -- Session Mailbox (Phase 1 of the session-mailbox spec, see
@@ -1490,6 +1517,8 @@ migrateLegacyPartialTurn completed pending =
             , tcPolicy = AppliedPolicy RunSync Nothing
             , tcEntityId = Nothing
             , tcDeliveredLate = False
+            , tcAttachDeadline = Nothing
+            , tcDetachedReason = Nothing
             }
     mkPending idx call =
         TrackedToolCall
@@ -1501,6 +1530,8 @@ migrateLegacyPartialTurn completed pending =
             , tcPolicy = AppliedPolicy RunSync Nothing
             , tcEntityId = Nothing
             , tcDeliveredLate = False
+            , tcAttachDeadline = Nothing
+            , tcDetachedReason = Nothing
             }
 
 -- | Completed tool calls with their responses (backward-compatible view).
@@ -1538,15 +1569,19 @@ partialToolMessages content =
                 Deferred -> "deferred"
                 Ready -> "pending"
                 _ -> "running"
+            message :: Text
+            message = case tc.tcDetachedReason of
+                Just _ ->
+                    "Its result will arrive as mail. Use wait, get-tool-call-status or cancel-tool-call."
+                Nothing ->
+                    "This tool call has not finished yet. Its result will be delivered in a later message. \
+                    \Use get-tool-call-status with this tool_call_id to inspect it, or cancel-tool-call to stop it."
          in JsonResponse $
                 Aeson.object $
                     [ "status" .= status
-                    , "message"
-                        .= ( "This tool call has not finished yet. Its result will be delivered in a later message. \
-                             \Use get-tool-call-status with this tool_call_id to inspect it, or cancel-tool-call to stop it." ::
-                                Text
-                           )
+                    , "message" .= message
                     ]
+                        ++ ["detached" .= reason | Just reason <- [tc.tcDetachedReason]]
                         ++ ["tool_call_id" .= tid | Just tid <- [providerToolCallId tc.tcCall]]
 
 -- | Tool calls that still need execution (backward-compatible view).

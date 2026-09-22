@@ -186,7 +186,7 @@ recoveryTest = do
     sess0 <- newSessionFromPrompt sid (SystemPrompt "sys") [] (UserQuery "hello" [])
     callId <- newToolCallId
     let running =
-            TrackedToolCall callId slowCall Running Nothing Nothing (AppliedPolicy RunAsync Nothing) Nothing False
+            TrackedToolCall callId slowCall Running Nothing Nothing (AppliedPolicy (RunAsync Nothing) Nothing) Nothing False Nothing Nothing
         llm = LlmTurn (LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) [slowCall]) Nothing
         partial = PartialUserTurn (PartialUserTurnContent (SystemPrompt "sys") [] Nothing [running] []) Nothing
         sess = sess0{turns = partial : llm : sess0.turns}

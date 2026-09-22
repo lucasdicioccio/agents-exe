@@ -8,17 +8,17 @@ module System.Agents.Session.Step where
 
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (race)
-import Control.Concurrent.STM (STM, atomically, retry)
-import Control.Monad (unless, void)
+import Control.Concurrent.STM (STM, TVar, atomically, orElse, registerDelay, readTVar, retry)
+import Control.Monad (filterM, forM, unless, void)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (partition)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import qualified Data.Time
-import System.Timeout (timeout)
+import qualified System.Timeout
 
 import Data.Void (Void)
 
@@ -282,45 +282,62 @@ executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery mailEnvelop
 
     let (readyItems, finalCalls) = partitionReady classified
 
-    -- Partition ready calls by disposition.
-    let (inlineItems, asyncItems, deferItems) = partitionByDisposition readyItems
+    -- Every non-deferred ready call is handed to the engine (D4: the
+    -- disposition controls how long the step stays attached, not where the
+    -- call runs); only calls that couldn't be tracked with an OS entity
+    -- fall back to inline execution.
+    let (engineItems, deferItems) = partitionForExecution readyItems
 
-    -- Start async calls first so they run while inline calls execute.
-    (asyncStarted, asyncFallback) <- startAsyncCalls ctx agent asyncItems
+    (engineStarted, engineFallback) <- startAsyncCalls ctx agent engineItems
 
-    -- Execute inline calls (RunSync / RunIsolated, plus untrackable async calls).
-    inlineProcessed <- mapM (executeInlineTrackedCall agent ctx) (inlineItems ++ asyncFallback)
+    -- Execute the calls that could not be tracked with an OS entity.
+    inlineProcessed <- mapM (executeInlineTrackedCall agent ctx) engineFallback
 
     -- Defer calls that asked to be paused.
     deferProcessed <- mapM (deferTrackedCall ctx agent) deferItems
 
-    -- Wait on everything in flight, including calls started in earlier steps.
-    let inFlight = [tc | tc <- asyncStarted ++ finalCalls, tcState tc == Running]
-    waitForRunningCalls ctx agent.ctxAsyncYieldStrategy inFlight
+    -- R3a: wait on everything in flight (including calls started in earlier
+    -- steps), attached per each call's own disposition, detachable at once
+    -- by an 'Interrupt' envelope.
+    let inFlight = [tc | tc <- engineStarted ++ finalCalls, tcState tc == Running]
+    attachOutcome <- waitAttachedCalls ctx agent.ctxMailbox sess.mailCursor agent.ctxAsyncYieldStrategy inFlight
 
     -- Reassemble in the original order using a map keyed by call id.
     let processedMap =
             Map.fromList
                 [ (tcId tc, tc)
-                | tc <- inlineProcessed ++ asyncStarted ++ deferProcessed ++ finalCalls
+                | tc <- inlineProcessed ++ engineStarted ++ deferProcessed ++ finalCalls
                 ]
-    processedOrdered <-
+    processedPolled <-
         mapM
             (pollRunningCall ctx . (\tc -> Map.findWithDefault tc (tcId tc) processedMap))
             trackedWithEntities
+    let processedOrdered = map (applyAttachOutcome attachOutcome) processedPolled
+
+    -- An interrupt detaches every attached call at once and is folded into
+    -- this same turn (R1's mail-rendering, reused rather than duplicated),
+    -- so the LLM sees both the placeholders and why they appeared ("^Z then
+    -- talk"). A non-interrupt outcome (a deadline, or the yield strategy)
+    -- leaves mail for the next ordinary receive point.
+    (sess', uQuery', mailEnvelopes') <-
+        if attachOutcome.awoInterrupted
+            then do
+                (sessMail, moreMail) <- receiveMailForTurn agent False sess
+                pure (sessMail, mergeUserQueries uQuery (mailQuery moreMail), mailEnvelopes ++ moreMail)
+            else pure (sess, uQuery, mailEnvelopes)
 
     -- Decide whether we can emit a full user turn or need a partial one.
-    let content = PartialUserTurnContent sPrompt sTools uQuery processedOrdered mailEnvelopes
+    let content = PartialUserTurnContent sPrompt sTools uQuery' processedOrdered mailEnvelopes'
     if all (isFinalToolCallState . tcState) processedOrdered
         then do
             let responses = partialToolMessages content
-            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery (map snd responses)
-            sess' <- pushTurn sess (UserTurn (UserTurnContent sPrompt sTools uQuery responses mailEnvelopes) (Just byteUsage))
-            pure (agent, Right sess')
+            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery' (map snd responses)
+            sess'' <- pushTurn sess' (UserTurn (UserTurnContent sPrompt sTools uQuery' responses mailEnvelopes') (Just byteUsage))
+            pure (agent, Right sess'')
         else do
-            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery processedOrdered
-            sess' <- pushTurn sess (PartialUserTurn content (Just byteUsage))
-            pure (agent, Right sess')
+            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery' processedOrdered
+            sess'' <- pushTurn sess' (PartialUserTurn content (Just byteUsage))
+            pure (agent, Right sess'')
   where
     pushTurn s t = do
         tId <- newTurnId
@@ -361,17 +378,22 @@ partitionReady = foldr go ([], [])
     go (Left tc) (ready, final) = (ready, tc : final)
     go (Right c) (ready, final) = (c : ready, final)
 
-partitionByDisposition :: [ClassifiedCall] -> ([ClassifiedCall], [ClassifiedCall], [ClassifiedCall])
-partitionByDisposition = foldr go ([], [], [])
-  where
-    go c (inline, async, defer)
-        | isAsyncDisposition (ccBase c) = (inline, c : async, defer)
-        | isDeferDisposition (ccBase c) = (inline, async, c : defer)
-        | otherwise = (c : inline, async, defer)
+{- | Split classified, ready calls into those to hand to the engine and
+those to defer.
 
-isAsyncDisposition :: ToolCallDisposition -> Bool
-isAsyncDisposition RunAsync = True
-isAsyncDisposition _ = False
+D4 (@todos/session-mailbox.md@): in asynchronous mode every disposition
+except 'Defer' now goes through the engine — the disposition controls how
+long the step stays *attached* to a call (see 'waitAttachedCalls'), not
+*where* it runs. Only a call with no OS entity ends up running inline
+('startAsyncCalls' falls it back), which preserves the pre-Phase-2 fallback
+for calls that could not be tracked.
+-}
+partitionForExecution :: [ClassifiedCall] -> ([ClassifiedCall], [ClassifiedCall])
+partitionForExecution = foldr go ([], [])
+  where
+    go c (engine, defer)
+        | isDeferDisposition (ccBase c) = (engine, c : defer)
+        | otherwise = (c : engine, defer)
 
 isDeferDisposition :: ToolCallDisposition -> Bool
 isDeferDisposition (Defer _) = True
@@ -390,12 +412,17 @@ executeInlineTrackedCall agent ctx c = do
     (result, tc') <- executeTrackedCallWithEntity agent ctx tc
     pure $ tc'{tcState = Completed, tcResult = Just result, tcPolicy = AppliedPolicy (ccFullDisposition c) Nothing}
 
-{- | Start a batch of 'RunAsync' calls in the background.
+{- | Start a batch of engine calls in the background (D4: every non-deferred
+disposition, not only 'RunAsync').
 
 Returns the calls that were started (in the 'Running' state) and the calls
 that must run inline instead. Calls fall back to inline execution when the
 agent has no OS 'World' or async engine, or when the call has no OS entity
 (e.g. its payload could not be parsed), so that the step remains total.
+
+A call classified @'RunAsync' ('Just' n)@ gets its 'tcAttachDeadline' fixed
+here, at start time, so it survives across however many steps a
+'PartialUserTurn' is resumed over (see 'waitAttachedCalls').
 -}
 startAsyncCalls ::
     forall r.
@@ -404,24 +431,167 @@ startAsyncCalls ::
     [ClassifiedCall] ->
     IO ([TrackedToolCall], [ClassifiedCall])
 startAsyncCalls _ctx _agent [] = pure ([], [])
-startAsyncCalls ctx agent asyncItems =
+startAsyncCalls ctx agent engineItems =
     case (Ctx.ctxWorld ctx, agent.ctxAsyncEngine) of
         (Just _world, Just engine) -> do
-            let (trackable, untrackable) = partition (isJust . tcEntityId . ccCall) asyncItems
+            let (trackable, untrackable) = partition (isJust . tcEntityId . ccCall) engineItems
             unless (null trackable) $ do
                 _batch <- startAsyncBatch engine ctx (map ccCall trackable)
                 pure ()
+            now <- getCurrentTime
             let running =
-                    [ (ccCall c){tcState = Running, tcPolicy = AppliedPolicy (ccFullDisposition c) Nothing}
+                    [ (ccCall c)
+                        { tcState = Running
+                        , tcPolicy = AppliedPolicy (ccFullDisposition c) Nothing
+                        , tcAttachDeadline = attachDeadline now (ccBase c)
+                        }
                     | c <- trackable
                     ]
             pure (running, untrackable)
-        _ -> pure ([], asyncItems)
+        _ -> pure ([], engineItems)
+  where
+    attachDeadline now base = case base of
+        RunAsync (Just secs) -> Just (Data.Time.addUTCTime (fromIntegral secs) now)
+        _ -> Nothing
 
-{- | Block on running calls according to the yield strategy.
+{- | Outcome of the R3a wait (see 'waitAttachedCalls'): which calls, if any,
+should now be marked detached, and why.
+-}
+data AttachWaitOutcome = AttachWaitOutcome
+    { awoDeadlineElapsed :: [ToolCallId]
+    -- ^ Calls whose 'tcAttachDeadline' passed during this wait.
+    , awoInterrupted :: Bool
+    -- ^ An 'Interrupt' envelope pre-empted the wait: every call still
+    -- attached (any bucket) should be detached at once ("^Z then talk").
+    }
 
-The wait watches the calls' OS entities, so it covers calls started in
-this step as well as calls carried over from earlier steps.
+{- | R3a (@todos/session-mailbox.md@ §2, §4): "attached calls vs.
+interrupts, one transaction". Blocks until the first of:
+
+* an unread 'Interrupt'-priority envelope: every attached call detaches at
+  once, in the same transaction (peeked, not consumed — the caller folds it
+  into the turn being built via 'receiveMailForTurn'/R1, reused rather than
+  duplicated);
+* a call's 'tcAttachDeadline' elapses (one 'orElse' arm per distinct
+  deadline, via 'registerDelay'): only that call detaches, the rest keep
+  waiting;
+* the ordinary 'AsyncYieldStrategy' condition holds for calls with no
+  explicit deadline (unchanged pre-Phase-2 behaviour for those calls).
+
+Calls attached "forever" ('RunSync', 'RunIsolated', i.e. no
+'tcAttachDeadline' and not @'RunAsync' 'Nothing'@) are only released by
+finishing or by an interrupt — never by the yield strategy or a deadline,
+per D4.
+
+No OS world, or nothing 'Running', returns immediately with an empty,
+non-interrupted outcome.
+-}
+waitAttachedCalls ::
+    ToolExecutionContext ->
+    Maybe Mailbox ->
+    Cursor ->
+    AsyncYieldStrategy ->
+    [TrackedToolCall] ->
+    IO AttachWaitOutcome
+waitAttachedCalls ctx mMailbox cursor strategy calls =
+    case Ctx.ctxWorld ctx of
+        Nothing -> pure noOutcome
+        Just world
+            | null running -> pure noOutcome
+            | otherwise -> do
+                now <- getCurrentTime
+                deadlineVars <- forM deadlineCalls $ \tc -> do
+                    let deadline = fromMaybe now tc.tcAttachDeadline
+                        micros = max 0 (round (realToFrac (Data.Time.diffUTCTime deadline now) * 1000000 :: Double))
+                    tvar <- registerDelay micros
+                    pure (tc.tcId, tvar)
+                mTimeoutVar <- case strategy of
+                    YieldOnTimeout ms -> Just <$> registerDelay (max 0 ms * 1000)
+                    _ -> pure Nothing
+                atomically $
+                    (noOutcome{awoInterrupted = True} <$ interruptArm)
+                        `orElse` deadlineArm deadlineVars
+                        `orElse` (noOutcome <$ mainCondition world mTimeoutVar)
+  where
+    noOutcome = AttachWaitOutcome [] False
+    running = filter ((== Running) . tcState) calls
+    bucketOf :: TrackedToolCall -> AttachBucket
+    bucketOf tc
+        | isJust tc.tcAttachDeadline = BDeadline
+        | otherwise = case snd (flattenDisposition tc.tcPolicy.apDisposition) of
+            RunAsync Nothing -> BStrategy
+            _ -> BForever
+    foreverCalls = [tc | tc <- running, bucketOf tc == BForever]
+    strategyCalls = [tc | tc <- running, bucketOf tc == BStrategy]
+    deadlineCalls = [tc | tc <- running, bucketOf tc == BDeadline]
+    foreverEids = [eid | tc <- foreverCalls, Just eid <- [tc.tcEntityId]]
+    strategyEids = [eid | tc <- strategyCalls, Just eid <- [tc.tcEntityId]]
+
+    interruptArm :: STM ()
+    interruptArm = case mMailbox of
+        Nothing -> retry
+        Just mb -> void (awaitMail mb cursor isInterruptEnvelope)
+    isInterruptEnvelope :: Envelope -> Bool
+    isInterruptEnvelope e = e.envPriority == Interrupt
+
+    deadlineArm :: [(ToolCallId, TVar Bool)] -> STM AttachWaitOutcome
+    deadlineArm [] = retry
+    deadlineArm vars = do
+        fired <- filterM (readTVar . snd) vars
+        if null fired then retry else pure $ AttachWaitOutcome (map fst fired) False
+
+    mainCondition :: World -> Maybe (TVar Bool) -> STM ()
+    mainCondition world mTimeoutVar = do
+        awaitEntities world all foreverEids
+        case strategy of
+            YieldWhenAllDone -> awaitEntities world all strategyEids
+            YieldOnAnyProgress -> unless (null strategyEids) $ awaitEntities world any strategyEids
+            YieldOnTimeout _ ->
+                unless (null strategyEids) $ case mTimeoutVar of
+                    Just tvar -> awaitEntities world any strategyEids `orElse` (readTVar tvar >>= \fired -> unless fired retry)
+                    Nothing -> awaitEntities world any strategyEids
+
+data AttachBucket = BForever | BStrategy | BDeadline
+    deriving (Eq)
+
+{- | Apply an R3a outcome to a polled call: mark it detached (with a
+human-readable reason for the placeholder, see 'partialToolMessages') when
+it is still 'Running' and either an interrupt fired or its own deadline
+was among those that elapsed. Calls governed by the yield strategy, or
+still within their attach window, are left untouched — that is today's
+ordinary "still running" placeholder, not a new detach.
+-}
+applyAttachOutcome :: AttachWaitOutcome -> TrackedToolCall -> TrackedToolCall
+applyAttachOutcome outcome tc
+    | tc.tcState /= Running = tc
+    | outcome.awoInterrupted = tc{tcDetachedReason = Just "interrupted"}
+    | tc.tcId `elem` outcome.awoDeadlineElapsed = tc{tcDetachedReason = Just (deadlineReason tc)}
+    | otherwise = tc
+  where
+    deadlineReason :: TrackedToolCall -> Text.Text
+    deadlineReason t = case snd (flattenDisposition t.tcPolicy.apDisposition) of
+        RunAsync (Just secs) -> "still running after " <> Text.pack (show secs) <> "s"
+        _ -> "still running"
+
+{- | Retry until the predicate ('any' or 'all') holds over the entities'
+finality.
+-}
+awaitEntities :: World -> ((Bool -> Bool) -> [Bool] -> Bool) -> [EntityId] -> STM ()
+awaitEntities world quantifier eids = do
+    finals <- mapM entityFinal eids
+    unless (quantifier id finals) retry
+  where
+    entityFinal eid = do
+        mState <- getComponent @OSConv.ToolCallState world eid
+        pure $ maybe True OSConv.isToolCallCompleted mState
+
+{- | Block on background calls from an earlier step according to the yield
+strategy (used by 'collectLateResults' and 'askUserQuery' — R1's "late
+results", not R3a's attach/detach wait over the calls the current turn just
+started; see 'waitAttachedCalls' for that).
+
+The wait watches the calls' OS entities, so it covers calls started in an
+earlier step.
 
 * 'YieldOnAnyProgress' blocks until at least one call is final.
 * 'YieldWhenAllDone' blocks until every call is final.
@@ -446,19 +616,7 @@ waitForRunningCalls ctx strategy calls =
                 _ | hasOrphan -> pure ()
                 YieldOnAnyProgress -> atomically $ awaitEntities world any eids
                 YieldOnTimeout ms ->
-                    void $ timeout (max 0 ms * 1000) $ atomically $ awaitEntities world any eids
-
-{- | Retry until the predicate ('any' or 'all') holds over the entities'
-finality.
--}
-awaitEntities :: World -> ((Bool -> Bool) -> [Bool] -> Bool) -> [EntityId] -> STM ()
-awaitEntities world quantifier eids = do
-    finals <- mapM entityFinal eids
-    unless (quantifier id finals) retry
-  where
-    entityFinal eid = do
-        mState <- getComponent @OSConv.ToolCallState world eid
-        pure $ maybe True OSConv.isToolCallCompleted mState
+                    void $ System.Timeout.timeout (max 0 ms * 1000) $ atomically $ awaitEntities world any eids
 
 {- | Ensure the agent has an async engine when it runs asynchronously with
 an OS world, creating one if necessary.
@@ -795,7 +953,7 @@ processTrackedCall ctx agent tc = do
         RunSync -> executeAndComplete disp
         RunIsolated _spec -> executeAndComplete disp
         Defer _reason -> deferCall disp
-        RunAsync ->
+        RunAsync _attachSeconds ->
             -- RunAsync is executed via the async engine in executeTrackedCalls.
             -- As a safe fallback for individual processing, degrade to sync.
             executeAndComplete disp
@@ -840,6 +998,8 @@ mkReadyTrackedCall ctx agent call = do
             , tcPolicy = AppliedPolicy policy Nothing
             , tcEntityId = Nothing
             , tcDeliveredLate = False
+            , tcAttachDeadline = Nothing
+            , tcDetachedReason = Nothing
             }
 
 {- | Ensure every tracked call has a corresponding OS entity when a world is
@@ -987,6 +1147,10 @@ buildContext agent sess convId =
             { Ctx.ctxWorld = agent.ctxWorld
             , Ctx.ctxEventQueue = agent.ctxEventQueue
             , Ctx.ctxCancelToolCall = fmap Engine.cancelToolCall agent.ctxAsyncEngine
+            , -- Phase 2 (@todos/session-mailbox.md@ §3): built once per turn
+              -- from this session's current cursor, so every tool call in
+              -- the turn shares the same view of "what mail is new".
+              Ctx.ctxAwaitMail = fmap (\mb -> awaitMail mb sess.mailCursor (const True)) agent.ctxMailbox
             , -- Cheap view of the calls the capabilities may be asked about,
               -- including calls left behind by an earlier process.
               Ctx.ctxSessionToolCalls = sessionTrackedCalls sess

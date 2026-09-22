@@ -1047,7 +1047,7 @@ mkAsyncTrackedCall world toolName = do
                 , Session.tcState = Session.Running
                 , Session.tcResult = Nothing
                 , Session.tcContinuation = Nothing
-                , Session.tcPolicy = Session.AppliedPolicy Session.RunAsync Nothing
+                , Session.tcPolicy = Session.AppliedPolicy (Session.RunAsync Nothing) Nothing
                 , Session.tcEntityId = Just eid
                 , Session.tcDeliveredLate = False
                 }
@@ -1145,7 +1145,7 @@ toolCallStatusTests =
                         , Session.tcState = Session.Running
                         , Session.tcResult = Nothing
                         , Session.tcContinuation = Nothing
-                        , Session.tcPolicy = Session.AppliedPolicy Session.RunAsync Nothing
+                        , Session.tcPolicy = Session.AppliedPolicy (Session.RunAsync Nothing) Nothing
                         , Session.tcEntityId = Nothing
                         , Session.tcDeliveredLate = False
                         }
