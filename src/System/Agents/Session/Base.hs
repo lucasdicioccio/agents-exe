@@ -146,6 +146,7 @@ module System.Agents.Session.Base (
     defaultWrapperEnv,
     interpretDecorator,
     applyDecorators,
+    mkToolInvoker,
     mkIsolationEnvelope,
     mkIsolationSuccessEnvelope,
     mkIsolationErrorEnvelope,
@@ -228,6 +229,7 @@ import System.Agents.Session.Durable (
     isolatedExecutor,
     localProcessRunner,
     mkDurableExecutor,
+    mkToolInvoker,
     mkIsolationEnvelope,
     mkIsolationErrorEnvelope,
     mkIsolationSuccessEnvelope,
@@ -682,7 +684,7 @@ executeCallSync agent ctx call = do
         ToolComplete result -> pure result
         ToolYield{} -> pure $ TextResponse "tool call yielded unexpectedly under a synchronous executor"
   where
-    wrapperEnv = WrapperEnv{weCache = agent.ctxToolCache}
+    wrapperEnv = WrapperEnv{weCache = agent.ctxToolCache, weInvokeTool = Just (mkToolInvoker agent.toolCall ctx)}
     (decorators, _base) = flattenDisposition (agent.ctxToolCallPolicy ctx call)
     baseExec ctx' call' = ToolComplete <$> baseExecSync ctx' call'
     baseExecSync ctx' call' =

@@ -51,6 +51,7 @@ for completeness:
 module DurableWorkflowTests where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.STM (atomically, flushTQueue, newTQueueIO)
 import Control.Exception (ErrorCall (..), throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
@@ -75,6 +76,7 @@ import System.Agents.Combinators.StoreSessionProgress (
     agentWithSessionProgress,
     backendStoreCallback,
  )
+import System.Agents.OS.Events (OSEvent (..))
 import System.Agents.Session.Async (
     ContinuationStore,
     ToolContinuationSnapshot (..),
@@ -182,6 +184,22 @@ tests =
             , cachedInProcessExecutorTest
             , composeExecutorsTest
             , agentStoreSessionWithCallbackTest
+            ]
+        , testGroup
+            "Session Mailbox Phase 5 (hooks)"
+            [ beforeHookCommandDeniesOnNonZeroExitTest
+            , beforeHookCommandDeniesExplicitlyTest
+            , beforeHookCommandContinuesWithRewrittenArgumentsTest
+            , beforeHookCommandDefersTest
+            , beforeHookCommandAnswersDirectlyTest
+            , beforeHookCommandFailureDeniesAndTracesTest
+            , beforeHookToolContinuesTest
+            , beforeHookToolDeniesTest
+            , afterHookCommandRewritesResultTest
+            , afterHookCommandAnnotatesTest
+            , afterHookCommandFailurePassesThroughAndTracesTest
+            , afterHookSkippedOnYieldTest
+            , hookDecoratorJsonRoundTripTest
             ]
         ]
 
@@ -977,6 +995,186 @@ applyDecoratorsOrderTest =
 -- | Waits at least the given number of seconds without busy-looping.
 threadDelaySeconds :: Int -> IO ()
 threadDelaySeconds n = threadDelay (n * 1000000)
+
+-------------------------------------------------------------------------------
+-- Session Mailbox Phase 5: before/after hooks
+-------------------------------------------------------------------------------
+
+-- | Write a hook script to a temp file, executable, and hand its path to the action.
+withHookScript :: String -> (FilePath -> IO a) -> IO a
+withHookScript scriptBody action =
+    withSystemTempDirectory "hook-script" $ \dir -> do
+        let path = dir ++ "/hook.sh"
+        writeFile path scriptBody
+        setPermissions path emptyPermissions{readable = True, executable = True}
+        action path
+
+-- | An 'Exec' that records how many times it ran and always succeeds.
+countingExec :: IORef Int -> Exec
+countingExec calls _ctx call = do
+    modifyIORef' calls (+ 1)
+    pure $ ToolComplete $ TextResponse ("done:" <> callName call)
+
+beforeHookCommandDeniesOnNonZeroExitTest :: TestTree
+beforeHookCommandDeniesOnNonZeroExitTest =
+    testCase "a before hook command exiting non-zero denies the call" $
+        withHookScript "#!/usr/bin/env bash\nset -e\ncat >/dev/null\nexit 3\n" $ \path -> do
+            calls <- newIORef (0 :: Int)
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) testCtx (mkCall "deploy")
+            case response of
+                ToolComplete (TextResponse msg) -> Text.isInfixOf "blocked by policy" msg @?= True
+                other -> assertFailure $ "expected a deny text response, got " <> show other
+            readIORef calls >>= (@?= 0)
+
+beforeHookCommandDeniesExplicitlyTest :: TestTree
+beforeHookCommandDeniesExplicitlyTest =
+    testCase "a before hook command can deny explicitly, and the call never runs" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"deny\",\"message\":\"nope, policy says no\"}'\n" $ \path -> do
+            calls <- newIORef (0 :: Int)
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) testCtx (mkCall "deploy")
+            response @?= ToolComplete (TextResponse "nope, policy says no")
+            readIORef calls >>= (@?= 0)
+
+beforeHookCommandContinuesWithRewrittenArgumentsTest :: TestTree
+beforeHookCommandContinuesWithRewrittenArgumentsTest =
+    testCase "a before hook command can rewrite arguments before the call runs" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"continue\",\"arguments\":{\"rewritten\":true}}'\n" $ \path -> do
+            let echoArgs _ctx (LlmToolCall v) = pure $ ToolComplete $ TextResponse (Text.pack (show v))
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) echoArgs testCtx (mkCall "deploy")
+            case response of
+                ToolComplete (TextResponse msg) -> Text.isInfixOf "rewritten" msg @?= True
+                other -> assertFailure $ "expected the rewritten arguments to reach the call, got " <> show other
+
+beforeHookCommandDefersTest :: TestTree
+beforeHookCommandDefersTest =
+    testCase "a before hook command can defer the call" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"defer\",\"reason\":\"needs approval\"}'\n" $ \path -> do
+            calls <- newIORef (0 :: Int)
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) testCtx (mkCall "deploy")
+            case response of
+                ToolYield{} -> pure ()
+                other -> assertFailure $ "expected a yielded response, got " <> show other
+            readIORef calls >>= (@?= 0)
+
+beforeHookCommandAnswersDirectlyTest :: TestTree
+beforeHookCommandAnswersDirectlyTest =
+    testCase "a before hook command can answer directly, short-circuiting the call" $
+        withHookScript
+            "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"answer\",\"result\":{\"type\":\"text\",\"content\":\"answered directly\"}}'\n"
+            $ \path -> do
+                calls <- newIORef (0 :: Int)
+                response <-
+                    interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) testCtx (mkCall "deploy")
+                response @?= ToolComplete (TextResponse "answered directly")
+                readIORef calls >>= (@?= 0)
+
+beforeHookCommandFailureDeniesAndTracesTest :: TestTree
+beforeHookCommandFailureDeniesAndTracesTest =
+    testCase "a before hook returning unparseable JSON denies (fail closed) and traces" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho 'not json at all'\n" $ \path -> do
+            queue <- newTQueueIO
+            let ctx = testCtx{Ctx.ctxEventQueue = Just queue}
+            calls <- newIORef (0 :: Int)
+            response <-
+                interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) ctx (mkCall "deploy")
+            case response of
+                ToolComplete (TextResponse msg) -> Text.isInfixOf "blocked by policy" msg @?= True
+                other -> assertFailure $ "expected a deny text response, got " <> show other
+            readIORef calls >>= (@?= 0)
+            traced <- atomically $ flushTQueue queue
+            any isTracedError traced @?= True
+  where
+    isTracedError e = case e of
+        OSEvent_Error _ -> True
+        _ -> False
+
+beforeHookToolContinuesTest :: TestTree
+beforeHookToolContinuesTest =
+    testCase "a before hook tool target can continue the call" $ do
+        let env = defaultWrapperEnv{weInvokeTool = Just stubGuard}
+        calls <- newIORef (0 :: Int)
+        response <-
+            interpretDecorator env (WithBeforeHook (HookTool "guard-allow")) (countingExec calls) testCtx (mkCall "deploy")
+        response @?= ToolComplete (TextResponse "done:deploy")
+        readIORef calls >>= (@?= 1)
+
+beforeHookToolDeniesTest :: TestTree
+beforeHookToolDeniesTest =
+    testCase "a before hook tool target can deny the call" $ do
+        let env = defaultWrapperEnv{weInvokeTool = Just stubGuard}
+        calls <- newIORef (0 :: Int)
+        response <-
+            interpretDecorator env (WithBeforeHook (HookTool "guard-deny")) (countingExec calls) testCtx (mkCall "deploy")
+        response @?= ToolComplete (TextResponse "blocked by guard")
+        readIORef calls >>= (@?= 0)
+
+-- | A stub 'weInvokeTool' standing in for an LLM-as-guard sub-agent tool.
+stubGuard :: Text -> Aeson.Value -> IO UserToolResponse
+stubGuard name _input = pure $ case name of
+    "guard-allow" -> JsonResponse (Aeson.object ["action" .= ("continue" :: Text)])
+    "guard-deny" -> JsonResponse (Aeson.object ["action" .= ("deny" :: Text), "message" .= ("blocked by guard" :: Text)])
+    other -> TextResponse ("unexpected guard target: " <> other)
+
+afterHookCommandRewritesResultTest :: TestTree
+afterHookCommandRewritesResultTest =
+    testCase "an after hook command can rewrite the result" $
+        withHookScript
+            "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"continue\",\"result\":{\"type\":\"text\",\"content\":\"rewritten result\"}}'\n"
+            $ \path -> do
+                let exec _ctx _call = pure $ ToolComplete $ TextResponse "original"
+                response <- interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand path)) exec testCtx (mkCall "deploy")
+                response @?= ToolComplete (TextResponse "rewritten result")
+
+afterHookCommandAnnotatesTest :: TestTree
+afterHookCommandAnnotatesTest =
+    testCase "an after hook command can annotate the result" $
+        withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"action\":\"annotate\",\"text\":\"looks fine\"}'\n" $ \path -> do
+            let exec _ctx _call = pure $ ToolComplete $ TextResponse "original"
+            response <- interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand path)) exec testCtx (mkCall "deploy")
+            response @?= ToolComplete (TextResponse "original\n\n[hook note: looks fine]")
+
+afterHookCommandFailurePassesThroughAndTracesTest :: TestTree
+afterHookCommandFailurePassesThroughAndTracesTest =
+    testCase "an after hook failure passes the original result through and traces" $
+        withHookScript "#!/usr/bin/env bash\nset -e\ncat >/dev/null\nexit 5\n" $ \path -> do
+            queue <- newTQueueIO
+            let ctx = testCtx{Ctx.ctxEventQueue = Just queue}
+            let exec _ctx _call = pure $ ToolComplete $ TextResponse "original"
+            response <- interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand path)) exec ctx (mkCall "deploy")
+            response @?= ToolComplete (TextResponse "original")
+            traced <- atomically $ flushTQueue queue
+            any isTracedError traced @?= True
+  where
+    isTracedError e = case e of
+        OSEvent_Error _ -> True
+        _ -> False
+
+-- | An after hook never runs on a yielded response: there is no result yet.
+afterHookSkippedOnYieldTest :: TestTree
+afterHookSkippedOnYieldTest =
+    testCase "an after hook is skipped for a yielded response" $ do
+        token <- newContinuationToken
+        let yielded = ToolYield token (computeCacheKey (mkCall "deploy"))
+        let exec _ctx _call = pure yielded
+        -- The target points nowhere; if the hook ran at all, this would fail
+        -- to execute rather than being silently skipped.
+        response <-
+            interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand "/nonexistent/hook")) exec testCtx (mkCall "deploy")
+        response @?= yielded
+
+-- | 'Decorator' JSON round-trips for both hook decorators and both hook targets.
+hookDecoratorJsonRoundTripTest :: TestTree
+hookDecoratorJsonRoundTripTest =
+    testCase "before/after hook decorators round-trip through JSON" $ do
+        let decorators =
+                [ WithBeforeHook (HookCommand "hooks/approve-deploy")
+                , WithAfterHook (HookTool "audit_log")
+                ]
+        Aeson.decode (Aeson.encode decorators) @?= Just decorators
 
 -- | 'mkDurableExecutor' builds an executor that caches and isolates.
 mkDurableExecutorTest :: TestTree

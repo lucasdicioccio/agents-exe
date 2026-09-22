@@ -23,6 +23,7 @@ module System.Agents.Tools.Cache (
     CacheKey (..),
     computeCacheKey,
     hashArguments,
+    extractToolInfo,
 
     -- * Cached Result
     CachedResult (..),

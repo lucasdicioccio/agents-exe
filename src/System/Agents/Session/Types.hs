@@ -54,6 +54,7 @@ module System.Agents.Session.Types (
     IsolationSpec (..),
     Reason (..),
     Decorator (..),
+    HookTarget (..),
     AppliedPolicy (..),
     TrackedToolCall (..),
 
@@ -475,6 +476,27 @@ instance FromJSON IsolationSpec where
             "functionRunner" -> FunctionRunner <$> v .: "target"
             _ -> fail $ "Unknown IsolationSpec tag: " ++ Text.unpack tag
 
+{- | Where a @before@\/@after@ hook decorator (Phase 5 of
+@todos/session-mailbox.md@, §6) runs:
+
+* 'HookCommand' - a subprocess; JSON on stdin, JSON on stdout.
+* 'HookTool' - any tool registered on the agent, visible to the LLM or not,
+  including a sub-agent (LLM-as-guard).
+-}
+data HookTarget
+    = HookCommand FilePath
+    | HookTool Text
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON HookTarget where
+    toJSON target = case target of
+        HookCommand path -> Aeson.object ["command" .= path]
+        HookTool toolName -> Aeson.object ["tool" .= toolName]
+
+instance FromJSON HookTarget where
+    parseJSON = Aeson.withObject "HookTarget" $ \v ->
+        (HookCommand <$> v .: "command") <|> (HookTool <$> v .: "tool")
+
 {- | Decorators that can be attached to a tool-call disposition.
 
 These modify how a call is executed without changing the core
@@ -491,6 +513,12 @@ data Decorator
     -- ^ Human-readable label for observability
     | WithTruncate Int
     -- ^ Cap the result to at most this many bytes, noting the cut to the model
+    | WithBeforeHook HookTarget
+    -- ^ Run before the call: continue (optionally rewriting arguments), deny,
+    -- defer, or answer directly. See "System.Agents.Session.Durable".
+    | WithAfterHook HookTarget
+    -- ^ Run after the call completes: continue (optionally rewriting the
+    -- result) or annotate it. See "System.Agents.Session.Durable".
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Decorator where
@@ -521,6 +549,16 @@ instance ToJSON Decorator where
                     [ "tag" .= ("truncate" :: Text)
                     , "maxBytes" .= maxBytes
                     ]
+            WithBeforeHook target ->
+                Aeson.object
+                    [ "tag" .= ("before" :: Text)
+                    , "hook" .= target
+                    ]
+            WithAfterHook target ->
+                Aeson.object
+                    [ "tag" .= ("after" :: Text)
+                    , "hook" .= target
+                    ]
 
 instance FromJSON Decorator where
     parseJSON = Aeson.withObject "Decorator" $ \v -> do
@@ -531,6 +569,8 @@ instance FromJSON Decorator where
             "cache" -> WithCache <$> v .: "key"
             "label" -> WithLabel <$> v .: "label"
             "truncate" -> WithTruncate <$> v .: "maxBytes"
+            "before" -> WithBeforeHook <$> v .: "hook"
+            "after" -> WithAfterHook <$> v .: "hook"
             _ -> fail $ "Unknown Decorator tag: " ++ Text.unpack tag
 
 {- | Decision made for a single tool call.

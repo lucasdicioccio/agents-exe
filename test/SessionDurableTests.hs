@@ -447,6 +447,19 @@ policyConfigTests =
                         ]
             let json = Aeson.encode cfg
             Aeson.decode json @?= Just cfg
+        , testCase "round-trips a before/after hook wrapper (session-mailbox.md §6 example)" $ do
+            let cfg =
+                    Base.ToolCallPolicyConfig
+                        RunSync
+                        []
+                        [ Base.ToolCallWrapperRule
+                            (Base.WrapperMatch (Just "deploy_*"))
+                            [ WithBeforeHook (HookCommand "hooks/approve-deploy")
+                            , WithAfterHook (HookTool "audit_log")
+                            ]
+                        ]
+            let json = Aeson.encode cfg
+            Aeson.decode json @?= Just cfg
         , testCase "parses example policy config JSON" $ do
             let json =
                     LBS8.pack $
