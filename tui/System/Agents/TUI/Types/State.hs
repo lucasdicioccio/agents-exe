@@ -17,6 +17,7 @@ module System.Agents.TUI.Types.State (
     corePausedConversations,
     coreWorld,
     coreOSEventQueue,
+    coreMailRouter,
     initCore,
 
     -- * Focus Ring
@@ -80,6 +81,7 @@ import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Base (Session)
+import System.Agents.Session.Mailbox (MailRouter, newMailRouter)
 import System.Agents.TUI.Buffer (Buffer)
 import System.Agents.TUI.KeyMapping (KeyMapping)
 import System.Agents.TUI.ToolCallActivity (ToolCallViews)
@@ -123,6 +125,15 @@ data Core = Core
     {- ^ Optional OS event queue for subcall event emission. Enables the TUI
     to receive notifications about subcall lifecycle (start, progress, completion).
     -}
+    , _coreMailRouter :: MailRouter
+    {- ^ One process-wide 'MailRouter' (@todos/session-mailbox.md@, Phase 4,
+    D12), the TUI's routing table of live conversation mailboxes. Every
+    conversation created by 'System.Agents.TUI.Event.Conversation.runConversation'
+    registers its mailbox here, keyed by
+    'System.Agents.SessionStore.conversationIdToSessionId', so
+    @send-message@\/@spawn-session@\/@watch-session@ can address it from any
+    other session (in this process or, via a future front-end, another).
+    -}
     }
 
 makeLenses ''Core
@@ -131,6 +142,7 @@ makeLenses ''Core
 initCore :: Maybe World -> Maybe (TQueue OSEvent) -> IO Core
 initCore mWorld mEventQueue = do
     bufferedVar <- newTVarIO Map.empty
+    router <- newMailRouter
     pure
         Core
             { _coreConversations = []
@@ -139,6 +151,7 @@ initCore mWorld mEventQueue = do
             , _corePausedConversations = Set.empty
             , _coreWorld = mWorld
             , _coreOSEventQueue = mEventQueue
+            , _coreMailRouter = router
             }
 
 -------------------------------------------------------------------------------

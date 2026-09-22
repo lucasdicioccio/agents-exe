@@ -86,6 +86,7 @@ import System.Agents.Session.Base (
     newTurnId,
  )
 import qualified System.Agents.Session.Loop as Loop
+import System.Agents.Session.Mailbox (MailRouter (..), MailScope (..), MailboxInfo (..), newInMemoryMailbox)
 import System.Agents.OS.Events (ToolCallActivity)
 import System.Agents.TUI.ToolCallActivity (applyToolCallActivity, pruneToolCallViews)
 import System.Agents.TUI.Types (
@@ -112,6 +113,7 @@ import System.Agents.TUI.Types (
     conversationSubcallDepth,
     coreBufferedMessages,
     coreConversations,
+    coreMailRouter,
     coreOSEventQueue,
     corePausedConversations,
     coreWorld,
@@ -215,6 +217,44 @@ runConversation tracer baseTuiAgent session = do
     coreState <- liftIO $ readTVarIO coreRef
     let mWorld = coreState ^. coreWorld
     let mEventQueue = coreState ^. coreOSEventQueue
+    let router = coreState ^. coreMailRouter
+
+    -- Phase 4 (@todos/session-mailbox.md@, D10/D12): every TUI conversation
+    -- gets an in-memory mailbox (there is no @session_mail@ backend here,
+    -- unlike the server) and registers it on the process's one 'MailRouter',
+    -- keyed the same way the server keys a session -- so 'send-message'/
+    -- 'watch-session' from another session (in this process, for now) can
+    -- reach it. This is additive: 'usrQuery'/the conversation's own 'BChan'
+    -- keep working exactly as they do today (Phase 1 kept the TUI on them
+    -- deliberately); a mailbox only adds R1/R2's mail-folding on top.
+    mailbox <- liftIO newInMemoryMailbox
+    -- Keyed by the *session's* id ('ctxSessionId', what 'send-message'/
+    -- 'spawn-session' address themselves and each other as -- see
+    -- 'System.Agents.Session.Step.buildContext'), not 'convId': the two are
+    -- independently-generated ids in this front-end (unlike the server,
+    -- where a session's 'ConversationId' is always derived from its
+    -- 'SessionId'), so registering under the wrong one would make this
+    -- conversation unreachable by its own reported identity.
+    let sid = session.sessionId
+    -- The unregister action is intentionally discarded: this TUI has no
+    -- "close conversation" action today, so a conversation's mailbox stays
+    -- registered for the process's lifetime, same as its 'Conversation'
+    -- entry in '_coreConversations' -- a conversation blocked on deferred
+    -- calls, in particular, is still a valid send-message/watch-session
+    -- target, so unregistering when its run loop merely stops looping
+    -- would be wrong.
+    _unregisterMail <-
+        liftIO $
+            router.mrRegister
+                sid
+                MailboxInfo
+                    { miAgentSlug = Just (tuiSlug baseTuiAgent)
+                    , miParent = Nothing
+                    , miStatus = "running"
+                    , miMailScope = MailScopeSubtree
+                    , miInterruptScope = MailScopeChildren
+                    }
+                mailbox
 
     let notifyNeedInput = writeBChan outChan (AppEvent_AgentNeedsInput convId)
 
@@ -225,6 +265,8 @@ runConversation tracer baseTuiAgent session = do
                 { ctxWorld = mWorld
                 , ctxEventQueue = mEventQueue
                 , ctxCallStack = [CallStackEntry "root" convId 0]
+                , ctxMailbox = Just mailbox
+                , ctxMailRouter = Just router
                 }
 
     let a =

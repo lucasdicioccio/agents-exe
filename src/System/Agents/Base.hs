@@ -23,7 +23,7 @@ import System.Agents.Tools.EndpointPredicate (EndpointPredicate)
 import System.Agents.Tools.PostgREST.Types (HttpMethod (..))
 import System.Agents.Tools.Secrets (Secret)
 import System.Agents.Tools.Skills.Types (SkillName, SkillSource)
-import System.Agents.Session.Types (AsyncYieldStrategy, Decorator, ExecutionMode, ToolCallDisposition)
+import System.Agents.Session.Types (AsyncYieldStrategy, Decorator, ExecutionMode, MailScope, ToolCallDisposition)
 
 -- Import FileSandbox types for unified sandboxing
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
@@ -1758,6 +1758,15 @@ data Agent
     that completion and amends the head turn with the mail instead of
     waiting for it to finish. Opt-in: default 'False' leaves an in-flight
     completion running and the mail is picked up at the next R1\/R2.
+    -}
+    , mailScope :: Maybe MailScope
+    {- ^ @todos/session-mailbox.md@ §5 "Permissions": how far this agent's
+    mail may reach, relative to its own place in session lineage. Default
+    'MailScopeSubtree' when unset.
+    -}
+    , interruptScope :: Maybe MailScope
+    {- ^ @todos/session-mailbox.md@ §5 "Permissions": how far this agent's
+    'Interrupt' priority may reach. Default 'MailScopeChildren' when unset.
     -}
     }
     deriving (Show, Eq, Generic)

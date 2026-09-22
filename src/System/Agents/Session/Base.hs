@@ -62,6 +62,7 @@ module System.Agents.Session.Base (
     Priority (..),
     Sender (..),
     ControlMsg (..),
+    MailScope (..),
     MailBody (..),
     Envelope (..),
     Outgoing (..),

@@ -522,10 +522,11 @@ serverMailRouter runner =
                         Nothing -> pure Nothing
                         Just (_sess, meta) -> do
                             mb <- newDurableMailbox runner.srHost.hostMail sid
-                            pure $ Just (metaToMailboxInfo meta, mb)
+                            info <- mailboxInfoFor meta
+                            pure $ Just (info, mb)
         , mrList = do
             metas <- sbQuery runner.srHost.hostBackend allSessionsQuery
-            pure [(meta.smSessionId, metaToMailboxInfo meta) | meta <- metas]
+            mapM (\meta -> (,) meta.smSessionId <$> mailboxInfoFor meta) metas
         }
   where
     {- | If this session already has a live agent in this process, its
@@ -539,25 +540,46 @@ serverMailRouter runner =
     process, where the store is the only shared state).
     -}
     lookupLiveMailbox :: SessionId -> IO (Maybe (MailboxInfo, Mailbox))
-    lookupLiveMailbox sid =
-        lookupLive runner sid >>= \case
+    lookupLiveMailbox sid = do
+        mLive <- lookupLive runner sid
+        case mLive of
             Nothing -> pure Nothing
             Just live -> do
                 mAgent <- readTVarIO live.lsAgent
                 mLatest <- readTVarIO live.lsLatest
-                pure $ do
-                    agent <- mAgent
-                    mb <- agent.ctxMailbox
-                    (_, meta) <- mLatest
-                    pure (metaToMailboxInfo meta, mb)
+                case (mAgent, mLatest) of
+                    (Just agent, Just (_, meta)) -> case agent.ctxMailbox of
+                        Just mb -> do
+                            info <- mailboxInfoFor meta
+                            pure $ Just (info, mb)
+                        Nothing -> pure Nothing
+                    _ -> pure Nothing
 
-    metaToMailboxInfo :: SessionMeta -> MailboxInfo
-    metaToMailboxInfo meta =
-        MailboxInfo
-            { miAgentSlug = meta.smAgent
-            , miParent = meta.smParent
-            , miStatus = sessionStatusText meta.smStatus
-            }
+    mailboxInfoFor :: SessionMeta -> IO MailboxInfo
+    mailboxInfoFor meta = do
+        (scope, iscope) <- agentMailScopes meta
+        pure
+            MailboxInfo
+                { miAgentSlug = meta.smAgent
+                , miParent = meta.smParent
+                , miStatus = sessionStatusText meta.smStatus
+                , miMailScope = scope
+                , miInterruptScope = iscope
+                }
+
+    {- | A session's own @mailScope@\/@interruptScope@ (§5 Permissions),
+    read from its agent's JSON config, defaulting to the spec's own
+    'MailScopeSubtree'\/'MailScopeChildren' when unset or the agent is
+    unknown.
+    -}
+    agentMailScopes :: SessionMeta -> IO (MailScope, MailScope)
+    agentMailScopes meta = do
+        mNode <- maybe (pure Nothing) (lookupAgent runner.srHost) meta.smAgent
+        let mCfg = osNodeConfig <$> mNode
+        pure
+            ( fromMaybe MailScopeSubtree (mCfg >>= Base.mailScope)
+            , fromMaybe MailScopeChildren (mCfg >>= Base.interruptScope)
+            )
 
 -------------------------------------------------------------------------------
 -- Watches (todos/session-mailbox.md, Phase 6, §7)
@@ -579,7 +601,9 @@ matching events as 'WatchedEvent' mail until its TTL elapses or
 -}
 serverWatchSession :: SessionRunner -> SessionId -> WatchRequest -> IO (Either Text Text)
 serverWatchSession runner watcherSid req = do
-    withinSubtree <- isWithinSubtree runner watcherSid req.wrTarget
+    mOwnInfo <- fmap fst <$> (serverMailRouter runner).mrLookup watcherSid
+    let ownScope = maybe MailScopeSubtree miMailScope mOwnInfo
+    withinSubtree <- isWithinScope runner ownScope watcherSid req.wrTarget
     if not withinSubtree
         then pure $ Left "not permitted to watch this session"
         else do
@@ -663,17 +687,23 @@ watchedEventPayload event = case event of
     ToolCallCompleted sid callId toolName succeeded ->
         Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
 
-{- | Whether 'targetSid' is 'ancestorSid' itself or one of its descendants,
-walking each session's recorded parent up from the target. Bounded depth so
-a corrupt or cyclic parent chain cannot hang. Mirrors
-"System.Agents.Tools.SystemToolbox.Mail"'s @isWithinSubtree@, which is not
+{- | Whether 'targetSid' is reachable from 'ownSid' under the given
+'MailScope', walking each session's recorded parent up from the target for
+'MailScopeSubtree' (bounded depth so a corrupt or cyclic parent chain
+cannot hang). Mirrors
+"System.Agents.Tools.SystemToolbox.Mail"'s @isWithinScope@, which is not
 reusable here without threading a 'MailRouter' value through -- both read
 the same 'MailboxInfo.miParent' shape via 'mrLookup'.
 -}
-isWithinSubtree :: SessionRunner -> SessionId -> SessionId -> IO Bool
-isWithinSubtree runner ancestorSid targetSid
-    | ancestorSid == targetSid = pure True
-    | otherwise = go targetSid (32 :: Int)
+isWithinScope :: SessionRunner -> MailScope -> SessionId -> SessionId -> IO Bool
+isWithinScope _runner MailScopeAll _ownSid _targetSid = pure True
+isWithinScope _runner _scope ownSid targetSid
+    | ownSid == targetSid = pure True
+isWithinScope _runner MailScopeOwn _ownSid _targetSid = pure False
+isWithinScope runner MailScopeChildren ownSid targetSid = do
+    mTarget <- (serverMailRouter runner).mrLookup targetSid
+    pure $ maybe False ((== Just ownSid) . miParent . fst) mTarget
+isWithinScope runner MailScopeSubtree ownSid targetSid = go targetSid (32 :: Int)
   where
     router = serverMailRouter runner
     go _ 0 = pure False
@@ -684,7 +714,7 @@ isWithinSubtree runner ancestorSid targetSid
             Just (info, _) -> case info.miParent of
                 Nothing -> pure False
                 Just parentSid
-                    | parentSid == ancestorSid -> pure True
+                    | parentSid == ownSid -> pure True
                     | otherwise -> go parentSid (depthLeft - 1)
 
 -------------------------------------------------------------------------------

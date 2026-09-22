@@ -73,6 +73,7 @@ module System.Agents.Session.Types (
     Priority (..),
     Sender (..),
     ControlMsg (..),
+    MailScope (..),
     MailBody (..),
     Envelope (..),
     Outgoing (..),
@@ -875,6 +876,37 @@ instance FromJSON ControlMsg where
             "cancelCalls" -> CancelCalls <$> v .: "toolCallIds"
             "stopRun" -> pure StopRun
             _ -> fail $ "Unknown ControlMsg tag: " ++ Text.unpack tag
+
+{- | How far a sending agent's mail (or its 'Interrupt' priority) may reach,
+relative to its own place in session lineage (@todos/session-mailbox.md@
+§5 "Permissions": @mailScope@, default 'MailScopeSubtree'; @interruptScope@,
+default 'MailScopeChildren').
+-}
+data MailScope
+    = MailScopeOwn
+    -- ^ Only the sender's own session.
+    | MailScopeChildren
+    -- ^ The sender itself, or a direct child.
+    | MailScopeSubtree
+    -- ^ The sender itself, or any descendant (children, grandchildren, ...).
+    | MailScopeAll
+    -- ^ Any session.
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON MailScope where
+    toJSON scope = Aeson.String $ case scope of
+        MailScopeOwn -> "own"
+        MailScopeChildren -> "children"
+        MailScopeSubtree -> "subtree"
+        MailScopeAll -> "all"
+
+instance FromJSON MailScope where
+    parseJSON = Aeson.withText "MailScope" $ \t -> case t of
+        "own" -> pure MailScopeOwn
+        "children" -> pure MailScopeChildren
+        "subtree" -> pure MailScopeSubtree
+        "all" -> pure MailScopeAll
+        _ -> fail $ "Unknown MailScope: " ++ Text.unpack t
 
 {- | The payload of an 'Envelope'.
 

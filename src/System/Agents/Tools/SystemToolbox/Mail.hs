@@ -8,16 +8,15 @@ Requires 'ctxMailRouter' to resolve the recipient's mailbox; without one,
 the call fails the same way any other capability fails when its supporting
 context is missing.
 
-__Scope__: enforces §5's own defaults -- @mailScope: subtree@ (a session
-may mail itself or any descendant, walking 'MailboxInfo.miParent' up from
-the recipient) and @interruptScope: children@ (only a direct child may be
-sent 'Interrupt' priority; a disallowed interrupt request is silently sent
-as 'Normal' rather than refused, since the sender was otherwise entitled to
-send). These are not yet a per-agent @mailScope@\/@interruptScope@ config
-knob (§5 lists them as knobs "we expect to revisit"); wiring one through
-requires threading two more fields across 'Agent', 'ToolExecutionContext',
-and every context constructor the way 'ctxMailRouter' was, which is
-deferred to a follow-up.
+__Scope__: enforces the *sender's own* @mailScope@\/@interruptScope@ (§5
+"Permissions"), read from 'MailboxInfo.miMailScope'\/'miInterruptScope' on
+the sender's own router registration (populated by each front-end from the
+sending agent's JSON config; the server does this in
+'System.Agents.Host.Runner.serverMailRouter'). Defaults, when a front-end
+or agent leaves them unset, are the spec's own: @subtree@ for mail,
+@children@ for 'Interrupt'. A disallowed interrupt request is silently
+sent as 'Normal' rather than refused, since the sender was otherwise
+entitled to send.
 -}
 module System.Agents.Tools.SystemToolbox.Mail (
     sendMessageToSession,
@@ -35,6 +34,7 @@ import System.Agents.Session.Mailbox (MailRouter (..), Mailbox (..), MailboxInfo
 import System.Agents.Session.Types (
     Envelope (..),
     MailBody (..),
+    MailScope (..),
     MessageId (..),
     Outgoing (..),
     Priority (..),
@@ -75,12 +75,14 @@ sendMessageToSession ctx params = case ctxMailRouter ctx of
                 Nothing -> pure $ Left $ SystemInfoError ("unknown session: " <> smpTo params)
                 Just (targetInfo, targetMailbox) -> do
                     let ownSid = ctxSessionId ctx
-                    -- §5 "Permissions": mailScope (default subtree) and
-                    -- interruptScope (default children). Not yet a
-                    -- per-agent config knob (see module haddock) -- these
-                    -- are the spec's own defaults, applied unconditionally.
-                    withinSubtree <- isWithinSubtree router ownSid toSid
-                    if not withinSubtree
+                    -- §5 "Permissions": the sender's own mailScope/
+                    -- interruptScope (its own MailboxInfo registration),
+                    -- defaulting to the spec's subtree/children when unset.
+                    mOwnInfo <- (fmap fst) <$> router.mrLookup ownSid
+                    let ownMailScope = maybe MailScopeSubtree miMailScope mOwnInfo
+                        ownInterruptScope = maybe MailScopeChildren miInterruptScope mOwnInfo
+                    withinScope <- isWithinScope router ownMailScope ownSid toSid
+                    if not withinScope
                         then pure $ Left $ sendErrorToQueryError NotPermitted
                         else do
                             ownSlug <- resolveOwnSlug router ownSid
@@ -88,7 +90,7 @@ sendMessageToSession ctx params = case ctxMailRouter ctx of
                             hops <- replyHops router ownSid mInReplyTo
                             canInterrupt <-
                                 if smpInterrupt params
-                                    then isDirectChild router ownSid toSid
+                                    then isWithinScope router ownInterruptScope ownSid toSid
                                     else pure False
                             let priority = if canInterrupt then Interrupt else Normal
                                 outgoing =
@@ -175,14 +177,20 @@ replyHops router ownSid (Just replyToId) = do
             everReceived <- atomically (ownMailbox.mbUnread 0)
             pure $ maybe 0 ((+ 1) . envHops) (find ((== replyToId) . envId) everReceived)
 
-{- | Whether 'targetSid' is 'ancestorSid' itself or one of its descendants,
-walking 'MailboxInfo.miParent' up from the target. Bounded depth so a
-corrupt or cyclic parent chain cannot hang.
+{- | Whether 'targetSid' is reachable from 'ownSid' under the given
+'MailScope' (§5 "Permissions"): 'MailScopeOwn' only the sender itself;
+'MailScopeChildren' the sender or a direct child; 'MailScopeSubtree' the
+sender or any descendant (walking 'MailboxInfo.miParent' up from the
+target, bounded depth so a corrupt or cyclic parent chain cannot hang);
+'MailScopeAll' always.
 -}
-isWithinSubtree :: MailRouter -> SessionId -> SessionId -> IO Bool
-isWithinSubtree router ancestorSid targetSid
-    | ancestorSid == targetSid = pure True
-    | otherwise = go targetSid (32 :: Int)
+isWithinScope :: MailRouter -> MailScope -> SessionId -> SessionId -> IO Bool
+isWithinScope _router MailScopeAll _ownSid _targetSid = pure True
+isWithinScope _router _scope ownSid targetSid
+    | ownSid == targetSid = pure True
+isWithinScope _router MailScopeOwn _ownSid _targetSid = pure False
+isWithinScope router MailScopeChildren ownSid targetSid = isDirectChild router ownSid targetSid
+isWithinScope router MailScopeSubtree ownSid targetSid = go targetSid (32 :: Int)
   where
     go _ 0 = pure False
     go sid depthLeft = do
@@ -192,7 +200,7 @@ isWithinSubtree router ancestorSid targetSid
             Just (info, _) -> case info.miParent of
                 Nothing -> pure False
                 Just parentSid
-                    | parentSid == ancestorSid -> pure True
+                    | parentSid == ownSid -> pure True
                     | otherwise -> go parentSid (depthLeft - 1)
 
 -- | Whether 'targetSid's recorded parent is exactly 'parentSid'.

@@ -24,6 +24,7 @@ module System.Agents.Session.Mailbox (
     MailStore (..),
     newDurableMailbox,
     MailboxInfo (..),
+    MailScope (..),
     MailRouter (..),
     newMailRouter,
     SpawnSession,
@@ -46,6 +47,7 @@ import System.Agents.Session.Types (
     Cursor,
     Envelope (..),
     MailBody (..),
+    MailScope (..),
     Outgoing (..),
     Receipt (..),
     SendError (..),
@@ -238,6 +240,14 @@ data MailboxInfo = MailboxInfo
     { miAgentSlug :: Maybe Text
     , miParent :: Maybe SessionId
     , miStatus :: Text
+    , miMailScope :: MailScope
+    -- ^ How far this session's own mail may reach (§5 Permissions,
+    -- default 'MailScopeSubtree'). Read from the sender's own registration
+    -- by a scope check, e.g. 'System.Agents.Tools.SystemToolbox.Mail'\'s
+    -- @isWithinScope@, not the recipient's.
+    , miInterruptScope :: MailScope
+    -- ^ How far this session's 'Interrupt' priority may reach (default
+    -- 'MailScopeChildren').
     }
     deriving (Show, Eq)
 
