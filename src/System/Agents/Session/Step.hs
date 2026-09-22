@@ -1156,6 +1156,9 @@ buildContext agent sess convId =
               -- sessions.
               Ctx.ctxMailRouter = agent.ctxMailRouter
             , Ctx.ctxSpawnSession = agent.ctxSpawnSession
+            , -- Phase 6 (@todos/session-mailbox.md@ §7): copied the same way.
+              Ctx.ctxWatchSession = agent.ctxWatchSession
+            , Ctx.ctxUnwatchSession = agent.ctxUnwatchSession
             , -- Cheap view of the calls the capabilities may be asked about,
               -- including calls left behind by an earlier process.
               Ctx.ctxSessionToolCalls = sessionTrackedCalls sess

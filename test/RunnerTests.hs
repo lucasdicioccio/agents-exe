@@ -10,6 +10,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, writeTVar)
+import Control.Monad (void)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy.Char8 as LBS8
@@ -82,6 +83,11 @@ tests =
         , testCase "a paused session refuses ordinary messages by default" controlPauseRefusesMessagesByDefaultTest
         , testCase "resumeOnAnyMail lets postMessage wake a paused session" controlResumeOnAnyMailTest
         , testCase "Control (CancelCalls ids) cancels one attached call" controlCancelCallsTest
+        , testCase "a background call reports tool.started and tool.completed events" toolCallEventsTest
+        , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
+        , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
+        , testCase "unwatch-session stops forwarding" unwatchSessionTest
+        , testCase "watch-session refuses a target outside the watcher's subtree" watchSessionScopeDenialTest
         ]
 
 -------------------------------------------------------------------------------
@@ -741,6 +747,155 @@ controlCancelCallsTest = do
         sessF <- currentSession runner sid
         assertBool ("call reported cancelled: " <> show (sessionTexts sessF)) (any ("cancelled" `Text.isInfixOf`) (sessionTexts sessF))
 
+-- | A background call reports 'ToolCallStarted' while it runs and
+-- 'ToolCallCompleted' once it finishes (@todos/session-mailbox.md@ §7).
+toolCallEventsTest :: Assertion
+toolCallEventsTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner (Base.slug node.osNodeConfig) (message "go") (Just StepOnce)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        startEvents <- subscribe runner sid
+        -- Second step: starts the background call, then yields while it runs.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        _ <- expectRight =<< awaitRun runner sid 5
+        startKinds <- eventsUntilStopped startEvents
+        assertBool ("tool.started among " <> show startKinds) ("tool.started" `elem` startKinds)
+
+        completeEvents <- subscribe runner sid
+        putMVar gate ()
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        completeKinds <- eventsUntilStopped completeEvents
+        assertBool ("tool.completed among " <> show completeKinds) ("tool.completed" `elem` completeKinds)
+
+{- | A watch always permits watching one's own session ('isWithinSubtree's
+own-id short-circuit), so a session watching itself is enough to exercise
+the whole watch/forward/deliver mechanism deterministically, on the exact
+same 'StepOnce'-driven background-call setup 'toolCallEventsTest' and
+'setUpBackgroundCall' already use, rather than layering 'spawnSession's own
+un-controllable 'UntilBlocked' auto-stepping (which raced unpredictably
+under a parallel test run) on top of it.
+
+Runs @before gate@ (watch setup, with the background call still running)
+then, once the gate is open and the run has finished, @after run@ (mailbox
+assertions), giving both access to the 'Host' (for 'hostMail') and the
+common session id.
+-}
+watchSelfSetup :: (SessionRunner -> Host -> SessionId -> IO ()) -> (SessionRunner -> Host -> SessionId -> IO ()) -> Assertion
+watchSelfSetup beforeGate afterRun = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        beforeGate runner host sid
+        putMVar gate ()
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        afterRun runner host sid
+
+-- | A watch forwards a matching event as 'WatchedEvent' mail to the watcher's own mailbox.
+watchSessionTest :: Assertion
+watchSessionTest =
+    watchSelfSetup
+        ( \runner _host sid ->
+            void $
+                expectRight
+                    =<< serverWatchSession
+                        runner
+                        sid
+                        WatchRequest{wrTarget = sid, wrEvents = Just ["tool.completed"], wrTool = Nothing, wrTtlSeconds = Nothing}
+        )
+        ( \_runner host sid -> do
+            mb <- newDurableMailbox host.hostMail sid
+            waitUntil (any isWatchedEvent <$> atomically (mbUnread mb 0))
+            unread <- atomically (mbUnread mb 0)
+            case [e | e <- unread, isWatchedEvent e] of
+                (e : _) -> case e.envBody of
+                    WatchedEvent watchedSid kind _ -> do
+                        watchedSid @?= sid
+                        kind @?= "tool.completed"
+                    _ -> assertFailure "expected WatchedEvent"
+                [] -> assertFailure "no WatchedEvent mail arrived"
+        )
+
+isWatchedEvent :: Envelope -> Bool
+isWatchedEvent e = case e.envBody of
+    WatchedEvent{} -> True
+    _ -> False
+
+-- | A watch's @events@ filter excludes non-matching kinds.
+watchSessionFilterTest :: Assertion
+watchSessionFilterTest =
+    watchSelfSetup
+        ( \runner _host sid ->
+            void $
+                expectRight
+                    =<< serverWatchSession
+                        runner
+                        sid
+                        WatchRequest{wrTarget = sid, wrEvents = Just ["run.started"], wrTool = Nothing, wrTtlSeconds = Nothing}
+        )
+        ( \_runner host sid -> do
+            threadDelay 200_000
+            mb <- newDurableMailbox host.hostMail sid
+            unread <- atomically (mbUnread mb 0)
+            let toolCompletedForwarded = or [True | e <- unread, WatchedEvent _ "tool.completed" _ <- [e.envBody]]
+            assertBool "tool.completed was not requested and must not be forwarded" (not toolCompletedForwarded)
+        )
+
+-- | 'unwatch-session' immediately stops a watch from forwarding further events.
+unwatchSessionTest :: Assertion
+unwatchSessionTest =
+    watchSelfSetup
+        ( \runner _host sid -> do
+            watchId <-
+                expectRight
+                    =<< serverWatchSession
+                        runner
+                        sid
+                        WatchRequest{wrTarget = sid, wrEvents = Just ["tool.completed"], wrTool = Nothing, wrTtlSeconds = Nothing}
+            stopped <- serverUnwatchSession runner watchId
+            stopped @?= True
+            stoppedAgain <- serverUnwatchSession runner watchId
+            stoppedAgain @?= False
+        )
+        ( \_runner host sid -> do
+            threadDelay 200_000
+            mb <- newDurableMailbox host.hostMail sid
+            unread <- atomically (mbUnread mb 0)
+            let forwarded = or [True | e <- unread, WatchedEvent{} <- [e.envBody]]
+            assertBool "an unwatched watch must not forward" (not forwarded)
+        )
+
+-- | @watch-session@ enforces the same subtree scope @send-message@ does.
+watchSessionScopeDenialTest :: Assertion
+watchSessionScopeDenialTest = do
+    aNode <- testNode "{}"
+    bNode <- testNode "{}"
+    host <- testHost [aNode, bNode] (const mockCompletion)
+    withSessionRunner host $ \runner -> do
+        aMeta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
+        bMeta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
+        _ <- expectRight =<< awaitRun runner aMeta.smSessionId 5
+        _ <- expectRight =<< awaitRun runner bMeta.smSessionId 5
+        result <-
+            serverWatchSession
+                runner
+                aMeta.smSessionId
+                WatchRequest{wrTarget = bMeta.smSessionId, wrEvents = Nothing, wrTool = Nothing, wrTtlSeconds = Nothing}
+        case result of
+            Left _ -> pure ()
+            Right _ -> assertFailure "expected watching an unrelated session to be refused"
+
 -- | A dummy tool portal for tests that need a valid 'ToolExecutionContext'.
 dummyPortal :: ToolPortal
 dummyPortal _ _ =
@@ -930,7 +1085,11 @@ eventsUntilStopped next = go []
 
 -- | Poll a condition every 20ms for up to 5 seconds.
 waitUntil :: IO Bool -> Assertion
-waitUntil check = go (250 :: Int)
+waitUntil = waitUntilFor 250
+
+-- | Poll a condition every 20ms for up to @n@ attempts.
+waitUntilFor :: Int -> IO Bool -> Assertion
+waitUntilFor attempts check = go attempts
   where
     go 0 = assertFailure "condition not reached in time"
     go n = do

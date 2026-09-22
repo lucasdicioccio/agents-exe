@@ -22,6 +22,8 @@ deferred to a follow-up.
 module System.Agents.Tools.SystemToolbox.Mail (
     sendMessageToSession,
     spawnSession,
+    watchSession,
+    unwatchSession,
 ) where
 
 import Control.Concurrent.STM (atomically)
@@ -29,7 +31,7 @@ import Data.List (find)
 import Data.Text (Text)
 import qualified Data.UUID as UUID
 
-import System.Agents.Session.Mailbox (MailRouter (..), Mailbox (..), MailboxInfo (..))
+import System.Agents.Session.Mailbox (MailRouter (..), Mailbox (..), MailboxInfo (..), WatchRequest (..))
 import System.Agents.Session.Types (
     Envelope (..),
     MailBody (..),
@@ -49,6 +51,10 @@ import System.Agents.Tools.SystemToolbox.Types (
     SendMessageResult (..),
     SpawnSessionParams (..),
     SpawnSessionResult (..),
+    UnwatchSessionParams (..),
+    UnwatchSessionResult (..),
+    WatchSessionParams (..),
+    WatchSessionResult (..),
  )
 
 {- | Send agent-to-agent mail to another session by id.
@@ -121,6 +127,32 @@ spawnSession ctx params = case ctxSpawnSession ctx of
   where
     mkResult :: SessionId -> SpawnSessionResult
     mkResult (SessionId uuid) = SpawnSessionResult{ssrSessionId = UUID.toText uuid}
+
+{- | Watch another session's events, forwarded as 'WatchedEvent' mail to
+this session's mailbox (§7). Delegates to the front-end's 'ctxWatchSession'
+hook, the same way 'sendMessageToSession' delegates to 'ctxMailRouter'.
+-}
+watchSession :: ToolExecutionContext -> WatchSessionParams -> IO (Either QueryError WatchSessionResult)
+watchSession ctx params = case ctxWatchSession ctx of
+    Nothing -> pure $ Left $ SystemInfoError "watch-session is not available in this context"
+    Just watch -> case parseSessionId (wspSession params) of
+        Nothing -> pure $ Left $ SystemInfoError ("not a session id: " <> wspSession params)
+        Just target -> do
+            let request =
+                    WatchRequest
+                        { wrTarget = target
+                        , wrEvents = wspEvents params
+                        , wrTool = wspTool params
+                        , wrTtlSeconds = wspTtlSeconds params
+                        }
+            result <- watch request
+            pure $ either (Left . SystemInfoError) (Right . WatchSessionResult) result
+
+-- | Stop a previously registered watch (§7). Delegates to 'ctxUnwatchSession'.
+unwatchSession :: ToolExecutionContext -> UnwatchSessionParams -> IO (Either QueryError UnwatchSessionResult)
+unwatchSession ctx params = case ctxUnwatchSession ctx of
+    Nothing -> pure $ Left $ SystemInfoError "unwatch-session is not available in this context"
+    Just unwatch -> Right . UnwatchSessionResult <$> unwatch (uspWatchId params)
 
 -- | Best-effort: look up the sender's own registration to report its slug.
 resolveOwnSlug :: MailRouter -> SessionId -> IO (Maybe Text)

@@ -358,6 +358,9 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                       -- spawn-session.
                       SessionBase.ctxMailRouter = Ctx.ctxMailRouter ctx
                     , SessionBase.ctxSpawnSession = Ctx.ctxSpawnSession ctx
+                    , -- Phase 6 (@todos/session-mailbox.md@ §7): handed down the same way.
+                      SessionBase.ctxWatchSession = Ctx.ctxWatchSession ctx
+                    , SessionBase.ctxUnwatchSession = Ctx.ctxUnwatchSession ctx
                     }
 
         -- Set the query on the agent

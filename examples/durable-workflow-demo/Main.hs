@@ -167,6 +167,8 @@ mkDemoAgent convId = do
             , ctxMailbox = Nothing
             , ctxMailRouter = Nothing
             , ctxSpawnSession = Nothing
+            , ctxWatchSession = Nothing
+            , ctxUnwatchSession = Nothing
             }
 
 -------------------------------------------------------------------------------

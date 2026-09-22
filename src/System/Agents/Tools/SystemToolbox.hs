@@ -78,6 +78,12 @@ module System.Agents.Tools.SystemToolbox (
     SpawnSessionParams (..),
     SpawnSessionResult (..),
     spawnSession,
+    WatchSessionParams (..),
+    WatchSessionResult (..),
+    UnwatchSessionParams (..),
+    UnwatchSessionResult (..),
+    watchSession,
+    unwatchSession,
 
     -- * Initialization (re-exported from Core)
     initializeToolbox,

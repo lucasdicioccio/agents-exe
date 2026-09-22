@@ -41,6 +41,8 @@ module System.Agents.Host.Runner (
     cancelRun,
     serverMailRouter,
     serverSpawnSession,
+    serverWatchSession,
+    serverUnwatchSession,
     getSession,
     awaitRun,
     recoverOnStartup,
@@ -65,6 +67,7 @@ import Control.Concurrent.STM
 import Control.Exception (Exception, SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
 import Control.Monad (filterM, forM, forM_, forever, unless, void, when)
 import qualified Data.Aeson as Aeson
+import Data.Aeson ((.=))
 import Data.Foldable (for_)
 import Data.List (nub)
 import Data.Map.Strict (Map)
@@ -73,7 +76,7 @@ import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Time (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
+import Data.Time (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
 import Prod.Tracer (contramap, runTracer)
 import System.Timeout (timeout)
 
@@ -85,6 +88,7 @@ import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
 import qualified System.Agents.Session.Async.Engine as Engine
+import System.Agents.Session.AgentConfig (matchGlob)
 import System.Agents.Session.Base hiding (SessionProgress (..))
 import System.Agents.Session.Step (buildContext, refreshHeadPartialTurn, runStepM)
 import System.Agents.Session.Wake (WakeOutcome (..), findSessionForToken, wakeSessionWith)
@@ -156,6 +160,10 @@ data SessionEvent
     | SessionFailed SessionId Text
     | -- | A piece of the LLM's answer, when the host streams tokens.
       TextDelta SessionId Text
+    | -- | A tracked tool call started running (@todos/session-mailbox.md@ §7).
+      ToolCallStarted SessionId ToolCallId Text
+    | -- | A tracked tool call reached a final state (@todos/session-mailbox.md@ §7).
+      ToolCallCompleted SessionId ToolCallId Text Bool
     deriving (Show)
 
 -- | The event's name in the HTTP events stream.
@@ -167,6 +175,8 @@ sessionEventKind = \case
     RunStopped{} -> "run.stopped"
     SessionFailed{} -> "session.failed"
     TextDelta{} -> "text.delta"
+    ToolCallStarted{} -> "tool.started"
+    ToolCallCompleted{} -> "tool.completed"
 
 sessionEventSession :: SessionEvent -> SessionId
 sessionEventSession = \case
@@ -176,6 +186,8 @@ sessionEventSession = \case
     RunStopped sid _ -> sid
     SessionFailed sid _ -> sid
     TextDelta sid _ -> sid
+    ToolCallStarted sid _ _ -> sid
+    ToolCallCompleted sid _ _ _ -> sid
 
 data DeleteMode = DryRun | DeleteForReal
     deriving (Show, Eq)
@@ -197,6 +209,14 @@ data SessionRunner = SessionRunner
     , srEvents :: TChan SessionEvent
     -- ^ Broadcast; subscribers filter by session, so eviction loses nothing.
     , srReaper :: Async ()
+    , srWatches :: TVar (Map Text WatchHandle)
+    -- ^ Active @watch-session@ registrations (@todos/session-mailbox.md@ §7), keyed by watch id.
+    }
+
+-- | One active watch: who is watching, and the thread forwarding matches.
+data WatchHandle = WatchHandle
+    { whWatcher :: SessionId
+    , whAsync :: Async ()
     }
 
 -- | In-memory state of a session this process has touched.
@@ -239,6 +259,7 @@ newSessionRunner :: Host -> IO SessionRunner
 newSessionRunner host = do
     live <- newTVarIO Map.empty
     events <- newBroadcastTChanIO
+    watches <- newTVarIO Map.empty
     let ttl = host.hostLiveSessionTtl
     self <- newEmptyTMVarIO
     reaper <- async $ do
@@ -246,7 +267,7 @@ newSessionRunner host = do
         forever $ do
             threadDelay (reaperInterval ttl)
             evictIdle runner
-    let runner = SessionRunner host live events reaper
+    let runner = SessionRunner host live events reaper watches
     atomically $ putTMVar self runner
     pure runner
 
@@ -258,6 +279,8 @@ reaperInterval ttl = max 50_000 (min 60_000_000 (round (realToFrac ttl * 500_000
 shutdownSessionRunner :: SessionRunner -> IO ()
 shutdownSessionRunner runner = do
     cancel runner.srReaper
+    watches <- Map.elems <$> readTVarIO runner.srWatches
+    forM_ watches $ \wh -> cancel wh.whAsync
     lives <- Map.elems <$> readTVarIO runner.srLive
     forM_ lives $ \live -> do
         active <- readTVarIO live.lsRun
@@ -457,10 +480,11 @@ newAgent runner live node = do
     -- accept mail (G2) and R1/R2 fold it into the session's turns.
     mailbox <- newDurableMailbox host.hostMail sid
     pure $
-        withSpawnSession (serverSpawnSession runner sid) $
-            withMailRouter (serverMailRouter runner) $
-                withMailbox mailbox $
-                    withExecutionMode Asynchronous agent
+        withWatchSession (serverWatchSession runner sid) (serverUnwatchSession runner) $
+            withSpawnSession (serverSpawnSession runner sid) $
+                withMailRouter (serverMailRouter runner) $
+                    withMailbox mailbox $
+                        withExecutionMode Asynchronous agent
 
 {- | The server's @spawn-session@ hook (§5): reuses 'spawnSession'
 (durable, recorded with 'sid' as parent) and reports only the new
@@ -531,6 +555,134 @@ serverMailRouter runner =
             , miParent = meta.smParent
             , miStatus = sessionStatusText meta.smStatus
             }
+
+-------------------------------------------------------------------------------
+-- Watches (todos/session-mailbox.md, Phase 6, §7)
+-------------------------------------------------------------------------------
+
+-- | Hard cap on concurrently active watches per watching session.
+maxWatchesPerSession :: Int
+maxWatchesPerSession = 32
+
+-- | Default TTL for a watch that did not specify one.
+defaultWatchTtlSeconds :: Int
+defaultWatchTtlSeconds = 600
+
+{- | The server's @watch-session@ hook (§7): scoped like mail (the watcher
+must be the target or one of its descendants, mirroring @send-message@'s
+own @mailScope: subtree@ default), capped per watcher, and forwarding
+matching events as 'WatchedEvent' mail until its TTL elapses or
+'serverUnwatchSession' is called.
+-}
+serverWatchSession :: SessionRunner -> SessionId -> WatchRequest -> IO (Either Text Text)
+serverWatchSession runner watcherSid req = do
+    withinSubtree <- isWithinSubtree runner watcherSid req.wrTarget
+    if not withinSubtree
+        then pure $ Left "not permitted to watch this session"
+        else do
+            activeForWatcher <- length . filter ((== watcherSid) . whWatcher) . Map.elems <$> readTVarIO runner.srWatches
+            if activeForWatcher >= maxWatchesPerSession
+                then pure $ Left "too many active watches for this session"
+                else do
+                    watchId <- Text.pack . show <$> newContinuationToken
+                    next <- subscribe runner req.wrTarget
+                    deadline <- addUTCTime (fromIntegral (fromMaybe defaultWatchTtlSeconds req.wrTtlSeconds)) <$> getCurrentTime
+                    handle <- async $ forwardLoop watchId next deadline
+                    atomically $ modifyTVar' runner.srWatches (Map.insert watchId (WatchHandle watcherSid handle))
+                    pure $ Right watchId
+  where
+    forwardLoop :: Text -> IO SessionEvent -> UTCTime -> IO ()
+    forwardLoop watchId next deadline = do
+        now <- getCurrentTime
+        let remainingMicros = round (max 0 (diffUTCTime deadline now)) * 1_000_000
+        if remainingMicros <= 0
+            then dropWatch watchId
+            else do
+                result <- timeout remainingMicros next
+                case result of
+                    Nothing -> dropWatch watchId
+                    Just event -> do
+                        when (eventMatches req event) $ forwardEvent watcherSid req.wrTarget event
+                        forwardLoop watchId next deadline
+
+    dropWatch :: Text -> IO ()
+    dropWatch watchId = atomically $ modifyTVar' runner.srWatches (Map.delete watchId)
+
+    forwardEvent :: SessionId -> SessionId -> SessionEvent -> IO ()
+    forwardEvent watcher target event = do
+        mTarget <- (serverMailRouter runner).mrLookup watcher
+        forM_ mTarget $ \(_, mb) ->
+            void $
+                mb.mbSend
+                    Outgoing
+                        { outId = Nothing
+                        , outFrom = FromSystem "watch-session"
+                        , outPriority = Normal
+                        , outHops = 0
+                        , outBody = WatchedEvent target (sessionEventKind event) (watchedEventPayload event)
+                        }
+
+-- | Stop a previously registered watch (§7).
+serverUnwatchSession :: SessionRunner -> Text -> IO Bool
+serverUnwatchSession runner watchId = do
+    mHandle <- atomically $ do
+        table <- readTVar runner.srWatches
+        writeTVar runner.srWatches (Map.delete watchId table)
+        pure (Map.lookup watchId table)
+    case mHandle of
+        Nothing -> pure False
+        Just wh -> cancel wh.whAsync >> pure True
+
+{- | Whether a 'SessionEvent' matches a watch request's @events@\/@tool@
+filter. 'Nothing' for @wrEvents@ matches every kind; @wrTool@ only applies
+to the two @tool.*@ events (per §7, other events always match it).
+-}
+eventMatches :: WatchRequest -> SessionEvent -> Bool
+eventMatches req event = kindMatches && toolMatches
+  where
+    kindMatches = maybe True (sessionEventKind event `elem`) req.wrEvents
+    toolMatches = case (req.wrTool, event) of
+        (Nothing, _) -> True
+        (Just pat, ToolCallStarted _ _ toolName) -> matchGlob pat toolName
+        (Just pat, ToolCallCompleted _ _ toolName _) -> matchGlob pat toolName
+        (Just _, _) -> True
+
+-- | A small JSON view of a 'SessionEvent', for 'WatchedEvent' mail.
+watchedEventPayload :: SessionEvent -> Aeson.Value
+watchedEventPayload event = case event of
+    RunStarted sid mode -> Aeson.object ["session_id" .= sid, "mode" .= Text.pack (show mode)]
+    SessionUpdated sid meta _turn -> Aeson.object ["session_id" .= sid, "status" .= sessionStatusText meta.smStatus]
+    CallsDeferred sid calls -> Aeson.object ["session_id" .= sid, "deferred_count" .= length calls]
+    RunStopped sid status -> Aeson.object ["session_id" .= sid, "status" .= sessionStatusText status]
+    SessionFailed sid msg -> Aeson.object ["session_id" .= sid, "message" .= msg]
+    TextDelta sid _ -> Aeson.object ["session_id" .= sid]
+    ToolCallStarted sid callId toolName -> Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName]
+    ToolCallCompleted sid callId toolName succeeded ->
+        Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
+
+{- | Whether 'targetSid' is 'ancestorSid' itself or one of its descendants,
+walking each session's recorded parent up from the target. Bounded depth so
+a corrupt or cyclic parent chain cannot hang. Mirrors
+"System.Agents.Tools.SystemToolbox.Mail"'s @isWithinSubtree@, which is not
+reusable here without threading a 'MailRouter' value through -- both read
+the same 'MailboxInfo.miParent' shape via 'mrLookup'.
+-}
+isWithinSubtree :: SessionRunner -> SessionId -> SessionId -> IO Bool
+isWithinSubtree runner ancestorSid targetSid
+    | ancestorSid == targetSid = pure True
+    | otherwise = go targetSid (32 :: Int)
+  where
+    router = serverMailRouter runner
+    go _ 0 = pure False
+    go sid depthLeft = do
+        mInfo <- router.mrLookup sid
+        case mInfo of
+            Nothing -> pure False
+            Just (info, _) -> case info.miParent of
+                Nothing -> pure False
+                Just parentSid
+                    | parentSid == ancestorSid -> pure True
+                    | otherwise -> go parentSid (depthLeft - 1)
 
 -------------------------------------------------------------------------------
 -- Session-level parameters (todos/tool-partial-application.md, Phase 4)
@@ -702,6 +854,7 @@ runLoop runner live mode agent0 = do
             let (sess', done) = case result of
                     Left (_, final) -> (final, True)
                     Right s -> (s, False)
+            emitToolCallEvents runner sid sess sess'
             withMVar live.lsLock $ \_ -> do
                 (_, meta) <- latestOrThrow live
                 void $ storeOrThrow runner live meta sess' StatusRunning
@@ -744,6 +897,52 @@ agentBoolOption :: SessionRunner -> SessionMeta -> (Base.Agent -> Maybe Bool) ->
 agentBoolOption runner meta field = do
     mNode <- maybe (pure Nothing) (lookupAgent runner.srHost) meta.smAgent
     pure $ fromMaybe False (mNode >>= field . osNodeConfig)
+
+{- | Every tracked call visible in the head turn, if it is a
+'PartialUserTurn' -- the only turn shape that still carries per-call state
+(a finalized 'UserTurn' has already folded each call into a plain
+@userToolResponses@ pair, with no 'ToolCallState' left to diff against).
+-}
+headTrackedCalls :: Session -> Map.Map ToolCallId (Text, ToolCallState)
+headTrackedCalls sess = case take 1 sess.turns of
+    [PartialUserTurn partial _] ->
+        Map.fromList [(tc.tcId, (llmToolCallName tc.tcCall, tc.tcState)) | tc <- partial.pTrackedToolCalls]
+    _ -> Map.empty
+
+{- | Emit 'ToolCallStarted' \/ 'ToolCallCompleted' for whatever changed
+between the turn the step started with and the turn it produced (§7).
+
+Only observes calls while the head turn stays a 'PartialUserTurn': a call
+that starts and reaches a final state within the same step, ending in a
+finalized 'UserTurn', is not caught here (its 'ToolCallState' is gone by
+the time this compares 'before'\/'after') -- an accepted gap, since such a
+call was never visible to anything waiting on 'tool.started' either. A call
+still 'Running' before this step whose turn is fully finalized after it is
+reported 'ToolCallCompleted' with @succeeded = True@: the exact
+success\/failure only survives in @userToolResponses@, keyed by
+'LlmToolCall' rather than 'ToolCallId', which is not worth walking for an
+event that is informational rather than authoritative (the stored session
+and 'get-tool-call-status' remain the source of truth).
+-}
+emitToolCallEvents :: SessionRunner -> SessionId -> Session -> Session -> IO ()
+emitToolCallEvents runner sid before after = do
+    forM_ (Map.toList afterCalls) $ \(callId, (toolName, state)) ->
+        when (state == Running && not (wasRunning callId)) $
+            emit runner (ToolCallStarted sid callId toolName)
+    forM_ (Map.toList beforeCalls) $ \(callId, (toolName, state)) ->
+        when (state == Running) $ case Map.lookup callId afterCalls of
+            Just (_, Completed) -> emit runner (ToolCallCompleted sid callId toolName True)
+            Just (_, Failed) -> emit runner (ToolCallCompleted sid callId toolName False)
+            Just (_, Running) -> pure ()
+            Just (_, Ready) -> pure ()
+            Just (_, Deferred) -> pure ()
+            Nothing -> emit runner (ToolCallCompleted sid callId toolName True)
+  where
+    beforeCalls = headTrackedCalls before
+    afterCalls = headTrackedCalls after
+    wasRunning callId = case Map.lookup callId beforeCalls of
+        Just (_, Running) -> True
+        _ -> False
 
 -- | Apply the queued external results to the latest version (under the lock).
 applyInbox :: SessionRunner -> LiveSession -> IO (Session, SessionMeta)

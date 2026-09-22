@@ -1188,6 +1188,43 @@ buildSystemToolParams box =
                 , propertyRequired = False
                 }
 
+        -- watch-session / unwatch-session parameters
+        watchSessionSessionParam =
+            ParamProperty
+                { propertyKey = "session"
+                , propertyType = StringParamType
+                , propertyDescription = "For watch-session: The session to watch"
+                , propertyRequired = False
+                }
+        watchSessionEventsParam =
+            ParamProperty
+                { propertyKey = "events"
+                , propertyType = StringParamType
+                , propertyDescription = "For watch-session: JSON array of event kinds to forward (e.g. [\"run.stopped\",\"tool.completed\"]); omit to forward every kind"
+                , propertyRequired = False
+                }
+        watchSessionToolParam =
+            ParamProperty
+                { propertyKey = "tool"
+                , propertyType = StringParamType
+                , propertyDescription = "For watch-session: Glob on the tool name, for tool.* events only (e.g. \"deploy_*\")"
+                , propertyRequired = False
+                }
+        watchSessionTtlParam =
+            ParamProperty
+                { propertyKey = "ttl_seconds"
+                , propertyType = NumberParamType
+                , propertyDescription = "For watch-session: How long the watch stays active (default: 600)"
+                , propertyRequired = False
+                }
+        watchIdParam =
+            ParamProperty
+                { propertyKey = "watch_id"
+                , propertyType = StringParamType
+                , propertyDescription = "For unwatch-session: The id a watch-session call returned"
+                , propertyRequired = False
+                }
+
         -- cancel-tool-call optional reason
         cancelReasonParam =
             ParamProperty
@@ -1282,6 +1319,11 @@ buildSystemToolParams box =
                         then [spawnSessionAgentParam, spawnSessionMessageParam]
                         else []
                    )
+                ++ ( if hasCapability SystemToolWatchSession
+                        then [watchSessionSessionParam, watchSessionEventsParam, watchSessionToolParam, watchSessionTtlParam]
+                        else []
+                   )
+                ++ (if hasCapability SystemToolUnwatchSession then [watchIdParam] else [])
      in
         baseParams ++ optionalParams
 
@@ -1308,6 +1350,8 @@ capabilityToText SystemToolCancelToolCall = "cancel-tool-call"
 capabilityToText SystemToolWait = "wait"
 capabilityToText SystemToolSendMessage = "send-message"
 capabilityToText SystemToolSpawnSession = "spawn-session"
+capabilityToText SystemToolWatchSession = "watch-session"
+capabilityToText SystemToolUnwatchSession = "unwatch-session"
 
 {- | Register all tools from a System toolbox.
 
@@ -1922,7 +1966,11 @@ systemTool box =
                                                 then handleSendMessage ctx v
                                                 else if cap == "spawn-session"
                                                     then handleSpawnSession ctx v
-                                                    else do
+                                                    else if cap == "watch-session"
+                                                        then handleWatchSession ctx v
+                                                        else if cap == "unwatch-session"
+                                                            then handleUnwatchSession ctx v
+                                                            else do
                                             -- Extract optional parameters for session introspection capabilities
                                             let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
                                                     Just (Aeson.String sid) -> Just sid
@@ -2005,6 +2053,32 @@ systemTool box =
                     Left err -> pure $ SystemToolError call err
                     Right spawnResult ->
                         pure $ SystemToolResult call $ SystemTools.QueryResult "spawn-session" (Aeson.toJSON spawnResult) 0
+
+    -- Handle the watch-session capability (todos/session-mailbox.md, Phase 6)
+    handleWatchSession :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleWatchSession ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.WatchSessionParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success watchParams -> do
+                result <- Mail.watchSession ctx watchParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right watchResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "watch-session" (Aeson.toJSON watchResult) 0
+
+    -- Handle the unwatch-session capability (todos/session-mailbox.md, Phase 6)
+    handleUnwatchSession :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleUnwatchSession ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.UnwatchSessionParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success unwatchParams -> do
+                result <- Mail.unwatchSession ctx unwatchParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right unwatchResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "unwatch-session" (Aeson.toJSON unwatchResult) 0
 
     -- Handle the cancel-tool-call capability
     handleCancel :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())

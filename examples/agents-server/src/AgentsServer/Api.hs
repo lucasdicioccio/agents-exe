@@ -566,6 +566,9 @@ eventFrame event = sseFrame (sessionEventKind event) $ case event of
     RunStopped sid status -> Aeson.object ["session_id" .= sid, "status" .= status]
     SessionFailed sid msg -> Aeson.object ["session_id" .= sid, "message" .= msg]
     TextDelta sid text -> Aeson.object ["session_id" .= sid, "text" .= text]
+    ToolCallStarted sid callId toolName -> Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName]
+    ToolCallCompleted sid callId toolName succeeded ->
+        Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
 
 -- | One event; JSON encoding has no raw newlines, so @data@ is one line.
 sseFrame :: Text -> Aeson.Value -> Builder

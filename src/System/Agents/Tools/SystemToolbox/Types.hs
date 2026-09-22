@@ -42,6 +42,11 @@ module System.Agents.Tools.SystemToolbox.Types (
     SendMessageResult (..),
     SpawnSessionParams (..),
     SpawnSessionResult (..),
+    WatchSessionParams (..),
+    WatchSessionResult (..),
+    UnwatchSessionParams (..),
+    UnwatchSessionResult (..),
+    maxWatchesPerSession,
 
     -- * Query errors
     QueryError (..),
@@ -601,6 +606,84 @@ instance ToJSON SpawnSessionResult where
 instance FromJSON SpawnSessionResult where
     parseJSON = Aeson.withObject "SpawnSessionResult" $ \v ->
         SpawnSessionResult <$> v .: "session_id"
+
+-------------------------------------------------------------------------------
+-- watch-session / unwatch-session (todos/session-mailbox.md, Phase 6, §7)
+-------------------------------------------------------------------------------
+
+-- | Hard cap on concurrently active watches per watching session.
+maxWatchesPerSession :: Int
+maxWatchesPerSession = 32
+
+{- | Parameters for a @watch-session@ call: forward a target session's
+matching events into this session's mailbox as 'WatchedEvent' mail.
+-}
+data WatchSessionParams = WatchSessionParams
+    { wspSession :: Text
+    -- ^ The session to watch, as text
+    , wspEvents :: Maybe [Text]
+    -- ^ Event kinds to forward (e.g. @"run.stopped"@, @"tool.completed"@); 'Nothing' forwards all kinds
+    , wspTool :: Maybe Text
+    -- ^ Glob on the tool name, for @tool.*@ events only; other events always match
+    , wspTtlSeconds :: Maybe Int
+    -- ^ How long the watch stays active; 'Nothing' uses a default
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON WatchSessionParams where
+    parseJSON = Aeson.withObject "WatchSessionParams" $ \v ->
+        WatchSessionParams
+            <$> v .: "session"
+            <*> v .:? "events"
+            <*> v .:? "tool"
+            <*> v .:? "ttl_seconds"
+
+instance ToJSON WatchSessionParams where
+    toJSON p =
+        Aeson.object $
+            ["session" .= wspSession p]
+                ++ ["events" .= es | Just es <- [wspEvents p]]
+                ++ ["tool" .= t | Just t <- [wspTool p]]
+                ++ ["ttl_seconds" .= t | Just t <- [wspTtlSeconds p]]
+
+-- | Result of a @watch-session@ call: an id to pass to @unwatch-session@.
+newtype WatchSessionResult = WatchSessionResult
+    { wsrWatchId :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON WatchSessionResult where
+    toJSON r = Aeson.object ["watch_id" .= wsrWatchId r]
+
+instance FromJSON WatchSessionResult where
+    parseJSON = Aeson.withObject "WatchSessionResult" $ \v ->
+        WatchSessionResult <$> v .: "watch_id"
+
+-- | Parameters for an @unwatch-session@ call: the id a @watch-session@ call returned.
+newtype UnwatchSessionParams = UnwatchSessionParams
+    { uspWatchId :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON UnwatchSessionParams where
+    parseJSON = Aeson.withObject "UnwatchSessionParams" $ \v ->
+        UnwatchSessionParams <$> v .: "watch_id"
+
+instance ToJSON UnwatchSessionParams where
+    toJSON p = Aeson.object ["watch_id" .= uspWatchId p]
+
+-- | Result of an @unwatch-session@ call: whether a matching watch was found and stopped.
+newtype UnwatchSessionResult = UnwatchSessionResult
+    { uwrStopped :: Bool
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON UnwatchSessionResult where
+    toJSON r = Aeson.object ["stopped" .= uwrStopped r]
+
+instance FromJSON UnwatchSessionResult where
+    parseJSON = Aeson.withObject "UnwatchSessionResult" $ \v ->
+        UnwatchSessionResult <$> v .: "stopped"
 
 -------------------------------------------------------------------------------
 -- Query Errors

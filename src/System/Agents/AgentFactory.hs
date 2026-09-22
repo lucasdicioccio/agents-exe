@@ -213,6 +213,8 @@ buildAgent tracer deps role convId node = do
                 , ctxMailbox = Nothing
                 , ctxMailRouter = Nothing
                 , ctxSpawnSession = Nothing
+                , ctxWatchSession = Nothing
+                , ctxUnwatchSession = Nothing
                 }
     disclosed <-
         agentEvaluateActiveTools

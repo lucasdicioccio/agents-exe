@@ -27,6 +27,9 @@ module System.Agents.Session.Mailbox (
     MailRouter (..),
     newMailRouter,
     SpawnSession,
+    WatchRequest (..),
+    WatchSession,
+    UnwatchSession,
 ) where
 
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
@@ -275,3 +278,25 @@ error to report to the LLM. Defined here (rather than next to 'Agent' in
 import "System.Agents.Session.Base" without a cycle.
 -}
 type SpawnSession = Text -> Text -> IO (Either Text SessionId)
+
+{- | A @watch-session@ request (@todos/session-mailbox.md@, Phase 6, §7): the
+target session, an optional filter on 'SessionEvent' kinds (as their
+@sessionEventKind@ text, e.g. @"run.stopped"@), an optional glob on the tool
+name (for @tool.*@ events only), and an optional TTL in seconds.
+-}
+data WatchRequest = WatchRequest
+    { wrTarget :: SessionId
+    , wrEvents :: Maybe [Text]
+    , wrTool :: Maybe Text
+    , wrTtlSeconds :: Maybe Int
+    }
+
+{- | A @watch-session@ hook (Phase 6, §7): given a request, either an error
+to report to the LLM, or an id to later pass to 'UnwatchSession'. Defined
+here for the same reason as 'SpawnSession': it is also a field of
+'System.Agents.Tools.Context.ToolExecutionContext'.
+-}
+type WatchSession = WatchRequest -> IO (Either Text Text)
+
+-- | An @unwatch-session@ hook (Phase 6, §7): a watch id -> whether a matching, still-active watch was found and stopped.
+type UnwatchSession = Text -> IO Bool

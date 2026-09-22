@@ -910,6 +910,11 @@ data SystemToolCapability
     | -- | Start one of this agent's own helpers running as a detached
       -- child session (@todos/session-mailbox.md@ §5, Phase 4)
       SystemToolSpawnSession
+    | -- | Watch another session's events, forwarded as mail
+      -- (@todos/session-mailbox.md@ §7, Phase 6)
+      SystemToolWatchSession
+    | -- | Stop a previously registered watch (@todos/session-mailbox.md@ §7, Phase 6)
+      SystemToolUnwatchSession
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -935,6 +940,8 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolWait = Aeson.String "wait"
     toJSON SystemToolSendMessage = Aeson.String "send-message"
     toJSON SystemToolSpawnSession = Aeson.String "spawn-session"
+    toJSON SystemToolWatchSession = Aeson.String "watch-session"
+    toJSON SystemToolUnwatchSession = Aeson.String "unwatch-session"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -961,7 +968,9 @@ instance FromJSON SystemToolCapability where
             "wait" -> return SystemToolWait
             "send-message" -> return SystemToolSendMessage
             "spawn-session" -> return SystemToolSpawnSession
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait, send-message, spawn-session."
+            "watch-session" -> return SystemToolWatchSession
+            "unwatch-session" -> return SystemToolUnwatchSession
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait, send-message, spawn-session, watch-session, unwatch-session."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 

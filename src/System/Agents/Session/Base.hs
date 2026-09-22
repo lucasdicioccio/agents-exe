@@ -76,6 +76,9 @@ module System.Agents.Session.Base (
     MailboxInfo (..),
     MailRouter (..),
     newMailRouter,
+    WatchRequest (..),
+    WatchSession,
+    UnwatchSession,
 
     -- * Byte usage tracking
     StepByteUsage (..),
@@ -180,6 +183,7 @@ module System.Agents.Session.Base (
     withMailbox,
     withMailRouter,
     withSpawnSession,
+    withWatchSession,
     SpawnSession,
 ) where
 
@@ -196,6 +200,9 @@ import System.Agents.Session.Mailbox (
     MailboxInfo (..),
     MailRouter (..),
     SpawnSession,
+    UnwatchSession,
+    WatchRequest (..),
+    WatchSession,
     newMailRouter,
     MailStore (..),
     awaitMail,
@@ -436,6 +443,12 @@ data Agent r = Agent
     'ctxCancelToolCall' on 'ToolExecutionContext'. Handed down to sub-agents
     the same way 'ctxMailRouter' is.
     -}
+    , ctxWatchSession :: Maybe WatchSession
+    -- ^ Optional @watch-session@ hook (@todos/session-mailbox.md@, Phase 6,
+    -- §7). Front-end-specific, the same shape as 'ctxSpawnSession'; handed
+    -- down to sub-agents the same way.
+    , ctxUnwatchSession :: Maybe UnwatchSession
+    -- ^ Optional @unwatch-session@ hook (Phase 6, §7), paired with 'ctxWatchSession'.
     }
     deriving (Functor)
 
@@ -483,6 +496,12 @@ Phase 4).
 -}
 withSpawnSession :: SpawnSession -> Agent r -> Agent r
 withSpawnSession spawn agent = agent{ctxSpawnSession = Just spawn}
+
+{- | Install @watch-session@\/@unwatch-session@ hooks on an agent
+(@todos/session-mailbox.md@, Phase 6).
+-}
+withWatchSession :: WatchSession -> UnwatchSession -> Agent r -> Agent r
+withWatchSession watch unwatch agent = agent{ctxWatchSession = Just watch, ctxUnwatchSession = Just unwatch}
 
 {- | Set the execution mode for an agent.
 
