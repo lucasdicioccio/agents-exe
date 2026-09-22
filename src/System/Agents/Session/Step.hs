@@ -9,7 +9,7 @@ module System.Agents.Session.Step where
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (race)
 import Control.Concurrent.STM (STM, TVar, atomically, orElse, registerDelay, readTVar, retry)
-import Control.Monad (filterM, forM, unless, void)
+import Control.Monad (filterM, forM, forM_, unless, void)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (partition)
@@ -27,7 +27,7 @@ import qualified System.Agents.OS.Conversation as OSConv
 import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Core.Types (EntityId)
 import System.Agents.OS.Core.World (World, getComponent, newWorld)
-import System.Agents.Session.Async (mkToolContinuationSnapshot, storeContinuation)
+import System.Agents.Session.Async (ContinuationStore (..), mkToolContinuationSnapshot, storeContinuation)
 import System.Agents.Session.Async.Engine (
     mkAsyncEngine,
     startAsyncBatch,
@@ -878,7 +878,68 @@ receiveMailForTurn agent shouldBlock sess =
                     else pure unread
             case envelopes of
                 [] -> pure (sess, [])
-                _ -> pure (sess{mailCursor = maximum (map envSeq envelopes)}, envelopes)
+                _ -> do
+                    sess' <- applyContinuationMail agent envelopes sess
+                    pure (sess'{mailCursor = maximum (map envSeq envelopes)}, envelopes)
+
+{- | Apply unread 'ContinuationResult' mail to the session's deferred calls.
+
+Replaces the old per-runner @lsInbox@\/@completeCall@ special case
+(@todos/session-mailbox.md@, a Phase 3 follow-up: "'autoResume' becomes
+'post `ContinuationResult`'"): instead of a side channel only 'Host.Runner'
+understood, an external result now arrives as ordinary mail and is acted on
+here, at the same receive point (R1) that already folds every other kind of
+mail into the turn being built — so every front-end with a mailbox gets
+this behaviour for free, not just the server.
+
+A 'Deferred' call matching a token moves to 'Completed'; once every call in
+the head partial turn is final, it is folded into a full 'UserTurn' exactly
+as 'refreshHeadPartialTurn' already does for a background call finishing.
+Structurally idempotent: a call whose state is no longer 'Deferred' is left
+untouched, so mail delivered again before its cursor advances (mail is
+never consumed by reading, only by the cursor committing, per §1) never
+re-applies the same result twice.
+-}
+applyContinuationMail :: Agent r -> [Envelope] -> Session -> IO Session
+applyContinuationMail agent envelopes sess =
+    case results of
+        [] -> pure sess
+        _ -> case sess.turns of
+            (PartialUserTurn partial _usage : rest) -> do
+                updated <- mapM applyResult partial.pTrackedToolCalls
+                if updated == partial.pTrackedToolCalls
+                    then pure sess
+                    else do
+                        let content = partial{pTrackedToolCalls = updated}
+                            sPrompt = partial.pUserPrompt
+                            sTools = partial.pUserTools
+                            uQuery = partial.pUserQuery
+                            turn
+                                | all (isFinalToolCallState . tcState) updated =
+                                    let responses = partialToolMessages content
+                                     in UserTurn
+                                            (UserTurnContent sPrompt sTools uQuery responses partial.pUserMail)
+                                            (Just $ calculateUserTurnByteUsage sPrompt sTools uQuery (map snd responses))
+                                | otherwise =
+                                    PartialUserTurn content (Just $ calculatePartialTurnByteUsage sPrompt sTools uQuery updated)
+                        pure sess{turns = turn : rest}
+            _ -> pure sess
+  where
+    results = [(token, result) | e <- envelopes, ContinuationResult token result <- [e.envBody]]
+
+    applyResult :: TrackedToolCall -> IO TrackedToolCall
+    applyResult tc
+        | tc.tcState /= Deferred = pure tc
+        | otherwise = case tc.tcContinuation of
+            Nothing -> pure tc
+            Just token -> case lookup token results of
+                Nothing -> pure tc
+                Just result -> do
+                    forM_ agent.ctxToolCache $ \cache -> do
+                        now <- Data.Time.getCurrentTime
+                        cache.cacheStore (Cache.computeCacheKey tc.tcCall) $ CachedResult result now Nothing
+                    forM_ agent.ctxContinuationStore $ \store -> void $ csComplete store token result
+                    pure tc{tcState = Completed, tcResult = Just result}
 
 {- | Render mail as a user message, one block per envelope with a header the
 model can quote back (§2, "What the LLM sees"). 'Control' envelopes are

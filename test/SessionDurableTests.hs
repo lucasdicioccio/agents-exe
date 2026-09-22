@@ -38,7 +38,7 @@ import System.Agents.CLI.SessionDurable (
     parseResultFile,
  )
 import System.Agents.Session.Base
-import System.Agents.Session.Step (getPartialTurn, naiveTilNoToolCallStep, receiveMailForTurn, runStepMAsync)
+import System.Agents.Session.Step (applyContinuationMail, getPartialTurn, naiveTilNoToolCallStep, receiveMailForTurn, runStepMAsync)
 import System.Agents.Session.Types
 import System.Agents.Session.Wake (wakeSession)
 import qualified System.Agents.SessionStore as SessionStore
@@ -168,6 +168,18 @@ expectRight :: (Show e) => Either e a -> IO a
 expectRight (Right a) = pure a
 expectRight (Left e) = assertFailure ("expected Right, got Left " <> show e) >> fail "unreachable"
 
+-- | An 'Outgoing' 'ContinuationResult' envelope, for tests exercising the
+-- @lsInbox@ replacement (@todos/session-mailbox.md@, a Phase 3 follow-up).
+continuationResultOutgoing :: ContinuationToken -> UserToolResponse -> Outgoing
+continuationResultOutgoing token result =
+    Outgoing
+        { outId = Nothing
+        , outFrom = FromSystem "test"
+        , outPriority = Normal
+        , outHops = 0
+        , outBody = ContinuationResult token result
+        }
+
 {- | Receive points R1 and R2 (@todos/session-mailbox.md@ §2), both the
 'receiveMailForTurn' primitive directly and folded into a full async step.
 -}
@@ -219,6 +231,34 @@ sessionMailboxTests =
                         Just q -> assertBool "query includes the mail text" ("hello from mail" `Text.isInfixOf` q.queryText)
                         Nothing -> assertFailure "expected a user query carrying the mail"
                 other -> assertFailure $ "expected a user turn, got " <> show other
+        , testCase "applyContinuationMail resolves a deferred call, and redelivery is a no-op" $ do
+            -- Phase 3 follow-up (todos/session-mailbox.md): this is what
+            -- replaces the old lsInbox/completeCall special case.
+            let policy _ctx _call = Defer (Reason "approval")
+                agent = mkAsyncAgent policy
+            (_agent', result) <- runStepMAsync testConvId agent (mkSessionWithCalls [mkCall "defer_a"])
+            session0 <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session" >> fail "unreachable"
+            token <- case getPartialTurn session0 of
+                Just partial -> case partial.pTrackedToolCalls of
+                    [tc] -> case tc.tcContinuation of
+                        Just t -> pure t
+                        Nothing -> assertFailure "expected a continuation token" >> fail "unreachable"
+                    other -> assertFailure ("expected exactly one tracked call, got " <> show other) >> fail "unreachable"
+                Nothing -> assertFailure "expected a partial turn" >> fail "unreachable"
+            mb <- newInMemoryMailbox
+            _ <- expectRight =<< mb.mbSend (continuationResultOutgoing token (TextResponse "approved"))
+            envelopes <- atomically (mbUnread mb 0)
+            session1 <- applyContinuationMail agent envelopes session0
+            case session1.turns of
+                (UserTurn content _ : _) -> map snd content.userToolResponses @?= [TextResponse "approved"]
+                other -> assertFailure $ "expected the deferred call to resolve into a user turn, got " <> show other
+            -- Idempotent: mail delivery never consumes (only the cursor
+            -- committing does), so redelivering the same envelope before
+            -- its cursor advances must not re-apply the result.
+            session2 <- applyContinuationMail agent envelopes session1
+            session2 @?= session1
         ]
 
 -- | A session whose head turn is a plain 'UserTurn' ready for a completion

@@ -12,8 +12,14 @@ A 'SessionRunner' owns, per session:
 * at most one run: a background thread stepping the session until it
   stops, is blocked on deferred calls, or (in 'StepOnce' mode) took a step;
 * the session's agent, kept between runs so that background tool calls
-  started by one run are picked up by the next;
-* a queue of external results for deferred calls, applied by the run.
+  started by one run are picked up by the next.
+
+External results for deferred calls (@completeCall@) are delivered as
+'ContinuationResult' mail on the session's durable mailbox
+(@todos/session-mailbox.md@, a Phase 3 follow-up) rather than a
+runner-private queue; 'Session.Step.applyContinuationMail' is what a run
+actually applies them with, at the same point it processes every other
+kind of mail.
 
 Every write goes through 'sbCompareAndStore', so a second process writing
 the same session is detected rather than silently overwritten.
@@ -90,7 +96,7 @@ import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
 import qualified System.Agents.Session.Async.Engine as Engine
 import System.Agents.Session.AgentConfig (matchGlob)
 import System.Agents.Session.Base hiding (SessionProgress (..))
-import System.Agents.Session.Step (buildContext, refreshHeadPartialTurn, runStepM)
+import System.Agents.Session.Step (applyContinuationMail, buildContext, refreshHeadPartialTurn, runStepM)
 import System.Agents.Session.Wake (WakeOutcome (..), findSessionForToken, wakeSessionWith)
 import System.Agents.SessionStore (
     SessionMeta (..),
@@ -227,8 +233,6 @@ data LiveSession = LiveSession
     , lsAgent :: TVar (Maybe RunnerAgent)
     , lsLatest :: TVar (Maybe (Session, SessionMeta))
     -- ^ The last version this process stored or loaded.
-    , lsInbox :: TVar [(ContinuationToken, UserToolResponse)]
-    -- ^ Results accepted while a run is active; the run applies them.
     , lsLastTouched :: TVar UTCTime
     , lsEvicted :: TVar Bool
     , lsParams :: TVar Params
@@ -319,7 +323,6 @@ getLive runner sid = do
             <*> newTVarIO Nothing
             <*> newTVarIO Nothing
             <*> newTVarIO Nothing
-            <*> newTVarIO []
             <*> newTVarIO now
             <*> newTVarIO False
             <*> newTVarIO Map.empty
@@ -810,7 +813,7 @@ runLoop runner live mode agent0 = do
     go :: RunnerAgent -> Int -> Bool -> IO ()
     go agent steps finished = do
         next <- withMVar live.lsLock $ \_ -> do
-            (sess0, meta) <- applyInbox runner live
+            (sess0, meta) <- applyInbox runner agent live
             -- Phase 3/6 (@todos/session-mailbox.md@ §4): unread 'Control'
             -- mail this run reacts to without waiting for the next receive
             -- point. When every envelope currently unread is a 'Control'
@@ -944,21 +947,64 @@ emitToolCallEvents runner sid before after = do
         Just (_, Running) -> True
         _ -> False
 
--- | Apply the queued external results to the latest version (under the lock).
-applyInbox :: SessionRunner -> LiveSession -> IO (Session, SessionMeta)
-applyInbox runner live = do
+{- | Apply unread 'ContinuationResult' mail to the latest version, before this
+iteration's blocked-on-deferred-calls check (under the lock).
+
+@completeCall@ posts a deferred call's external result as mail rather than
+writing it to a runner-private queue (a Phase 3 follow-up to
+@todos/session-mailbox.md@: "'autoResume' becomes 'post
+`ContinuationResult`'", 'lsInbox' is gone). This still has to run here,
+ahead of 'runStepM', rather than only relying on the ordinary R1 receive
+point inside the step: a session blocked on deferred calls never reaches R1
+at all if 'isBlockedOnDeferredCalls' below still sees it as blocked, so the
+result would sit applied-but-invisible in the mailbox forever. Mirrors
+'applyControlMail': the cursor only advances when the whole unread batch is
+'ContinuationResult' mail, so mail mixed in with something else is left for
+the step's own R1 to render\/consume\/advance past as usual.
+-}
+applyInbox :: SessionRunner -> RunnerAgent -> LiveSession -> IO (Session, SessionMeta)
+applyInbox runner agent live = do
     (sess, meta) <- latestOrThrow live
-    inbox <- atomically $ swapTVar live.lsInbox []
-    if null inbox
-        then pure (sess, meta)
-        else do
-            outcome <- wakeSessionWith (Just runner.srHost.hostContinuations) Nothing sess inbox
-            meta' <- storeOrThrow runner live meta outcome.woSession StatusRunning
-            pure (outcome.woSession, meta')
+    case agent.ctxMailbox of
+        Nothing -> pure (sess, meta)
+        Just mb -> do
+            envelopes <- atomically (mbUnread mb sess.mailCursor)
+            let results = [e | e <- envelopes, ContinuationResult{} <- [e.envBody]]
+            if null results
+                then pure (sess, meta)
+                else do
+                    woken <- applyContinuationMail agent results sess
+                    let allResults = length results == length envelopes
+                        woken' = if allResults then woken{mailCursor = maximum (map (.envSeq) results)} else woken
+                    meta' <- storeOrThrow runner live meta woken' StatusRunning
+                    pure (woken', meta')
 
 latestOrThrow :: LiveSession -> IO (Session, SessionMeta)
 latestOrThrow live =
     readTVarIO live.lsLatest >>= maybe (throwIO $ userError "runner: session state missing") pure
+
+{- | The mailbox to post to for a given session: the live agent's own
+'ctxMailbox' when this process is actively running or holding it (so a
+post lands in the same in-memory 'TVar' an active run reads, not a second,
+separately-hydrated durable mailbox -- the same live-vs-durable distinction
+'serverMailRouter' has to get right), otherwise a fresh durable mailbox
+opened directly from the store, or 'Nothing' for a session this host
+doesn't know about at all.
+-}
+sessionMailbox :: SessionRunner -> SessionId -> IO (Maybe Mailbox)
+sessionMailbox runner sid = do
+    mLive <- lookupLive runner sid
+    mAgentMailbox <- case mLive of
+        Nothing -> pure Nothing
+        Just live -> do
+            mAgent <- readTVarIO live.lsAgent
+            pure (mAgent >>= \a -> a.ctxMailbox)
+    case mAgentMailbox of
+        Just mb -> pure (Just mb)
+        Nothing ->
+            runner.srHost.hostBackend.sbLoadMeta sid >>= \case
+                Nothing -> pure Nothing
+                Just _ -> Just <$> newDurableMailbox runner.srHost.hostMail sid
 
 -- | Record a failed run: the last stored version, marked failed.
 failRun :: SessionRunner -> LiveSession -> Text -> IO ()
@@ -1184,11 +1230,30 @@ completeCall runner token result autoResume supplied = do
   where
     enqueue live = do
         (sess, meta) <- latestOrThrow live
-        queued <- map fst <$> readTVarIO live.lsInbox
         outcome <- wakeSessionWith Nothing Nothing sess [(token, result)]
-        classify outcome (token `elem` queued) $ do
-            atomically $ modifyTVar' live.lsInbox (<> [(token, result)])
+        mMailbox <- sessionMailbox runner live.lsSessionId
+        alreadyQueued <- case mMailbox of
+            Nothing -> pure False
+            Just mb -> do
+                unread <- atomically (mbUnread mb sess.mailCursor)
+                pure $ any isSameToken unread
+        classify outcome alreadyQueued $ do
+            forM_ mMailbox $ \mb ->
+                void $
+                    mb.mbSend
+                        Outgoing
+                            { outId = Nothing
+                            , outFrom = FromSystem "completeCall"
+                            , outPriority = Normal
+                            , outHops = 0
+                            , outBody = ContinuationResult token result
+                            }
             pure (Right meta)
+      where
+        isSameToken :: Envelope -> Bool
+        isSameToken e = case e.envBody of
+            ContinuationResult t _ -> t == token
+            _ -> False
 
     applyNow live overlay node =
         loadLatest runner live >>= \case
@@ -1247,7 +1312,9 @@ cancelRun runner sid = do
             Nothing -> pure $ Left $ UnknownSession sid
             Just (sess0, meta0) -> do
                 atomically $ writeTVar live.lsLatest (Just (sess0, meta0))
-                (sess1, meta1) <- applyInbox runner live
+                (sess1, meta1) <- case mAgent of
+                    Just agent -> applyInbox runner agent live
+                    Nothing -> pure (sess0, meta0)
                 sess2 <- case mAgent of
                     Just agent -> refreshHeadPartialTurn (buildContext agent sess1 (sessionIdToConversationId sid)) sess1
                     Nothing -> pure sess1
