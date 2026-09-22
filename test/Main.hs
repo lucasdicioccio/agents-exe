@@ -293,6 +293,8 @@ agentSerializationTests =
                     , Base.asyncCallTimeoutSeconds = Nothing
                     , bindings = Nothing
                     , Base.parameters = Nothing
+                    , pauseCancelsCalls = Nothing
+                    , resumeOnAnyMail = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -322,6 +324,8 @@ agentSerializationTests =
                     , Base.asyncCallTimeoutSeconds = Nothing
                     , bindings = Nothing
                     , Base.parameters = Nothing
+                    , pauseCancelsCalls = Nothing
+                    , resumeOnAnyMail = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -353,6 +357,8 @@ agentSerializationTests =
                     , Base.asyncCallTimeoutSeconds = Nothing
                     , bindings = Nothing
                     , Base.parameters = Nothing
+                    , pauseCancelsCalls = Nothing
+                    , resumeOnAnyMail = Nothing
                     }
             let desc = Base.AgentDescription agent
             let json = encode desc
@@ -390,6 +396,8 @@ agentSerializationTests =
                     , Base.asyncCallTimeoutSeconds = Nothing
                     , bindings = Nothing
                     , Base.parameters = Nothing
+                    , pauseCancelsCalls = Nothing
+                    , resumeOnAnyMail = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -432,6 +440,8 @@ agentSerializationTests =
                     , Base.asyncCallTimeoutSeconds = Nothing
                     , bindings = Nothing
                     , Base.parameters = Nothing
+                    , pauseCancelsCalls = Nothing
+                    , resumeOnAnyMail = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -471,6 +481,8 @@ agentSerializationTests =
                     , Base.asyncCallTimeoutSeconds = Nothing
                     , bindings = Nothing
                     , Base.parameters = Nothing
+                    , pauseCancelsCalls = Nothing
+                    , resumeOnAnyMail = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -594,6 +606,8 @@ bashToolboxTests =
                     , Base.asyncCallTimeoutSeconds = Nothing
                     , bindings = Nothing
                     , Base.parameters = Nothing
+                    , pauseCancelsCalls = Nothing
+                    , resumeOnAnyMail = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -624,6 +638,8 @@ bashToolboxTests =
                     , Base.asyncCallTimeoutSeconds = Nothing
                     , bindings = Nothing
                     , Base.parameters = Nothing
+                    , pauseCancelsCalls = Nothing
+                    , resumeOnAnyMail = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent

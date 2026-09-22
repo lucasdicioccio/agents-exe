@@ -1734,6 +1734,15 @@ data Agent
     including bash tools (which have no toolbox name to hang a
     toolbox-level binding on). Applied after toolbox-level bindings.
     -}
+    , pauseCancelsCalls :: Maybe Bool
+    -- ^ @todos/session-mailbox.md@ §4: whether a 'Control' 'Pause' also
+    -- cancels this session's attached/running tool calls. Default 'False':
+    -- they keep running, orphaned, the same as any other detached call.
+    , resumeOnAnyMail :: Maybe Bool
+    {- ^ @todos/session-mailbox.md@ §4: whether any mail (not only an
+    explicit 'Control' 'Resume') is enough for 'postMessage' to accept a
+    message into a paused session and run again. Default 'False'.
+    -}
     }
     deriving (Show, Eq, Generic)
 

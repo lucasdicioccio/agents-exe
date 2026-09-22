@@ -77,6 +77,11 @@ tests =
         , testCase "send-message refuses a recipient outside the sender's subtree" sendMessageScopeDenialTest
         , testCase "a send-message reply carries hops one past the mail it answers" sendMessageHopsTest
         , testCase "spawn-session starts a durable child session that answers by mail" spawnSessionTest
+        , testCase "Control Pause stops a run and leaves calls running by default" controlPauseTest
+        , testCase "pauseCancelsCalls makes Control Pause cancel attached calls" controlPauseCancelsCallsTest
+        , testCase "a paused session refuses ordinary messages by default" controlPauseRefusesMessagesByDefaultTest
+        , testCase "resumeOnAnyMail lets postMessage wake a paused session" controlResumeOnAnyMailTest
+        , testCase "Control (CancelCalls ids) cancels one attached call" controlCancelCallsTest
         ]
 
 -------------------------------------------------------------------------------
@@ -599,6 +604,143 @@ spawnSessionTest = do
             Just (info, _) -> info.miParent @?= Just callerSid
             Nothing -> assertFailure "spawned session is not reachable via the MailRouter"
 
+{- | Get a session to the point where one call runs in the background,
+using the deterministic 'StepOnce'-driven flow 'engineKeptTest' also uses:
+first step issues the call, second step yields while it runs. Driving the
+run one step at a time (rather than 'UntilBlocked' plus polling) makes
+exactly when a run is (not) active, and thus when it next checks its
+mailbox, independent of the async engine's own yield/attach timing.
+-}
+setUpBackgroundCall :: SessionRunner -> OSAgentNode -> IO SessionId
+setUpBackgroundCall runner node = do
+    meta <- expectRight =<< createSession runner (Base.slug node.osNodeConfig) (message "go") (Just StepOnce)
+    let sid = meta.smSessionId
+    _ <- expectRight =<< awaitRun runner sid 5
+    _ <- expectRight =<< resume runner sid StepOnce Map.empty
+    _ <- expectRight =<< awaitRun runner sid 5
+    running <- currentSession runner sid
+    assertBool "a call runs in the background" (hasRunningCall running)
+    pure sid
+
+-- | 'Control' 'Pause' mail stops a run at its next iteration, sets the
+-- session's persisted status to 'StatusPaused', and (by default) leaves an
+-- attached background call running.
+controlPauseTest :: Assertion
+controlPauseTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+
+        sendControl runner sid Pause
+        -- A new run's very first iteration checks the mailbox before
+        -- taking any step, so this stops immediately: no step, no LLM call.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, active) <- expectRight =<< awaitRun runner sid 5
+        (paused.smStatus, active) @?= (StatusPaused, False)
+        stillRunning <- hasBackgroundCall <$> currentSession runner sid
+        assertBool "the background call keeps running through the pause by default" stillRunning
+
+        -- An explicit 'resume' works regardless of the persisted status.
+        putMVar gate ()
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+
+-- | 'pauseCancelsCalls' makes 'Control' 'Pause' also cancel attached calls.
+controlPauseCancelsCallsTest :: Assertion
+controlPauseCancelsCallsTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAllPauseCancelsCalls
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    complete <- onceThen [slowCall]
+    host <- testHost [node] (const complete)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+
+        sendControl runner sid Pause
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, _) <- expectRight =<< awaitRun runner sid 5
+        paused.smStatus @?= StatusPaused
+
+        -- Cancellation of the background call's thread is asynchronous, so
+        -- (per 'cancelTest's established pattern) it isn't asserted right
+        -- here against the just-persisted turn; the next run re-polls the
+        -- OS entity and delivers the cancellation to the LLM.
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        sess <- currentSession runner sid
+        assertBool ("call reported cancelled: " <> show (sessionTexts sess)) (any ("cancelled" `Text.isInfixOf`) (sessionTexts sess))
+
+-- | Without 'resumeOnAnyMail' (the default), 'postMessage' refuses an
+-- ordinary message sent to a paused session.
+controlPauseRefusesMessagesByDefaultTest :: Assertion
+controlPauseRefusesMessagesByDefaultTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        sendControl runner sid Pause
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, _) <- expectRight =<< awaitRun runner sid 5
+        paused.smStatus @?= StatusPaused
+
+        refused <- postMessage runner sid (message "are you there") Nothing Map.empty
+        case refused of
+            Left (NotAcceptingMessages _ StatusPaused) -> pure ()
+            other -> assertFailure ("expected a paused refusal, got " <> show other)
+        putMVar gate ()
+
+-- | With 'resumeOnAnyMail', 'postMessage' accepts a message into a paused
+-- session and starts a run again.
+controlResumeOnAnyMailTest :: Assertion
+controlResumeOnAnyMailTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAllResumeOnAnyMail
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        sendControl runner sid Pause
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, _) <- expectRight =<< awaitRun runner sid 5
+        paused.smStatus @?= StatusPaused
+
+        accepted <- expectRight =<< postMessage runner sid (message "are you there") (Just UntilBlocked) Map.empty
+        accepted.smStatus @?= StatusRunning
+        putMVar gate ()
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+
+-- | 'Control' ('CancelCalls' ids) cancels one specific attached call, which
+-- the run then reports as failed, without stopping the run itself.
+controlCancelCallsTest :: Assertion
+controlCancelCallsTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    complete <- onceThen [slowCall]
+    host <- testHost [node] (const complete)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        sess <- currentSession runner sid
+        let runningIds = [tc.tcId | PartialUserTurn p _ <- sess.turns, tc <- p.pTrackedToolCalls, tc.tcState == Running]
+        case runningIds of
+            [callId] -> sendControl runner sid (CancelCalls [callId])
+            other -> assertFailure ("expected exactly one running call, got " <> show (length other))
+
+        -- The next run picks the cancellation up and delivers it to the LLM.
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        sessF <- currentSession runner sid
+        assertBool ("call reported cancelled: " <> show (sessionTexts sessF)) (any ("cancelled" `Text.isInfixOf`) (sessionTexts sessF))
+
 -- | A dummy tool portal for tests that need a valid 'ToolExecutionContext'.
 dummyPortal :: ToolPortal
 dummyPortal _ _ =
@@ -651,6 +793,45 @@ backgroundAll :: String
 backgroundAll =
     "{\"executionMode\": \"asynchronous\", \"asyncYieldStrategy\": {\"tag\": \"yieldOnTimeout\", \"milliseconds\": 20}, "
         <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runAsync\"}, \"rules\": []}}"
+
+-- | Like 'backgroundAll', with 'pauseCancelsCalls' turned on (Phase 6).
+backgroundAllPauseCancelsCalls :: String
+backgroundAllPauseCancelsCalls =
+    "{\"executionMode\": \"asynchronous\", \"asyncYieldStrategy\": {\"tag\": \"yieldOnTimeout\", \"milliseconds\": 20}, "
+        <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runAsync\"}, \"rules\": []}, \"pauseCancelsCalls\": true}"
+
+-- | Like 'backgroundAll', with 'resumeOnAnyMail' turned on (Phase 6).
+backgroundAllResumeOnAnyMail :: String
+backgroundAllResumeOnAnyMail =
+    "{\"executionMode\": \"asynchronous\", \"asyncYieldStrategy\": {\"tag\": \"yieldOnTimeout\", \"milliseconds\": 20}, "
+        <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runAsync\"}, \"rules\": []}, \"resumeOnAnyMail\": true}"
+
+{- | Post a 'Control' envelope directly to a session's mailbox, bypassing
+any tool: the way something like a future admin endpoint would reach it.
+
+Sent at 'Interrupt' priority: per §4, "the user and 'Control' may always
+interrupt", and it is what lets R3a's interrupt arm detach an attached call
+right away rather than waiting for the ordinary yield-strategy condition
+(which, for calls with no explicit 'attachSeconds', can otherwise take
+arbitrarily long to next hand control back to the outer run loop).
+-}
+sendControl :: SessionRunner -> SessionId -> ControlMsg -> IO ()
+sendControl runner sid msg = do
+    let router = serverMailRouter runner
+    mTarget <- router.mrLookup sid
+    case mTarget of
+        Nothing -> assertFailure "session not reachable via the MailRouter"
+        Just (_, mb) -> do
+            sent <-
+                mb.mbSend
+                    Outgoing
+                        { outId = Nothing
+                        , outFrom = FromSystem "test"
+                        , outPriority = Interrupt
+                        , outHops = 0
+                        , outBody = Control msg
+                        }
+            either (\e -> assertFailure ("control mail refused: " <> show e)) (const (pure ())) sent
 
 -- | The first completion ever calls the tools; every other one answers.
 onceThen :: [LlmToolCall] -> IO Completion

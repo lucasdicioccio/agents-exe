@@ -419,6 +419,8 @@ minimalBaseAgent =
         , Base.asyncCallTimeoutSeconds = Nothing
         , Base.bindings = Nothing
         , Base.parameters = Nothing
+        , Base.pauseCancelsCalls = Nothing
+        , Base.resumeOnAnyMail = Nothing
         }
 
 -- | Tool-call policy config JSON round-trip tests.

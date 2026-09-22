@@ -283,7 +283,11 @@ cancelAsyncBatch batch = do
 {- | Cancel a single running call by its 'ToolCallId'.
 
 Looks up the call in the engine registry, cancels its background thread
-(waiting for it to terminate), and marks the OS entity as cancelled.
+(waiting for it to terminate), and marks the OS entity as cancelled. A
+successful cancellation also posts 'ST.ToolCallFinished' \/ 'ST.Failed' mail
+(@todos/session-mailbox.md@ §4, "'CancelCalls': the engine's cancel;
+results come back as 'ToolCallFinished' ... 'Failed'"), the same way a call
+that fails on its own does (see 'startCall').
 Returns 'True' if the call ended up cancelled, 'False' otherwise (unknown
 to this engine, or it reached a final state before the cancellation).
 -}
@@ -306,7 +310,9 @@ cancelToolCall engine callId = do
                             TCT.cancelToolCall (abWorld batch) eid
                             mState <- atomically $ getComponent @ToolCallState (abWorld batch) eid
                             let cancelled = fmap tcStatus mState == Just TcCancelled
-                            when cancelled $ achEmit h ToolCallCancelled
+                            when cancelled $ do
+                                achEmit h ToolCallCancelled
+                                notifyMailbox engine (achTracked h) ST.Failed (TextResponse "tool call cancelled")
                             pure cancelled
                         Nothing -> pure False
 

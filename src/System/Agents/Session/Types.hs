@@ -158,8 +158,8 @@ newTurnId =
 
 {- | Where a session stands, as recorded next to it in storage.
 
-'StatusRunning' and 'StatusFailed' are set by whoever runs the session;
-'sessionStatusOf' derives the others from the turns.
+'StatusRunning', 'StatusPaused' and 'StatusFailed' are set by whoever runs
+the session; 'sessionStatusOf' derives the others from the turns.
 -}
 data SessionStatus
     = -- | The LLM gave a final answer; the session waits for a user message.
@@ -170,6 +170,10 @@ data SessionStatus
       StatusRunning
     | -- | Only deferred calls remain, which an external worker must complete.
       StatusWaitingExternal
+    | -- | Stopped by a 'Control' 'Pause' envelope (@todos/session-mailbox.md@
+      -- §4); runnable again on 'Resume', or on any mail if the agent's
+      -- @resumeOnAnyMail@ option is set.
+      StatusPaused
     | -- | The last run failed.
       StatusFailed
     deriving (Show, Eq, Ord, Enum, Bounded, Generic)
@@ -180,6 +184,7 @@ sessionStatusText = \case
     StatusReady -> "ready"
     StatusRunning -> "running"
     StatusWaitingExternal -> "waiting_external"
+    StatusPaused -> "paused"
     StatusFailed -> "failed"
 
 parseSessionStatus :: Text -> Maybe SessionStatus

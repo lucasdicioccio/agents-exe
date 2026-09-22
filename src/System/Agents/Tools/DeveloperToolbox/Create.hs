@@ -181,6 +181,8 @@ agentFromOverrides overrides =
         , asyncCallTimeoutSeconds = Nothing
         , bindings = Nothing
         , parameters = Nothing
+        , pauseCancelsCalls = Nothing
+        , resumeOnAnyMail = Nothing
         }
 
 -- | Merge a reference agent with overrides.
@@ -210,6 +212,8 @@ mergeAgentWithOverrides ref overrides =
         , asyncCallTimeoutSeconds = Nothing
         , bindings = Nothing
         , parameters = Nothing
+        , pauseCancelsCalls = Nothing
+        , resumeOnAnyMail = Nothing
         }
 
 -------------------------------------------------------------------------------

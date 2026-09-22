@@ -84,6 +84,7 @@ import System.Agents.Host
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
+import qualified System.Agents.Session.Async.Engine as Engine
 import System.Agents.Session.Base hiding (SessionProgress (..))
 import System.Agents.Session.Step (buildContext, refreshHeadPartialTurn, runStepM)
 import System.Agents.Session.Wake (WakeOutcome (..), findSessionForToken, wakeSessionWith)
@@ -486,17 +487,43 @@ serverMailRouter runner =
     MailRouter
         { mrRegister = \_sid _info _mb -> pure (pure ())
         , mrLookup = \sid -> do
-            mMeta <- sbLoadMeta runner.srHost.hostBackend sid
-            case mMeta of
-                Nothing -> pure Nothing
-                Just (_sess, meta) -> do
-                    mb <- newDurableMailbox runner.srHost.hostMail sid
-                    pure $ Just (metaToMailboxInfo meta, mb)
+            mLive <- lookupLiveMailbox sid
+            case mLive of
+                Just found -> pure (Just found)
+                Nothing ->
+                    sbLoadMeta runner.srHost.hostBackend sid >>= \case
+                        Nothing -> pure Nothing
+                        Just (_sess, meta) -> do
+                            mb <- newDurableMailbox runner.srHost.hostMail sid
+                            pure $ Just (metaToMailboxInfo meta, mb)
         , mrList = do
             metas <- sbQuery runner.srHost.hostBackend allSessionsQuery
             pure [(meta.smSessionId, metaToMailboxInfo meta) | meta <- metas]
         }
   where
+    {- | If this session already has a live agent in this process, its
+    'ctxMailbox' is the one whose in-memory 'TVar' any active run actually
+    reads. Opening a *second* 'newDurableMailbox' for the same session
+    (what this function used to do unconditionally) hydrates its own,
+    separate 'TVar' from the store, so mail sent through it would sit in
+    the database until the session's next run re-hydrates -- invisible to
+    the run reading mail right now. Fall back to a fresh durable mailbox
+    only for a session with no live agent (idle, evicted, or on another
+    process, where the store is the only shared state).
+    -}
+    lookupLiveMailbox :: SessionId -> IO (Maybe (MailboxInfo, Mailbox))
+    lookupLiveMailbox sid =
+        lookupLive runner sid >>= \case
+            Nothing -> pure Nothing
+            Just live -> do
+                mAgent <- readTVarIO live.lsAgent
+                mLatest <- readTVarIO live.lsLatest
+                pure $ do
+                    agent <- mAgent
+                    mb <- agent.ctxMailbox
+                    (_, meta) <- mLatest
+                    pure (metaToMailboxInfo meta, mb)
+
     metaToMailboxInfo :: SessionMeta -> MailboxInfo
     metaToMailboxInfo meta =
         MailboxInfo
@@ -631,21 +658,36 @@ runLoop runner live mode agent0 = do
     go :: RunnerAgent -> Int -> Bool -> IO ()
     go agent steps finished = do
         next <- withMVar live.lsLock $ \_ -> do
-            (sess, meta) <- applyInbox runner live
-            -- Phase 3 (@todos/session-mailbox.md@): 'Control' 'StopRun' mail
-            -- stops the run early, today's 'cancelRun' now reachable by mail.
-            -- Left unconsumed: the next receive point (this run's own next
-            -- R1, or a later run's) folds it in and advances past it like
-            -- any other 'Control' envelope, per §2.
-            stopRequested <- checkStopRequested agent sess
-            let stop =
+            (sess0, meta) <- applyInbox runner live
+            -- Phase 3/6 (@todos/session-mailbox.md@ §4): unread 'Control'
+            -- mail this run reacts to without waiting for the next receive
+            -- point. When every envelope currently unread is a 'Control'
+            -- one, the cursor is committed past them here ("consumed...
+            -- but render nothing", §2) so a 'Pause'/'StopRun' that stops
+            -- the run before it ever steps doesn't leave that same
+            -- envelope to immediately re-trigger on the next run. A batch
+            -- that mixes in other mail is left alone: the next real R1
+            -- (once this run, or a later one, actually steps) is what
+            -- renders it, and advancing the cursor here would silently
+            -- drop it unread.
+            (sess, controls) <- applyControlMail agent sess0
+            forM_ [ids | CancelCalls ids <- controls] $ mapM_ (cancelAttachedCall agent)
+            let stopRequested = StopRun `elem` controls
+                pauseRequested = Pause `elem` controls
+                stop =
                     finished
                         || stopRequested
+                        || pauseRequested
                         || (mode == StepOnce && steps >= 1)
                         || isBlockedOnDeferredCalls sess
             if stop
                 then do
-                    let status = sessionStatusOf sess
+                    when pauseRequested $ do
+                        cancelsCalls <- agentBoolOption runner meta Base.pauseCancelsCalls
+                        when cancelsCalls $ mapM_ (cancelAttachedCall agent) (runningToolCallIds sess)
+                    let status
+                            | pauseRequested = StatusPaused
+                            | otherwise = sessionStatusOf sess
                     _ <- storeOrThrow runner live meta sess status
                     atomically $ writeTVar live.lsRun Nothing
                     when (status == StatusWaitingExternal) $
@@ -665,16 +707,43 @@ runLoop runner live mode agent0 = do
                 void $ storeOrThrow runner live meta sess' StatusRunning
             go agent' (steps + 1) done
 
-    -- | Whether an unread 'Control' 'StopRun' envelope is waiting.
-    checkStopRequested :: RunnerAgent -> Session -> IO Bool
-    checkStopRequested agent sess = case agent.ctxMailbox of
-        Nothing -> pure False
-        Just mb -> any isStopRun <$> atomically (mbUnread mb sess.mailCursor)
-      where
-        isStopRun :: Envelope -> Bool
-        isStopRun e = case e.envBody of
-            Control StopRun -> True
-            _ -> False
+    -- | Every unread 'Control' message waiting in the session's mailbox.
+    -- | Read unread 'Control' mail; when the whole unread batch is
+    -- 'Control', commit the cursor past it. See the call site for why a
+    -- mixed batch is left uncommitted.
+    applyControlMail :: RunnerAgent -> Session -> IO (Session, [ControlMsg])
+    applyControlMail agent sess = case agent.ctxMailbox of
+        Nothing -> pure (sess, [])
+        Just mb -> do
+            envelopes <- atomically (mbUnread mb sess.mailCursor)
+            let controls = [msg | e <- envelopes, Control msg <- [e.envBody]]
+                allControl = not (null envelopes) && length controls == length envelopes
+                sess' =
+                    if allControl
+                        then sess{mailCursor = maximum (map (.envSeq) envelopes)}
+                        else sess
+            pure (sess', controls)
+
+    -- | Cancel one attached call through the agent's async engine, if any.
+    -- A no-op (per 'Engine.cancelToolCall') for an unknown or already-final
+    -- call id, so it is safe to call again for a 'Control' envelope this
+    -- loop has already reacted to on an earlier iteration.
+    cancelAttachedCall :: RunnerAgent -> ToolCallId -> IO ()
+    cancelAttachedCall agent callId = for_ agent.ctxAsyncEngine $ \engine -> void $ Engine.cancelToolCall engine callId
+
+-- | Every tool-call id still tracked as 'Running' anywhere in a session
+-- (the head turn's attached calls, and any left behind in earlier partial
+-- turns).
+runningToolCallIds :: Session -> [ToolCallId]
+runningToolCallIds sess =
+    [tc.tcId | PartialUserTurn partial _ <- sess.turns, tc <- partial.pTrackedToolCalls, tc.tcState == Running]
+
+-- | Whether an agent's JSON config enables a given boolean option, looked
+-- up by the session's recorded agent slug.
+agentBoolOption :: SessionRunner -> SessionMeta -> (Base.Agent -> Maybe Bool) -> IO Bool
+agentBoolOption runner meta field = do
+    mNode <- maybe (pure Nothing) (lookupAgent runner.srHost) meta.smAgent
+    pure $ fromMaybe False (mNode >>= field . osNodeConfig)
 
 -- | Apply the queued external results to the latest version (under the lock).
 applyInbox :: SessionRunner -> LiveSession -> IO (Session, SessionMeta)
@@ -774,30 +843,67 @@ postMessage runner sid message mode supplied =
         if isJust active
             then acceptAsMail live
             else
-                withIdle runner live $ \sess meta -> do
-                    let status = sessionStatusOf sess
-                    if status /= StatusIdle
-                        then pure $ Left $ NotAcceptingMessages sid status
-                        else
-                            agentNodeFor runner meta >>= \case
-                                Left err -> pure (Left err)
-                                Right node ->
-                                    prepareParams runner live node supplied >>= \case
+                withIdle runner live $ \sess meta ->
+                    -- Phase 6 (@todos/session-mailbox.md@ §4): a paused
+                    -- session (no active run, so it fell to this branch)
+                    -- has a persisted status -- not derivable from turns,
+                    -- so 'sessionStatusOf' can't see it -- of
+                    -- 'StatusPaused'. Its turns are exactly as they were
+                    -- when it paused (e.g. a 'PartialUserTurn' with a
+                    -- background call still going), so it is not safe to
+                    -- append a plain new 'UserTurn' as the ordinary idle
+                    -- path below does; treat the message as mail instead
+                    -- (like the "busy" case above) and, since nothing is
+                    -- running to fold it in, start a run so something does.
+                    -- Only when 'resumeOnAnyMail' says so; an explicit
+                    -- 'resume' call always works regardless ('resume' only
+                    -- checks for an active run, not status).
+                    if meta.smStatus == StatusPaused
+                        then do
+                            resumeOk <- agentBoolOption runner meta Base.resumeOnAnyMail
+                            if not resumeOk
+                                then pure $ Left $ NotAcceptingMessages sid meta.smStatus
+                                else
+                                    acceptAsMail live >>= \case
                                         Left err -> pure (Left err)
-                                        Right overlay ->
-                                            sessionAgent runner live meta >>= \case
-                                                Left err -> pure (Left err)
-                                                Right agent -> case missingRequiredParams node agent overlay of
-                                                    missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
-                                                    [] -> do
-                                                        sPrompt <- agent.sysPrompt
-                                                        sTools <- agent.sysTools
-                                                        tid <- newTurnId
-                                                        let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) [] []) Nothing
-                                                            sess' = sess{turns = turn : sess.turns, turnId = tid}
-                                                        store runner live meta sess' StatusReady Nothing >>= \case
-                                                            Left conflict -> pure (Left (Conflict conflict))
-                                                            Right meta' -> maybe (pure (Right meta')) (\m -> startRun runner live m overlay sess' meta') mode
+                                        Right _ ->
+                                            -- Start a run directly (not via 'resume', which
+                                            -- would re-take 'live.lsLock' this callback
+                                            -- already holds): the new run's own first
+                                            -- receive point folds in the mail just posted.
+                                            case mode of
+                                                Nothing -> pure (Right meta)
+                                                Just m ->
+                                                    agentNodeFor runner meta >>= \case
+                                                        Left err -> pure (Left err)
+                                                        Right node ->
+                                                            prepareParams runner live node supplied >>= \case
+                                                                Left err -> pure (Left err)
+                                                                Right overlay -> startRun runner live m overlay sess meta
+                        else
+                            let status = sessionStatusOf sess
+                             in if status /= StatusIdle
+                                    then pure $ Left $ NotAcceptingMessages sid status
+                                    else
+                                        agentNodeFor runner meta >>= \case
+                                            Left err -> pure (Left err)
+                                            Right node ->
+                                                prepareParams runner live node supplied >>= \case
+                                                    Left err -> pure (Left err)
+                                                    Right overlay ->
+                                                        sessionAgent runner live meta >>= \case
+                                                            Left err -> pure (Left err)
+                                                            Right agent -> case missingRequiredParams node agent overlay of
+                                                                missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
+                                                                [] -> do
+                                                                    sPrompt <- agent.sysPrompt
+                                                                    sTools <- agent.sysTools
+                                                                    tid <- newTurnId
+                                                                    let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) [] []) Nothing
+                                                                        sess' = sess{turns = turn : sess.turns, turnId = tid}
+                                                                    store runner live meta sess' StatusReady Nothing >>= \case
+                                                                        Left conflict -> pure (Left (Conflict conflict))
+                                                                        Right meta' -> maybe (pure (Right meta')) (\m -> startRun runner live m overlay sess' meta') mode
   where
     acceptAsMail live =
         loadLatest runner live >>= \case
