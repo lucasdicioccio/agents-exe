@@ -670,12 +670,18 @@ jsonBodyOrEmpty req = do
 parseBody :: Aeson.Object -> (Aeson.Object -> Aeson.Parser a) -> IO a
 parseBody o parser = either (badRequest . Text.pack) pure (Aeson.parseEither parser o)
 
--- | @prompt@ and optional @media: [{mime, base64, filename?}]@.
+{- | @prompt@, optional @media: [{mime, base64, filename?}]@, and optional
+@interrupt: false@ (@todos/session-mailbox.md@ R3a\/R4: only has an effect
+against a busy session, where it detaches attached tool calls -- and, with
+@interruptCompletions@ on, cancels an in-flight completion -- rather than
+waiting behind them).
+-}
 messageFields :: Aeson.Object -> Aeson.Parser NewMessage
 messageFields o = do
     prompt <- o .: "prompt"
     media <- fromMaybe [] <$> o .:? "media"
-    NewMessage prompt <$> mapM mediaItem media
+    interrupt <- fromMaybe False <$> o .:? "interrupt"
+    NewMessage prompt <$> mapM mediaItem media <*> pure interrupt
   where
     mediaItem = Aeson.withObject "media" $ \m ->
         MediaAttachment <$> m .: "mime" <*> m .: "base64" <*> m .:? "filename"

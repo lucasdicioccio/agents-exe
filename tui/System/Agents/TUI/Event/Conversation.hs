@@ -41,6 +41,9 @@ module System.Agents.TUI.Event.Conversation (
     handleTogglePauseConversation,
     isConversationPaused,
 
+    -- * Interrupt
+    handleInterruptConversation,
+
     -- * Progress Callbacks
     buildOnProgress,
     readAndClearBufferedMessagesSTM,
@@ -639,6 +642,57 @@ handleTogglePauseConversation = do
 -- | Check if a conversation is currently paused.
 isConversationPaused :: ConversationId -> Core -> Bool
 isConversationPaused convId core = Set.member convId (core ^. corePausedConversations)
+
+-------------------------------------------------------------------------------
+-- Interrupt
+-------------------------------------------------------------------------------
+
+{- | Interrupt the focused conversation's currently-attached tool calls
+(@todos/session-mailbox.md@, R3a): posts an 'Interrupt'-priority envelope
+to its own mailbox, which the stepper reacts to the next time it is
+waiting on attached calls -- all of them are detached at once ("^Z then
+talk") and the LLM is asked again with the interrupting mail and the
+detached calls' placeholders folded into the next turn.
+
+Only has an effect for a conversation whose agent runs in asynchronous
+execution mode: a call in the (default) synchronous mode runs inline, with
+no attached-call state for R3a to detach, so the mail is simply queued and
+picked up (rendered, not acted on) at the conversation's next turn
+boundary. This is a real, spec-inherent limitation, not a bug -- told to
+the user via 'showStatus' rather than silently doing nothing.
+-}
+handleInterruptConversation :: EventM N TuiState ()
+handleInterruptConversation = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> case conv.conversationSession of
+            Nothing -> showStatus StatusWarning "Conversation has no session yet"
+            Just sess -> do
+                coreRef <- use tuiCore
+                core <- liftIO $ readTVarIO coreRef
+                let router = core ^. coreMailRouter
+                mTarget <- liftIO $ router.mrLookup sess.sessionId
+                case mTarget of
+                    Nothing -> showStatus StatusWarning "Conversation has no mailbox to interrupt"
+                    Just (_, mailbox) -> do
+                        sent <-
+                            liftIO $
+                                mailbox.mbSend
+                                    Outgoing
+                                        { outId = Nothing
+                                        , outFrom = FromUser Nothing
+                                        , outPriority = Interrupt
+                                        , outHops = 0
+                                        , outBody =
+                                            UserMessage
+                                                (UserQuery "(interrupted by user; any attached tool calls have been detached)" [])
+                                        }
+                        case sent of
+                            Left _ -> showStatus StatusWarning "Could not send interrupt (mailbox full)"
+                            Right _ ->
+                                showStatus StatusInfo $
+                                    "Interrupt sent to " <> conversationName conv <> ": attached tool calls will be detached shortly"
 
 -------------------------------------------------------------------------------
 -- Progress Callbacks

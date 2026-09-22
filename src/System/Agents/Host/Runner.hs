@@ -131,6 +131,14 @@ data RunMode
 data NewMessage = NewMessage
     { nmText :: Text
     , nmMedia :: [MediaAttachment]
+    , nmInterrupt :: Bool
+    {- ^ Post this as 'Interrupt'-priority mail rather than 'Normal'
+    (@todos/session-mailbox.md@ R3a\/R4): a running session's attached tool
+    calls are detached and, if @interruptCompletions@ is on, an in-flight
+    LLM completion is cancelled, either way asked again with this message
+    folded in. Only meaningful for 'acceptAsMail' (a busy session); ignored
+    on the idle path, where there is nothing to interrupt.
+    -}
     }
 
 data RunnerError
@@ -495,7 +503,7 @@ newAgent runner live node = do
 -}
 serverSpawnSession :: SessionRunner -> SessionId -> Text -> Text -> IO (Either Text SessionId)
 serverSpawnSession runner sid slug text = do
-    result <- spawnSession runner sid slug (NewMessage text [])
+    result <- spawnSession runner sid slug (NewMessage text [] False)
     pure $ either (Left . runnerErrorText) (Right . (.smSessionId)) result
 
 -- | Render a 'RunnerError' as text, for hooks that report to the LLM rather than the HTTP API.
@@ -1210,7 +1218,7 @@ postMessage runner sid message mode supplied =
                                     Outgoing
                                         { outId = Nothing
                                         , outFrom = FromUser Nothing
-                                        , outPriority = Normal
+                                        , outPriority = if message.nmInterrupt then Interrupt else Normal
                                         , outHops = 0
                                         , outBody = UserMessage (UserQuery message.nmText message.nmMedia)
                                         }

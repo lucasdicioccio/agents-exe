@@ -43,7 +43,7 @@ import System.Agents.Host.Runner
 import System.Agents.OneShot (oneShotSpawnSession)
 import System.Agents.Session.Async (ContinuationStore (..), mkSqliteContinuationStore)
 import System.Agents.Session.Base hiding (SessionProgress (..))
-import System.Agents.Session.Mailbox (MailboxInfo (..), MailRouter (..), newInMemoryMailbox, newMailRouter)
+import System.Agents.Session.Mailbox (Mailbox (..), MailboxInfo (..), MailRouter (..), newInMemoryMailbox, newMailRouter)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.SessionStore
 import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM)
@@ -66,6 +66,7 @@ tests =
         [ testCase "a deferred call completed with auto-resume leads to a final answer" deferredFlowTest
         , testCase "concurrent completions of one turn both land" concurrentCompletionsTest
         , testCase "messages are refused during a run and accepted after" postMessageTest
+        , testCase "an interrupt message is posted as Interrupt-priority mail" postMessageInterruptTest
         , testCase "a background call started in one run is picked up by the next" engineKeptTest
         , testCase "cancelling stops the run and its background calls" cancelTest
         , testCase "sessions left running are recovered, their calls orphaned" recoveryTest
@@ -165,6 +166,33 @@ postMessageTest = do
         length [() | LlmTurn{} <- sess.turns] @?= 2
         stillIdle <- postMessage runner sid (message "fine") Nothing Map.empty
         fmap (.smStatus) stillIdle @?= Right StatusReady
+
+{- | A message posted with @interrupt: true@ against a busy session is
+delivered as 'Interrupt'-priority mail (R3a\/R4), not 'Normal' -- what
+distinguishes it, per §4, is that it pre-empts attached calls\/an in-flight
+completion instead of waiting behind them.
+-}
+postMessageInterruptTest :: Assertion
+postMessageInterruptTest = do
+    gate <- newEmptyMVar
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> readMVar gate >> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        accepted <- postMessage runner sid (NewMessage "urgent" [] True) (Just UntilBlocked) Map.empty
+        either (\e -> assertFailure ("expected mail to be accepted, got " <> show e)) (const (pure ())) accepted
+        let router = serverMailRouter runner
+        mTarget <- router.mrLookup sid
+        case mTarget of
+            Nothing -> assertFailure "session has no mailbox"
+            Just (_, mb) -> do
+                envelopes <- atomically (mbUnread mb 0)
+                let priorities = [e.envPriority | e <- envelopes, UserMessage q <- [e.envBody], q.queryText == "urgent"]
+                priorities @?= [Interrupt]
+        putMVar gate ()
+        _ <- expectRight =<< awaitRun runner sid 5
+        pure ()
 
 engineKeptTest :: Assertion
 engineKeptTest = do
@@ -1158,7 +1186,7 @@ gatedTool gate =
         pure (CByteString.pack "slow result")
 
 message :: Text -> NewMessage
-message txt = NewMessage txt []
+message txt = NewMessage txt [] False
 
 expectRight :: (Show e) => Either e a -> IO a
 expectRight = either (\e -> assertFailure ("unexpected error: " <> show e)) pure
