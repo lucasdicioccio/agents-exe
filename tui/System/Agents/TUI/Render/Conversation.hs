@@ -415,7 +415,9 @@ render_turn views (_k, turn) =
                     [ txt $
                         "> " <> case userTurn.userQuery of
                             Just (UserQuery q _) -> q
-                            Nothing -> "(no query)"
+                            Nothing -> case userTurn.userToolResponses of
+                                [] -> "(no query)"
+                                resps -> "(tool result: " <> Text.intercalate ", " (map (llmToolCallName . fst) resps) <> ")"
                     , render_usage mUsage
                     , txt " "
                     ]
@@ -425,7 +427,9 @@ render_turn views (_k, turn) =
                     [ txt $
                         "AI: " <> case llmTurn.llmResponse.responseText of
                             Just txt0 -> txt0
-                            Nothing -> "(no response)"
+                            Nothing -> case llmTurn.llmToolCalls of
+                                [] -> "(no response)"
+                                calls -> "(tool call: " <> Text.intercalate ", " (map llmToolCallName calls) <> ")"
                     , case llmTurn.llmResponse.responseThinking of
                         Just thinking -> withAttr thinkingAttr $ txt $ "Thinking: " <> thinking
                         Nothing -> emptyWidget
