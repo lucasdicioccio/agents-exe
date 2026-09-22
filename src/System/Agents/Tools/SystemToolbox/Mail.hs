@@ -23,12 +23,18 @@ module System.Agents.Tools.SystemToolbox.Mail (
     spawnSession,
     watchSession,
     unwatchSession,
+    mergeLiveSessions,
 ) where
 
 import Control.Concurrent.STM (atomically)
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.List (find)
+import qualified Data.List as List
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.UUID as UUID
+import qualified Data.Vector as Vector
 
 import System.Agents.Session.Mailbox (MailRouter (..), Mailbox (..), MailboxInfo (..), WatchRequest (..))
 import System.Agents.Session.Types (
@@ -44,7 +50,9 @@ import System.Agents.Session.Types (
     SessionId (..),
     messageIdText,
  )
+import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.Tools.Context (ToolExecutionContext (..))
+import System.Agents.Tools.SystemToolbox.Session (conversationIdToText)
 import System.Agents.Tools.SystemToolbox.Types (
     QueryError (..),
     SendMessageParams (..),
@@ -155,6 +163,65 @@ unwatchSession :: ToolExecutionContext -> UnwatchSessionParams -> IO (Either Que
 unwatchSession ctx params = case ctxUnwatchSession ctx of
     Nothing -> pure $ Left $ SystemInfoError "unwatch-session is not available in this context"
     Just unwatch -> Right . UnwatchSessionResult <$> unwatch (uspWatchId params)
+
+{- | Merge a 'MailRouter's live sessions into a @list-sessions@ result (§5:
+"@list-sessions@ merges it with the persisted ones"), so a session that
+exists (e.g. just 'spawn-session'ed) but hasn't been checkpointed to the
+persisted catalog yet is still visible.
+
+Matches by session id (rendered the same way @list-sessions@ already does,
+as its underlying 'ConversationId''s text — see
+'System.Agents.SessionStore.sessionIdToConversationId'): an id already in
+the persisted list has its @status@ overwritten with the live one (more
+current); an id the persisted list doesn't have yet is appended, with the
+fields @list-sessions@ can't know about a session it never loaded left at
+sensible defaults. A 'Nothing' router, or a result shaped unlike
+@list-sessions@'s own output, is passed through unchanged.
+-}
+mergeLiveSessions :: Maybe MailRouter -> Aeson.Value -> IO Aeson.Value
+mergeLiveSessions Nothing value = pure value
+mergeLiveSessions (Just router) (Aeson.Object obj)
+    | Just (Aeson.Array sessions) <- KeyMap.lookup "sessions" obj = do
+        live <- router.mrList
+        let existingIds = Set.fromList [sid | Aeson.Object s <- Vector.toList sessions, Just (Aeson.String sid) <- [KeyMap.lookup "sessionId" s]]
+            overlaid = fmap (overlayStatus live) sessions
+            newEntries = [liveSessionEntry sid info | (sid, info) <- live, not (idText sid `Set.member` existingIds)]
+            merged = overlaid <> Vector.fromList newEntries
+            bumpedTotal = case KeyMap.lookup "totalAccessible" obj of
+                Just (Aeson.Number count) -> Aeson.Number (count + fromIntegral (length newEntries))
+                _ -> Aeson.toJSON (Vector.length merged)
+         in pure $
+                Aeson.Object $
+                    KeyMap.insert "sessions" (Aeson.Array merged) $
+                        KeyMap.insert "totalAccessible" bumpedTotal obj
+mergeLiveSessions _ value = pure value
+
+-- | This session's id, rendered the way @list-sessions@ renders one.
+idText :: SessionId -> Text
+idText = conversationIdToText . SessionStore.sessionIdToConversationId
+
+-- | A brand-new @list-sessions@ entry for a live session the persisted
+-- catalog doesn't know about yet.
+liveSessionEntry :: SessionId -> MailboxInfo -> Aeson.Value
+liveSessionEntry sid info =
+    Aeson.object
+        [ "sessionId" Aeson..= idText sid
+        , "conversationId" Aeson..= idText sid
+        , "modificationTime" Aeson..= ("" :: Text)
+        , "turnCount" Aeson..= (0 :: Int)
+        , "isParent" Aeson..= False
+        , "isChild" Aeson..= (info.miParent /= Nothing)
+        , "isLocked" Aeson..= False
+        , "status" Aeson..= info.miStatus
+        ]
+
+-- | Overwrite a persisted entry's @status@ with the live one, if it has one.
+overlayStatus :: [(SessionId, MailboxInfo)] -> Aeson.Value -> Aeson.Value
+overlayStatus live (Aeson.Object s)
+    | Just (Aeson.String sid) <- KeyMap.lookup "sessionId" s
+    , Just (_, info) <- List.find ((== sid) . idText . fst) live =
+        Aeson.Object (KeyMap.insert "status" (Aeson.String info.miStatus) s)
+overlayStatus _ other = other
 
 -- | Best-effort: look up the sender's own registration to report its slug.
 resolveOwnSlug :: MailRouter -> SessionId -> IO (Maybe Text)

@@ -9,9 +9,10 @@ module RunnerTests (tests) where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
-import Control.Concurrent.STM (atomically, writeTVar)
+import Control.Concurrent.STM (atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Monad (void)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
@@ -39,9 +40,10 @@ import System.Agents.Base (AgentId (..))
 import qualified System.Agents.Base as Base
 import System.Agents.Host
 import System.Agents.Host.Runner
+import System.Agents.OneShot (oneShotSpawnSession)
 import System.Agents.Session.Async (ContinuationStore (..), mkSqliteContinuationStore)
 import System.Agents.Session.Base hiding (SessionProgress (..))
-import System.Agents.Session.Mailbox (MailboxInfo (..), MailRouter (..))
+import System.Agents.Session.Mailbox (MailboxInfo (..), MailRouter (..), newInMemoryMailbox, newMailRouter)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.SessionStore
 import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM)
@@ -88,6 +90,9 @@ tests =
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
         , testCase "unwatch-session stops forwarding" unwatchSessionTest
         , testCase "watch-session refuses a target outside the watcher's subtree" watchSessionScopeDenialTest
+        , testCase "list-sessions merges live MailRouter entries with the persisted catalog" listSessionsMergeTest
+        , testCase "run's spawn-session resolves a helper slug into a registered child session" oneShotSpawnSessionTest
+        , testCase "run's spawn-session refuses an unknown helper slug" oneShotSpawnSessionUnknownSlugTest
         ]
 
 -------------------------------------------------------------------------------
@@ -609,6 +614,94 @@ spawnSessionTest = do
         case childInfo of
             Just (info, _) -> info.miParent @?= Just callerSid
             Nothing -> assertFailure "spawned session is not reachable via the MailRouter"
+
+{- | 'Mail.mergeLiveSessions' (@todos/session-mailbox.md@, Phase 4, §5)
+appends a live-only session to a @list-sessions@-shaped result and
+overwrites the status of one already present in it, leaving everything
+else (an id present in neither list) untouched.
+-}
+listSessionsMergeTest :: Assertion
+listSessionsMergeTest = do
+    router <- newMailRouter
+    persistedSid <- SessionId <$> nextRandom
+    liveOnlySid <- SessionId <$> nextRandom
+    mb <- newInMemoryMailbox
+    _ <-
+        router.mrRegister
+            persistedSid
+            (MailboxInfo (Just "persisted-agent") Nothing "running" MailScopeSubtree MailScopeChildren)
+            mb
+    _ <-
+        router.mrRegister
+            liveOnlySid
+            (MailboxInfo (Just "live-agent") Nothing "running" MailScopeSubtree MailScopeChildren)
+            mb
+    let idText sid = case sid of SessionId uuid -> UUID.toText uuid
+        catalogResult =
+            Aeson.object
+                [ "sessions"
+                    Aeson..= [ Aeson.object
+                                [ "sessionId" Aeson..= idText persistedSid
+                                , "conversationId" Aeson..= idText persistedSid
+                                , "status" Aeson..= ("idle" :: Text)
+                                ]
+                             ]
+                , "totalAccessible" Aeson..= (1 :: Int)
+                ]
+    merged <- Mail.mergeLiveSessions (Just router) catalogResult
+    case merged of
+        Aeson.Object obj -> do
+            case Aeson.fromJSON <$> KeyMap.lookup "sessions" obj of
+                Just (Aeson.Success (sessions :: [Aeson.Object])) -> do
+                    let byId sid = [s | s <- sessions, KeyMap.lookup "sessionId" s == Just (Aeson.String (idText sid))]
+                    case byId persistedSid of
+                        [s] -> KeyMap.lookup "status" s @?= Just (Aeson.String "running")
+                        other -> assertFailure ("expected exactly one persisted entry, got " <> show other)
+                    length (byId liveOnlySid) @?= 1
+                    length sessions @?= 2
+                other -> assertFailure ("expected a decodable sessions array, got " <> show other)
+            KeyMap.lookup "totalAccessible" obj @?= Just (Aeson.Number 2)
+        other -> assertFailure ("expected a merged object, got " <> show other)
+
+{- | 'System.Agents.OneShot.oneShotSpawnSession' (@todos/session-mailbox.md@,
+Phase 4, §5) resolves @<slug>@ against the caller's own declared helpers and
+returns immediately with a registered child session id, without waiting for
+(or requiring) the child to actually answer -- so this only exercises the
+resolution/registration/bookkeeping, not a real LLM round trip (there is no
+fake-completion seam in @run@'s current design to drive one in a test).
+-}
+oneShotSpawnSessionTest :: Assertion
+oneShotSpawnSessionTest = withSystemTempDirectory "oneshot-spawn-session" $ \dir -> do
+    let store = mkSimpleSessionStore dir
+    router <- newMailRouter
+    spawnedVar <- newTVarIO []
+    ownSid <- SessionId <$> nextRandom
+    helperNode <- testNode "{}"
+    callerNode <- testNode "{}"
+    let callerWithHelper = callerNode{osNodeChildren = [helperNode]}
+    result <- oneShotSpawnSession store silent [] router spawnedVar ownSid callerWithHelper "test-agent" "get started"
+    childSid <- case result of
+        Right sid -> pure sid
+        Left err -> assertFailure ("expected spawn-session to succeed, got " <> Text.unpack err) >> error "unreachable"
+    info <- router.mrLookup childSid
+    case info of
+        Just (mailboxInfo, _) -> mailboxInfo.miParent @?= Just ownSid
+        Nothing -> assertFailure "spawned session is not reachable via the MailRouter"
+    spawned <- readTVarIO spawnedVar
+    length spawned @?= 1
+
+-- | An unknown helper slug is refused rather than crashing or hanging.
+oneShotSpawnSessionUnknownSlugTest :: Assertion
+oneShotSpawnSessionUnknownSlugTest = withSystemTempDirectory "oneshot-spawn-session-unknown" $ \dir -> do
+    let store = mkSimpleSessionStore dir
+    router <- newMailRouter
+    spawnedVar <- newTVarIO []
+    ownSid <- SessionId <$> nextRandom
+    callerNode <- testNode "{}"
+    result <- oneShotSpawnSession store silent [] router spawnedVar ownSid callerNode "no-such-helper" "hi"
+    case result of
+        Left _ -> pure ()
+        Right sid -> assertFailure ("expected an unknown slug to be refused, got session " <> show sid)
 
 {- | Get a session to the point where one call runs in the background,
 using the deterministic 'StepOnce'-driven flow 'engineKeptTest' also uses:

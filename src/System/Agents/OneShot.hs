@@ -29,6 +29,9 @@ module System.Agents.OneShot (
     -- * Utility functions
     mapProgressiveDisclosureTrace,
     parseModelFlavor,
+
+    -- * Agent-to-agent (session-mailbox Phase 4), exposed for testing
+    oneShotSpawnSession,
 ) where
 
 import Control.Concurrent.Async (Async, async, cancel)

@@ -1970,7 +1970,9 @@ systemTool box =
                                                         then handleWatchSession ctx v
                                                         else if cap == "unwatch-session"
                                                             then handleUnwatchSession ctx v
-                                                            else do
+                                                            else if cap == "list-sessions"
+                                                                then handleListSessions tracer ctx
+                                                                else do
                                             -- Extract optional parameters for session introspection capabilities
                                             let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
                                                     Just (Aeson.String sid) -> Just sid
@@ -2079,6 +2081,19 @@ systemTool box =
                     Left err -> pure $ SystemToolError call err
                     Right unwatchResult ->
                         pure $ SystemToolResult call $ SystemTools.QueryResult "unwatch-session" (Aeson.toJSON unwatchResult) 0
+
+    {- | Handle the list-sessions capability, merging in the caller's
+    'ctxMailRouter' live sessions (@todos/session-mailbox.md@, Phase 4, §5)
+    on top of the ordinary catalog-only result.
+    -}
+    handleListSessions :: Tracer IO Trace -> ToolExecutionContext -> IO (CallResult ())
+    handleListSessions tracer ctx = do
+        result <- SystemTools.executeQueryWithParams (Prod.contramap SystemToolsTrace tracer) box "list-sessions" Nothing Nothing Nothing
+        case result of
+            Left err -> pure $ SystemToolError call err
+            Right rsp -> do
+                merged <- Mail.mergeLiveSessions (Context.ctxMailRouter ctx) (SystemTools.resultData rsp)
+                pure $ SystemToolResult call rsp{SystemTools.resultData = merged}
 
     -- Handle the cancel-tool-call capability
     handleCancel :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
