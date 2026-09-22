@@ -78,6 +78,7 @@ tests =
         , testCase "asynchronous agent without a World gets a private one" asyncWithoutWorld
         , testCase "ctxMaxConcurrency bounds concurrently running calls" maxConcurrencyBoundsCalls
         , testCase "engine publishes activity events on the event queue" engineEmitsActivity
+        , testCase "a background call's completion is posted as ToolCallFinished mail" backgroundCompletionPostsMail
         , testCase "background results win the race against a pending user query" backgroundWinsUserQueryRace
         , testCase "a user query wins the race against running background calls" userQueryWinsRace
         , testGroup
@@ -229,7 +230,7 @@ orphanedCallResolves = do
                 , tcEntityId = Just (EntityId UUID.nil)
                 , tcDeliveredLate = False
                 }
-    let partial = PartialUserTurnContent (SystemPrompt "test") [] Nothing [tracked]
+    let partial = PartialUserTurnContent (SystemPrompt "test") [] Nothing [tracked] []
     let s0 = (sessionWithCalls [tracked.tcCall]){turns = [PartialUserTurn partial Nothing, llmTurnWith [tracked.tcCall]]}
     let agent = mkAgent world YieldWhenAllDone (\_ _ -> pure $ TextResponse "unused")
     (_, s1) <- stepOk agent s0
@@ -362,6 +363,26 @@ engineEmitsActivity = do
             , (Just "call_a", "a", ToolCallCompleted)
             ]
 
+{- | Per @todos/session-mailbox.md@ §3, the engine posts a background call's
+final result to the owning session's mailbox as 'ToolCallFinished' mail.
+-}
+backgroundCompletionPostsMail :: Assertion
+backgroundCompletionPostsMail = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    let tool _ call = pure $ TextResponse (callName call <> "-result")
+    let agent = (mkAgent world YieldWhenAllDone tool){ctxMailbox = Just mb}
+    _ <- stepOk agent (sessionWithCalls [mkCall "call_a" "a"])
+    mEnvelopes <- timeout (5 * 1000 * 1000) $ atomically $ awaitMail mb 0 (const True)
+    case mEnvelopes of
+        Nothing -> assertFailure "expected ToolCallFinished mail after the background call completed"
+        Just [e] -> case e.envBody of
+            ToolCallFinished _tcid state response -> do
+                state @?= Completed
+                response @?= TextResponse "a-result"
+            other -> assertFailure $ "expected ToolCallFinished mail, got " <> show other
+        Just other -> assertFailure $ "expected exactly one envelope, got " <> show (length other)
+
 {- | While waiting for user input, a background call finishing delivers its
 result without a user query.
 -}
@@ -413,8 +434,8 @@ activityViewPrune = do
     t <- getCurrentTime
     let done = applyToolCallActivity (activity t ToolCallCompleted) Map.empty
         runningCall = trackedCall Running
-        stillRunning = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [runningCall]) Nothing]}
-        caughtUp = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [trackedCall Completed]) Nothing]}
+        stillRunning = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [runningCall] []) Nothing]}
+        caughtUp = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [trackedCall Completed] []) Nothing]}
     Map.size (pruneToolCallViews stillRunning done) @?= 1
     Map.size (pruneToolCallViews caughtUp done) @?= 0
     let started = applyToolCallActivity (activity t ToolCallStarted) Map.empty
@@ -544,7 +565,7 @@ markdownPartialTurn :: Assertion
 markdownPartialTurn = do
     let done = (trackedCall Completed){tcCall = mkCall "call_done" "done", tcResult = Just (TextResponse "done-output")}
         running = (trackedCall Running){tcCall = mkCall "call_run" "run"}
-        partial = PartialUserTurnContent (SystemPrompt "p") [] Nothing [done, running]
+        partial = PartialUserTurnContent (SystemPrompt "p") [] Nothing [done, running] []
         sess = (sessionWithCalls []){turns = [PartialUserTurn partial Nothing]}
         opts =
             SessionPrintOptions
@@ -703,7 +724,7 @@ initialSession :: Session
 initialSession =
     (sessionWithCalls [])
         { turns =
-            [ UserTurn (UserTurnContent (SystemPrompt "test") [] (Just (UserQuery "go" [])) []) Nothing
+            [ UserTurn (UserTurnContent (SystemPrompt "test") [] (Just (UserQuery "go" [])) [] []) Nothing
             ]
         }
 
@@ -719,6 +740,7 @@ sessionWithCalls calls =
         , turnId = TurnId nil
         , sessionVersion = Just 2
         , sessionExecutionMode = Just Asynchronous
+        , mailCursor = 0
         }
 
 dummyPortal :: ToolPortal
@@ -756,4 +778,5 @@ mkAgent world strategy tool =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
         }

@@ -169,6 +169,7 @@ library agents-lib
                     , System.Agents.Session.AgentConfig
                     , System.Agents.Session.Base
                     , System.Agents.Session.Durable
+                    , System.Agents.Session.Mailbox
                     , System.Agents.Session.Isolation
                     , System.Agents.Session.Async
                     , System.Agents.Session.Async.Engine
@@ -533,6 +534,7 @@ test-suite agents-tests
                     , FileSandboxPredicateTests
                     , LuaToolboxJsonValueTests
                     , LuaToolboxHttpTests
+                    , MailboxTests
                     , McpImplementationTests
                     , ModelCatalogTests
                     , OpenAPIToolboxTests

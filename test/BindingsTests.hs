@@ -311,12 +311,13 @@ storedResponse from slug =
 sessionWith :: [(LlmToolCall, UserToolResponse)] -> Session
 sessionWith pairs =
     Session
-        [UserTurn (UserTurnContent (SystemPrompt "") [] Nothing pairs) Nothing]
+        [UserTurn (UserTurnContent (SystemPrompt "") [] Nothing pairs []) Nothing]
         (SessionId nil)
         Nothing
         (TurnId nil)
         (Just 1)
         Nothing
+        0
 
 deriveAgentTableTests :: TestTree
 deriveAgentTableTests =

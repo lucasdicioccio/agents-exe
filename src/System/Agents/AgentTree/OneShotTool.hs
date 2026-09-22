@@ -60,10 +60,15 @@ import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
     LlmTurnContent (..),
+    MailBody (UserMessage),
+    Outgoing (..),
     PartialUserTurnContent (..),
+    Priority (Normal),
+    Sender (FromUser),
     Session (..),
     Turn (..),
     UserQuery (..),
+    newInMemoryMailbox,
     newTurnId,
  )
 import qualified System.Agents.Session.Base as SessionBase
@@ -350,12 +355,12 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                     }
 
         -- Set the query on the agent
-        let agentWithQuery = agentSetQuery (UserQuery query []) sessionAgent
+        agentWithQuery <- agentSetQuery (UserQuery query []) sessionAgent
 
         -- Create a fresh session with media support (version 1), identified
         -- like its conversation so that its own sub-agents can name it as parent
         let subcallSessionId = SessionStore.conversationIdToSessionId subcallBaseConvId
-        session0 <- Session [] subcallSessionId Nothing <$> newTurnId <*> pure (Just 1) <*> pure Nothing
+        session0 <- Session [] subcallSessionId Nothing <$> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
 
         -- Get current time for timestamps
         now <- getCurrentTime
@@ -630,10 +635,17 @@ resolveCallBindings callerParams = go []
                 Fail -> Left $ "binding for argument '" <> abArg b <> "' has no value for parameter '" <> p <> "'"
                 _ -> go acc bs
 
--- | Set the user query on an agent.
-agentSetQuery :: UserQuery -> Agent r -> Agent r
-agentSetQuery query agent =
-    agent{usrQuery = pure (Just query)}
+{- | Set the user query on an agent.
+
+Pre-loads it as one 'UserMessage' envelope on a fresh in-memory mailbox
+rather than answering 'usrQuery' (@todos/session-mailbox.md@, Phase 1); see
+'System.Agents.OneShot.agentSetQuery'.
+-}
+agentSetQuery :: UserQuery -> Agent r -> IO (Agent r)
+agentSetQuery query agent = do
+    mb <- newInMemoryMailbox
+    _ <- mb.mbSend Outgoing{outId = Nothing, outFrom = FromUser Nothing, outPriority = Normal, outHops = 0, outBody = UserMessage query}
+    pure agent{ctxMailbox = Just mb}
 
 extractResponseText :: LlmResponse -> Text
 extractResponseText (LlmResponse txt _thinking _ _) =

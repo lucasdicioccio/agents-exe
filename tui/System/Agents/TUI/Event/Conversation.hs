@@ -163,7 +163,7 @@ handleNewConversationFromEditor tracer = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
         Just (_, baseTuiAgent) -> do
-            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing)
+            session <- liftIO (Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0)
             runConversation tracer baseTuiAgent session
         _ -> pure ()
 

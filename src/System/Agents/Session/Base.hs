@@ -54,6 +54,24 @@ module System.Agents.Session.Base (
     CacheKey (..),
     AsyncYieldStrategy (..),
 
+    -- * Session mailbox (re-exported from Session.Types / Session.Mailbox)
+    Cursor,
+    MessageId (..),
+    newMessageId,
+    messageIdText,
+    Priority (..),
+    Sender (..),
+    ControlMsg (..),
+    MailBody (..),
+    Envelope (..),
+    Outgoing (..),
+    SendError (..),
+    Receipt (..),
+    Mailbox (..),
+    newInMemoryMailbox,
+    awaitMail,
+    mailboxMaxUnread,
+
     -- * Byte usage tracking
     StepByteUsage (..),
     calculateStepByteUsage,
@@ -153,6 +171,7 @@ module System.Agents.Session.Base (
     withDurableExecutor,
     withAsyncEngine,
     withAsyncYieldStrategy,
+    withMailbox,
 ) where
 
 import Control.Concurrent.STM (TQueue)
@@ -163,6 +182,12 @@ import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEvent)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
+import System.Agents.Session.Mailbox (
+    Mailbox (..),
+    awaitMail,
+    mailboxMaxUnread,
+    newInMemoryMailbox,
+ )
 import System.Agents.Session.Durable (
     AsyncToolResponse (..),
     DeploymentRunner (..),
@@ -371,6 +396,13 @@ data Agent r = Agent
     Copied into every tool call's 'ToolExecutionContext' by 'buildContext',
     same as 'ctxParams'.
     -}
+    , ctxMailbox :: Maybe Mailbox
+    {- ^ Optional mailbox (@todos/session-mailbox.md@, Phase 1). When
+    present, the receive points in "System.Agents.Session.Step" fold unread
+    mail into the user turn being built (R1), and block on it when the step
+    has nothing else to do (R2). 'Nothing' keeps every existing code path
+    (including 'usrQuery') unchanged.
+    -}
     }
     deriving (Functor)
 
@@ -388,6 +420,18 @@ yieldingAgent = withAsyncYieldStrategy YieldOnAnyProgress baseAgent
 -}
 withAsyncYieldStrategy :: AsyncYieldStrategy -> Agent r -> Agent r
 withAsyncYieldStrategy strategy agent = agent{ctxAsyncYieldStrategy = strategy}
+
+{- | Install a mailbox on an agent (@todos/session-mailbox.md@, Phase 1).
+
+Example:
+
+@
+mb <- newInMemoryMailbox
+mailboxAgent = withMailbox mb baseAgent
+@
+-}
+withMailbox :: Mailbox -> Agent r -> Agent r
+withMailbox mb agent = agent{ctxMailbox = Just mb}
 
 {- | Set the execution mode for an agent.
 
@@ -570,7 +614,7 @@ withAsyncEngine maxConcurrency agent =
             -- Register the tool-call stores first so the engine and the
             -- agent share the same world value.
             world <- TCT.ensureToolCallComponentsIO world0
-            engine <- mkAsyncEngine world (executeCallSync agent) maxConcurrency agent.ctxAsyncCallTimeout
+            engine <- mkAsyncEngine world (executeCallSync agent) maxConcurrency agent.ctxAsyncCallTimeout agent.ctxMailbox
             pure agent{ctxWorld = Just world, ctxAsyncEngine = Just engine}
 
 {- | Execute a call synchronously through the agent's executor (or its

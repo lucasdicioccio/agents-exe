@@ -131,15 +131,15 @@ runOneShotWithConfig ::
 runOneShotWithConfig store config convId tracer loadedApiKeys node query = do
     agent1 <- nodeToAgentWithThinking store config.extraSavePath config.thinkingOutput config.mediaAttachments convId tracer loadedApiKeys node
 
-    let agent =
-            agentSetQuery (UserQuery query []) $
-                agentWithSessionProgress (config.onSessionProgress convId) $
-                    agent1
+    agent <-
+        agentSetQuery (UserQuery query []) $
+            agentWithSessionProgress (config.onSessionProgress convId) $
+                agent1
 
     -- Create or use initial session with media support (version 1)
     session0 <- case config.initialSession of
         Just s -> pure s
-        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
+        Nothing -> Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
 
     config.onSessionProgress convId (SessionStarted session0)
     -- The agent returns the final session as part of its stop result.
@@ -303,6 +303,17 @@ fileStoringCallback store convId progress =
         SessionStarted sess -> SessionStore.storeSession store convId sess
         SessionFailed sess _ -> SessionStore.storeSession store convId sess
 
-agentSetQuery :: forall r. UserQuery -> Agent r -> Agent r
-agentSetQuery query agent =
-    agent{usrQuery = pure (Just query)}
+{- | Set a one-shot agent's query.
+
+Per @todos/session-mailbox.md@ (Phase 1, "TUI and one-shot post
+'UserMessage'"), the query is pre-loaded as one 'UserMessage' envelope on a
+fresh in-memory mailbox rather than answered through 'usrQuery': the first
+receive point (R1) folds it into the run's first user turn. 'usrQuery' is
+left untouched for embedders that still rely on it with
+@ctxMailbox = Nothing@.
+-}
+agentSetQuery :: forall r. UserQuery -> Agent r -> IO (Agent r)
+agentSetQuery query agent = do
+    mb <- newInMemoryMailbox
+    _ <- mb.mbSend Outgoing{outId = Nothing, outFrom = FromUser Nothing, outPriority = Normal, outHops = 0, outBody = UserMessage query}
+    pure agent{ctxMailbox = Just mb}

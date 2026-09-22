@@ -93,6 +93,7 @@ import qualified OpenAIStreamTests
 import qualified RunnerTests
 import qualified DurableWorkflowTests
 import qualified NarrowingTests
+import qualified MailboxTests
 
 main :: IO ()
 main = defaultMain tests
@@ -145,6 +146,7 @@ tests =
         , MediaContentPartTests.tests
         , OpenAIStreamTests.tests
         , RunnerTests.tests
+        , MailboxTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -656,6 +658,7 @@ turnRoundTripTests =
                     , userTools = []
                     , userQuery = Just (UserQuery "Hello" [])
                     , userToolResponses = []
+                    , userMail = []
                     }
             let turn = UserTurn userContent Nothing
             let json = encode turn
@@ -667,6 +670,7 @@ turnRoundTripTests =
                     , userTools = []
                     , userQuery = Just (UserQuery "Hello" [])
                     , userToolResponses = []
+                    , userMail = []
                     }
             let byteUsage = StepByteUsage 1000 500 300 100 100 Nothing
             let turn = UserTurn userContent (Just byteUsage)
@@ -712,6 +716,7 @@ turnRoundTripTests =
                     , userTools = []
                     , userQuery = Nothing
                     , userToolResponses = [(toolCall, toolResponse)]
+                    , userMail = []
                     }
             let turn = UserTurn userContent Nothing
             let json = encode turn
@@ -744,6 +749,7 @@ turnRoundTripTests =
                         , userTools = []
                         , userQuery = Just (UserQuery "First query" [])
                         , userToolResponses = []
+                        , userMail = []
                         })
                     Nothing
             
@@ -765,6 +771,7 @@ turnRoundTripTests =
                         , userTools = []
                         , userQuery = Just (UserQuery "Second query" [])
                         , userToolResponses = []
+                        , userMail = []
                         })
                     Nothing
             
@@ -775,6 +782,7 @@ turnRoundTripTests =
                     , turnId = turnId'
                     , sessionVersion = Nothing
                     , sessionExecutionMode = Nothing
+                    , mailCursor = 0
                     }
             
             let json = encode session
@@ -792,6 +800,7 @@ turnRoundTripTests =
                     , turnId = turnId'
                     , sessionVersion = Nothing
                     , sessionExecutionMode = Nothing
+                    , mailCursor = 0
                     }
             
             let json = encode session
@@ -803,6 +812,7 @@ turnRoundTripTests =
                     , userTools = []
                     , userQuery = Nothing
                     , userToolResponses = []
+                    , userMail = []
                     }
             let turn = UserTurn userContent (Just (StepByteUsage 100 50 30 10 10 Nothing))
             let json = encode turn
@@ -817,6 +827,7 @@ turnRoundTripTests =
                     , userTools = []
                     , userQuery = Nothing
                     , userToolResponses = []
+                    , userMail = []
                     }
             let turn = UserTurn userContent Nothing
             let json = encode turn

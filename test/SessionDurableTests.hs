@@ -13,10 +13,13 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
+import Control.Concurrent (forkIO, threadDelay)
 import Data.Maybe (isJust)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.UUID (nil)
 import System.IO.Temp (withSystemTempDirectory)
+import System.Timeout (timeout)
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -32,7 +35,7 @@ import System.Agents.CLI.SessionDurable (
     parseResultFile,
  )
 import System.Agents.Session.Base
-import System.Agents.Session.Step (getPartialTurn, naiveTilNoToolCallStep, runStepMAsync)
+import System.Agents.Session.Step (getPartialTurn, naiveTilNoToolCallStep, receiveMailForTurn, runStepMAsync)
 import System.Agents.Session.Types
 import System.Agents.Session.Wake (wakeSession)
 import qualified System.Agents.SessionStore as SessionStore
@@ -107,6 +110,7 @@ mkAsyncAgent policy =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -127,7 +131,89 @@ mkSessionWithCalls calls =
         , turnId = TurnId nil
         , sessionVersion = Just 2
         , sessionExecutionMode = Just Asynchronous
+        , mailCursor = 0
         }
+
+-- | A brand-new session with no turns at all.
+mkFreshSession :: Session
+mkFreshSession =
+    Session
+        { turns = []
+        , sessionId = testSessionId
+        , forkedFromSessionId = Nothing
+        , turnId = TurnId nil
+        , sessionVersion = Just 2
+        , sessionExecutionMode = Just Asynchronous
+        , mailCursor = 0
+        }
+
+-- | An 'Outgoing' 'UserMessage' envelope, for tests that seed a mailbox.
+userMessageOutgoing :: Text -> Outgoing
+userMessageOutgoing txt =
+    Outgoing
+        { outId = Nothing
+        , outFrom = FromUser Nothing
+        , outPriority = Normal
+        , outHops = 0
+        , outBody = UserMessage (UserQuery txt [])
+        }
+
+expectRight :: (Show e) => Either e a -> IO a
+expectRight (Right a) = pure a
+expectRight (Left e) = assertFailure ("expected Right, got Left " <> show e) >> fail "unreachable"
+
+{- | Receive points R1 and R2 (@todos/session-mailbox.md@ §2), both the
+'receiveMailForTurn' primitive directly and folded into a full async step.
+-}
+sessionMailboxTests :: TestTree
+sessionMailboxTests =
+    testGroup
+        "Session mailbox (R1/R2)"
+        [ testCase "R1 peeks unread mail without blocking and advances the cursor" $ do
+            mb <- newInMemoryMailbox
+            receipt <- expectRight =<< mb.mbSend (userMessageOutgoing "hi")
+            (sess', envelopes) <- receiveMailForTurn (mkAsyncAgent defaultToolCallPolicy){ctxMailbox = Just mb} False mkFreshSession
+            map envId envelopes @?= [receipt.rcptId]
+            sess'.mailCursor @?= receipt.rcptSeq
+        , testCase "R1 with nothing unread returns the session untouched" $ do
+            mb <- newInMemoryMailbox
+            (sess', envelopes) <- receiveMailForTurn (mkAsyncAgent defaultToolCallPolicy){ctxMailbox = Just mb} False mkFreshSession
+            envelopes @?= []
+            sess'.mailCursor @?= mkFreshSession.mailCursor
+        , testCase "R2 blocks until mail arrives, then delivers it" $ do
+            mb <- newInMemoryMailbox
+            let agent = (mkAsyncAgent defaultToolCallPolicy){ctxMailbox = Just mb}
+            done <-
+                timeout (5 * 1000 * 1000) $ do
+                    _ <- forkIO $ threadDelay (200 * 1000) >> (expectRight =<< mb.mbSend (userMessageOutgoing "delayed")) >> pure ()
+                    receiveMailForTurn agent True mkFreshSession
+            case done of
+                Nothing -> assertFailure "receiveMailForTurn (R2) never woke up after mail arrived"
+                Just (sess', envelopes) -> do
+                    length envelopes @?= 1
+                    sess'.mailCursor @?= maximum (map envSeq envelopes)
+        , testCase "a Nothing mailbox leaves the session and cursor untouched" $ do
+            let agent = mkAsyncAgent defaultToolCallPolicy
+            (sess', envelopes) <- receiveMailForTurn agent True mkFreshSession
+            envelopes @?= []
+            sess'.mailCursor @?= mkFreshSession.mailCursor
+        , testCase "unread mail is folded into the fresh turn's query and userMail (end to end)" $ do
+            mb <- newInMemoryMailbox
+            _ <- expectRight =<< mb.mbSend (userMessageOutgoing "hello from mail")
+            let agent = (mkAsyncAgent defaultToolCallPolicy){ctxMailbox = Just mb}
+            (_agent', result) <- runStepMAsync testConvId agent mkFreshSession
+            session <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session" >> fail "unreachable"
+            session.mailCursor @?= 1
+            case session.turns of
+                (UserTurn content _ : _) -> do
+                    length content.userMail @?= 1
+                    case content.userQuery of
+                        Just q -> assertBool "query includes the mail text" ("hello from mail" `Text.isInfixOf` q.queryText)
+                        Nothing -> assertFailure "expected a user query carrying the mail"
+                other -> assertFailure $ "expected a user turn, got " <> show other
+        ]
 
 -- | Test suite entry point.
 tests :: TestTree
@@ -142,6 +228,7 @@ tests =
         , deferredCallExtractionTests
         , isolatedCallExtractionTests
         , pendingCompleteIntegrationTest
+        , sessionMailboxTests
         ]
 
 -- | Continuation token formatting/parsing tests.

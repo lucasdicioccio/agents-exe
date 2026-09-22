@@ -188,7 +188,7 @@ recoveryTest = do
     let running =
             TrackedToolCall callId slowCall Running Nothing Nothing (AppliedPolicy RunAsync Nothing) Nothing False
         llm = LlmTurn (LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) [slowCall]) Nothing
-        partial = PartialUserTurn (PartialUserTurnContent (SystemPrompt "sys") [] Nothing [running]) Nothing
+        partial = PartialUserTurn (PartialUserTurnContent (SystemPrompt "sys") [] Nothing [running] []) Nothing
         sess = sess0{turns = partial : llm : sess0.turns}
     now <- getCurrentTime
     _ <- expectRight =<< host.hostBackend.sbCompareAndStore (freshSessionMeta sid now){smAgent = Just "test-agent", smStatus = StatusRunning} sess

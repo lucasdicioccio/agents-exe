@@ -683,7 +683,7 @@ postMessage runner sid message mode supplied =
                                                 sPrompt <- agent.sysPrompt
                                                 sTools <- agent.sysTools
                                                 tid <- newTurnId
-                                                let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) []) Nothing
+                                                let turn = UserTurn (UserTurnContent sPrompt sTools (Just (UserQuery message.nmText message.nmMedia)) [] []) Nothing
                                                     sess' = sess{turns = turn : sess.turns, turnId = tid}
                                                 store runner live meta sess' StatusReady Nothing >>= \case
                                                     Left conflict -> pure (Left (Conflict conflict))

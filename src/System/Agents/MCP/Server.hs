@@ -269,7 +269,7 @@ runAgentWithQuery tracer onProgress apiKeys tree query = do
     let agent = agent0{usrQuery = pure (Just $ UserQuery query [])}
 
     -- Create initial session with media support (version 1)
-    session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing
+    session0 <- Session [] <$> newSessionId <*> pure Nothing <*> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
 
     -- Notify session start
     onProgress (SessionBase.SessionStarted session0)

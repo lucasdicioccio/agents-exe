@@ -64,6 +64,20 @@ module System.Agents.Session.Types (
     CacheKey (..),
     AsyncYieldStrategy (..),
 
+    -- * Session mailbox (Phase 1 of the session-mailbox spec)
+    Cursor,
+    MessageId (..),
+    newMessageId,
+    messageIdText,
+    Priority (..),
+    Sender (..),
+    ControlMsg (..),
+    MailBody (..),
+    Envelope (..),
+    Outgoing (..),
+    SendError (..),
+    Receipt (..),
+
     -- * Byte usage tracking
     StepByteUsage (..),
     calculateStepByteUsage,
@@ -113,6 +127,7 @@ import Data.Aeson.Types ((.!=))
 import qualified Data.Aeson.Types as Aeson.Types
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Time (UTCTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
@@ -256,8 +271,8 @@ Nothing is sent to the LLM yet: the first step of an agent does that.
 newSessionFromPrompt :: SessionId -> SystemPrompt -> [SystemTool] -> UserQuery -> IO Session
 newSessionFromPrompt sid sPrompt sTools query = do
     tid <- newTurnId
-    let initialTurn = UserTurn (UserTurnContent sPrompt sTools (Just query) []) Nothing
-    pure $ Session [initialTurn] sid Nothing tid (Just 2) (Just Asynchronous)
+    let initialTurn = UserTurn (UserTurnContent sPrompt sTools (Just query) [] []) Nothing
+    pure $ Session [initialTurn] sid Nothing tid (Just 2) (Just Asynchronous) 0
 
 -------------------------------------------------------------------------------
 -- Async/Continuation Types
@@ -684,6 +699,238 @@ instance FromJSON TrackedToolCall where
             <*> v .: "policy"
             <*> v .:? "entityId"
             <*> v .:? "deliveredLate" .!= False
+
+-------------------------------------------------------------------------------
+-- Session Mailbox (Phase 1 of the session-mailbox spec, see
+-- todos/session-mailbox.md)
+-------------------------------------------------------------------------------
+
+{- | A position in a mailbox's total order: everything with 'envSeq' at or
+below a session's 'mailCursor' has been folded into that session.
+-}
+type Cursor = Int
+
+-- | Idempotency key for an 'Envelope'. The sender may supply one; if not,
+-- one is generated when the envelope is accepted.
+newtype MessageId = MessageId UUID
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON MessageId where
+    toJSON (MessageId uuid) = Aeson.toJSON $ UUID.toText uuid
+
+instance FromJSON MessageId where
+    parseJSON val = do
+        txt <- Aeson.parseJSON val
+        case UUID.fromText txt of
+            Just uuid -> pure $ MessageId uuid
+            Nothing -> fail $ "Invalid MessageId UUID: " ++ Text.unpack txt
+
+newMessageId :: IO MessageId
+newMessageId = MessageId <$> UUID.nextRandom
+
+-- | Render a 'MessageId' as text, for logs and mail rendered to the LLM.
+messageIdText :: MessageId -> Text
+messageIdText (MessageId uuid) = UUID.toText uuid
+
+-- | Whether an envelope may pre-empt a wait (see receive points R3/R4,
+-- Phase 2). Phase 1 only defines the type; nothing acts on 'Interrupt' yet.
+data Priority = Normal | Interrupt
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Priority where
+    toJSON Normal = Aeson.String "normal"
+    toJSON Interrupt = Aeson.String "interrupt"
+
+instance FromJSON Priority where
+    parseJSON = Aeson.withText "Priority" $ \case
+        "normal" -> pure Normal
+        "interrupt" -> pure Interrupt
+        other -> fail $ "Unknown Priority: " ++ Text.unpack other
+
+-- | Who an envelope came from.
+data Sender
+    = FromUser (Maybe Text)
+    -- ^ The owner, when known.
+    | FromSession SessionId (Maybe Text)
+    -- ^ Another session, and its agent slug when known.
+    | FromToolCall ToolCallId
+    | FromSystem Text
+    -- ^ Timers, watchers, the runner.
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Sender where
+    toJSON sender = case sender of
+        FromUser owner -> Aeson.object $ ["tag" .= ("user" :: Text)] ++ ["owner" .= o | Just o <- [owner]]
+        FromSession sid agent ->
+            Aeson.object $
+                ["tag" .= ("session" :: Text), "sessionId" .= sid] ++ ["agent" .= a | Just a <- [agent]]
+        FromToolCall tcid -> Aeson.object ["tag" .= ("toolCall" :: Text), "toolCallId" .= tcid]
+        FromSystem source -> Aeson.object ["tag" .= ("system" :: Text), "source" .= source]
+
+instance FromJSON Sender where
+    parseJSON = Aeson.withObject "Sender" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "user" -> FromUser <$> v .:? "owner"
+            "session" -> FromSession <$> v .: "sessionId" <*> v .:? "agent"
+            "toolCall" -> FromToolCall <$> v .: "toolCallId"
+            "system" -> FromSystem <$> v .: "source"
+            _ -> fail $ "Unknown Sender tag: " ++ Text.unpack tag
+
+-- | A control instruction delivered as mail. Phase 1 only defines the type
+-- and makes it consumable (advances the cursor, renders nothing); the
+-- runtime does not yet act on any of these (Phase 2/3/6).
+data ControlMsg
+    = Pause
+    | Resume
+    | CancelCalls [ToolCallId]
+    | StopRun
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON ControlMsg where
+    toJSON msg = case msg of
+        Pause -> Aeson.object ["tag" .= ("pause" :: Text)]
+        Resume -> Aeson.object ["tag" .= ("resume" :: Text)]
+        CancelCalls ids -> Aeson.object ["tag" .= ("cancelCalls" :: Text), "toolCallIds" .= ids]
+        StopRun -> Aeson.object ["tag" .= ("stopRun" :: Text)]
+
+instance FromJSON ControlMsg where
+    parseJSON = Aeson.withObject "ControlMsg" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "pause" -> pure Pause
+            "resume" -> pure Resume
+            "cancelCalls" -> CancelCalls <$> v .: "toolCallIds"
+            "stopRun" -> pure StopRun
+            _ -> fail $ "Unknown ControlMsg tag: " ++ Text.unpack tag
+
+{- | The payload of an 'Envelope'.
+
+Only 'UserMessage' and 'ToolCallFinished' are produced in Phase 1 (by
+front-ends posting user text, and by the async engine posting background
+results). The rest of the constructors exist so the type matches the full
+design in todos/session-mailbox.md; nothing produces them yet:
+'AgentMessage' and 'ContinuationResult' are agent-to-agent mail (Phase 4),
+'WatchedEvent' is Phase 7, 'Control' is Phase 2\/3\/6.
+-}
+data MailBody
+    = UserMessage UserQuery
+    | AgentMessage Text (Maybe MessageId) Bool
+    -- ^ Text, in-reply-to, expects-reply.
+    | ToolCallFinished ToolCallId ToolCallState UserToolResponse
+    | ContinuationResult ContinuationToken UserToolResponse
+    | WatchedEvent SessionId Text Aeson.Value
+    | Control ControlMsg
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON MailBody where
+    toJSON body = case body of
+        UserMessage q -> Aeson.object ["tag" .= ("userMessage" :: Text), "query" .= q]
+        AgentMessage txt inReplyTo expectsReply ->
+            Aeson.object
+                [ "tag" .= ("agentMessage" :: Text)
+                , "text" .= txt
+                , "inReplyTo" .= inReplyTo
+                , "expectsReply" .= expectsReply
+                ]
+        ToolCallFinished tcid state result ->
+            Aeson.object
+                [ "tag" .= ("toolCallFinished" :: Text)
+                , "toolCallId" .= tcid
+                , "state" .= state
+                , "result" .= result
+                ]
+        ContinuationResult token result ->
+            Aeson.object ["tag" .= ("continuationResult" :: Text), "token" .= token, "result" .= result]
+        WatchedEvent sid eventName payload ->
+            Aeson.object
+                ["tag" .= ("watchedEvent" :: Text), "sessionId" .= sid, "name" .= eventName, "payload" .= payload]
+        Control msg -> Aeson.object ["tag" .= ("control" :: Text), "message" .= msg]
+
+instance FromJSON MailBody where
+    parseJSON = Aeson.withObject "MailBody" $ \v -> do
+        tag <- v .: "tag"
+        case tag :: Text of
+            "userMessage" -> UserMessage <$> v .: "query"
+            "agentMessage" -> AgentMessage <$> v .: "text" <*> v .:? "inReplyTo" <*> v .: "expectsReply"
+            "toolCallFinished" -> ToolCallFinished <$> v .: "toolCallId" <*> v .: "state" <*> v .: "result"
+            "continuationResult" -> ContinuationResult <$> v .: "token" <*> v .: "result"
+            "watchedEvent" -> WatchedEvent <$> v .: "sessionId" <*> v .: "name" <*> v .: "payload"
+            "control" -> Control <$> v .: "message"
+            _ -> fail $ "Unknown MailBody tag: " ++ Text.unpack tag
+
+{- | A single piece of mail, accepted into a mailbox with a total order
+('envSeq') per session.
+-}
+data Envelope = Envelope
+    { envId :: MessageId
+    -- ^ Idempotency key; resending the same one returns the original receipt.
+    , envSeq :: Int
+    -- ^ Assigned on accept; total order per session.
+    , envFrom :: Sender
+    , envPriority :: Priority
+    , envHops :: Int
+    -- ^ Agent-to-agent loop guard (Phase 4); user mail resets this to 0.
+    , envSentAt :: UTCTime
+    , envBody :: MailBody
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Envelope where
+    toJSON e =
+        Aeson.object
+            [ "id" .= e.envId
+            , "seq" .= e.envSeq
+            , "from" .= e.envFrom
+            , "priority" .= e.envPriority
+            , "hops" .= e.envHops
+            , "sentAt" .= e.envSentAt
+            , "body" .= e.envBody
+            ]
+
+instance FromJSON Envelope where
+    parseJSON = Aeson.withObject "Envelope" $ \v ->
+        Envelope
+            <$> v .: "id"
+            <*> v .: "seq"
+            <*> v .: "from"
+            <*> v .: "priority"
+            <*> v .: "hops"
+            <*> v .: "sentAt"
+            <*> v .: "body"
+
+{- | What a caller hands to 'System.Agents.Session.Mailbox.mbSend'.
+
+'outId' lets the sender supply their own idempotency key; when absent, one
+is generated on accept.
+-}
+data Outgoing = Outgoing
+    { outId :: Maybe MessageId
+    , outFrom :: Sender
+    , outPriority :: Priority
+    , outHops :: Int
+    , outBody :: MailBody
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+-- | Why 'System.Agents.Session.Mailbox.mbSend' refused an envelope.
+data SendError
+    = UnknownRecipient
+    | MailboxFull
+    | NotPermitted
+    | TooManyHops
+    deriving (Show, Eq, Ord, Generic)
+
+-- | Proof of acceptance for a sent envelope.
+data Receipt = Receipt
+    { rcptId :: MessageId
+    , rcptSeq :: Int
+    , rcptDuplicate :: Bool
+    -- ^ True when 'outId' matched an envelope already accepted; 'rcptSeq'
+    -- is then the original envelope's sequence number, not a new one.
+    }
+    deriving (Show, Eq, Ord, Generic)
+
 -------------------------------------------------------------------------------
 -- Signal Types (Trajectory Analysis)
 -------------------------------------------------------------------------------
@@ -1132,10 +1379,33 @@ data UserTurnContent
     , userTools :: [SystemTool]
     , userQuery :: Maybe UserQuery
     , userToolResponses :: [(LlmToolCall, UserToolResponse)]
+    , userMail :: [Envelope]
+    {- ^ Mail folded into this turn's 'userQuery' (see receive point R1 in
+    todos/session-mailbox.md §2). Kept alongside the rendered text so UIs
+    and the audit trail can show senders properly. Empty for turns built
+    without a mailbox, or predating this field.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
-instance FromJSON UserTurnContent
-instance ToJSON UserTurnContent
+
+instance ToJSON UserTurnContent where
+    toJSON c =
+        Aeson.object $
+            [ "userPrompt" .= c.userPrompt
+            , "userTools" .= c.userTools
+            , "userQuery" .= c.userQuery
+            , "userToolResponses" .= c.userToolResponses
+            ]
+                ++ ["userMail" .= c.userMail | not (null c.userMail)]
+
+instance FromJSON UserTurnContent where
+    parseJSON = Aeson.withObject "UserTurnContent" $ \v ->
+        UserTurnContent
+            <$> v .: "userPrompt"
+            <*> v .: "userTools"
+            <*> v .:? "userQuery"
+            <*> v .: "userToolResponses"
+            <*> v .:? "userMail" .!= []
 
 -- Bundle llm-turn content.
 data LlmTurnContent
@@ -1162,17 +1432,20 @@ data PartialUserTurnContent = PartialUserTurnContent
     -- ^ User query if any
     , pTrackedToolCalls :: [TrackedToolCall]
     -- ^ All tool calls in this turn with their lifecycle state
+    , pUserMail :: [Envelope]
+    -- ^ Mail folded into 'pUserQuery' (see 'userMail').
     }
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON PartialUserTurnContent where
     toJSON content =
-        Aeson.object
+        Aeson.object $
             [ "userPrompt" .= content.pUserPrompt
             , "userTools" .= content.pUserTools
             , "userQuery" .= content.pUserQuery
             , "trackedToolCalls" .= content.pTrackedToolCalls
             ]
+                ++ ["userMail" .= content.pUserMail | not (null content.pUserMail)]
 
 instance FromJSON PartialUserTurnContent where
     parseJSON = Aeson.withObject "PartialUserTurnContent" $ \v ->
@@ -1184,6 +1457,7 @@ instance FromJSON PartialUserTurnContent where
                 <*> trackedV .: "userTools"
                 <*> trackedV .:? "userQuery"
                 <*> trackedV .: "trackedToolCalls"
+                <*> trackedV .:? "userMail" .!= []
 
         parseLegacy legacyV = do
             prompt <- legacyV .: "userPrompt"
@@ -1195,7 +1469,7 @@ instance FromJSON PartialUserTurnContent where
             unless (null continuations) $
                 fail "Legacy pending continuations cannot be migrated; use the new durable format"
             tracked <- migrateLegacyPartialTurn completed pending
-            pure $ PartialUserTurnContent prompt tools query tracked
+            pure $ PartialUserTurnContent prompt tools query tracked []
 
 -- | Convert a legacy partial turn (completed + pending calls) into tracked calls.
 migrateLegacyPartialTurn ::
@@ -1400,6 +1674,12 @@ data Session
     {- ^ Execution mode used for this session.
     Nothing = default to Synchronous for backward compatibility.
     -}
+    , mailCursor :: Cursor
+    {- ^ Everything with 'envSeq' at or below this has been folded into a
+    turn (see todos/session-mailbox.md §1, D1: the versioned session store
+    is the mailbox's ack). Defaults to 0 for sessions predating the mailbox,
+    equivalent to "nothing read yet".
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1414,6 +1694,7 @@ instance ToJSON Session where
             ]
                 ++ ["sessionVersion" .= v | Just v <- [s.sessionVersion]]
                 ++ ["sessionExecutionMode" .= m | Just m <- [s.sessionExecutionMode]]
+                ++ ["mailCursor" .= s.mailCursor | s.mailCursor /= 0]
 
 -- | Custom FromJSON for Session that handles missing fields.
 instance FromJSON Session where
@@ -1425,6 +1706,7 @@ instance FromJSON Session where
             <*> v .: "turnId"
             <*> v .:? "sessionVersion"
             <*> v .:? "sessionExecutionMode"
+            <*> v .:? "mailCursor" .!= 0
 
 -------------------------------------------------------------------------------
 -- Session Migration

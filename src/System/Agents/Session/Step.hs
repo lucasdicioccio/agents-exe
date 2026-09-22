@@ -87,7 +87,9 @@ runStepMSync convId agent sess =
                 let ctx = buildContext agent0' sess0 convId
                 (uQuery0, blockForLate) <- askUserQuery ctx agent0' missing sess0
                 (sessLate, late) <- collectLateResults ctx agent0'.ctxAsyncYieldStrategy blockForLate sess0
-                let uQuery = mergeUserQueries uQuery0 (lateResultsQuery late)
+                let shouldBlockForMail = blockForLate && null late && null missing.missingToolCalls
+                (sessMail, mailEnvelopes) <- receiveMailForTurn agent0' shouldBlockForMail sessLate
+                let uQuery = mergeUserQueries (mergeUserQueries uQuery0 (lateResultsQuery late)) (mailQuery mailEnvelopes)
                 -- Execute tool calls with optional OS entity tracking
                 tracked <- traverse (mkReadyTrackedCall ctx agent0') missing.missingToolCalls
                 trackedWithEntities <- ensureTrackedCallEntities ctx tracked
@@ -96,7 +98,7 @@ runStepMSync convId agent sess =
                 let uToolResponses = zip missing.missingToolCalls toolResponses
                 -- Calculate byte usage for this user turn
                 let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery toolResponses
-                sess1 <- addTurn sessLate (UserTurn (UserTurnContent{userPrompt = sPrompt, userTools = sTools, userQuery = uQuery, userToolResponses = uToolResponses}) (Just byteUsage))
+                sess1 <- addTurn sessMail (UserTurn (UserTurnContent{userPrompt = sPrompt, userTools = sTools, userQuery = uQuery, userToolResponses = uToolResponses, userMail = mailEnvelopes}) (Just byteUsage))
                 pure (agent0', Right sess1)
             AskLlmCompletion completion -> do
                 (llmRsp, llmTool) <- agent0'.complete completion
@@ -210,10 +212,12 @@ startNewAsyncTurn ::
 startNewAsyncTurn convId agent sess sPrompt sTools uQuery blockForLate calls = do
     let ctx = buildContext agent sess convId
     (sessLate, late) <- collectLateResults ctx agent.ctxAsyncYieldStrategy blockForLate sess
+    let shouldBlockForMail = blockForLate && null late && null calls
+    (sessMail, mailEnvelopes) <- receiveMailForTurn agent shouldBlockForMail sessLate
     tracked <- traverse (mkReadyTrackedCall ctx agent) calls
     trackedWithEntities <- ensureTrackedCallEntities ctx tracked
-    let uQuery' = mergeUserQueries uQuery (lateResultsQuery late)
-    executeTrackedCalls ctx agent sessLate False sPrompt sTools uQuery' trackedWithEntities
+    let uQuery' = mergeUserQueries (mergeUserQueries uQuery (lateResultsQuery late)) (mailQuery mailEnvelopes)
+    executeTrackedCalls ctx agent sessMail False sPrompt sTools uQuery' mailEnvelopes trackedWithEntities
 
 {- | Continue execution of a partial turn.
 
@@ -234,7 +238,9 @@ continuePartialTurn convId agent sess partial = do
     -- Poll running calls from a previous step so completed results are
     -- copied back into the tracked calls before re-scheduling.
     polled <- mapM (pollRunningCall ctx) partial.pTrackedToolCalls
-    executeTrackedCalls ctx agent sess True partial.pUserPrompt partial.pUserTools partial.pUserQuery polled
+    -- Mail already folded into this partial turn (see 'pUserMail') carries
+    -- forward unchanged; a fresh receive happens once a new turn starts.
+    executeTrackedCalls ctx agent sess True partial.pUserPrompt partial.pUserTools partial.pUserQuery partial.pUserMail polled
 
 {- | Execute the scheduler over a list of tracked calls.
 
@@ -264,9 +270,10 @@ executeTrackedCalls ::
     SystemPrompt ->
     [SystemTool] ->
     Maybe UserQuery ->
+    [Envelope] ->
     [TrackedToolCall] ->
     IO (Agent r, Either r Session)
-executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery tracked = do
+executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery mailEnvelopes tracked = do
     -- Ensure every call has an OS entity when a world is available.
     trackedWithEntities <- ensureTrackedCallEntities ctx tracked
 
@@ -303,12 +310,12 @@ executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery tracked = d
             trackedWithEntities
 
     -- Decide whether we can emit a full user turn or need a partial one.
-    let content = PartialUserTurnContent sPrompt sTools uQuery processedOrdered
+    let content = PartialUserTurnContent sPrompt sTools uQuery processedOrdered mailEnvelopes
     if all (isFinalToolCallState . tcState) processedOrdered
         then do
             let responses = partialToolMessages content
             let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery (map snd responses)
-            sess' <- pushTurn sess (UserTurn (UserTurnContent sPrompt sTools uQuery responses) (Just byteUsage))
+            sess' <- pushTurn sess (UserTurn (UserTurnContent sPrompt sTools uQuery responses mailEnvelopes) (Just byteUsage))
             pure (agent, Right sess')
         else do
             let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery processedOrdered
@@ -464,7 +471,7 @@ prepareAsyncEngine agent =
     case (agent.ctxExecutionMode, agent.ctxWorld, agent.ctxAsyncEngine) of
         (Asynchronous, Just world, Nothing) -> do
             let limit = maybe defaultMaxConcurrency (max 1) agent.ctxMaxConcurrency
-            engine <- mkAsyncEngine world (executeCall agent) limit agent.ctxAsyncCallTimeout
+            engine <- mkAsyncEngine world (executeCall agent) limit agent.ctxAsyncCallTimeout agent.ctxMailbox
             pure agent{ctxAsyncEngine = Just engine}
         _ -> pure agent
 
@@ -565,7 +572,7 @@ refreshHeadPartialTurn ctx sess =
                                 | all (isFinalToolCallState . tcState) polled =
                                     let responses = partialToolMessages content
                                      in UserTurn
-                                            (UserTurnContent sPrompt sTools uQuery responses)
+                                            (UserTurnContent sPrompt sTools uQuery responses partial.pUserMail)
                                             (Just $ calculateUserTurnByteUsage sPrompt sTools uQuery (map snd responses))
                                 | otherwise =
                                     PartialUserTurn content (Just $ calculatePartialTurnByteUsage sPrompt sTools uQuery polled)
@@ -671,6 +678,101 @@ mergeUserQueries Nothing q = q
 mergeUserQueries q Nothing = q
 mergeUserQueries (Just (UserQuery t1 m1)) (Just (UserQuery t2 m2)) =
     Just $ UserQuery (t1 <> "\n\n" <> t2) (m1 <> m2)
+
+{- | Receive points R1 and R2 (@todos/session-mailbox.md@ §2).
+
+Always peeks unread mail without blocking (R1: "building a user turn,
+before AskLlmCompletion"). When @shouldBlock@ is set — the step has nothing
+else to do this turn (no tool calls to run, no late results, and the query
+would otherwise be a plain idle wait) — and nothing was unread, blocks until
+some mail arrives (R2: "idle").
+
+Advances the returned session's 'mailCursor' to the highest 'envSeq' seen,
+so a crash between this read and storing the session redelivers into a
+session that does not contain the mail yet (D1: exactly-once effect via the
+versioned session store).
+
+A 'Nothing' 'ctxMailbox' (the default) leaves the session and its cursor
+untouched, so every existing code path is unaffected.
+-}
+receiveMailForTurn :: Agent r -> Bool -> Session -> IO (Session, [Envelope])
+receiveMailForTurn agent shouldBlock sess =
+    case agent.ctxMailbox of
+        Nothing -> pure (sess, [])
+        Just mb -> do
+            let cur = sess.mailCursor
+            unread <- atomically (mbUnread mb cur)
+            envelopes <-
+                if null unread && shouldBlock
+                    then atomically (awaitMail mb cur (const True))
+                    else pure unread
+            case envelopes of
+                [] -> pure (sess, [])
+                _ -> pure (sess{mailCursor = maximum (map envSeq envelopes)}, envelopes)
+
+{- | Render mail as a user message, one block per envelope with a header the
+model can quote back (§2, "What the LLM sees"). 'Control' envelopes are
+consumed (already reflected in the advanced cursor) but render nothing.
+-}
+mailQuery :: [Envelope] -> Maybe UserQuery
+mailQuery envelopes =
+    case filter (not . isControlEnvelope) envelopes of
+        [] -> Nothing
+        rendered -> Just $ UserQuery (Text.intercalate "\n\n" (map renderMailEnvelope rendered)) (concatMap mailMedia rendered)
+  where
+    isControlEnvelope :: Envelope -> Bool
+    isControlEnvelope e = case e.envBody of
+        Control _ -> True
+        _ -> False
+
+-- | Render one non-'Control' envelope as a block of text.
+renderMailEnvelope :: Envelope -> Text.Text
+renderMailEnvelope e =
+    "[mail " <> messageIdText e.envId <> " " <> senderText e.envFrom <> replyHint <> "]\n" <> bodyText
+  where
+    replyHint = case e.envBody of
+        AgentMessage _ _ True -> ", expects reply"
+        _ -> ""
+
+    senderText sender = case sender of
+        FromUser owner -> "from user" <> maybe "" (\o -> " (" <> o <> ")") owner
+        FromSession sid agentSlug ->
+            "from session " <> Text.pack (show sid) <> maybe "" (\a -> " (agent \"" <> a <> "\")") agentSlug
+        FromToolCall tcid -> "from tool call " <> Text.pack (show tcid)
+        FromSystem source -> "from " <> source
+
+    bodyText = case e.envBody of
+        UserMessage q -> q.queryText
+        AgentMessage txt _ _ -> txt
+        ToolCallFinished tcid state result ->
+            "tool call "
+                <> Text.pack (show tcid)
+                <> " "
+                <> (if state == Completed then "completed" else "failed")
+                <> ":\n"
+                <> renderMailResult result
+        ContinuationResult _token result -> renderMailResult result
+        WatchedEvent _sid eventName payload ->
+            eventName <> ":\n" <> Text.decodeUtf8 (LByteString.toStrict (Aeson.encode payload))
+        Control _ -> ""
+
+    renderMailResult (TextResponse txt) = txt
+    renderMailResult (JsonResponse val) = Text.decodeUtf8 (LByteString.toStrict (Aeson.encode val))
+    renderMailResult (MediaResponse m) = "[attached " <> m.mediaMimeType <> "]"
+    renderMailResult (MixedResponse parts) = Text.intercalate "\n" (map renderMailPart parts)
+
+    renderMailPart (TextPart txt) = txt
+    renderMailPart (MediaPart m) = "[attached " <> m.mediaMimeType <> "]"
+
+-- | Media attached to a mail envelope's body, if any.
+mailMedia :: Envelope -> [MediaAttachment]
+mailMedia e = case e.envBody of
+    UserMessage q -> q.queryMedia
+    ToolCallFinished _ _ (MediaResponse m) -> [m]
+    ToolCallFinished _ _ (MixedResponse parts) -> [m | MediaPart m <- parts]
+    ContinuationResult _ (MediaResponse m) -> [m]
+    ContinuationResult _ (MixedResponse parts) -> [m | MediaPart m <- parts]
+    _ -> []
 
 {- | Process a single tracked call according to the agent's policy.
 

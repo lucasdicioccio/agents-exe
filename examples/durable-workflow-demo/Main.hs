@@ -164,6 +164,7 @@ mkDemoAgent convId = do
             , ctxAsyncEngine = Nothing
             , ctxParams = mempty
             , ctxInheritedBindings = []
+            , ctxMailbox = Nothing
             }
 
 -------------------------------------------------------------------------------
@@ -192,6 +193,7 @@ mkDemoSession = do
             , turnId = tid
             , sessionVersion = Just 2
             , sessionExecutionMode = Just Asynchronous
+            , mailCursor = 0
             }
 
 -------------------------------------------------------------------------------

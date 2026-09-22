@@ -268,6 +268,7 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -299,6 +300,7 @@ mkSimpleAgent =
         , ctxAsyncEngine = Nothing
         , ctxParams = mempty
         , ctxInheritedBindings = []
+        , ctxMailbox = Nothing
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -319,6 +321,7 @@ mkSessionWithCalls calls =
         , turnId = TurnId nil
         , sessionVersion = Just 2
         , sessionExecutionMode = Just Asynchronous
+        , mailCursor = 0
         }
 
 -- | A serialisable context snapshot for envelope tests.

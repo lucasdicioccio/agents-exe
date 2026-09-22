@@ -430,6 +430,7 @@ handleForkAtTurn tracer navState = do
                 , turnId = newTurnId'
                 , sessionVersion = Just 1
                 , sessionExecutionMode = Nothing
+                , mailCursor = 0
                 }
     mAgent <- use (tuiUI . agentList . to listSelectedElement)
     case mAgent of
