@@ -212,6 +212,7 @@ buildAgent tracer deps role convId node = do
                 , ctxInheritedBindings = []
                 , ctxMailbox = Nothing
                 , ctxMailRouter = Nothing
+                , ctxSpawnSession = Nothing
                 }
     disclosed <-
         agentEvaluateActiveTools

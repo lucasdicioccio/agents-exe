@@ -166,6 +166,7 @@ mkDemoAgent convId = do
             , ctxInheritedBindings = []
             , ctxMailbox = Nothing
             , ctxMailRouter = Nothing
+            , ctxSpawnSession = Nothing
             }
 
 -------------------------------------------------------------------------------

@@ -178,6 +178,8 @@ module System.Agents.Session.Base (
     withAsyncYieldStrategy,
     withMailbox,
     withMailRouter,
+    withSpawnSession,
+    SpawnSession,
 ) where
 
 import Control.Concurrent.STM (TQueue)
@@ -192,6 +194,7 @@ import System.Agents.Session.Mailbox (
     Mailbox (..),
     MailboxInfo (..),
     MailRouter (..),
+    SpawnSession,
     newMailRouter,
     MailStore (..),
     awaitMail,
@@ -420,6 +423,17 @@ data Agent r = Agent
     like @send-message@ can address another session by id. Handed down to
     sub-agents the same way 'ctxWorld' \/ 'ctxEventQueue' are.
     -}
+    , ctxSpawnSession :: Maybe SpawnSession
+    {- ^ Optional @spawn-session@ hook (@todos/session-mailbox.md@, Phase 4,
+    §5): given a helper's agent slug and an initial message, start it
+    running as a detached child session (not call\/return -- it outlives
+    the tool call that spawned it and answers by mail) and return its new
+    'SessionId' at once. Front-end-specific (durable\/'createSessionAs'-like
+    on the server; a new conversation in the TUI; a thread in @run@), so it
+    is a hook rather than a shared implementation, the same shape as
+    'ctxCancelToolCall' on 'ToolExecutionContext'. Handed down to sub-agents
+    the same way 'ctxMailRouter' is.
+    -}
     }
     deriving (Functor)
 
@@ -461,6 +475,12 @@ routedAgent = withMailRouter router baseAgent
 -}
 withMailRouter :: MailRouter -> Agent r -> Agent r
 withMailRouter router agent = agent{ctxMailRouter = Just router}
+
+{- | Install a @spawn-session@ hook on an agent (@todos/session-mailbox.md@,
+Phase 4).
+-}
+withSpawnSession :: SpawnSession -> Agent r -> Agent r
+withSpawnSession spawn agent = agent{ctxSpawnSession = Just spawn}
 
 {- | Set the execution mode for an agent.
 

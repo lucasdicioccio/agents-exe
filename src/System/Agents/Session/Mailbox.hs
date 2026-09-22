@@ -26,6 +26,7 @@ module System.Agents.Session.Mailbox (
     MailboxInfo (..),
     MailRouter (..),
     newMailRouter,
+    SpawnSession,
 ) where
 
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
@@ -70,6 +71,15 @@ data Mailbox = Mailbox
 mailboxMaxUnread :: Int
 mailboxMaxUnread = 256
 
+{- | Default bound on 'envHops'\/'outHops' (§5): together with
+'mailboxMaxUnread' and the @wait@ tool's timeout cap, this is what keeps two
+agents replying to each other from ping-ponging or deadlocking forever. A
+sender computes its own 'outHops' (a reply is the hops of the mail it
+answers, plus one; fresh user mail is 0); 'mbSend' only enforces the cap.
+-}
+maxMailHops :: Int
+maxMailHops = 16
+
 -- | Whether an envelope's body is exempt from the 'mailboxMaxUnread' bound.
 exemptFromBound :: MailBody -> Bool
 exemptFromBound body = case body of
@@ -100,10 +110,11 @@ sendImpl envelopesVar nextSeqVar outgoing = do
         es <- readTVar envelopesVar
         case Foldable.find ((== mid) . envId) es of
             Just existing -> pure $ Right $ Receipt mid existing.envSeq True
-            Nothing ->
-                if Seq.length es >= mailboxMaxUnread && not (exemptFromBound outgoing.outBody)
-                    then pure $ Left MailboxFull
-                    else do
+            Nothing
+                | outgoing.outHops > maxMailHops -> pure $ Left TooManyHops
+                | Seq.length es >= mailboxMaxUnread && not (exemptFromBound outgoing.outBody) ->
+                    pure $ Left MailboxFull
+                | otherwise -> do
                         n <- readTVar nextSeqVar
                         writeTVar nextSeqVar (n + 1)
                         let envelope =
@@ -166,26 +177,27 @@ durableSendImpl lock store sid envelopesVar nextSeqVar outgoing = withMVar lock 
     es <- readTVarIO envelopesVar
     case Foldable.find ((== mid) . envId) es of
         Just existing -> pure $ Right $ Receipt mid existing.envSeq True
-        Nothing -> do
-            n <- readTVarIO nextSeqVar
-            if Seq.length es >= mailboxMaxUnread && not (exemptFromBound outgoing.outBody)
-                then pure $ Left MailboxFull
-                else do
-                    let envelope =
-                            Envelope
-                                { envId = mid
-                                , envSeq = n
-                                , envFrom = outgoing.outFrom
-                                , envPriority = outgoing.outPriority
-                                , envHops = outgoing.outHops
-                                , envSentAt = now
-                                , envBody = outgoing.outBody
-                                }
-                    store.msAppend sid envelope
-                    atomically $ do
-                        writeTVar nextSeqVar (n + 1)
-                        writeTVar envelopesVar (es Seq.|> envelope)
-                    pure $ Right $ Receipt mid n False
+        Nothing
+            | outgoing.outHops > maxMailHops -> pure $ Left TooManyHops
+            | Seq.length es >= mailboxMaxUnread && not (exemptFromBound outgoing.outBody) ->
+                pure $ Left MailboxFull
+            | otherwise -> do
+                n <- readTVarIO nextSeqVar
+                let envelope =
+                        Envelope
+                            { envId = mid
+                            , envSeq = n
+                            , envFrom = outgoing.outFrom
+                            , envPriority = outgoing.outPriority
+                            , envHops = outgoing.outHops
+                            , envSentAt = now
+                            , envBody = outgoing.outBody
+                            }
+                store.msAppend sid envelope
+                atomically $ do
+                    writeTVar nextSeqVar (n + 1)
+                    writeTVar envelopesVar (es Seq.|> envelope)
+                pure $ Right $ Receipt mid n False
 
 unreadImpl :: TVar (Seq Envelope) -> Cursor -> STM [Envelope]
 unreadImpl envelopesVar cur = do
@@ -254,3 +266,12 @@ newMailRouter = do
             , mrLookup = \sid -> Map.lookup sid <$> readTVarIO tableVar
             , mrList = fmap (fmap fst) . Map.toList <$> readTVarIO tableVar
             }
+
+{- | A @spawn-session@ hook (@todos/session-mailbox.md@, Phase 4, §5): a
+helper's agent slug, an initial message -> the new session's id, or an
+error to report to the LLM. Defined here (rather than next to 'Agent' in
+"System.Agents.Session.Base") because it is also a field of
+'System.Agents.Tools.Context.ToolExecutionContext', and that module cannot
+import "System.Agents.Session.Base" without a cycle.
+-}
+type SpawnSession = Text -> Text -> IO (Either Text SessionId)

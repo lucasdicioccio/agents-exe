@@ -40,6 +40,8 @@ module System.Agents.Tools.SystemToolbox.Types (
     maxWaitSeconds,
     SendMessageParams (..),
     SendMessageResult (..),
+    SpawnSessionParams (..),
+    SpawnSessionResult (..),
 
     -- * Query errors
     QueryError (..),
@@ -558,6 +560,47 @@ instance FromJSON SendMessageResult where
             <*> v .: "seq"
             <*> v .: "duplicate"
             <*> v .: "recipient_status"
+
+-------------------------------------------------------------------------------
+-- spawn-session (todos/session-mailbox.md, Phase 4, §5)
+-------------------------------------------------------------------------------
+
+{- | Parameters for a @spawn-session@ call: start one of this agent's own
+helpers running as a detached child session (not call\/return -- it
+outlives this tool call and answers by mail via @send-message@).
+-}
+data SpawnSessionParams = SpawnSessionParams
+    { sspAgent :: Text
+    -- ^ One of the caller's helper slugs, as for @prompt_agent_\<slug\>@
+    , sspMessage :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON SpawnSessionParams where
+    parseJSON = Aeson.withObject "SpawnSessionParams" $ \v ->
+        SpawnSessionParams
+            <$> v .: "agent"
+            <*> v .: "message"
+
+instance ToJSON SpawnSessionParams where
+    toJSON p =
+        Aeson.object
+            [ "agent" .= sspAgent p
+            , "message" .= sspMessage p
+            ]
+
+-- | Result of a @spawn-session@ call: the new session's id.
+newtype SpawnSessionResult = SpawnSessionResult
+    { ssrSessionId :: Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON SpawnSessionResult where
+    toJSON r = Aeson.object ["session_id" .= ssrSessionId r]
+
+instance FromJSON SpawnSessionResult where
+    parseJSON = Aeson.withObject "SpawnSessionResult" $ \v ->
+        SpawnSessionResult <$> v .: "session_id"
 
 -------------------------------------------------------------------------------
 -- Query Errors

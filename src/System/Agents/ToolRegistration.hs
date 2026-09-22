@@ -1172,6 +1172,22 @@ buildSystemToolParams box =
                 , propertyRequired = False
                 }
 
+        -- spawn-session parameters
+        spawnSessionAgentParam =
+            ParamProperty
+                { propertyKey = "agent"
+                , propertyType = StringParamType
+                , propertyDescription = "For spawn-session: One of your own helper agent slugs, as for prompt_agent_<slug>"
+                , propertyRequired = False
+                }
+        spawnSessionMessageParam =
+            ParamProperty
+                { propertyKey = "message"
+                , propertyType = StringParamType
+                , propertyDescription = "For spawn-session: The initial message to start the new session with"
+                , propertyRequired = False
+                }
+
         -- cancel-tool-call optional reason
         cancelReasonParam =
             ParamProperty
@@ -1262,6 +1278,10 @@ buildSystemToolParams box =
                             ]
                         else []
                    )
+                ++ ( if hasCapability SystemToolSpawnSession
+                        then [spawnSessionAgentParam, spawnSessionMessageParam]
+                        else []
+                   )
      in
         baseParams ++ optionalParams
 
@@ -1287,6 +1307,7 @@ capabilityToText SystemToolListRunningToolCalls = "list-running-tool-calls"
 capabilityToText SystemToolCancelToolCall = "cancel-tool-call"
 capabilityToText SystemToolWait = "wait"
 capabilityToText SystemToolSendMessage = "send-message"
+capabilityToText SystemToolSpawnSession = "spawn-session"
 
 {- | Register all tools from a System toolbox.
 
@@ -1899,7 +1920,9 @@ systemTool box =
                                             then handleWait ctx v
                                             else if cap == "send-message"
                                                 then handleSendMessage ctx v
-                                                else do
+                                                else if cap == "spawn-session"
+                                                    then handleSpawnSession ctx v
+                                                    else do
                                             -- Extract optional parameters for session introspection capabilities
                                             let mSessionId = case KeyMap.lookup (AesonKey.fromText "session_id") v of
                                                     Just (Aeson.String sid) -> Just sid
@@ -1969,6 +1992,19 @@ systemTool box =
                     Left err -> pure $ SystemToolError call err
                     Right sendResult ->
                         pure $ SystemToolResult call $ SystemTools.QueryResult "send-message" (Aeson.toJSON sendResult) 0
+
+    -- Handle the spawn-session capability (todos/session-mailbox.md, Phase 4)
+    handleSpawnSession :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleSpawnSession ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.SpawnSessionParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success spawnParams -> do
+                result <- Mail.spawnSession ctx spawnParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right spawnResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "spawn-session" (Aeson.toJSON spawnResult) 0
 
     -- Handle the cancel-tool-call capability
     handleCancel :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())

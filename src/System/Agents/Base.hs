@@ -907,6 +907,9 @@ data SystemToolCapability
     | -- | Send agent-to-agent mail to another session by id
       -- (@todos/session-mailbox.md@ §5, Phase 4)
       SystemToolSendMessage
+    | -- | Start one of this agent's own helpers running as a detached
+      -- child session (@todos/session-mailbox.md@ §5, Phase 4)
+      SystemToolSpawnSession
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize SystemToolCapability as kebab-case strings.
@@ -931,6 +934,7 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolCancelToolCall = Aeson.String "cancel-tool-call"
     toJSON SystemToolWait = Aeson.String "wait"
     toJSON SystemToolSendMessage = Aeson.String "send-message"
+    toJSON SystemToolSpawnSession = Aeson.String "spawn-session"
 
 -- | Parse SystemToolCapability from kebab-case strings.
 instance FromJSON SystemToolCapability where
@@ -956,7 +960,8 @@ instance FromJSON SystemToolCapability where
             "cancel-tool-call" -> return SystemToolCancelToolCall
             "wait" -> return SystemToolWait
             "send-message" -> return SystemToolSendMessage
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait, send-message."
+            "spawn-session" -> return SystemToolSpawnSession
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait, send-message, spawn-session."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 

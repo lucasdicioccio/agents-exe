@@ -948,6 +948,7 @@ mkAgentWithWorld world mode policy =
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
+        , ctxSpawnSession = Nothing
         }
 
 -------------------------------------------------------------------------------

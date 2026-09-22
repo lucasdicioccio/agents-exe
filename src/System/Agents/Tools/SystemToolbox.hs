@@ -75,6 +75,9 @@ module System.Agents.Tools.SystemToolbox (
     SendMessageParams (..),
     SendMessageResult (..),
     sendMessageToSession,
+    SpawnSessionParams (..),
+    SpawnSessionResult (..),
+    spawnSession,
 
     -- * Initialization (re-exported from Core)
     initializeToolbox,

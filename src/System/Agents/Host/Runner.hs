@@ -33,12 +33,14 @@ module System.Agents.Host.Runner (
     RunnerError (..),
     createSession,
     createSessionAs,
+    spawnSession,
     sessionOwner,
     postMessage,
     resume,
     completeCall,
     cancelRun,
     serverMailRouter,
+    serverSpawnSession,
     getSession,
     awaitRun,
     recoverOnStartup,
@@ -454,9 +456,23 @@ newAgent runner live node = do
     -- accept mail (G2) and R1/R2 fold it into the session's turns.
     mailbox <- newDurableMailbox host.hostMail sid
     pure $
-        withMailRouter (serverMailRouter runner) $
-            withMailbox mailbox $
-                withExecutionMode Asynchronous agent
+        withSpawnSession (serverSpawnSession runner sid) $
+            withMailRouter (serverMailRouter runner) $
+                withMailbox mailbox $
+                    withExecutionMode Asynchronous agent
+
+{- | The server's @spawn-session@ hook (§5): reuses 'spawnSession'
+(durable, recorded with 'sid' as parent) and reports only the new
+'SessionId' as text, or an error, to the calling LLM.
+-}
+serverSpawnSession :: SessionRunner -> SessionId -> Text -> Text -> IO (Either Text SessionId)
+serverSpawnSession runner sid slug text = do
+    result <- spawnSession runner sid slug (NewMessage text [])
+    pure $ either (Left . runnerErrorText) (Right . (.smSessionId)) result
+
+-- | Render a 'RunnerError' as text, for hooks that report to the LLM rather than the HTTP API.
+runnerErrorText :: RunnerError -> Text
+runnerErrorText = Text.pack . show
 
 {- | The server's 'MailRouter' (@todos/session-mailbox.md@, Phase 4, §5,
 D12). Every session on the server is durable, so unlike the TUI or @run@
@@ -697,6 +713,16 @@ createSession runner slug message mode = createSessionAs runner Nothing slug mes
 -- | Like 'createSession', for an owner, with caller-supplied parameter values.
 createSessionAs :: SessionRunner -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
 createSessionAs runner owner slug message mode supplied =
+    createSessionAsWithParent runner Nothing owner slug message mode supplied
+
+{- | Create a session as a child (in lineage only, not call\/return -- see
+'spawnSession') of another one (@todos/session-mailbox.md@, Phase 4, §5).
+Shared by 'createSessionAs' (no parent) and 'spawnSession' (a parent, and
+never a run mode -- a spawned session always starts running and answers by
+mail, not by handing its final result back to the caller).
+-}
+createSessionAsWithParent :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+createSessionAsWithParent runner parent owner slug message mode supplied =
     lookupAgent runner.srHost slug >>= \case
         Nothing -> pure $ Left $ UnknownAgent slug
         Just node -> do
@@ -706,7 +732,7 @@ createSessionAs runner owner slug message mode supplied =
                     Left err -> pure (Left err)
                     Right overlay -> do
                         now <- getCurrentTime
-                        let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner}
+                        let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner, smParent = parent}
                         sessionAgent runner live meta0 >>= \case
                             Left err -> pure (Left err)
                             Right agent -> case missingRequiredParams node agent overlay of
@@ -718,6 +744,18 @@ createSessionAs runner owner slug message mode supplied =
                                     store runner live meta0 sess StatusReady Nothing >>= \case
                                         Left conflict -> pure (Left (Conflict conflict))
                                         Right meta -> maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
+
+{- | @spawn-session@ (§5): start a new, durable, detached child session
+running a caller's helper agent, recorded with 'parentSid' as parent in
+lineage, and return as soon as it exists -- unlike 'createSessionAs' with a
+run mode, this never waits for or returns the child's answer; the caller
+gets it later by mail (a 'ToolCallFinished'-shaped reply is not produced,
+since there is no call to complete -- the child answers with @send-message@
+whenever it has something to say).
+-}
+spawnSession :: SessionRunner -> SessionId -> Text -> NewMessage -> IO (Either RunnerError SessionMeta)
+spawnSession runner parentSid slug message =
+    createSessionAsWithParent runner (Just parentSid) Nothing slug message (Just UntilBlocked) Map.empty
 
 -- | Add a user message to an idle session, and start a run unless the mode is 'Nothing'.
 {- | Add a user message to a session.

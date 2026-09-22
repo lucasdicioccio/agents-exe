@@ -48,7 +48,13 @@ import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.Context (ToolExecutionContext (..), ToolPortal, ToolResult (..), mkMinimalContext)
 import qualified System.Agents.Tools.Context as Ctx
 import qualified System.Agents.Tools.SystemToolbox.Mail as Mail
-import System.Agents.Tools.SystemToolbox.Types (SendMessageParams (..), SendMessageResult (..))
+import System.Agents.Tools.SystemToolbox.Types (
+    QueryError (..),
+    SendMessageParams (..),
+    SendMessageResult (..),
+    SpawnSessionParams (..),
+    SpawnSessionResult (..),
+ )
 
 tests :: TestTree
 tests =
@@ -68,6 +74,9 @@ tests =
         , testCase "stored agents survive a restart; a file agent hides a stored one" storedAgentsTest
         , testCase "the server's MailRouter resolves a stored session on demand" serverMailRouterTest
         , testCase "send-message delivers agent-to-agent mail the recipient can read" sendMessageTest
+        , testCase "send-message refuses a recipient outside the sender's subtree" sendMessageScopeDenialTest
+        , testCase "a send-message reply carries hops one past the mail it answers" sendMessageHopsTest
+        , testCase "spawn-session starts a durable child session that answers by mail" spawnSessionTest
         ]
 
 -------------------------------------------------------------------------------
@@ -409,7 +418,10 @@ sendMessageTest = do
     withSessionRunner host $ \runner -> do
         senderMeta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
         _ <- expectRight =<< awaitRun runner senderMeta.smSessionId 5
-        recipientMeta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        -- §5's "Permissions": mailScope defaults to subtree, so the
+        -- recipient must be the sender itself or a descendant. Spawn it as
+        -- a child, exercising 'spawnSession' at the same time.
+        recipientMeta <- expectRight =<< spawnSession runner senderMeta.smSessionId "test-agent" (message "hi")
         _ <- expectRight =<< awaitRun runner recipientMeta.smSessionId 5
 
         let router = serverMailRouter runner
@@ -444,20 +456,164 @@ sendMessageTest = do
                         expectsReply @?= True
                     other -> assertFailure ("expected AgentMessage, got " <> show other)
             other -> assertFailure ("expected exactly one AgentMessage envelope, got " <> show (length other))
-  where
-    matchesAgentMessage :: Envelope -> Bool
-    matchesAgentMessage e = case e.envBody of
-        AgentMessage{} -> True
-        _ -> False
 
-    dummyPortal :: ToolPortal
-    dummyPortal _ _ =
-        pure $
-            ToolResult
-                { resultData = Aeson.object []
-                , resultDuration = 0
-                , resultTraceId = "dummy"
-                }
+-- | An unrelated session (no parent\/child relationship) is outside the
+-- sender's default @mailScope: subtree@, so @send-message@ refuses it.
+sendMessageScopeDenialTest :: Assertion
+sendMessageScopeDenialTest = do
+    senderNode <- testNode "{}"
+    recipientNode <- testNode "{}"
+    host <- testHost [senderNode, recipientNode] (const mockCompletion)
+    withSessionRunner host $ \runner -> do
+        senderMeta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
+        _ <- expectRight =<< awaitRun runner senderMeta.smSessionId 5
+        recipientMeta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        _ <- expectRight =<< awaitRun runner recipientMeta.smSessionId 5
+
+        let router = serverMailRouter runner
+            senderSid = senderMeta.smSessionId
+            recipientText = case recipientMeta.smSessionId of SessionId uuid -> UUID.toText uuid
+        turnId <- newTurnId
+        let ctx =
+                (mkMinimalContext senderSid (sessionIdToConversationId senderSid) turnId dummyPortal)
+                    { Ctx.ctxMailRouter = Just router
+                    }
+            params =
+                SendMessageParams
+                    { smpTo = recipientText
+                    , smpText = "hi there"
+                    , smpInReplyTo = Nothing
+                    , smpExpectsReply = False
+                    , smpInterrupt = False
+                    }
+        result <- Mail.sendMessageToSession ctx params
+        result @?= Left (SystemInfoError "not permitted to send to this session")
+
+{- | A message that answers one already received (@in_reply_to@ set)
+carries 'envHops' one past it; fresh mail (no @in_reply_to@) carries 0.
+
+Relays root -> child -> grandchild, rather than a reply back up the tree,
+because the default @mailScope: subtree@ only allows a sender to reach its
+own descendants (see 'sendMessageScopeDenialTest'): a child cannot mail its
+parent by default, so a literal "reply" can't be exercised here without
+also changing scope. The hop-increment logic is identical either way --
+what matters is that a message's own 'outHops' is computed from the mail
+named by 'smpInReplyTo' in the *sender's own* received mail.
+-}
+sendMessageHopsTest :: Assertion
+sendMessageHopsTest = do
+    rootNode <- testNode "{}"
+    childNode <- testNode "{}"
+    grandchildNode <- testNode "{}"
+    host <- testHost [rootNode, childNode, grandchildNode] (const mockCompletion)
+    withSessionRunner host $ \runner -> do
+        rootMeta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
+        let rootSid = rootMeta.smSessionId
+        _ <- expectRight =<< awaitRun runner rootSid 5
+        childMeta <- expectRight =<< spawnSession runner rootSid "test-agent" (message "hi")
+        let childSid = childMeta.smSessionId
+        _ <- expectRight =<< awaitRun runner childSid 5
+        grandchildMeta <- expectRight =<< spawnSession runner childSid "test-agent" (message "hi")
+        let grandchildSid = grandchildMeta.smSessionId
+        _ <- expectRight =<< awaitRun runner grandchildSid 5
+
+        let router = serverMailRouter runner
+        turnId <- newTurnId
+        let rootCtx =
+                (mkMinimalContext rootSid (sessionIdToConversationId rootSid) turnId dummyPortal)
+                    { Ctx.ctxMailRouter = Just router
+                    }
+        -- Fresh mail, root -> child: hops 0.
+        firstResult <-
+            expectRight
+                =<< Mail.sendMessageToSession
+                    rootCtx
+                    SendMessageParams
+                        { smpTo = sessionIdText childSid
+                        , smpText = "ping"
+                        , smpInReplyTo = Nothing
+                        , smpExpectsReply = True
+                        , smpInterrupt = False
+                        }
+        childMb <- newDurableMailbox host.hostMail childSid
+        childUnread <- atomically (mbUnread childMb 0)
+        firstEnvelope <- case [e | e <- childUnread, matchesAgentMessage e] of
+            [e] -> pure e
+            other -> assertFailure ("expected exactly one AgentMessage envelope, got " <> show (length other)) >> error "unreachable"
+        firstEnvelope.envHops @?= 0
+
+        -- Relayed, child -> grandchild, in reply to the mail child just
+        -- received from root: hops 1.
+        let childCtx =
+                (mkMinimalContext childSid (sessionIdToConversationId childSid) turnId dummyPortal)
+                    { Ctx.ctxMailRouter = Just router
+                    }
+        _ <-
+            expectRight
+                =<< Mail.sendMessageToSession
+                    childCtx
+                    SendMessageParams
+                        { smpTo = sessionIdText grandchildSid
+                        , smpText = "fyi"
+                        , smpInReplyTo = Just (smrMessageId firstResult)
+                        , smpExpectsReply = False
+                        , smpInterrupt = False
+                        }
+        grandchildMb <- newDurableMailbox host.hostMail grandchildSid
+        grandchildUnread <- atomically (mbUnread grandchildMb 0)
+        case [e | e <- grandchildUnread, matchesAgentMessage e] of
+            [e] -> e.envHops @?= 1
+            other -> assertFailure ("expected exactly one AgentMessage envelope, got " <> show (length other))
+  where
+    sessionIdText :: SessionId -> Text
+    sessionIdText (SessionId uuid) = UUID.toText uuid
+
+-- | @spawn-session@ starts a durable child session recorded with the
+-- caller as parent, which can then be reached by @send-message@.
+spawnSessionTest :: Assertion
+spawnSessionTest = do
+    callerNode <- testNode "{}"
+    helperNode <- testNode "{}"
+    host <- testHost [callerNode, helperNode] (const mockCompletion)
+    withSessionRunner host $ \runner -> do
+        callerMeta <- expectRight =<< createSession runner "test-agent" (message "hello") (Just UntilBlocked)
+        let callerSid = callerMeta.smSessionId
+        _ <- expectRight =<< awaitRun runner callerSid 5
+
+        let router = serverMailRouter runner
+        turnId <- newTurnId
+        let ctx =
+                (mkMinimalContext callerSid (sessionIdToConversationId callerSid) turnId dummyPortal)
+                    { Ctx.ctxSpawnSession = Just (serverSpawnSession runner callerSid)
+                    }
+        result <- expectRight =<< Mail.spawnSession ctx SpawnSessionParams{sspAgent = "test-agent", sspMessage = "get started"}
+        childSid <- case UUID.fromText (ssrSessionId result) of
+            Just uuid -> pure (SessionId uuid)
+            Nothing -> assertFailure "spawn-session did not return a valid session id" >> error "unreachable"
+
+        (childMeta, _) <- expectRight =<< awaitRun runner childSid 5
+        childMeta.smParent @?= Just callerSid
+
+        childInfo <- router.mrLookup childSid
+        case childInfo of
+            Just (info, _) -> info.miParent @?= Just callerSid
+            Nothing -> assertFailure "spawned session is not reachable via the MailRouter"
+
+-- | A dummy tool portal for tests that need a valid 'ToolExecutionContext'.
+dummyPortal :: ToolPortal
+dummyPortal _ _ =
+    pure $
+        ToolResult
+            { resultData = Aeson.object []
+            , resultDuration = 0
+            , resultTraceId = "dummy"
+            }
+
+-- | Whether an envelope is an 'AgentMessage'.
+matchesAgentMessage :: Envelope -> Bool
+matchesAgentMessage e = case e.envBody of
+    AgentMessage{} -> True
+    _ -> False
 
 -------------------------------------------------------------------------------
 -- Fixtures

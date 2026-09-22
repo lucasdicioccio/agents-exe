@@ -1155,6 +1155,7 @@ buildContext agent sess convId =
               -- through so send-message/spawn-session can address other
               -- sessions.
               Ctx.ctxMailRouter = agent.ctxMailRouter
+            , Ctx.ctxSpawnSession = agent.ctxSpawnSession
             , -- Cheap view of the calls the capabilities may be asked about,
               -- including calls left behind by an earlier process.
               Ctx.ctxSessionToolCalls = sessionTrackedCalls sess
