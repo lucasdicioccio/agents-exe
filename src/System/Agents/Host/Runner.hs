@@ -42,6 +42,7 @@ module System.Agents.Host.Runner (
     spawnSession,
     sessionOwner,
     postMessage,
+    cancelAttachedCalls,
     resume,
     completeCall,
     cancelRun,
@@ -865,6 +866,7 @@ runLoop runner live mode agent0 = do
             -- drop it unread.
             (sess, controls) <- applyControlMail agent sess0
             forM_ [ids | CancelCalls ids <- controls] $ mapM_ (cancelAttachedCall agent)
+            when (CancelAllAttached `elem` controls) $ mapM_ (cancelAttachedCall agent) (runningToolCallIds sess)
             let stopRequested = StopRun `elem` controls
                 pauseRequested = Pause `elem` controls
                 stop =
@@ -1380,6 +1382,41 @@ cancelRun runner sid = do
         runner.srHost.hostBackend.sbLoadMeta sid >>= \case
             Nothing -> pure $ Left $ UnknownSession sid
             Just _ -> pure $ Left $ NoActiveRun sid
+
+{- | Hard-cancel every tool call currently attached to a session: posts
+'CancelAllAttached' 'Control' mail, which the runner loop reacts to on its
+next iteration by killing each call still tracked as 'Running' through the
+agent's async engine (see 'runningToolCallIds', 'cancelAttachedCall').
+
+Unlike 'cancelRun' (which tears down the whole run and its async engine),
+this only targets attached calls; the run itself keeps going and the LLM
+is asked again once the calls are gone. Unlike an 'Interrupt'-priority
+'UserMessage' (a soft interrupt, only detaches), a cancelled call's result
+never arrives -- there is nothing left to deliver. Works whether or not
+the session currently has an active run, since 'Control' mail is picked
+up the next time one does.
+-}
+cancelAttachedCalls :: SessionRunner -> SessionId -> IO (Either RunnerError SessionMeta)
+cancelAttachedCalls runner sid =
+    withLive runner sid $ \live ->
+        loadLatest runner live >>= \case
+            Nothing -> pure $ Left $ UnknownSession sid
+            Just (_, meta) ->
+                sessionAgent runner live meta >>= \case
+                    Left err -> pure (Left err)
+                    Right agent -> case agent.ctxMailbox of
+                        Nothing -> pure $ Left $ MailboxRejected sid
+                        Just mb -> do
+                            sent <-
+                                mb.mbSend
+                                    Outgoing
+                                        { outId = Nothing
+                                        , outFrom = FromUser Nothing
+                                        , outPriority = Normal
+                                        , outHops = 0
+                                        , outBody = Control CancelAllAttached
+                                        }
+                            pure $ either (const (Left (MailboxRejected sid))) (const (Right meta)) sent
 
 {- | Who a session belongs to: the owner of its root session, since
 sub-sessions record none. 'Nothing' when the session does not exist.

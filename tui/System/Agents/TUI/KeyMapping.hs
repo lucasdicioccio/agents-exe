@@ -84,6 +84,7 @@ data EventName
     | EventContinueSession
     | EventTogglePause
     | EventInterruptRun
+    | EventCancelAttached
     | EventAttachFile
     | EventClearAttachments
     | EventPasteClipboard
@@ -121,6 +122,7 @@ eventNameToText EventNewConversation = "new-conversation"
 eventNameToText EventContinueSession = "continue-session"
 eventNameToText EventTogglePause = "toggle-pause"
 eventNameToText EventInterruptRun = "interrupt-run"
+eventNameToText EventCancelAttached = "cancel-attached"
 eventNameToText EventAttachFile = "attach-file"
 eventNameToText EventClearAttachments = "clear-attachments"
 eventNameToText EventPasteClipboard = "paste-clipboard"
@@ -153,6 +155,7 @@ eventNameFromText "new-conversation" = Just EventNewConversation
 eventNameFromText "continue-session" = Just EventContinueSession
 eventNameFromText "toggle-pause" = Just EventTogglePause
 eventNameFromText "interrupt-run" = Just EventInterruptRun
+eventNameFromText "cancel-attached" = Just EventCancelAttached
 eventNameFromText "attach-file" = Just EventAttachFile
 eventNameFromText "clear-attachments" = Just EventClearAttachments
 eventNameFromText "paste-clipboard" = Just EventPasteClipboard
@@ -396,6 +399,7 @@ defaultKeyMapping =
             , (EventContinueSession, [KeyBinding (KeyChar 'c') ctrlModifier])
             , (EventTogglePause, [KeyBinding (KeyChar 'e') ctrlModifier])
             , (EventInterruptRun, [KeyBinding (KeyChar 'u') ctrlModifier])
+            , (EventCancelAttached, [KeyBinding (KeyChar 'x') ctrlModifier])
             , (EventAttachFile, [KeyBinding (KeyChar 'f') ctrlModifier])
             , (EventClearAttachments, [KeyBinding (KeyChar 'F') (Modifiers True False True)])
             , (EventPasteClipboard, [KeyBinding (KeyChar 'v') ctrlModifier])
@@ -563,6 +567,7 @@ generateHelpContent keymap =
     , "  " <> formatBindings EventSendMessage <> " - Send message"
     , "  " <> formatBindings EventTogglePause <> " - Pause/unpause conversation"
     , "  " <> formatBindings EventInterruptRun <> " - Interrupt attached tool calls (asynchronous agents only)"
+    , "  " <> formatBindings EventCancelAttached <> " - Cancel attached tool calls, killing them (asynchronous agents only)"
     , ""
     , "Attachments:"
     , "  " <> formatBindings EventAttachFile <> " - Attach file (opens file browser)"

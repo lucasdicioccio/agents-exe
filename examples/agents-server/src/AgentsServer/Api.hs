@@ -190,6 +190,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("POST", ["v1", "sessions", sid, "messages"]) -> withSession sid (messagesH env req)
     ("POST", ["v1", "sessions", sid, "resume"]) -> withSession sid (resumeH env req)
     ("POST", ["v1", "sessions", sid, "cancel"]) -> withSession sid (cancelH env)
+    ("POST", ["v1", "sessions", sid, "cancel-attached"]) -> withSession sid (cancelAttachedH env)
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
     ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env)
     ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
@@ -211,7 +212,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
-        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "pending", "events"]
+        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pending", "events"]
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
         _ -> False
@@ -451,6 +452,13 @@ resumeH env req sid = do
 
 cancelH :: ServerEnv -> SessionId -> IO Response
 cancelH env sid = json status200 <$> orThrow (cancelRun env.envRunner sid)
+
+{- | Hard-cancel every tool call currently attached to a session, without
+stopping the run itself (unlike 'cancelH', a full teardown). Posts
+'Control' mail directly; a cancelled call's result never arrives.
+-}
+cancelAttachedH :: ServerEnv -> SessionId -> IO Response
+cancelAttachedH env sid = json status200 <$> orThrow (cancelAttachedCalls env.envRunner sid)
 
 pendingH :: ServerEnv -> SessionId -> IO Response
 pendingH env sid = do

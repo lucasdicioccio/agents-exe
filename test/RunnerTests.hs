@@ -87,6 +87,7 @@ tests =
         , testCase "resumeOnAnyMail lets postMessage wake a paused session" controlResumeOnAnyMailTest
         , testCase "wakeOn excluding \"user\" still refuses an ordinary message" wakeOnExcludesUserTest
         , testCase "Control (CancelCalls ids) cancels one attached call" controlCancelCallsTest
+        , testCase "cancelAttachedCalls cancels the running call without needing its id" cancelAllAttachedTest
         , testCase "a background call reports tool.started and tool.completed events" toolCallEventsTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
@@ -887,6 +888,29 @@ controlCancelCallsTest = do
         case runningIds of
             [callId] -> sendControl runner sid (CancelCalls [callId])
             other -> assertFailure ("expected exactly one running call, got " <> show (length other))
+
+        -- The next run picks the cancellation up and delivers it to the LLM.
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        sessF <- currentSession runner sid
+        assertBool ("call reported cancelled: " <> show (sessionTexts sessF)) (any ("cancelled" `Text.isInfixOf`) (sessionTexts sessF))
+
+{- | 'cancelAttachedCalls' (the agents-server "hard cancel" endpoint's
+underlying call) posts 'CancelAllAttached' mail without the caller needing
+to know the running call's id, and the next run kills it exactly like an
+explicit 'CancelCalls'.
+-}
+cancelAllAttachedTest :: Assertion
+cancelAllAttachedTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    complete <- onceThen [slowCall]
+    host <- testHost [node] (const complete)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        _ <- expectRight =<< cancelAttachedCalls runner sid
 
         -- The next run picks the cancellation up and delivers it to the LLM.
         _ <- expectRight =<< resume runner sid UntilBlocked Map.empty

@@ -872,6 +872,11 @@ data ControlMsg
     = Pause
     | Resume
     | CancelCalls [ToolCallId]
+    | CancelAllAttached
+    -- ^ Cancel every tool call currently attached to the session, without
+    -- the sender needing to know their ids (the "hard cancel" interrupt,
+    -- as opposed to an 'Interrupt'-priority 'UserMessage' which only
+    -- detaches).
     | StopRun
     deriving (Show, Eq, Ord, Generic)
 
@@ -880,6 +885,7 @@ instance ToJSON ControlMsg where
         Pause -> Aeson.object ["tag" .= ("pause" :: Text)]
         Resume -> Aeson.object ["tag" .= ("resume" :: Text)]
         CancelCalls ids -> Aeson.object ["tag" .= ("cancelCalls" :: Text), "toolCallIds" .= ids]
+        CancelAllAttached -> Aeson.object ["tag" .= ("cancelAllAttached" :: Text)]
         StopRun -> Aeson.object ["tag" .= ("stopRun" :: Text)]
 
 instance FromJSON ControlMsg where
@@ -889,6 +895,7 @@ instance FromJSON ControlMsg where
             "pause" -> pure Pause
             "resume" -> pure Resume
             "cancelCalls" -> CancelCalls <$> v .: "toolCallIds"
+            "cancelAllAttached" -> pure CancelAllAttached
             "stopRun" -> pure StopRun
             _ -> fail $ "Unknown ControlMsg tag: " ++ Text.unpack tag
 

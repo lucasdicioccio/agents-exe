@@ -43,6 +43,7 @@ module System.Agents.TUI.Event.Conversation (
 
     -- * Interrupt
     handleInterruptConversation,
+    handleCancelAttachedConversation,
 
     -- * Progress Callbacks
     buildOnProgress,
@@ -80,6 +81,7 @@ import qualified System.Agents.Runtime.Trace as Runtime
 import System.Agents.Session.Base (
     Action (..),
     Agent (..),
+    ControlMsg (..),
     MailBody (..),
     MissingUserPrompt (..),
     OnSessionProgress,
@@ -693,6 +695,47 @@ handleInterruptConversation = do
                             Right _ ->
                                 showStatus StatusInfo $
                                     "Interrupt sent to " <> conversationName conv <> ": attached tool calls will be detached shortly"
+
+{- | Hard-cancel the focused conversation's currently-attached tool calls:
+posts 'CancelAllAttached' 'Control' mail, which kills every call still
+tracked as 'Running' through the agent's async engine. Unlike
+'handleInterruptConversation', a cancelled call's result never arrives --
+there is nothing left to deliver.
+
+Same execution-mode caveat as the soft interrupt: only has an effect for a
+conversation whose agent runs asynchronously, since a synchronous call has
+no attached-call state to cancel.
+-}
+handleCancelAttachedConversation :: EventM N TuiState ()
+handleCancelAttachedConversation = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> case conv.conversationSession of
+            Nothing -> showStatus StatusWarning "Conversation has no session yet"
+            Just sess -> do
+                coreRef <- use tuiCore
+                core <- liftIO $ readTVarIO coreRef
+                let router = core ^. coreMailRouter
+                mTarget <- liftIO $ router.mrLookup sess.sessionId
+                case mTarget of
+                    Nothing -> showStatus StatusWarning "Conversation has no mailbox to cancel"
+                    Just (_, mailbox) -> do
+                        sent <-
+                            liftIO $
+                                mailbox.mbSend
+                                    Outgoing
+                                        { outId = Nothing
+                                        , outFrom = FromUser Nothing
+                                        , outPriority = Normal
+                                        , outHops = 0
+                                        , outBody = Control CancelAllAttached
+                                        }
+                        case sent of
+                            Left _ -> showStatus StatusWarning "Could not send cancel (mailbox full)"
+                            Right _ ->
+                                showStatus StatusInfo $
+                                    "Cancel sent to " <> conversationName conv <> ": attached tool calls will be killed shortly"
 
 -------------------------------------------------------------------------------
 -- Progress Callbacks
