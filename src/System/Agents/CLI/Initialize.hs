@@ -60,6 +60,7 @@ handleInitialize apiKeysFile agentFiles = do
                 , pauseCancelsCalls = Nothing
                 , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                 }

@@ -134,6 +134,7 @@ defaultOpenAIAgent =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }
@@ -172,6 +173,7 @@ mistralAgent =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }
@@ -210,6 +212,7 @@ ollamaAgent =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }
@@ -257,6 +260,7 @@ orchestratorAgent =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }

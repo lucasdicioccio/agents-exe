@@ -300,6 +300,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -334,6 +335,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -370,6 +372,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -412,6 +415,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -459,6 +463,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -503,6 +508,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     , Base.extraAgents = Nothing
@@ -631,6 +637,7 @@ bashToolboxTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -666,6 +673,7 @@ bashToolboxTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }

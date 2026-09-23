@@ -89,12 +89,23 @@ runStepMSync convId agent sess =
                 (sessLate, late) <- collectLateResults ctx agent0'.ctxAsyncYieldStrategy blockForLate sess0
                 let shouldBlockForMail = blockForLate && null late && null missing.missingToolCalls
                 (sessMail, mailEnvelopes) <- receiveMailForTurn agent0' shouldBlockForMail sessLate
-                let uQuery = mergeUserQueries (mergeUserQueries uQuery0 (lateResultsQuery late)) (mailQuery mailEnvelopes)
+                let uQueryBase = mergeUserQueries uQuery0 (lateResultsQuery late)
+                let mMailBlock = mailQuery mailEnvelopes
                 -- Execute tool calls with optional OS entity tracking
                 tracked <- traverse (mkReadyTrackedCall ctx agent0') missing.missingToolCalls
                 trackedWithEntities <- ensureTrackedCallEntities ctx tracked
                 resultsWithTracked <- traverse (executeTrackedCallWithEntity agent0' ctx) trackedWithEntities
-                let toolResponses = map fst resultsWithTracked
+                let toolResponses0 = map fst resultsWithTracked
+                -- Design §5 "What the LLM sees" (@todos/os-as-standalone-
+                -- server.md@): a provider that rejects a user message right
+                -- after tool results opts in with 'ctxMailInToolResult'; R1
+                -- then appends the folded mail to the last tool result of
+                -- this round instead of a separate user message. Only
+                -- applies when this round actually had (attached, sync)
+                -- tool calls -- a plain user turn is unaffected.
+                let (uQuery, toolResponses) = case (agent0'.ctxMailInToolResult && not (null toolResponses0), mMailBlock) of
+                        (True, Just mailBlock) -> (uQueryBase, appendMailToLastToolResult mailBlock toolResponses0)
+                        _ -> (mergeUserQueries uQueryBase mMailBlock, toolResponses0)
                 let uToolResponses = zip missing.missingToolCalls toolResponses
                 -- Calculate byte usage for this user turn
                 let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery toolResponses
@@ -1020,6 +1031,33 @@ mailQuery envelopes =
         Control _ -> True
         _ -> False
 
+{- | @todos/os-as-standalone-server.md@ Design §5: append a folded-mail
+'UserQuery' (its text, with the same @[mail ...]@ headers, and any media
+it carries) to the last of a round's tool results, instead of it becoming
+a separate user message. Empty lists pass through unchanged (nothing to
+append to).
+-}
+appendMailToLastToolResult :: UserQuery -> [UserToolResponse] -> [UserToolResponse]
+appendMailToLastToolResult _ [] = []
+appendMailToLastToolResult (UserQuery mailText mailAttachments) responses =
+    initRs ++ [appendMailBlock lastR]
+  where
+    initRs = init responses
+    lastR = last responses
+    appendMailBlock resp
+        | null mailAttachments = case resp of
+            TextResponse txt -> TextResponse (txt <> "\n\n" <> mailText)
+            JsonResponse val -> MixedResponse [TextPart (renderJsonAsText val), TextPart mailText]
+            MediaResponse m -> MixedResponse [MediaPart m, TextPart mailText]
+            MixedResponse parts -> MixedResponse (parts ++ [TextPart mailText])
+        | otherwise = case resp of
+            TextResponse txt -> MixedResponse (TextPart txt : mailParts)
+            JsonResponse val -> MixedResponse (TextPart (renderJsonAsText val) : mailParts)
+            MediaResponse m -> MixedResponse (MediaPart m : mailParts)
+            MixedResponse parts -> MixedResponse (parts ++ mailParts)
+    mailParts = TextPart mailText : map MediaPart mailAttachments
+    renderJsonAsText val = Text.decodeUtf8 (LByteString.toStrict (Aeson.encode val))
+
 -- | Render one non-'Control' envelope as a block of text.
 renderMailEnvelope :: Envelope -> Text.Text
 renderMailEnvelope e =
@@ -1357,6 +1395,7 @@ buildContext agent sess convId =
      in baseCtx
             { Ctx.ctxWorld = agent.ctxWorld
             , Ctx.ctxEventQueue = agent.ctxEventQueue
+            , Ctx.ctxEmit = agent.ctxEmit
             , Ctx.ctxCancelToolCall = fmap Engine.cancelToolCall agent.ctxAsyncEngine
             , -- Phase 2 (@todos/session-mailbox.md@ §3): built once per turn
               -- from this session's current cursor, so every tool call in

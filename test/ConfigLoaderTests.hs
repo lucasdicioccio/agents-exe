@@ -161,6 +161,7 @@ writeAgentFile dir name slugName = do
                 , pauseCancelsCalls = Nothing
                 , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing
                 , wakeOn = Nothing
