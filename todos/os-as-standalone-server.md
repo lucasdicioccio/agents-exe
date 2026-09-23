@@ -462,6 +462,13 @@ subcall visibility and tool-call activity from runner events, the
 pending-calls view with `CompleteCall`, and retiring `OSEvent`,
 `ctxEventQueue` and the TUI's event bridge.
 
+3a landed (a78d280..bb4e003): `AgentDescriptor` (model, prompt, tools with
+`Activation`, parameters, helpers) served by `GET /v1/agents`; `Command`
+and `Reply`; `System.Agents.Host.Client` with `RunnerClient`,
+`Subscription`, `inProcessClient owner runner` and one typed helper per
+operation. The owner is the client's identity, not a `Command` field, so a
+command cannot spoof another owner.
+
 `inProcessClient`; the TUI conversation layer rewritten on `RunnerClient`
 (§4). `agents-exe tui` starts a `Host` + `SessionRunner` over the SQLite
 backend chosen from config (Phase 1), with the file store composited in for history.
