@@ -85,6 +85,7 @@ main =
             , testCase "GET /v1/events sees session.created and session.deleted" crossSessionEventsTest
             , testCase "GET /v1/events is owner-scoped when auth is on" ownerScopedEventsTest
             , testCase "POST /v1/sessions with no prompt creates an idle session with no turn" createNoPromptTest
+            , testCase "POST and GET /v1/sessions/:id/mail send and list mail" mailRouteTest
             ]
 
 -------------------------------------------------------------------------------
@@ -259,6 +260,37 @@ createNoPromptTest = withServer "{}" mockCompletion $ \srv -> do
     getStatus @?= 200
     field "status" got @?= Aeson.String "ready"
     arrayField "session" got @?= []
+
+-- | POST posts a MailBody and answers a Receipt; GET lists it back, and
+-- filters to only what is unread (which, with nothing ever run against
+-- this session, is everything).
+mailRouteTest :: Assertion
+mailRouteTest = withServer "{}" mockCompletion $ \srv -> do
+    (created, view) <- call srv "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+    created @?= 201
+    let sid = textField "session_id" view
+        mailBody =
+            Aeson.object
+                [ "body" .= Aeson.object ["tag" .= ("agentMessage" :: Text), "text" .= ("hi there" :: Text), "expectsReply" .= False]
+                , "priority" .= ("normal" :: Text)
+                ]
+    (posted, receipt) <- call srv "POST" ("/v1/sessions/" <> sid <> "/mail") (Just mailBody)
+    posted @?= 202
+    case field "id" receipt of
+        Aeson.String _ -> pure ()
+        other -> assertFailure ("expected a receipt id, got " <> show other)
+    field "duplicate" receipt @?= Aeson.Bool False
+
+    (listed, page) <- call srv "GET" ("/v1/sessions/" <> sid <> "/mail") Nothing
+    listed @?= 200
+    length (arrayField "mail" page) @?= 1
+
+    (listedUnread, unreadPage) <- call srv "GET" ("/v1/sessions/" <> sid <> "/mail?unread=true") Nothing
+    listedUnread @?= 200
+    length (arrayField "mail" unreadPage) @?= 1
+
+    (missing, err) <- call srv "GET" "/v1/sessions/00000000-0000-0000-0000-000000000000/mail" Nothing
+    (missing, field "error" err) @?= (404, "unknown_session")
 
 agentsHealthTest :: Assertion
 agentsHealthTest = withServer "{}" mockCompletion $ \srv -> do
@@ -647,6 +679,7 @@ openApiTest = do
                 , "/v1/sessions/{id}/cancel"
                 , "/v1/sessions/{id}/cancel-attached"
                 , "/v1/sessions/{id}/events"
+                , "/v1/sessions/{id}/mail"
                 , "/v1/sessions/{id}/messages"
                 , "/v1/sessions/{id}/pause"
                 , "/v1/sessions/{id}/pending"

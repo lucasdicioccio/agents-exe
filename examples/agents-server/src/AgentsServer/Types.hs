@@ -33,6 +33,8 @@ module AgentsServer.Types (
     DeletePlanBody (..),
     DeletedBody (..),
     DeferredCallBody (..),
+    MailPostBody (..),
+    MailListBody (..),
     RawJson (..),
 
     -- * Encoding shared by the two
@@ -306,6 +308,65 @@ instance ToSchema ContinuationBody where
                         , ("resume", boolRef)
                         ]
                     }
+
+{- | @POST \/v1\/sessions\/:id\/mail@ (G6): generic mail to a session,
+generalizing @POST .../messages@'s @interrupt@. @body@ is any
+@System.Agents.Session.Base.MailBody@, tagged JSON (@{tag, ...}@); see the
+"Mail" section of @docs\/agents-server.md@ for the exact shapes
+(@userMessage@, @agentMessage@, @control@, ...). The answer is the mail's
+@Receipt@: @{id, seq, duplicate}@.
+-}
+data MailPostBody = MailPostBody
+    { mpBody :: RawJson
+    , mpPriority :: Maybe Text
+    -- ^ @normal@ (the default) or @interrupt@.
+    }
+    deriving (Show, Eq, Generic)
+
+instance Aeson.ToJSON MailPostBody where
+    toJSON = Aeson.genericToJSON (bodyOptions 2)
+
+instance Aeson.FromJSON MailPostBody where
+    parseJSON = Aeson.genericParseJSON (bodyOptions 2)
+
+instance ToSchema MailPostBody where
+    declareNamedSchema p =
+        withFieldDocs
+            [
+                ( "body"
+                , says
+                    "A MailBody, tagged JSON ({tag, ...}); see the Mail section of \
+                    \docs/agents-server.md for the exact shapes (userMessage, \
+                    \agentMessage, control, ...)."
+                )
+            , ("priority", oneOfValues "Whether this mail may pre-empt a wait." ["normal", "interrupt"])
+            ]
+            <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
+
+-- | @GET \/v1\/sessions\/:id\/mail@: this session's mail, oldest first.
+newtype MailListBody = MailListBody
+    { mlMail :: [RawJson]
+    -- ^ Each is an Envelope: @{id, seq, from, priority, hops, sentAt, body}@.
+    }
+    deriving (Show, Eq, Generic)
+
+instance Aeson.ToJSON MailListBody where
+    toJSON = Aeson.genericToJSON (bodyOptions 2)
+
+instance Aeson.FromJSON MailListBody where
+    parseJSON = Aeson.genericParseJSON (bodyOptions 2)
+
+instance ToSchema MailListBody where
+    declareNamedSchema p =
+        withFieldDocs
+            [
+                ( "mail"
+                , says
+                    "Each is an Envelope: {id, seq, from, priority, hops, sentAt, body}. \
+                    \See the Mail section of docs/agents-server.md."
+                )
+            ]
+            <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
 
 -------------------------------------------------------------------------------
 -- Responses

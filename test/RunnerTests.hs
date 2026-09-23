@@ -110,6 +110,9 @@ tests =
         , testCase "session.created and session.deleted are emitted" sessionCreatedDeletedTest
         , testCase "createSessionAs with no message creates an idle session with no turn and starts no run" createNoMessageTest
         , testCase "listSessions filters by owner and reflects a live session's current status" listSessionsRunnerTest
+        , testCase "sendMail with Control StopRun stops a run" sendMailStopRunTest
+        , testCase "sendMail with AgentMessage wakes a paused session when wakeOn/resumeOnAnyMail allow it" sendMailAgentMessageWakesPausedTest
+        , testCase "listMail lists all mail, or only what is still unread" listMailTest
         ]
 
 -------------------------------------------------------------------------------
@@ -1062,6 +1065,90 @@ wakeOnExcludesUserTest = do
         _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
         (final, _) <- expectRight =<< awaitRun runner sid 5
         final.smStatus @?= StatusIdle
+
+-- | 'sendMail' (G6) posting 'Control' 'StopRun' mail stops a run at its
+-- next iteration, the same as the internal 'sendControl' helper other
+-- Control tests use.
+sendMailStopRunTest :: Assertion
+sendMailStopRunTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+
+        _ <- expectRight =<< sendMail runner sid (Just "alice") Normal (Control StopRun)
+        -- A new run's very first iteration checks the mailbox before
+        -- taking any step, so this stops immediately.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (_, active) <- expectRight =<< awaitRun runner sid 5
+        active @?= False
+        putMVar gate ()
+
+-- | 'sendMail' (G6) posting 'AgentMessage' mail wakes a paused session the
+-- same way 'postMessage' does (§5 "Scheduling rule"): only when the
+-- agent's @resumeOnAnyMail@ is set and the mail's sender ('FromUser', for
+-- 'sendMail') classifies into one of its @wakeOn@ kinds ('WakeOnUser' by
+-- default).
+sendMailAgentMessageWakesPausedTest :: Assertion
+sendMailAgentMessageWakesPausedTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAllResumeOnAnyMail
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        sendControl runner sid Pause
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, _) <- expectRight =<< awaitRun runner sid 5
+        paused.smStatus @?= StatusPaused
+
+        _ <- expectRight =<< sendMail runner sid (Just "bob") Normal (AgentMessage "ping" Nothing False)
+        -- 'startRun' stores 'StatusRunning' synchronously before returning.
+        (_, afterSend) <- maybe (assertFailure "session missing") pure =<< getSession runner sid
+        afterSend.smStatus @?= StatusRunning
+
+        putMVar gate ()
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+
+        -- 'listMail' (G6): every envelope, and, filtered, only what is
+        -- still unread past the session's stored cursor. Waking the run
+        -- above collects the background call's late result at R1, the
+        -- same receive point that peeks and folds unread mail -- so the
+        -- 'AgentMessage' sent to trigger the wake is folded in by the
+        -- time the run goes idle, and no longer shows up as unread.
+        allMail <- expectRight =<< listMail runner sid False
+        let isPing :: Envelope -> Bool
+            isPing e = case e.envBody of
+                AgentMessage "ping" Nothing False -> True
+                _ -> False
+        assertBool "the AgentMessage that woke the session is in its mail" (any isPing allMail)
+        unread <- expectRight =<< listMail runner sid True
+        assertBool "the AgentMessage that woke the session was folded in, not left unread" (not (any isPing unread))
+
+-- | 'listMail' (G6) lists every envelope ever accepted, unread or not, and
+-- reports an unknown session like every other runner operation.
+listMailTest :: Assertion
+listMailTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") Nothing
+        let sid = meta.smSessionId
+        _ <- expectRight =<< sendMail runner sid (Just "alice") Normal (AgentMessage "one" Nothing False)
+        _ <- expectRight =<< sendMail runner sid (Just "alice") Normal (AgentMessage "two" Nothing False)
+        allMail <- expectRight =<< listMail runner sid False
+        length allMail @?= 2
+        -- Nothing has run yet, so nothing has folded this mail in: every
+        -- envelope is still unread past the session's cursor (0).
+        unread <- expectRight =<< listMail runner sid True
+        map (.envSeq) unread @?= map (.envSeq) allMail
+
+        missing <- SessionId <$> nextRandom
+        got <- listMail runner missing False
+        got @?= Left (UnknownSession missing)
 
 -- | 'Control' ('CancelCalls' ids) cancels one specific attached call, which
 -- the run then reports as failed, without stopping the run itself.

@@ -47,6 +47,9 @@ module System.Agents.Host.Runner (
     postMessage,
     cancelAttachedCalls,
     pauseSession,
+    sendMail,
+    sendControlMail,
+    listMail,
     resume,
     completeCall,
     cancelRun,
@@ -1466,29 +1469,93 @@ this mail ever being read.
 pauseSession :: SessionRunner -> SessionId -> IO (Either RunnerError SessionMeta)
 pauseSession runner sid = sendControlMail runner sid Pause
 
--- | Post 'Control' mail to a session at 'Normal' priority, shared by
--- 'cancelAttachedCalls' and 'pauseSession'.
+{- | Post 'Control' mail to a session at 'Normal' priority, from no owner --
+a thin wrapper over 'sendMail' (G6) kept for 'cancelAttachedCalls' and
+'pauseSession', and for existing callers that only want the up to date
+'SessionMeta' rather than a mail 'Receipt'.
+-}
 sendControlMail :: SessionRunner -> SessionId -> ControlMsg -> IO (Either RunnerError SessionMeta)
 sendControlMail runner sid msg =
-    withLive runner sid $ \live ->
-        loadLatest runner live >>= \case
+    sendMail runner sid Nothing Normal (Control msg) >>= \case
+        Left err -> pure (Left err)
+        Right _receipt -> maybe (Left (UnknownSession sid)) (Right . snd) <$> getSession runner sid
+
+{- | Post mail to a session (G6, @todos/os-as-standalone-server.md@),
+generalizing 'sendControlMail': any 'MailBody' -- 'UserMessage',
+'AgentMessage', 'ToolCallFinished', 'ContinuationResult', 'WatchedEvent',
+or 'Control' (of 'Pause', 'Resume', 'CancelCalls', 'CancelAllAttached',
+'StopRun') -- from a given owner (or none), at a given 'Priority'. This is
+how a client posts 'StopRun' on quit, or sends 'AgentMessage' mail on
+behalf of another session, over the same mailbox 'postMessage' and
+'serverMailRouter' already share.
+
+Reuses 'sessionMailbox' (the live-vs-durable lookup 'postMessage' and
+'serverMailRouter' use), so a stored-but-not-live session gets its durable
+mailbox, not a fresh, disconnected one. Waking mirrors 'postMessage''s own
+paused branch exactly: a session with an active run, or one that is
+otherwise idle\/ready, is left alone (mail just queues, folded in at the
+next R1\/R2, or whenever something else starts a run); a 'StatusPaused'
+session is woken -- a run started with 'UntilBlocked' -- only when the
+agent's @resumeOnAnyMail@ option is set and this mail's sender classifies
+(via 'senderWakeKind') into one of its @wakeOn@ kinds, exactly the test
+'postMessage' applies to a message arriving while paused.
+-}
+sendMail :: SessionRunner -> SessionId -> Maybe Text -> Priority -> MailBody -> IO (Either RunnerError Receipt)
+sendMail runner sid owner priority body =
+    withLive runner sid $ \live -> do
+        mMailbox <- sessionMailbox runner sid
+        case mMailbox of
             Nothing -> pure $ Left $ UnknownSession sid
-            Just (_, meta) ->
-                sessionAgent runner live meta >>= \case
-                    Left err -> pure (Left err)
-                    Right agent -> case agent.ctxMailbox of
-                        Nothing -> pure $ Left $ MailboxRejected sid
-                        Just mb -> do
-                            sent <-
-                                mb.mbSend
-                                    Outgoing
-                                        { outId = Nothing
-                                        , outFrom = FromUser Nothing
-                                        , outPriority = Normal
-                                        , outHops = 0
-                                        , outBody = Control msg
-                                        }
-                            pure $ either (const (Left (MailboxRejected sid))) (const (Right meta)) sent
+            Just mb -> do
+                sent <-
+                    mb.mbSend
+                        Outgoing
+                            { outId = Nothing
+                            , outFrom = FromUser owner
+                            , outPriority = priority
+                            , outHops = 0
+                            , outBody = body
+                            }
+                case sent of
+                    Left _sendErr -> pure $ Left $ MailboxRejected sid
+                    Right receipt -> do
+                        wakeIfPaused live
+                        pure $ Right receipt
+  where
+    wakeIfPaused live = do
+        active <- readTVarIO live.lsRun
+        unless (isJust active) $
+            loadLatest runner live >>= \case
+                Nothing -> pure ()
+                Just (sess, meta) ->
+                    when (meta.smStatus == StatusPaused) $ do
+                        resumeOk <- agentBoolOption runner meta Base.resumeOnAnyMail
+                        wakes <- agentWakesOn runner meta (senderWakeKind (FromUser owner))
+                        when (resumeOk && wakes) $
+                            agentNodeFor runner meta >>= \case
+                                Left _ -> pure ()
+                                Right node ->
+                                    prepareParams runner live node Map.empty >>= \case
+                                        Left _ -> pure ()
+                                        Right overlay -> void $ startRun runner live UntilBlocked overlay sess meta
+
+{- | A session's mail, oldest first: every envelope ever accepted, or only
+those unread past the session's stored 'mailCursor' (G6). Uses 'getSession'
+for the cursor -- the last-stored one, which is what the session's next run
+will fold in from -- not any in-flight cursor a run in progress has not
+stored yet.
+-}
+listMail :: SessionRunner -> SessionId -> Bool -> IO (Either RunnerError [Envelope])
+listMail runner sid unreadOnly = do
+    mMailbox <- sessionMailbox runner sid
+    case mMailbox of
+        Nothing -> pure $ Left $ UnknownSession sid
+        Just mb -> do
+            cursor <-
+                if unreadOnly
+                    then maybe 0 ((.mailCursor) . fst) <$> getSession runner sid
+                    else pure 0
+            Right <$> atomically (mb.mbUnread cursor)
 
 {- | Who a session belongs to: the owner of its root session, since
 sub-sessions record none. 'Nothing' when the session does not exist.

@@ -1105,6 +1105,21 @@ data SendError
     | TooManyHops
     deriving (Show, Eq, Ord, Generic)
 
+instance ToJSON SendError where
+    toJSON e = Aeson.String $ case e of
+        UnknownRecipient -> "unknown_recipient"
+        MailboxFull -> "mailbox_full"
+        NotPermitted -> "not_permitted"
+        TooManyHops -> "too_many_hops"
+
+instance FromJSON SendError where
+    parseJSON = Aeson.withText "SendError" $ \t -> case t of
+        "unknown_recipient" -> pure UnknownRecipient
+        "mailbox_full" -> pure MailboxFull
+        "not_permitted" -> pure NotPermitted
+        "too_many_hops" -> pure TooManyHops
+        _ -> fail $ "Unknown SendError: " ++ Text.unpack t
+
 -- | Proof of acceptance for a sent envelope.
 data Receipt = Receipt
     { rcptId :: MessageId
@@ -1114,6 +1129,21 @@ data Receipt = Receipt
     -- is then the original envelope's sequence number, not a new one.
     }
     deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON Receipt where
+    toJSON r =
+        Aeson.object
+            [ "id" .= r.rcptId
+            , "seq" .= r.rcptSeq
+            , "duplicate" .= r.rcptDuplicate
+            ]
+
+instance FromJSON Receipt where
+    parseJSON = Aeson.withObject "Receipt" $ \v ->
+        Receipt
+            <$> v .: "id"
+            <*> v .: "seq"
+            <*> v .: "duplicate"
 
 -------------------------------------------------------------------------------
 -- Signal Types (Trajectory Analysis)

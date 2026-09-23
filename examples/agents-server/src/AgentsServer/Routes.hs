@@ -140,6 +140,22 @@ type SessionsAPI =
                             :<|> Summary "The deferred calls this session waits on"
                                 :> "pending"
                                 :> Get '[JSON] PendingBody
+                            :<|> Summary "Send mail to this session"
+                                :> Description
+                                    "Generalizes the interrupt on POST .../messages (G6): any MailBody \
+                                    \-- a user or agent message, or a control instruction (pause, \
+                                    \resume, cancel calls, stop the run) -- from any sender. A stored, \
+                                    \not-currently-live session still accepts it (its durable mailbox), \
+                                    \and a paused session may wake on it (see the Mail section of \
+                                    \docs/agents-server.md)."
+                                :> "mail"
+                                :> ReqBody '[JSON] MailPostBody
+                                :> Post '[JSON] RawJson
+                            :<|> Summary "This session's mail"
+                                :> Description "Every envelope ever accepted, oldest first, or only the unread ones."
+                                :> "mail"
+                                :> QueryParam "unread" Bool
+                                :> Get '[JSON] MailListBody
                        )
            )
 

@@ -60,7 +60,7 @@ import System.Agents.Protocol (
     runnerErrorCode,
     runnerErrorMessage,
  )
-import System.Agents.Session.Base (ContinuationToken (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls)
+import System.Agents.Session.Base (ContinuationToken (..), Priority (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls)
 import System.Agents.Session.Wake (findSessionForToken)
 import System.Agents.SessionStore (SessionMeta (..), SessionQuery (..), allSessionsQuery)
 import System.Agents.ToolRegistration (ToolRegistration (..))
@@ -215,6 +215,8 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("POST", ["v1", "sessions", sid, "cancel-attached"]) -> withSession sid (cancelAttachedH env)
     ("POST", ["v1", "sessions", sid, "pause"]) -> withSession sid (pauseH env)
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
+    ("POST", ["v1", "sessions", sid, "mail"]) -> withSession sid (mailPostH env req caller)
+    ("GET", ["v1", "sessions", sid, "mail"]) -> withSession sid (mailListH env req)
     ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env req)
     ("GET", ["v1", "events"]) -> allEventsH env req caller
     ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
@@ -236,7 +238,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
-        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "events"]
+        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "mail", "events"]
         ["v1", "events"] -> True
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
@@ -575,6 +577,35 @@ pendingH :: ServerEnv -> SessionId -> IO Response
 pendingH env sid = do
     (sess, _) <- loadSession env sid
     pure $ json status200 $ Aeson.object ["calls" .= pendingDeferredCalls sess]
+
+{- | Generic mail to a session (G6): @{body, priority?}@, where @body@ is any
+tagged 'MailBody' JSON. The sender is this caller's own owner (or none when
+authentication is off), mirroring how 'createH' attributes a new session
+rather than trusting a claim in the body. Answers the mailbox's 'Receipt'.
+-}
+mailPostH :: ServerEnv -> Request -> Caller -> SessionId -> IO Response
+mailPostH env req (Caller owner) sid = do
+    body <- jsonBody req
+    (mailBody, priority) <- parseBody body $ \o -> do
+        raw <- o .: "body"
+        mailBody <- Aeson.parseJSON raw
+        priority <-
+            o .:? "priority" >>= \case
+                Nothing -> pure Normal
+                Just ("normal" :: Text) -> pure Normal
+                Just "interrupt" -> pure Interrupt
+                Just other -> fail ("priority must be \"normal\" or \"interrupt\": " <> Text.unpack other)
+        pure (mailBody, priority)
+    receipt <- orThrow $ sendMail env.envRunner sid owner priority mailBody
+    pure $ json status202 receipt
+
+-- | This session's mail, oldest first (G6); @?unread=true@ for only what
+-- has not yet been folded into a turn.
+mailListH :: ServerEnv -> Request -> SessionId -> IO Response
+mailListH env req sid = do
+    unreadOnly <- boolParam "unread" False req
+    mail <- orThrow $ listMail env.envRunner sid unreadOnly
+    pure $ json status200 $ Aeson.object ["mail" .= mail]
 
 continuationH :: ServerEnv -> Request -> Caller -> Text -> IO Response
 continuationH env req caller tokenText = do
