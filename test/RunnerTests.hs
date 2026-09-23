@@ -105,6 +105,7 @@ tests =
         , testCase "replay after N returns exactly the events after N, from the ring" replayAfterNTest
         , testCase "replay across the boundary into live events has no gap or duplicate" replayLiveBoundaryTest
         , testCase "a ring smaller than the run's events reports replay unavailable" replayUnavailableTest
+        , testCase "replay after a sequence number ahead of the server's own is unavailable" replayFutureSeqTest
         , testCase "an owner-scoped subscription only sees that owner's events" ownerScopeTest
         , testCase "session.created and session.deleted are emitted" sessionCreatedDeletedTest
         ]
@@ -820,6 +821,25 @@ replayUnavailableTest = do
         subscribe runner (OneSession sid) (Just (EventSeq 0)) >>= \case
             Left ReplayUnavailable -> pure ()
             Right _ -> assertFailure "expected replay to be unavailable with a 2-event ring"
+
+-- | @after@ naming a sequence number this server never stamped (e.g. a
+-- client that remembers an id from a previous process) is unavailable,
+-- not silently treated as "go live": there is no way to tell whether
+-- events between it and now were missed.
+replayFutureSeqTest :: Assertion
+replayFutureSeqTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        allEvents <- runEventsFromRing runner sid
+        assertBool "at least one event" (not (null allEvents))
+        let EventSeq n = maximum (map (.evSeq) allEvents)
+        subscribe runner (OneSession sid) (Just (EventSeq (n + 1000))) >>= \case
+            Left ReplayUnavailable -> pure ()
+            Right _ -> assertFailure "expected replay to be unavailable for a sequence number ahead of the server's own"
 
 ownerScopeTest :: Assertion
 ownerScopeTest = do

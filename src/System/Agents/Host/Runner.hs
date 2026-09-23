@@ -431,9 +431,18 @@ subscribeSTM :: SessionRunner -> SubscribeScope -> Maybe EventSeq -> IO (Either 
 subscribeSTM runner scope after = atomically $ do
     ring <- readTVar runner.srRing
     chan <- dupTChan runner.srEvents
+    current <- readTVar runner.srSeq
     case after of
         Nothing -> pure $ Right (liveOnly chan)
         Just n
+            | n > current ->
+                -- A client carrying an id from a previous server process
+                -- (or a bogus one): nothing this server ever stamped is
+                -- past 'current', so replaying "from" it would silently
+                -- skip straight to live events instead of reporting the
+                -- gap. Answer unavailable, same as an id too old for the
+                -- ring, so the caller falls back to a fresh snapshot.
+                pure (Left ReplayUnavailable)
             | replayAvailable ring n -> do
                 replayBuf <- newTVar (filter (matchesScope scope) (toList (Seq.filter ((> n) . evSeq) ring)))
                 pure $ Right (replayThenLive replayBuf chan)
