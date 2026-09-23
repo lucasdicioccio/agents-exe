@@ -1269,7 +1269,21 @@ postMessage runner sid message mode supplied =
                                                                 Right overlay -> startRun runner live m overlay sess meta
                         else
                             let status = sessionStatusOf sess
-                             in if status /= StatusIdle
+                                {- G2 (@todos/os-as-standalone-server.md@ Phase 3b):
+                                a session 'createSessionAs'\/'createSessionAsWithParent'
+                                made with no first message ('Nothing') has no turns at
+                                all, so 'sessionStatusOf' reports it 'StatusReady' (the
+                                same status a pending, unanswered 'UserTurn' or a
+                                not-yet-finished background call also reports) rather
+                                than 'StatusIdle' -- it never had an answer to be idle
+                                after. Accepting a message here as a fresh turn is only
+                                safe in that specific case (an *empty* session): for
+                                every other 'StatusReady' cause, there is already a turn
+                                this new one would follow incoherently, so those still
+                                fall through to 'NotAcceptingMessages' below.
+                                -}
+                                acceptable = status == StatusIdle || (status == StatusReady && null sess.turns)
+                             in if not acceptable
                                     then pure $ Left $ NotAcceptingMessages sid status
                                     else
                                         agentNodeFor runner meta >>= \case
