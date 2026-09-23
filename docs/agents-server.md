@@ -501,8 +501,8 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `GET /openapi.json` | | `200` OpenAPI 3 document | |
 | `GET /healthz` | | `200 {ok, live_sessions, active_runs}` | |
 | `POST /mcp` | JSON-RPC message or batch | `200` JSON-RPC answer, or `202` | see [MCP over HTTP](#mcp-over-http) |
-| `GET /v1/agents` | | `200 [{slug, description, tools, source, …}]` | |
-| `GET /v1/agents/:slug` | | `200` agent | 404 `unknown_agent` |
+| `GET /v1/agents` | | `200 [{slug, description, model, system_prompt, tools, parameters, helpers, source, …}]` | |
+| `GET /v1/agents/:slug` | | `200` agent (same shape) | 404 `unknown_agent` |
 | `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
 | `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` |
 | `POST /v1/sessions?wait=&timeout=` | `{agent, prompt?, media?, run?, params?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request`, see [Parameters](#parameters) |
@@ -911,6 +911,49 @@ main = do
 ```
 
 The HTTP layer itself is in `examples/agents-server/src/AgentsServer/Api.hs`.
+
+### Clients
+
+`System.Agents.Host.Client` (`todos/os-as-standalone-server.md` Phase 3a)
+gives the same operations as a `RunnerClient`: one `Command` in, one
+`Reply` (or a `RunnerError`) out, plus a live event feed, instead of a
+bag of separate `SessionRunner` functions. `System.Agents.Protocol` owns
+the `Command`/`Reply` sum types and their JSON, so a future HTTP or Unix
+socket client can speak the same wire shape `inProcessClient` already
+dispatches in-process:
+
+```haskell
+data RunnerClient = RunnerClient
+    { rcCommand   :: Command -> IO (Either RunnerError Reply)
+    , rcSubscribe :: SubscribeScope -> Maybe EventSeq -> IO (Either ReplayUnavailable Subscription)
+    }
+
+inProcessClient :: Maybe Text -> SessionRunner -> RunnerClient
+```
+
+The `Maybe Text` is the client's own identity (an owner, or `Nothing`),
+used for `CreateSession`, `SpawnSession`, `SendMail` and `ForkSession` --
+a `Command` never carries a caller-asserted owner of its own to trust.
+`System.Agents.Host.Client` also has a typed helper per operation
+(`createSession`, `postMessage`, `resumeSession`, `completeCall`,
+`cancelRun`, `cancelAttachedCalls`, `pauseSession`, `sendMail`, `listMail`,
+`forkSession`, `listSessions`, `getSession`, `listAgents`, `getAgent`,
+`deleteSession`, `awaitRun`, `stats`, `subscribeAll`) that builds the
+`Command` and unwraps the expected `Reply`, failing with `UnexpectedReply`
+(code `unexpected_reply`) on a mismatch -- which only a bug in a
+`RunnerClient` implementation can provoke, `inProcessClient`'s dispatch
+being total over every `Command` constructor:
+
+```haskell
+import System.Agents.Host.Client
+
+main :: IO ()
+main = withHost cfg silent $ \host -> withSessionRunner host $ \runner -> do
+    let client = inProcessClient Nothing runner
+    Right meta <- createSession client "weather" (Just (NewMessage "Weather in Paris?" [] False)) (Just UntilBlocked) mempty
+    Right (stopped, _) <- awaitRun client meta.smSessionId 120
+    print stopped.smStatus
+```
 
 ## Not yet supported
 
