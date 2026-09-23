@@ -62,7 +62,7 @@ import System.Agents.CLI.Aliases (
     resolveAliases,
  )
 import qualified System.Agents.FileLoader as FileLoader
-import System.Agents.Host (HostConfig, defaultHostConfig)
+import System.Agents.Host (HostConfig (..), defaultHostConfig)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 
@@ -358,7 +358,9 @@ passed in take priority over 'rcAgentFiles' when non-empty, mirroring
 -}
 hostConfigFromResolved :: ResolvedConfig -> [FilePath] -> FilePath -> FilePath -> HostConfig
 hostConfigFromResolved rc explicitAgentFiles apiKeysFile dbPath =
-    defaultHostConfig agentFiles apiKeysFile dbPath
+    (defaultHostConfig agentFiles apiKeysFile dbPath)
+        { hcLegacySessionDirs = rc.rcSessionStore.sessionReadPrefixes
+        }
   where
     agentFiles = case explicitAgentFiles of
         [] -> rc.rcAgentFiles

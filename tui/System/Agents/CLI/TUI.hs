@@ -26,20 +26,13 @@ module System.Agents.CLI.TUI (
 ) where
 
 import qualified Data.Map.Strict as Map
-import Data.Text (Text)
-import Database.SQLite.Simple (Only (..), query_, withConnection)
 
 import qualified Prod.Tracer as Prod
 
-import qualified System.Agents.AgentStore as AgentStore
 import qualified System.Agents.CLI.ConfigLoader as ConfigLoader
 import qualified System.Agents.Host as Host
 import qualified System.Agents.Host.Client as Client
 import qualified System.Agents.Host.Runner as Runner
-import qualified System.Agents.Session.Async as Async
-import qualified System.Agents.Session.MailStore as MailStore
-import System.Agents.SessionStore (FileSessionStore (..), fileSessionBackend, mkCompositeSessionStore, mkSqliteSessionStore)
-import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 import qualified System.Agents.TUI.Core as TUI
 
@@ -86,28 +79,19 @@ handleTUI tracer rc apiKeysFile mKeymapPath agentFiles mDbPath params = do
         Nothing -> pure TUI.defaultTUIUserConfig
 
     let dbPath = maybe (ConfigLoader.defaultServerDatabasePath rc) id mDbPath
+        -- 'ConfigLoader.hostConfigFromResolved' already sets
+        -- 'Host.hcLegacySessionDirs' from the config's session-store read
+        -- prefixes, so opening the host here is the same code path
+        -- @agents-exe serve@ uses (todos/os-as-standalone-server.md §6):
+        -- SQLite is the primary backend, with the legacy file store (old
+        -- `conv.<uuid>.json` history) composited in as a read-only
+        -- fallback by 'Host.withHost' itself.
         hostCfg = ConfigLoader.hostConfigFromResolved rc agentFiles apiKeysFile dbPath
         hostTracer = Prod.contramap HostTrace tracer
         rawParams = Map.map (\(ProcessValue v _pinned) -> v) params
 
-    withConnection dbPath $ \conn -> do
-        _ <- query_ conn "PRAGMA journal_mode = WAL" :: IO [Only Text]
-        _ <- query_ conn "PRAGMA busy_timeout = 5000" :: IO [Only Int]
-        sqliteBackend <- mkSqliteSessionStore conn
-        contStore <- Async.mkSqliteContinuationStore conn
-        mailStore <- MailStore.mkSqliteMailStore conn
-        agentStore <- AgentStore.mkSqliteAgentStore conn
-
-        -- SQLite is the primary backend; the legacy file store (the
-        -- config's `sessions` read locations) is composited in as a
-        -- read-only fallback, so pre-existing `conv.<uuid>.json` history
-        -- keeps showing up once the History tab is populated (3b-iii).
-        let fileBackends = map (fileSessionBackend . FileSessionStore) rc.rcSessionStore.sessionReadPrefixes
-            backend = mkCompositeSessionStore (sqliteBackend : fileBackends)
-            stores = Host.HostStores backend contStore mailStore (Just agentStore)
-
-        Host.withHostStores hostCfg stores hostTracer $ \host ->
-            Runner.withSessionRunner host $ \runner -> do
-                _ <- Runner.recoverOnStartup runner
-                let client = Client.inProcessClient Nothing runner
-                TUI.runTUIWithUserConfig (Prod.contramap TUITrace tracer) client rc.rcSessionStore userConfig rawParams
+    Host.withHost hostCfg hostTracer $ \host ->
+        Runner.withSessionRunner host $ \runner -> do
+            _ <- Runner.recoverOnStartup runner
+            let client = Client.inProcessClient Nothing runner
+            TUI.runTUIWithUserConfig (Prod.contramap TUITrace tracer) client rc.rcSessionStore userConfig rawParams

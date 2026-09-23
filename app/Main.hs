@@ -1446,17 +1446,20 @@ runCommand pargs baseTracer sessionStore files =
         SessionDurable opts ->
             SessionDurableCmd.handleSessionDurable sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
         Serve opts ->
-            handleServe pargs files opts
+            handleServe pargs sessionStore files opts
 
 {- | @agents-exe serve@: like @agents-server@, but with the agent files,
 API keys and process parameters agents-exe already resolved from
 @agents-exe.cfg.json@, @--agent-file@\/@--agent@, @--api-keys@,
 @--set@\/@--pin@ and @--params-file@.
 -}
-handleServe :: Prog -> [FilePath] -> ServeOptions -> IO ()
-handleServe pargs files opts = do
+handleServe :: Prog -> SessionStore.SessionStore -> [FilePath] -> ServeOptions -> IO ()
+handleServe pargs sessionStore files opts = do
     logger <- SrvLog.newHandleLogger stderr
-    let serverOpts = Srv.serverOptionsFromFlags files pargs.apiKeysFile opts.serveFlags pargs.progParams
+    let serverOpts =
+            (Srv.serverOptionsFromFlags files pargs.apiKeysFile opts.serveFlags pargs.progParams)
+                { Srv.soLegacySessionDirs = sessionStore.sessionReadPrefixes
+                }
     result <- try (Srv.runServer serverOpts logger)
     case result of
         Right () -> pure ()

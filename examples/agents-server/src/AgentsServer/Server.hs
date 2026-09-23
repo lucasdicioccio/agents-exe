@@ -76,6 +76,13 @@ data ServerOptions = ServerOptions
     and need no bearer token beyond what @--auth-tokens@ imposes elsewhere:
     the socket itself, and who can reach it, is the trust boundary.
     -}
+    , soLegacySessionDirs :: [FilePath]
+    {- ^ Read-only fallback locations for old @conv.<uuid>.json@ session
+    history, honoured through 'Host.hcLegacySessionDirs'
+    (@todos/os-as-standalone-server.md@ §6). Plain @agents-server@ (flags
+    only) leaves this empty; @agents-exe serve@ fills it in from the
+    resolved config's session-store read prefixes.
+    -}
     , soProcessParams :: ProcessParams
     {- ^ @--set@/@--set-json@/@--pin@/@--pin-json@: process-scope parameter
     values shared by every loaded agent (@todos/tool-partial-application.md@,
@@ -156,6 +163,7 @@ serverOptionsFromFlags agentFiles apiKeysFile flags params =
         , soNoUI = flags.sfNoUI
         , soCorsOrigins = flags.sfCorsOrigins
         , soSocket = flags.sfSocket
+        , soLegacySessionDirs = []
         , soProcessParams = params
         }
 
@@ -216,6 +224,7 @@ runServer opts logger = do
                 { hcLiveSessionTtl = opts.soLiveSessionTtl
                 , hcStreamTokens = opts.soStreamTokens
                 , hcProcessParams = opts.soProcessParams
+                , hcLegacySessionDirs = opts.soLegacySessionDirs
                 }
         tracer = hostTraceLogger logger
         withStores k

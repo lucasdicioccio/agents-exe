@@ -575,6 +575,7 @@ corsWildcardStartupTest = withSystemTempDirectory "agents-server-cors" $ \dir ->
                 , soNoUI = True
                 , soCorsOrigins = ["*"]
                 , soSocket = Nothing
+                , soLegacySessionDirs = []
                 , soProcessParams = mempty
                 }
     result <- try (runServer opts silentLogger)
@@ -1117,6 +1118,7 @@ socketHealthzTest = withSystemTempDirectory "agents-server-socket" $ \dir -> do
                 , soNoUI = True
                 , soCorsOrigins = []
                 , soSocket = Just sockPath
+                , soLegacySessionDirs = []
                 , soProcessParams = mempty
                 }
     serverAsync <- async (runServer opts silentLogger)

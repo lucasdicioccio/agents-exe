@@ -93,6 +93,7 @@ import qualified OpenAIStreamTests
 import qualified ProtocolTests
 import qualified RunnerTests
 import qualified HostClientTests
+import qualified HostLegacySessionTests
 import qualified DurableWorkflowTests
 import qualified NarrowingTests
 import qualified MailboxTests
@@ -152,6 +153,7 @@ tests =
         , ProtocolTests.tests
         , RunnerTests.tests
         , HostClientTests.tests
+        , HostLegacySessionTests.tests
         , MailboxTests.tests
         , ConfigLoaderTests.tests
         , TuiDraftTests.tests

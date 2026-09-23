@@ -314,7 +314,6 @@ library agents-tui
                       process,
                       process-extras,
                       prodapi,
-                      sqlite-simple,
                       stm,
                       temporary,
                       text,
@@ -565,6 +564,7 @@ test-suite agents-tests
                     , ProtocolTests
                     , RunnerTests
                     , HostClientTests
+                    , HostLegacySessionTests
                     , SessionEditTests
                     , SessionDurableTests
                     , SessionMetadataTests
