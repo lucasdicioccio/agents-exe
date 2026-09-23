@@ -2,7 +2,7 @@
 
 Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
-(commits 8de2a64..dc01dc8); Phase 2a done (0390c9f..2d65359); 2b in
+(commits 8de2a64..dc01dc8); Phases 2a and 2b done (0390c9f..6e16f91); 2c in
 progress. Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
 
@@ -182,7 +182,7 @@ data Command
     | CancelAttached  SessionId
     | Pause           SessionId
     | SendMail        { session :: SessionId, body :: MailBody, priority :: Priority }   -- StopRun, CancelCalls, Resume, AgentMessage, …
-    | ForkSession     { session :: SessionId, atTurn :: TurnId, agent :: Maybe Text }
+    | ForkSession     { session :: SessionId, atTurn :: Maybe Int, agent :: Maybe Text }   -- newest-first index; turns have no id
     | ListSessions    SessionQuery
     | GetSession      SessionId
     | ListAgents
@@ -420,6 +420,15 @@ JSON merges them with the embedded `SessionMeta` fields; `RunnerError`'s
 decoder is lossy (only the code survives, by design of the existing
 `{error, message}` shape); the snapshot fallback on an unavailable replay
 keeps the pre-existing tiny gap between snapshot and re-subscribe.
+
+2b landed: `createSessionAs*` take `Maybe NewMessage` (promptless
+`POST /v1/sessions` creates an idle `ready` session), `listSessions` on
+the runner, `sendMail`/`listMail` with `POST`/`GET /v1/sessions/:id/mail`,
+and `forkSession` with `POST /v1/sessions/:id/fork`. Deviation: `Turn` has
+no id of its own, so forks are addressed by a 0-based newest-first turn
+index (`at_turn`), exactly as the TUI's `handleForkAtTurn` does, and the
+error is `UnknownTurn SessionId Int` (`unknown_turn`). The `Command`
+sketch's `atTurn :: TurnId` is wrong until turns get ids.
 
 `System.Agents.Protocol` with `Command`, `Event`, `EventBody`, JSON
 instances, and codecs for `NewMessage`, `RunMode`, `RunnerError`,
