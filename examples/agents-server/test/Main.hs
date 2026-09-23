@@ -81,6 +81,9 @@ main =
             , testCase "EventSource may carry its token as a query parameter" accessTokenTest
             , testCase "an attached file is stored on the turn that carried it" mediaRoundTripTest
             , testCase "--socket: /healthz answers over a Unix domain socket" socketHealthzTest
+            , testCase "reconnecting with Last-Event-ID replays exactly the missed events" reconnectLastEventIdTest
+            , testCase "GET /v1/events sees session.created and session.deleted" crossSessionEventsTest
+            , testCase "GET /v1/events is owner-scoped when auth is on" ownerScopedEventsTest
             ]
 
 -------------------------------------------------------------------------------
@@ -111,6 +114,70 @@ eventsFlowTest = withServer deferAll (firstThen [remoteCall "call_1"]) $ \srv ->
         secondRun <- untilStopped next
         assertBool ("second run: " <> show (map fst secondRun)) ("run.started" `elem` map fst secondRun)
         field "status" (snd (last secondRun)) @?= "idle"
+
+{- | A client that disconnects mid-run and reconnects with @Last-Event-ID@
+(G5) gets exactly the events it missed, replayed from the runner's ring,
+and nothing it already saw.
+-}
+reconnectLastEventIdTest :: Assertion
+reconnectLastEventIdTest = withServer deferAll (firstThen [remoteCall "call_1"]) $ \srv -> do
+    (created, view) <- call srv "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+    created @?= 201
+    let sid = textField "session_id" view
+    firstBatch <- withIdEvents srv ("/v1/sessions/" <> sid <> "/events") $ \next -> do
+        (kind0, _, _) <- next
+        kind0 @?= "snapshot"
+        (resumed, _) <- call srv "POST" ("/v1/sessions/" <> sid <> "/resume") Nothing
+        assertBool ("resume answers 200 or 202, got " <> show resumed) (resumed `elem` [200, 202])
+        untilStoppedWithId next
+    (_, cutId, _) <- case firstBatch of
+        (e : _) -> pure e
+        [] -> assertFailure "expected at least one event"
+    let srv2 = srv{srvHeaders = [("Last-Event-ID", Text.encodeUtf8 cutId)]}
+    replayed <- withIdEvents srv2 ("/v1/sessions/" <> sid <> "/events") untilStoppedWithId
+    -- No "snapshot": the reconnect replays from the ring instead.
+    map (\(k, _, _) -> k) replayed @?= drop 1 (map (\(k, _, _) -> k) firstBatch)
+    replayed @?= drop 1 firstBatch
+
+-- | 'GET \/v1\/events' (no auth) sees a session being created and deleted,
+-- across sessions -- the server-wide feed (G5).
+crossSessionEventsTest :: Assertion
+crossSessionEventsTest = withServer "{}" mockCompletion $ \srv ->
+    withEventsAt srv "/v1/events" $ \next -> do
+        (created, view) <- call srv "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+        created @?= 201
+        let sid = textField "session_id" view
+        untilKind next "session.created"
+        (deleted, _) <- call srv "DELETE" ("/v1/sessions/" <> sid) Nothing
+        deleted @?= 200
+        untilKind next "session.deleted"
+  where
+    untilKind next kind = do
+        (k, _) <- next
+        if k == kind then pure () else untilKind next kind
+
+-- | With authentication on, @scope=all@ needs an admin owner, the default
+-- scope is the caller's own, and one owner never sees another's events.
+ownerScopedEventsTest :: Assertion
+ownerScopedEventsTest = do
+    let tokens = authTokensFromList [("alice-token", "alice"), ("bob-token", "bob")]
+    withServerAuth (Just tokens) "{}" mockCompletion $ \anonymous -> do
+        let alice = anonymous{srvToken = Just "alice-token"}
+            bob = anonymous{srvToken = Just "bob-token"}
+        (refused, err) <- call alice "GET" "/v1/events?scope=all" Nothing
+        (refused, field "error" err) @?= (403, "forbidden")
+        withEventsAt alice "/v1/events" $ \nextAlice -> do
+            (createdA, _) <- call alice "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+            createdA @?= 201
+            untilKind nextAlice "session.created"
+            (createdB, _) <- call bob "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+            createdB @?= 201
+            stray <- timeout 300_000 nextAlice
+            stray @?= Nothing
+  where
+    untilKind next kind = do
+        (k, _) <- next
+        if k == kind then pure () else untilKind next kind
 
 waitFlowTest :: Assertion
 waitFlowTest = withServer deferAll (firstThen [remoteCall "call_1"]) $ \srv -> do
@@ -559,6 +626,7 @@ openApiTest = do
                 , "/v1/agents"
                 , "/v1/agents/{slug}"
                 , "/v1/continuations/{token}"
+                , "/v1/events"
                 , "/v1/sessions"
                 , "/v1/sessions/{id}"
                 , "/v1/sessions/{id}/cancel"
@@ -817,8 +885,12 @@ call srv method path body = do
 (without its trailing blank line), or @""@ once the stream has ended.
 -}
 withRawEvents :: Srv -> Text -> (IO ByteString.ByteString -> IO a) -> IO a
-withRawEvents srv sid k = do
-    req <- request srv "GET" ("/v1/sessions/" <> sid <> "/events") Nothing
+withRawEvents srv sid = withRawEventsAt srv ("/v1/sessions/" <> sid <> "/events")
+
+-- | Like 'withRawEvents', at any path (e.g. @\/v1\/events?scope=all@).
+withRawEventsAt :: Srv -> Text -> (IO ByteString.ByteString -> IO a) -> IO a
+withRawEventsAt srv path k = do
+    req <- request srv "GET" path Nothing
     Http.withResponse req srv.srvManager $ \rsp -> do
         buffer <- newIORef ByteString.empty
         let nextFrame = do
@@ -837,21 +909,42 @@ withRawEvents srv sid k = do
 
 -- | Like 'withRawEvents', parsed, skipping keepalives; 5 seconds per event.
 withEvents :: Srv -> Text -> (IO (Text, Aeson.Value) -> IO a) -> IO a
-withEvents srv sid k = withRawEvents srv sid $ \nextFrame ->
-    let next =
-            timeout 5_000_000 nextFrame >>= \case
-                Nothing -> assertFailure "no event within 5 seconds"
-                Just frame
-                    | ":" `ByteString.isPrefixOf` frame -> next
-                    | otherwise -> parseFrame frame
-     in k next
+withEvents srv sid k = withRawEvents srv sid (k . parsedNext)
+
+-- | Like 'withEvents', at any path.
+withEventsAt :: Srv -> Text -> (IO (Text, Aeson.Value) -> IO a) -> IO a
+withEventsAt srv path k = withRawEventsAt srv path (k . parsedNext)
+
+-- | Like 'withEvents', also giving each event's @id:@ (its 'EventSeq').
+withIdEvents :: Srv -> Text -> (IO (Text, Text, Aeson.Value) -> IO a) -> IO a
+withIdEvents srv path k = withRawEventsAt srv path (k . parsedNextWithId)
+
+parsedNext :: IO ByteString.ByteString -> IO (Text, Aeson.Value)
+parsedNext nextFrame = do
+    (kind, _, value) <- parsedNextWithId nextFrame
+    pure (kind, value)
+
+parsedNextWithId :: IO ByteString.ByteString -> IO (Text, Text, Aeson.Value)
+parsedNextWithId nextFrame = next
   where
+    next =
+        timeout 5_000_000 nextFrame >>= \case
+            Nothing -> assertFailure "no event within 5 seconds"
+            Just frame
+                | ":" `ByteString.isPrefixOf` frame -> next
+                | otherwise -> parseFrame frame
     parseFrame frame = do
         let lines' = Char8.lines frame
             value prefix = [ByteString.drop (ByteString.length prefix) l | l <- lines', prefix `ByteString.isPrefixOf` l]
+            eid = case value "id: " of
+                (i : _) -> Text.decodeUtf8 i
+                [] -> "" -- e.g. the "snapshot" frame, which carries no id.
         case (value "event: ", value "data: ") of
             ([kind], [payload]) ->
-                either (\e -> assertFailure ("bad event data: " <> e)) (pure . (Text.decodeUtf8 kind,)) (Aeson.eitherDecodeStrict payload)
+                either
+                    (\e -> assertFailure ("bad event data: " <> e))
+                    (pure . (Text.decodeUtf8 kind,eid,))
+                    (Aeson.eitherDecodeStrict payload)
             _ -> assertFailure ("bad frame: " <> show frame)
 
 -- | Events up to and including the next @run.stopped@.
@@ -862,6 +955,15 @@ untilStopped next = go []
         event <- next
         let acc' = event : acc
         if fst event == "run.stopped" then pure (reverse acc') else go acc'
+
+-- | Like 'untilStopped', keeping each event's @id:@.
+untilStoppedWithId :: IO (Text, Text, Aeson.Value) -> IO [(Text, Text, Aeson.Value)]
+untilStoppedWithId next = go []
+  where
+    go acc = do
+        event@(kind, _, _) <- next
+        let acc' = event : acc
+        if kind == "run.stopped" then pure (reverse acc') else go acc'
 
 -------------------------------------------------------------------------------
 -- JSON helpers

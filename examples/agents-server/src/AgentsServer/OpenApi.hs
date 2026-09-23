@@ -104,6 +104,7 @@ handWritten :: InsOrdHashMap FilePath PathItem
 handWritten =
     InsOrd.fromList
         [ ("/v1/sessions/{id}/events", mempty & get ?~ eventsOperation)
+        , ("/v1/events", mempty & get ?~ allEventsOperation)
         , ("/mcp", mempty & post ?~ mcpOperation)
         ]
 
@@ -116,14 +117,20 @@ eventsOperation =
     mempty
         & summary ?~ "Follow a session as it runs"
         & description
-            ?~ "A server-sent event stream. It opens with a `snapshot` of the session's \
-               \metadata, then sends one event per change: `session.updated` (metadata plus \
-               \`head_turn`, the newest turn), `run.started`, `calls.deferred` (the run \
-               \stopped on these deferred calls), `run.stopped`, `session.failed`, and, when \
-               \the server runs with --stream-tokens, `text.delta` as the answer is written. \
-               \A `: keepalive` comment is sent after 15 seconds of silence. Events are not \
-               \replayed: a client that reconnects gets a fresh snapshot."
-        & parameters .~ [Inline sessionIdParam]
+            ?~ "A server-sent event stream. Each frame carries an `id:` (the event's \
+               \sequence number). It opens with a `snapshot` of the session's metadata (unless \
+               \a replay from `Last-Event-ID`/`after` is available -- see below), then sends \
+               \one event per change: `session.updated` (metadata plus `head_turn`, the newest \
+               \turn), `run.started`, `calls.deferred` (the run stopped on these deferred \
+               \calls), `run.stopped`, `session.failed`, and, when the server runs with \
+               \--stream-tokens, `text.delta` as the answer is written. A `: keepalive` \
+               \comment is sent after 15 seconds of silence. A reconnecting client sends \
+               \`Last-Event-ID` (set automatically by `EventSource`) or `?after=<seq>`: when \
+               \that sequence number is still in the server's event ring (the last 4096 events \
+               \by default), the missed events replay before the stream goes live, with no gap \
+               \or duplicate; otherwise the stream falls back to a fresh `snapshot`, as if \
+               \reconnecting for the first time."
+        & parameters .~ [Inline sessionIdParam, Inline afterParam]
         & responses . responses
             .~ [
                    ( 200
@@ -132,6 +139,29 @@ eventsOperation =
                             & description .~ "The stream, until the client disconnects or the server stops."
                             & content .~ [("text/event-stream", mempty)]
                    )
+               ]
+
+allEventsOperation :: Operation
+allEventsOperation =
+    mempty
+        & summary ?~ "Follow every session, or one owner's, across the server"
+        & description
+            ?~ "Like `GET /v1/sessions/{id}/events`, without a `snapshot` (there is no single \
+               \session to snapshot) but with the same `Last-Event-ID`/`after` replay, and two \
+               \events besides the session ones: `session.created` and `session.deleted`. \
+               \`?scope=owner` (the default when the caller has an owner) is that caller's own \
+               \sessions; `?scope=all` is every session, and needs authentication off or the \
+               \caller to be an admin owner (`--admin-owners`)."
+        & parameters .~ [Inline afterParam, Inline scopeParam]
+        & responses . responses
+            .~ [
+                   ( 200
+                   , Inline $
+                        mempty
+                            & description .~ "The stream, until the client disconnects or the server stops."
+                            & content .~ [("text/event-stream", mempty)]
+                   )
+               , (403, errorResponse "`scope=all` without authentication off or an admin owner.")
                ]
 
 mcpOperation :: Operation
@@ -164,3 +194,21 @@ sessionIdParam =
         & in_ .~ ParamPath
         & required ?~ True
         & schema ?~ Inline (mempty & type_ ?~ OpenApiString & format ?~ "uuid")
+
+afterParam :: Param
+afterParam =
+    mempty
+        & name .~ "after"
+        & in_ .~ ParamQuery
+        & description ?~ "Replay events after this sequence number (an alternative to the `Last-Event-ID` header, which `EventSource` sets on its own)."
+        & required ?~ False
+        & schema ?~ Inline (mempty & type_ ?~ OpenApiInteger)
+
+scopeParam :: Param
+scopeParam =
+    mempty
+        & name .~ "scope"
+        & in_ .~ ParamQuery
+        & description ?~ "\"owner\" (the caller's own sessions, the default) or \"all\" (every session; needs authentication off or an admin owner)."
+        & required ?~ False
+        & schema ?~ Inline (mempty & type_ ?~ OpenApiString & enum_ ?~ ["owner", "all"])

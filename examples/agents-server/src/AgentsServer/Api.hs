@@ -55,8 +55,12 @@ import System.Agents.AgentTree (OSAgentNode (..))
 import qualified System.Agents.Base as Base
 import System.Agents.Host (AgentEditError (..), AgentSource (..), Host (..), deleteStoredAgent, hostAllAgents, putStoredAgent)
 import System.Agents.Host.Runner
-import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.Session.Base (ContinuationToken (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls, sessionStatusText)
+import System.Agents.Protocol (
+    runModeFromText,
+    runnerErrorCode,
+    runnerErrorMessage,
+ )
+import System.Agents.Session.Base (ContinuationToken (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls)
 import System.Agents.Session.Wake (findSessionForToken)
 import System.Agents.SessionStore (SessionBackend (..), SessionMeta (..), SessionQuery (..), allSessionsQuery)
 import System.Agents.ToolRegistration (ToolRegistration (..))
@@ -125,23 +129,28 @@ errorResponse (ApiError status code msg) =
         (hContentType, jsonType)
             : [("WWW-Authenticate", "Bearer") | status == status401]
 
+{- | The HTTP status for a 'RunnerError', by its Protocol 'runnerErrorCode'
+(the @{error, message}@ body itself comes straight from
+"System.Agents.Protocol", so the two cannot drift).
+-}
 fromRunnerError :: RunnerError -> ApiError
-fromRunnerError = \case
-    UnknownAgent slug -> ApiError status404 "unknown_agent" ("no agent named " <> slug)
-    UnknownSession sid -> ApiError status404 "unknown_session" ("no session " <> showId sid)
-    UnknownToken _ -> ApiError status404 "unknown_token" "no pending call has this continuation token"
-    TokenAlreadyCompleted _ -> ApiError status409 "token_already_completed" "this call already has a result"
-    RunInProgress sid -> ApiError status409 "run_in_progress" ("a run is active on session " <> showId sid)
-    NoActiveRun sid -> ApiError status409 "no_active_run" ("no run is active on session " <> showId sid)
-    NotAcceptingMessages _ status ->
-        ApiError status409 "not_accepting_messages" ("the session is " <> sessionStatusText status <> ", not idle")
-    Conflict _ -> ApiError status409 "conflict" "the session was modified by another writer; retry"
-    UnknownParams names -> ApiError status422 "unknown_params" ("unknown parameter(s): " <> Text.intercalate ", " names)
-    ForbiddenParams names ->
-        ApiError status403 "forbidden_params" ("process-scope or pinned parameter(s) cannot be set here: " <> Text.intercalate ", " names)
-    InvalidParams names -> ApiError status422 "invalid_params" ("secret parameter(s) must be given as strings: " <> Text.intercalate ", " names)
-    MissingRequiredParams names -> ApiError status422 "params_required" ("required parameter(s) not bound: " <> Text.intercalate ", " names)
-    MailboxRejected sid -> ApiError status429 "mailbox_full" ("session " <> showId sid <> " has too much unread mail; try again later")
+fromRunnerError e = ApiError (statusFor (runnerErrorCode e)) (runnerErrorCode e) (runnerErrorMessage e)
+  where
+    statusFor = \case
+        "unknown_agent" -> status404
+        "unknown_session" -> status404
+        "unknown_token" -> status404
+        "token_already_completed" -> status409
+        "run_in_progress" -> status409
+        "no_active_run" -> status409
+        "not_accepting_messages" -> status409
+        "conflict" -> status409
+        "unknown_params" -> status422
+        "forbidden_params" -> status403
+        "invalid_params" -> status422
+        "params_required" -> status422
+        "mailbox_full" -> status429
+        _ -> status500
 
 orThrow :: IO (Either RunnerError a) -> IO a
 orThrow action = action >>= either (throwIO . fromRunnerError) pure
@@ -206,7 +215,8 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("POST", ["v1", "sessions", sid, "cancel-attached"]) -> withSession sid (cancelAttachedH env)
     ("POST", ["v1", "sessions", sid, "pause"]) -> withSession sid (pauseH env)
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
-    ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env)
+    ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env req)
+    ("GET", ["v1", "events"]) -> allEventsH env req caller
     ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
     ("POST", ["mcp"]) -> mcpH env req caller
     _
@@ -227,6 +237,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
         ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "events"]
+        ["v1", "events"] -> True
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
         _ -> False
@@ -352,6 +363,7 @@ authenticateRequest env req path = case env.envAuth of
     headerToken = lookup hAuthorization (requestHeaders req) >>= bearerToken
     queryToken = case path of
         ["v1", "sessions", _, "events"] -> Text.encodeUtf8 <$> param "access_token" (queryParams req)
+        ["v1", "events"] -> Text.encodeUtf8 <$> param "access_token" (queryParams req)
         _ -> Nothing
 
 {- | Refuse access to another owner's session. It answers as if the session
@@ -515,9 +527,7 @@ deleteH :: ServerEnv -> Request -> SessionId -> IO Response
 deleteH env req sid = do
     dryRun <- boolParam "dry_run" False req
     plan <- orThrow $ deleteSession env.envRunner sid (if dryRun then DryRun else DeleteForReal)
-    pure $
-        json status200 $
-            Aeson.object ["sessions" .= plan.dpSessions, "continuations" .= plan.dpContinuations, "dry_run" .= plan.dpDryRun]
+    pure $ json status200 (Aeson.toJSON plan)
 
 messagesH :: ServerEnv -> Request -> SessionId -> IO Response
 messagesH env req sid = do
@@ -631,53 +641,117 @@ headerParams req =
 -- Events
 -------------------------------------------------------------------------------
 
-data Wake = ShuttingDown | Delivered (Maybe SessionEvent) | KeepAlive
+data Wake = ShuttingDown | Delivered (Maybe Event) | KeepAlive
 
-eventsH :: ServerEnv -> SessionId -> IO Response
-eventsH env sid = do
-    -- Subscribe before the snapshot, so no event falls between the two.
-    next <- subscribeSTM env.envRunner sid
+{- | Follow one session. Honours @Last-Event-ID@\/@?after=@ (G5): when the
+requested sequence number is still in the runner's ring, the missed events
+replay before the stream goes live, with no gap or duplicate at the
+boundary ('subscribeSTM'). When it is not (or none was given, a plain
+fresh connect), a @snapshot@ of the session opens the stream as before.
+-}
+eventsH :: ServerEnv -> Request -> SessionId -> IO Response
+eventsH env req sid = do
+    after <- parseAfter req
+    -- Subscribe before the snapshot, so no live event falls between the two.
+    subscribed <- subscribeSTM env.envRunner (OneSession sid) after
     (_, meta) <- loadSession env sid
     pure $ responseStream status200 headers $ \write flush -> do
         let send frame = write frame >> flush
-            loop = do
-                timer <- registerDelay env.envKeepAlive
-                let wake =
-                        asum
-                            [ ShuttingDown <$ (readTVar env.envShutdown >>= check)
-                            , Delivered <$> next
-                            , KeepAlive <$ (readTVar timer >>= check)
-                            ]
-                    -- Skip other sessions' events without resetting the timer.
-                    await =
-                        atomically wake >>= \case
-                            Delivered Nothing -> await
-                            other -> pure other
-                await >>= \case
-                    ShuttingDown -> pure ()
-                    KeepAlive -> send ": keepalive\n\n" >> loop
-                    Delivered (Just event) -> send (eventFrame event) >> loop
-                    Delivered Nothing -> loop
-        send (sseFrame "snapshot" (Aeson.toJSON meta))
-        loop
+        case subscribed of
+            Right next -> do
+                when (after == Nothing) $ send (sseFrame "snapshot" (Aeson.toJSON meta))
+                eventLoop env next send
+            Left ReplayUnavailable -> do
+                send (sseFrame "snapshot" (Aeson.toJSON meta))
+                subscribeSTM env.envRunner (OneSession sid) Nothing >>= \case
+                    Right next -> eventLoop env next send
+                    -- Unreachable: after = Nothing never reports unavailable.
+                    Left ReplayUnavailable -> pure ()
   where
-    headers =
-        [ (hContentType, "text/event-stream")
-        , (hCacheControl, "no-cache")
-        , ("X-Accel-Buffering", "no")
-        ]
+    headers = eventStreamHeaders
 
-eventFrame :: SessionEvent -> Builder
-eventFrame event = sseFrame (sessionEventKind event) $ case event of
-    RunStarted sid mode -> Aeson.object ["session_id" .= sid, "mode" .= runModeText mode]
-    SessionUpdated _ meta turn -> withFields (Aeson.toJSON meta) ["head_turn" .= turn]
-    CallsDeferred sid calls -> Aeson.object ["session_id" .= sid, "calls" .= calls]
-    RunStopped sid status -> Aeson.object ["session_id" .= sid, "status" .= status]
-    SessionFailed sid msg -> Aeson.object ["session_id" .= sid, "message" .= msg]
-    TextDelta sid text -> Aeson.object ["session_id" .= sid, "text" .= text]
-    ToolCallStarted sid callId toolName -> Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName]
-    ToolCallCompleted sid callId toolName succeeded ->
-        Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
+{- | Every session's events, or one owner's (G5's cross-session feed).
+@?scope=all@ needs authentication off, or an admin owner; @?scope=owner@
+(the default when a caller has an owner) is that caller's own events. No
+single snapshot makes sense across sessions, so a stream that cannot
+replay just resumes live, same as a first connection.
+-}
+allEventsH :: ServerEnv -> Request -> Caller -> IO Response
+allEventsH env req caller = do
+    scope <- resolveScope env req caller
+    after <- parseAfter req
+    subscribed <- subscribeSTM env.envRunner scope after
+    pure $ responseStream status200 eventStreamHeaders $ \write flush -> do
+        let send frame = write frame >> flush
+        case subscribed of
+            Right next -> eventLoop env next send
+            Left ReplayUnavailable ->
+                subscribeSTM env.envRunner scope Nothing >>= \case
+                    Right next -> eventLoop env next send
+                    Left ReplayUnavailable -> pure ()
+
+-- | Which sessions' events a caller of @GET \/v1\/events@ may see.
+resolveScope :: ServerEnv -> Request -> Caller -> IO SubscribeScope
+resolveScope env req (Caller owner) = case (param "scope" (queryParams req), owner) of
+    (Just "all", Nothing) -> pure AllSessions
+    (Just "all", Just o)
+        | o `elem` env.envAdmins -> pure AllSessions
+        | otherwise -> throwIO $ ApiError status403 "forbidden" "scope=all needs an admin owner (--admin-owners)"
+    (Just "owner", o) -> pure (Owner o)
+    (Nothing, Just o) -> pure (Owner (Just o))
+    (Nothing, Nothing) -> pure AllSessions
+    (Just other, _) -> throwIO $ ApiError status400 "bad_request" ("unknown scope: " <> other)
+
+-- | @Last-Event-ID@ (the SSE reconnect header) or @?after=@, whichever is given.
+parseAfter :: Request -> IO (Maybe EventSeq)
+parseAfter req = case asum [headerVal, param "after" (queryParams req)] of
+    Nothing -> pure Nothing
+    Just txt -> case readMaybe (Text.unpack txt) of
+        Just n -> pure (Just (EventSeq n))
+        Nothing -> badRequest "after/Last-Event-ID must be an integer event sequence number"
+  where
+    headerVal = Text.decodeUtf8 <$> lookup "Last-Event-ID" (requestHeaders req)
+
+eventStreamHeaders :: [Header]
+eventStreamHeaders =
+    [ (hContentType, "text/event-stream")
+    , (hCacheControl, "no-cache")
+    , ("X-Accel-Buffering", "no")
+    ]
+
+-- | The shutdown\/keepalive\/deliver loop shared by every event stream.
+eventLoop :: ServerEnv -> STM (Maybe Event) -> (Builder -> IO ()) -> IO ()
+eventLoop env next send = loop
+  where
+    loop = do
+        timer <- registerDelay env.envKeepAlive
+        let wake =
+                asum
+                    [ ShuttingDown <$ (readTVar env.envShutdown >>= check)
+                    , Delivered <$> next
+                    , KeepAlive <$ (readTVar timer >>= check)
+                    ]
+            -- Skip non-matching events without resetting the timer.
+            await =
+                atomically wake >>= \case
+                    Delivered Nothing -> await
+                    other -> pure other
+        await >>= \case
+            ShuttingDown -> pure ()
+            KeepAlive -> send ": keepalive\n\n" >> loop
+            Delivered (Just event) -> send (eventFrame event) >> loop
+            Delivered Nothing -> loop
+
+-- | An 'Event' as an SSE frame: @id@ is the sequence number ('EventSeq'),
+-- so a reconnecting client's @Last-Event-ID@ is exactly what to pass back.
+eventFrame :: Event -> Builder
+eventFrame ev =
+    "id: "
+        <> byteString (Text.encodeUtf8 (Text.pack (show seqInt)))
+        <> "\n"
+        <> sseFrame (eventKind ev.evBody) (Aeson.toJSON ev)
+  where
+    EventSeq seqInt = ev.evSeq
 
 -- | One event; JSON encoding has no raw newlines, so @data@ is one line.
 sseFrame :: Text -> Aeson.Value -> Builder
@@ -786,14 +860,7 @@ against a busy session, where it detaches attached tool calls -- and, with
 waiting behind them).
 -}
 messageFields :: Aeson.Object -> Aeson.Parser NewMessage
-messageFields o = do
-    prompt <- o .: "prompt"
-    media <- fromMaybe [] <$> o .:? "media"
-    interrupt <- fromMaybe False <$> o .:? "interrupt"
-    NewMessage prompt <$> mapM mediaItem media <*> pure interrupt
-  where
-    mediaItem = Aeson.withObject "media" $ \m ->
-        MediaAttachment <$> m .: "mime" <*> m .: "base64" <*> m .:? "filename"
+messageFields o = Aeson.parseJSON (Aeson.Object o)
 
 -- | @run@: @none@, @step@, or @until_blocked@ (the default).
 runField :: Aeson.Object -> Aeson.Parser (Maybe RunMode)
@@ -813,17 +880,6 @@ paramsField o =
         Nothing -> pure Map.empty
         Just (Aeson.Object obj) -> pure $ Map.fromList [(Key.toText k, v) | (k, v) <- KeyMap.toList obj]
         Just _ -> fail "params must be an object"
-
-runModeFromText :: Text -> Maybe RunMode
-runModeFromText = \case
-    "step" -> Just StepOnce
-    "until_blocked" -> Just UntilBlocked
-    _ -> Nothing
-
-runModeText :: RunMode -> Text
-runModeText = \case
-    StepOnce -> "step"
-    UntilBlocked -> "until_blocked"
 
 param :: Text -> QueryText -> Maybe Text
 param name params = case lookup name params of

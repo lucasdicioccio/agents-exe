@@ -52,7 +52,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.UUID as UUID
 
-import System.Agents.Media.Types (MediaAttachment)
+import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Session.Base (
     ContinuationToken (..),
     DeferredCallView,
@@ -249,11 +249,18 @@ data NewMessage = NewMessage
     }
     deriving (Show, Eq)
 
+{- | @{prompt, media: [{mime, base64, filename?}], interrupt}@ -- the wire
+shape @POST .../messages@ and @POST /v1/sessions@ already used. Note this
+is not 'MediaAttachment'\'s own JSON (@mimeType@\/@base64Data@, used when a
+'MediaAttachment' is nested in a stored 'Turn'): the request body has
+always spelled it @mime@\/@base64@, so the field names here are kept
+distinct on purpose.
+-}
 instance Aeson.ToJSON NewMessage where
     toJSON m =
         Aeson.object
             [ "prompt" .= m.nmText
-            , "media" .= m.nmMedia
+            , "media" .= map mediaToJSON m.nmMedia
             , "interrupt" .= m.nmInterrupt
             ]
 
@@ -261,8 +268,18 @@ instance Aeson.FromJSON NewMessage where
     parseJSON = Aeson.withObject "NewMessage" $ \o ->
         NewMessage
             <$> o .: "prompt"
-            <*> (maybe (pure []) pure =<< o .:? "media")
+            <*> (maybe (pure []) (mapM mediaFromJSON) =<< o .:? "media")
             <*> (maybe (pure False) pure =<< o .:? "interrupt")
+
+mediaToJSON :: MediaAttachment -> Aeson.Value
+mediaToJSON m =
+    Aeson.object $
+        ["mime" .= m.mediaMimeType, "base64" .= m.mediaBase64Data]
+            <> ["filename" .= fname | Just fname <- [m.mediaFilename]]
+
+mediaFromJSON :: Aeson.Value -> Aeson.Parser MediaAttachment
+mediaFromJSON = Aeson.withObject "media" $ \m ->
+    MediaAttachment <$> m .: "mime" <*> m .: "base64" <*> m .:? "filename"
 
 -------------------------------------------------------------------------------
 -- RunnerError
