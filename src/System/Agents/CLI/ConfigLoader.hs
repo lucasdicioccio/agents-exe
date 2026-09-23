@@ -35,6 +35,10 @@ module System.Agents.CLI.ConfigLoader (
     secretKeysFileIn,
     parseParamsFileValue,
     loadParamsFile,
+
+    -- * HostConfig
+    hostConfigFromResolved,
+    defaultServerDatabasePath,
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -58,6 +62,7 @@ import System.Agents.CLI.Aliases (
     resolveAliases,
  )
 import qualified System.Agents.FileLoader as FileLoader
+import System.Agents.Host (HostConfig, defaultHostConfig)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 
@@ -339,3 +344,29 @@ loadParamsFile path = do
     pure $ case Aeson.eitherDecode raw >>= parseParamsFileValue of
         Left err -> Left (Text.pack ("--params-file " <> path <> ": " <> err))
         Right params -> Right params
+
+-------------------------------------------------------------------------------
+-- HostConfig
+-------------------------------------------------------------------------------
+
+{- | Build a 'HostConfig' from a resolved agents-exe configuration, an API
+keys file and a database path, so 'System.Agents.Host.withHost' can be fed
+either explicit @--agent-file@s or the files 'loadAgentsExeConfig' resolved
+(@todos/os-as-standalone-server.md@, Phase 1, item 2). The agent files
+passed in take priority over 'rcAgentFiles' when non-empty, mirroring
+@--agent-file@ overriding the config file everywhere else in agents-exe.
+-}
+hostConfigFromResolved :: ResolvedConfig -> [FilePath] -> FilePath -> FilePath -> HostConfig
+hostConfigFromResolved rc explicitAgentFiles apiKeysFile dbPath =
+    defaultHostConfig agentFiles apiKeysFile dbPath
+  where
+    agentFiles = case explicitAgentFiles of
+        [] -> rc.rcAgentFiles
+        xs -> xs
+
+{- | Where @agents-exe serve@ puts its SQLite database when @--db@ is not
+given: next to the resolved sessions directory (its write location), rather
+than @./agents-server.db@ as plain @agents-server@ defaults to.
+-}
+defaultServerDatabasePath :: ResolvedConfig -> FilePath
+defaultServerDatabasePath rc = rc.rcSessionStore.sessionWritePrefix </> "agents-server.db"
