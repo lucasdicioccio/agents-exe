@@ -320,8 +320,10 @@ validation table above.
 
 `GET /v1/sessions/:id/events` is a
 [server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html)
-stream. It first sends a `snapshot` of the session's metadata, then one event
-per change:
+stream. Each frame carries an `id:` line (the event's sequence number, unique
+and increasing per server) alongside the usual `event:`/`data:`. It first
+sends a `snapshot` of the session's metadata (unless it is a replay -- see
+[Reconnecting](#reconnecting) below), then one event per change:
 
 | Event | Data |
 |---|---|
@@ -334,28 +336,40 @@ per change:
 | `text.delta` | `{session_id, text}`: the next piece of the LLM's answer, with `--stream-tokens` only. |
 | `tool.started` | `{session_id, tool_call_id, tool}`: a tool call still attached to the session (not deferred) started running. |
 | `tool.completed` | `{session_id, tool_call_id, tool, succeeded}`: that call reached a final state. `succeeded` is `false` for a failed or cancelled call. A call that both starts and finishes within one step is not reported (informational only; the stored session remains the source of truth). |
+| `session.created` | `{session_id, …}` (full session metadata): a new session was created. Only seen on `GET /v1/events` (below); a single session's own stream never reports its own creation. |
+| `session.deleted` | `{session_id}`: a session (and everything under it) was deleted. Only seen on `GET /v1/events`. |
 
 A typical run, from a `resume`:
 
 ```
+id: 101
 event: snapshot
 data: {"session_id":"4ed4…","status":"ready","version":1,…}
 
+id: 102
 event: session.updated
-data: {"session_id":"4ed4…","status":"running","version":2,"head_turn":{…},…}
+data: {"session_id":"4ed4…","status":"running","version":2,"head_turn":{…},…,"kind":"session.updated","seq":102}
 
+id: 103
 event: run.started
-data: {"mode":"until_blocked","session_id":"4ed4…"}
+data: {"mode":"until_blocked","session_id":"4ed4…","kind":"run.started","seq":103}
 
+id: 104
 event: session.updated
-data: {"session_id":"4ed4…","status":"running","version":3,"head_turn":{…},…}
+data: {"session_id":"4ed4…","status":"running","version":3,"head_turn":{…},…,"kind":"session.updated","seq":104}
 
+id: 105
 event: calls.deferred
-data: {"session_id":"4ed4…","calls":[{"continuation_token":"0dd0…",…}]}
+data: {"session_id":"4ed4…","calls":[{"continuation_token":"0dd0…",…}],"kind":"calls.deferred","seq":105}
 
+id: 106
 event: run.stopped
-data: {"session_id":"4ed4…","status":"waiting_external"}
+data: {"session_id":"4ed4…","status":"waiting_external","kind":"run.stopped","seq":106}
 ```
+
+(The `snapshot` frame has no `id:`: it is a point-in-time read, not an event
+in the sequence. `kind` and `seq` inside `data` are additive -- every field
+this doc's table names was already there.)
 
 ### Streaming answers
 
@@ -372,8 +386,43 @@ supports streaming: OpenAI and most OpenAI-compatible APIs do. For the
 (`stream_options.include_usage`).
 
 The stream stays open across runs. It sends a `: keepalive` comment after 15
-seconds without events. Events are not replayed: a client that reconnects
-gets a new snapshot and continues from there.
+seconds without events.
+
+### Reconnecting
+
+The server keeps a ring of the last 4096 events (across every session, not
+per session). A reconnecting client sends `Last-Event-ID` -- set
+automatically by the browser's `EventSource` on a dropped connection -- or,
+for any other client, `?after=<seq>` naming the same thing explicitly. Two
+cases:
+
+* The sequence number is still in the ring: the missed events replay first,
+  in order, with no gap and no duplicate at the point where the stream goes
+  live (the server takes the ring snapshot and subscribes to new events in
+  one atomic step). No `snapshot` frame is sent in this case -- the client
+  already has a consistent view and only needs what it missed.
+* It is older than everything still in the ring (a long disconnect, or a
+  server restart, which starts the sequence over): the stream falls back to
+  a fresh `snapshot` followed by live events, exactly like a first
+  connection. There is no way to tell "missed too much" apart from "never
+  connected before" other than this: either way, a `snapshot` means re-read
+  anything you need from it (and `GET /v1/sessions/:id` for the full turns).
+
+The ring is in-memory only: it does not survive a restart, and does not
+replace `session_mail`/the stored session as the durable record.
+
+### Following every session
+
+`GET /v1/events?scope=&after=` is the same stream, server-wide instead of
+per session: every event above, plus `session.created` and
+`session.deleted`, and the same `Last-Event-ID`/`after` reconnect (no
+`snapshot` here -- there is no single session to snapshot). `scope=owner`
+(the default when the caller has an owner) is that caller's own sessions;
+`scope=all` is every session on the server, and needs authentication off or
+the caller to be one of `--admin-owners`, since it would otherwise let any
+authenticated caller watch every other owner's sessions. This is what a
+live session list, or a dashboard across sessions, follows instead of
+polling `GET /v1/sessions`.
 
 ---
 
@@ -400,7 +449,8 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `POST /v1/sessions/:id/cancel-attached` | | `200` session metadata | 404 |
 | `POST /v1/sessions/:id/pause` | | `200` session metadata | 404 |
 | `GET /v1/sessions/:id/pending` | | `200 {calls}` | 404 |
-| `GET /v1/sessions/:id/events` | | `200 text/event-stream` | 404 |
+| `GET /v1/sessions/:id/events?after=` | | `200 text/event-stream` | 404 |
+| `GET /v1/events?scope=&after=` | | `200 text/event-stream` | 403 `forbidden` (`scope=all` without authentication off or an admin owner) |
 | `POST /v1/continuations/:token?wait=&timeout=` | `{result, resume?, params?}` | `202` or `200` session | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict`, see [Parameters](#parameters) |
 | `DELETE /v1/sessions/:id?dry_run=` | | `200 {sessions, continuations, dry_run}` | 404, 409 `run_in_progress` |
 
@@ -727,7 +777,7 @@ and, when known, `session_id`:
 |---|---|
 | `server.started` | `bind`, `port`, `agents`, `admin_owners`, `database`, `authentication` (`bearer` or `none`), `ui`, and `warning` when authentication is off |
 | `http.request` | `method`, `path`, `status`, `ms` (when the response starts) |
-| `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed` | `session_id` |
+| `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed`, `tool.started`, `tool.completed`, `session.created`, `session.deleted` | `session_id` |
 | `llm.request` / `llm.response` | `bytes`, token counts |
 | `llm.http` | `method`, `host`, `path`, `status` |
 | `sessions.recovered` | `session_ids` |
