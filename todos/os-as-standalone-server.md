@@ -2,7 +2,7 @@
 
 Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
-(commits 8de2a64..dc01dc8); Phases 2a and 2b done (0390c9f..6e16f91); 2c in
+(commits 8de2a64..dc01dc8); Phase 2 done (0390c9f..a1e0ea5); Phase 3 in
 progress. Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
 
@@ -430,6 +430,18 @@ index (`at_turn`), exactly as the TUI's `handleForkAtTurn` does, and the
 error is `UnknownTurn SessionId Int` (`unknown_turn`). The `Command`
 sketch's `atTurn :: TurnId` is wrong until turns get ids.
 
+2c landed: `ctxEmit :: Maybe (OSEmission -> IO ())` next to `ctxEventQueue`
+(an intermediate `OSEmission` type avoids a `Session.Base` → `Protocol`
+import cycle; the runner converts it to `EventBody`), the four kinds
+`subcall.started` / `subcall.completed` / `subcall.failed` /
+`tool.progressed`, the nine dead `OSEvent` constructors deleted, and
+`mailInToolResult`. Deviations: subcall events are stamped with the
+*parent* as `session_id` (so a subscriber of the parent sees them) and
+carry the child as `child_session_id`. **Open gap:** `mailInToolResult` is
+implemented in the synchronous step path only; the server always runs
+agents asynchronously, so it has no effect on server sessions until the
+async path (`runStepMAsync`) folds mail the same way. Tracked for Phase 5.
+
 `System.Agents.Protocol` with `Command`, `Event`, `EventBody`, JSON
 instances, and codecs for `NewMessage`, `RunMode`, `RunnerError`,
 `UserToolResponse` views. `AgentsServer.Api` re-implemented on top of it (no
@@ -440,6 +452,15 @@ and the ring, `listSessions`, `sendMail`, `createSession` with no message,
 the ring, fork, empty create, `mailInToolResult` folding.
 
 ### Phase 3: the TUI on the in-process runner
+
+Split in three sequential steps: 3a `RunnerClient` and `inProcessClient`
+in the library plus a serializable agent descriptor (`ListAgents` /
+`GetAgent` with model, prompt and tool activation, which also fixes the
+`GET /v1/agents` gap); 3b the TUI's startup, Agents tab, History tab and
+conversation layer rewritten on `RunnerClient` (the large step); 3c
+subcall visibility and tool-call activity from runner events, the
+pending-calls view with `CompleteCall`, and retiring `OSEvent`,
+`ctxEventQueue` and the TUI's event bridge.
 
 `inProcessClient`; the TUI conversation layer rewritten on `RunnerClient`
 (§4). `agents-exe tui` starts a `Host` + `SessionRunner` over the SQLite
