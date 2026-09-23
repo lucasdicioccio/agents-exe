@@ -3,14 +3,18 @@
 
 {- | Conversation lifecycle event handlers for the TUI.
 
-Phase 3b-i (@todos/os-as-standalone-server.md@): the TUI no longer builds
-or runs an agent itself (G1). Every handler that used to spawn a
-'System.Agents.Session.Loop.runUntilBlocked' thread, poll a 'MailRouter',
-or read\/write @Core@'s buffered-message\/paused-conversation maps is
-reduced to a compiling stub, tagged with the 'System.Agents.Host.Client'
-helper 3b-ii will call. Handlers that only touch local UI state (selection,
-focus, unread markers, the 'ConversationStatus' already on a 'Conversation')
-keep working as before.
+Phase 3b-ii (@todos/os-as-standalone-server.md@): every handler here now
+drives its work through 'System.Agents.Host.Client.RunnerClient' (Design
+§4). A 'Conversation' is a client-side view of a runner session: creating
+one calls 'Client.createSession', continuing a stored one calls
+'Client.getSession', sending calls 'Client.postMessage' (interrupting sets
+'System.Agents.Protocol.nmInterrupt'), pausing calls 'Client.pauseSession'
+(unpausing 'Client.resumeSession'), and forking (elsewhere, "System.Agents.TUI.Event")
+calls 'Client.forkSession'. Every session this TUI creates, forks, or
+messages after restoring is added to 'coreOwnedSessions' so quitting can
+ask the runner to stop it (see 'System.Agents.TUI.Event.stopConversations').
+Handlers that only touch local UI state (selection, focus, unread markers)
+are unchanged from 3b-i.
 -}
 module System.Agents.TUI.Event.Conversation (
     -- * New Conversation
@@ -38,9 +42,11 @@ module System.Agents.TUI.Event.Conversation (
 
     -- * Conversation Updates
     handleConversationUpdated,
+    handleSessionCreated,
     handleToolCallActivity,
     handleRunStopped,
     updateConversationStatus,
+    statusFromSessionStatus,
 
     -- * Pause/Resume
     handleTogglePauseConversation,
@@ -53,26 +59,36 @@ module System.Agents.TUI.Event.Conversation (
 
     -- * Core State Manipulation
     appendConversation,
+    mkConversation,
+    addConversationToCore,
+    markOwnedSession,
+    reportRunnerResult,
 ) where
 
 import Brick
 import Brick.BChan (writeBChan)
+import Brick.Widgets.Edit (editContentsL, getEditContents)
 import Brick.Widgets.List (listInsert, listSelectedElement)
 import qualified Brick.Widgets.List as List
-import Control.Concurrent.STM (atomically, modifyTVar)
+import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
 import Control.Lens (to, use, (%=), (.=), (^.))
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
+import qualified Data.Text.Zipper as TextZipper
 import qualified Data.UUID as UUID
 import qualified Data.Vector as Vector
 
 import Prod.Tracer (Tracer (..))
 
 import System.Agents.Base (ConversationId (..))
+import qualified System.Agents.Host.Client as Client
 import System.Agents.OS.Events (ToolCallActivity)
-import System.Agents.Session.Base (Session (..), SessionStatus (..))
-import System.Agents.SessionStore (SessionMeta, conversationIdToSessionId)
+import System.Agents.Protocol (NewMessage (..), RunMode (..), RunnerError, runnerErrorMessage)
+import System.Agents.Session.Base (Session (..), SessionId, SessionStatus (..))
+import System.Agents.SessionStore (SessionMeta (..), conversationIdToSessionId, sessionIdToConversationId)
 import System.Agents.TUI.ToolCallActivity (applyToolCallActivity)
 import System.Agents.TUI.Types (
     AppEvent (..),
@@ -85,12 +101,19 @@ import System.Agents.TUI.Types (
     TuiAgent (..),
     TuiState,
     agentList,
+    attachedFiles,
     conversationId,
     conversationList,
     conversationName,
+    coreClient,
     coreConversations,
+    coreOwnedSessions,
+    coreParams,
     emptyDraft,
     eventChan,
+    messageEditor,
+    selectedAttachmentIndex,
+    sessionList,
     tuiCore,
     tuiSlug,
     toolCallViews,
@@ -99,8 +122,7 @@ import System.Agents.TUI.Types (
     updateConversationSession,
  )
 
--- | Trace type for TUI conversation events. Nothing to trace yet in 3b-i;
--- 3b-ii will carry 'RunnerClient' command\/reply pairs here.
+-- | Trace type for TUI conversation events. Nothing to trace yet.
 newtype Trace = ConversationTrace Text.Text
     deriving (Show)
 
@@ -117,19 +139,88 @@ getFocusedConversation = do
     pure $ fmap snd mConv
 
 -------------------------------------------------------------------------------
+-- Core / client helpers
+-------------------------------------------------------------------------------
+
+-- | Read the current 'Core' (client, params, owned sessions, conversations).
+readCore :: EventM N TuiState Core
+readCore = use tuiCore >>= liftIO . readTVarIO
+
+-- | Build the client-side view of a session from its 'SessionMeta' (and, if
+-- already fetched, its full 'Session').
+mkConversation :: SessionMeta -> Maybe Session -> Bool -> Maybe ConversationId -> Int -> Conversation
+mkConversation meta mSess isSubcall parentId depth =
+    Conversation
+        { conversationId = sessionIdToConversationId meta.smSessionId
+        , conversationSessionId = meta.smSessionId
+        , conversationAgentSlug = slug
+        , conversationSession = mSess
+        , conversationMeta = Just meta
+        , conversationName = "@" <> slug
+        , conversationStatus = statusFromSessionStatus meta.smStatus
+        , conversationIsSubcall = isSubcall
+        , conversationParentId = parentId
+        , conversationSubcallDepth = depth
+        , conversationDraft = emptyDraft :: Draft
+        }
+  where
+    slug = fromMaybe "?" meta.smAgent
+
+-- | Translate a run's stop status (or a fresh 'SessionMeta.smStatus') into
+-- the conversation's local status.
+statusFromSessionStatus :: SessionStatus -> ConversationStatus
+statusFromSessionStatus StatusPaused = ConversationStatus_Paused
+statusFromSessionStatus StatusWaitingExternal = ConversationStatus_BlockedOnDeferred
+statusFromSessionStatus StatusRunning = ConversationStatus_Active
+statusFromSessionStatus _ = ConversationStatus_WaitingForInput
+
+-- | Add a conversation to 'Core' and to the visible list, at the front.
+addConversationToCore :: Conversation -> EventM N TuiState ()
+addConversationToCore conv = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
+    tuiUI . conversationList %= listInsert 0 conv
+
+-- | Record a session id as one this TUI started (embedded mode): due a
+-- 'Client.sendMail' 'StopRun' on quit ("System.Agents.TUI.Event".stopConversations).
+markOwnedSession :: SessionId -> EventM N TuiState ()
+markOwnedSession sid = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c{_coreOwnedSessions = Set.insert sid (c ^. coreOwnedSessions)}
+
+{- | Surface a 'RunnerClient' result the way every command handler does:
+an error never drops silently (it becomes a status-line error), a success
+refreshes the conversation's status from the returned 'SessionMeta'.
+-}
+reportRunnerResult :: Text.Text -> Either RunnerError SessionMeta -> EventM N TuiState ()
+reportRunnerResult _ (Left err) = showStatus StatusError (runnerErrorMessage err)
+reportRunnerResult okMsg (Right meta) = do
+    updateConversationStatus (sessionIdToConversationId meta.smSessionId) (statusFromSessionStatus meta.smStatus)
+    showStatus StatusInfo okMsg
+
+-------------------------------------------------------------------------------
 -- New Conversation
 -------------------------------------------------------------------------------
 
--- | Create a new conversation from the selected agent.
--- TODO(3b-ii): System.Agents.Host.Client.createSession
+-- | Create a new (promptless) conversation with the selected agent.
 handleNewConversationFromEditor :: Tracer IO Trace -> EventM N TuiState ()
 handleNewConversationFromEditor _tracer = do
     selected <- use (tuiUI . agentList . to listSelectedElement)
     case selected of
-        Just (_, baseTuiAgent) ->
-            showStatus StatusWarning $
-                "New conversation with @" <> tuiSlug baseTuiAgent <> " not wired yet (3b-ii: Client.createSession)"
         Nothing -> showStatus StatusWarning "No agent selected"
+        Just (_, baseTuiAgent) -> do
+            let slug = tuiSlug baseTuiAgent
+            core <- readCore
+            result <- liftIO $ Client.createSession (core ^. coreClient) slug Nothing Nothing (core ^. coreParams)
+            case result of
+                Left err -> showStatus StatusError (runnerErrorMessage err)
+                Right meta -> do
+                    let conv = mkConversation meta Nothing False Nothing 0
+                    addConversationToCore conv
+                    markOwnedSession meta.smSessionId
+                    handleNewConversation (conversationId conv)
+                    showStatus StatusInfo $ "Started @" <> slug
 
 -- | Handle new conversation event: select it in the list and mark it read.
 handleNewConversation :: ConversationId -> EventM N TuiState ()
@@ -145,60 +236,117 @@ handleNewConversation convId = do
 -- Restored Conversation
 -------------------------------------------------------------------------------
 
--- | Continue a session restored from the History tab.
--- TODO(3b-ii)/TODO(3b-iii): System.Agents.Host.Client.getSession, then
--- Client.postMessage or Client.resumeSession; the History tab itself is
--- only populated starting 3b-iii ('Client.listSessions').
+{- | Continue a session restored from the History tab (the 'sessionList'
+selection): if the currently selected agent differs from the stored
+session's 'smAgent', fork first ('Client.forkSession' with no turn index,
+i.e. the whole session, and the new agent slug -- "continue with another
+agent") and open the fork; otherwise open the source session as-is
+('runConversation'). Either way, the opened session only joins
+'coreOwnedSessions' once the user actually sends it a message
+('handleSendMessage'), except a fork, which this TUI created outright.
+-}
 handleRestoredConversation :: Tracer IO Trace -> EventM N TuiState ()
-handleRestoredConversation _tracer =
-    showStatus StatusWarning "Continuing a stored session is not wired yet (3b-ii/3b-iii)"
+handleRestoredConversation tracer = do
+    mSelectedSession <- use (tuiUI . sessionList . to listSelectedElement)
+    case mSelectedSession of
+        Nothing -> showStatus StatusWarning "No stored session selected"
+        Just (_, sourceMeta) -> do
+            mAgent <- use (tuiUI . agentList . to listSelectedElement)
+            case mAgent of
+                Nothing -> showStatus StatusWarning "No agent selected"
+                Just (_, baseTuiAgent) -> do
+                    let slug = tuiSlug baseTuiAgent
+                        sid = sourceMeta.smSessionId
+                    if sourceMeta.smAgent == Just slug
+                        then runConversation tracer slug sid
+                        else do
+                            core <- readCore
+                            forked <- liftIO $ Client.forkSession (core ^. coreClient) sid Nothing (Just slug)
+                            case forked of
+                                Left err -> showStatus StatusError (runnerErrorMessage err)
+                                Right meta -> do
+                                    markOwnedSession meta.smSessionId
+                                    runConversation tracer slug meta.smSessionId
+                                    showStatus StatusInfo $ "Forked to continue with @" <> slug
 
 -------------------------------------------------------------------------------
 -- Run Conversation
 -------------------------------------------------------------------------------
 
-{- | Build the client-side 'Conversation' view for a session and add it to
-'Core' and the visible list.
-
-TODO(3b-ii): this used to fork a 'System.Agents.Session.Loop.runUntilBlocked'
-thread; the runner now owns every session's run loop
-("System.Agents.Host.Runner"), so this becomes: call
-'System.Agents.Host.Client.createSession' (or 'Client.getSession' for a
-restored one), then insert the resulting 'Conversation' built from its
-'SessionMeta'.
+{- | Open an existing session (a fresh fork, or a stored one from the
+History tab) as a conversation: 'Client.getSession' for its full 'Session',
+then add and select it.
 -}
-runConversation :: Tracer IO Trace -> TuiAgent -> Session -> EventM N TuiState ()
-runConversation _tracer baseTuiAgent _session =
-    showStatus StatusWarning $
-        "Starting @" <> tuiSlug baseTuiAgent <> " not wired yet (3b-ii: Client.createSession)"
+runConversation :: Tracer IO Trace -> Text.Text -> SessionId -> EventM N TuiState ()
+runConversation _tracer slug sid = do
+    core <- readCore
+    result <- liftIO $ Client.getSession (core ^. coreClient) sid
+    case result of
+        Left err -> showStatus StatusError (runnerErrorMessage err)
+        Right (sess, meta) -> do
+            let conv = mkConversation meta (Just sess) False Nothing 0
+            addConversationToCore conv
+            handleNewConversation (conversationId conv)
+            showStatus StatusInfo $ "Opened @" <> slug
 
 -------------------------------------------------------------------------------
 -- Send Message
 -------------------------------------------------------------------------------
 
-{- | Send (or draft) a message in the current conversation.
+{- | Post the message editor's content (plus any attachments) to a
+conversation's session: 'Client.postMessage', with @interrupt@ controlling
+'System.Agents.Protocol.nmInterrupt' (bypasses a busy run rather than being
+folded as ordinary mail -- 'handleInterruptConversation').
 
-TODO(3b-ii): 'System.Agents.Host.Client.postMessage' when the session is
-idle. TODO(3b-iii): append-to-draft semantics (§5, D3) when it is busy,
-and the "send now" / draft editor behaviour.
+TODO(3b-iii): append-to-draft semantics (§5, D3) when the session is busy;
+for now, sending while a run is active still calls 'Client.postMessage',
+which the runner folds as mail.
 -}
+sendMessageTo :: Conversation -> Bool -> EventM N TuiState ()
+sendMessageTo conv interrupt = do
+    msgLines <- use (tuiUI . messageEditor . to getEditContents)
+    let msgText = Text.strip (Text.intercalate "\n" msgLines)
+    atts <- use (tuiUI . attachedFiles)
+    let attachments = Map.findWithDefault [] (conversationId conv) atts
+    if Text.null msgText && null attachments
+        then showStatus StatusWarning "Nothing to send"
+        else do
+            core <- readCore
+            let nm = NewMessage{nmText = msgText, nmMedia = attachments, nmInterrupt = interrupt}
+            result <-
+                liftIO $
+                    Client.postMessage
+                        (core ^. coreClient)
+                        (conversationSessionId conv)
+                        nm
+                        (Just UntilBlocked)
+                        (core ^. coreParams)
+            case result of
+                Left err -> showStatus StatusError (runnerErrorMessage err)
+                Right meta -> do
+                    tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+                    tuiUI . attachedFiles %= Map.delete (conversationId conv)
+                    tuiUI . selectedAttachmentIndex .= Nothing
+                    updateConversationStatus (conversationId conv) (statusFromSessionStatus meta.smStatus)
+                    markOwnedSession meta.smSessionId
+                    showStatus StatusInfo $
+                        if interrupt then "Interrupted " <> conversationName conv else "Sent to " <> conversationName conv
+
+-- | Send (or draft) a message in the current conversation.
 handleSendMessage :: EventM N TuiState ()
 handleSendMessage = do
     mConv <- getFocusedConversation
     case mConv of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just conv ->
-            showStatus StatusWarning $
-                "Sending to " <> conversationName conv <> " not wired yet (3b-ii: Client.postMessage)"
+        Just conv -> sendMessageTo conv False
 
 -------------------------------------------------------------------------------
 -- Subcall Management
 -------------------------------------------------------------------------------
 
 {- | Handle a subcall-started event by creating its conversation entry.
-TODO(3b-ii): this fires from the runner's event stream
-('System.Agents.Host.Client.subscribeAll' -> 'AppEvent_SubcallStarted'),
-not from a local OS event queue any more.
+Fires from the runner's event stream ('System.Agents.Host.Client.subscribeAll'
+-> 'AppEvent_SubcallStarted', bridged in "System.Agents.TUI.Core").
 -}
 handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text.Text -> Int -> EventM N TuiState ()
 handleSubcallStarted _tracer parentId subcallId slug depth = do
@@ -226,7 +374,7 @@ handleSubcallFailed subcallId err = do
 {- | Create a conversation entry for a sub-agent call, in the "started but
 not yet updated" state. Progress reaches it later through
 'handleConversationUpdated', once its own 'AppEvent_SessionUpdated's start
-arriving (3b-ii).
+arriving.
 -}
 createSubcallConversationEntry ::
     TuiAgent ->
@@ -249,9 +397,7 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
                 , conversationSubcallDepth = depth
                 , conversationDraft = emptyDraft :: Draft
                 }
-    coreRef <- use tuiCore
-    liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
-    tuiUI . conversationList %= listInsert 0 conv
+    addConversationToCore conv
     let convShort = shortConvId convId
         parentShort = shortConvId parentId
     showStatus StatusInfo $ "Created subcall d=" <> Text.pack (show depth) <> " cid=" <> convShort <> " pid=" <> parentShort
@@ -265,12 +411,7 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
 "needs input" runner event, only @run.stopped@ with a 'SessionStatus').
 -}
 handleRunStopped :: ConversationId -> SessionStatus -> EventM N TuiState ()
-handleRunStopped convId status = updateConversationStatus convId (fromSessionStatus status)
-  where
-    fromSessionStatus StatusPaused = ConversationStatus_Paused
-    fromSessionStatus StatusWaitingExternal = ConversationStatus_BlockedOnDeferred
-    fromSessionStatus StatusRunning = ConversationStatus_Active
-    fromSessionStatus _ = ConversationStatus_WaitingForInput
+handleRunStopped convId status = updateConversationStatus convId (statusFromSessionStatus status)
 
 -- | Update conversation status in core.
 updateConversationStatus :: ConversationId -> ConversationStatus -> EventM N TuiState ()
@@ -308,6 +449,27 @@ handleConversationUpdated convId sess meta = do
                 tuiUI . unreadConversations %= Set.insert convId
         _ -> pure ()
 
+{- | A new session was created somewhere in this owner's tree
+('AppEvent_SessionCreated', @session.created@): if it is a child of a
+conversation we already know about, and we do not already have an entry
+for it, add it -- this is how an agent-initiated @spawn-session@ shows up
+without the TUI having started it itself.
+-}
+handleSessionCreated :: SessionMeta -> EventM N TuiState ()
+handleSessionCreated meta = do
+    core <- readCore
+    let convs = core ^. coreConversations
+        childConvId = sessionIdToConversationId meta.smSessionId
+        alreadyKnown = any (\c -> conversationId c == childConvId) convs
+    case (alreadyKnown, meta.smParent) of
+        (False, Just parentSid) ->
+            case [c | c <- convs, conversationSessionId c == parentSid] of
+                (parentConv : _) -> do
+                    let conv = mkConversation meta Nothing True (Just (conversationId parentConv)) (conversationSubcallDepth parentConv + 1)
+                    addConversationToCore conv
+                _ -> pure ()
+        _ -> pure ()
+
 -------------------------------------------------------------------------------
 -- Pause/Resume
 -------------------------------------------------------------------------------
@@ -340,35 +502,46 @@ isConversationPaused convId core =
 -- Interrupt
 -------------------------------------------------------------------------------
 
--- | TODO(3b-ii): System.Agents.Host.Client.postMessage with 'nmInterrupt = True'.
+-- | Interrupt the session with the message editor's content: 'Client.postMessage' with @nmInterrupt = True@.
 handleInterruptConversation :: EventM N TuiState ()
 handleInterruptConversation = do
     mConv <- getFocusedConversation
     case mConv of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just conv ->
-            showStatus StatusWarning $
-                "Interrupt for " <> conversationName conv <> " not wired yet (3b-ii: Client.postMessage nmInterrupt)"
+        Just conv -> sendMessageTo conv True
 
--- | TODO(3b-ii): System.Agents.Host.Client.cancelAttachedCalls.
+-- | Cancel every tool call currently attached to the focused session: 'Client.cancelAttachedCalls'.
 handleCancelAttachedConversation :: EventM N TuiState ()
 handleCancelAttachedConversation = do
     mConv <- getFocusedConversation
     case mConv of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just conv ->
-            showStatus StatusWarning $
-                "Cancel-attached for " <> conversationName conv <> " not wired yet (3b-ii: Client.cancelAttachedCalls)"
+        Just conv -> do
+            core <- readCore
+            result <- liftIO $ Client.cancelAttachedCalls (core ^. coreClient) (conversationSessionId conv)
+            reportRunnerResult ("Cancelled attached calls for " <> conversationName conv) result
 
--- | TODO(3b-ii): System.Agents.Host.Client.pauseSession.
+{- | Pause or unpause the focused session for real, over the mailbox:
+'Client.pauseSession' when it is not paused yet, 'Client.resumeSession'
+with 'UntilBlocked' (the mode the chat page's Resume button uses) when it
+already is.
+-}
 handlePauseRunConversation :: EventM N TuiState ()
 handlePauseRunConversation = do
     mConv <- getFocusedConversation
     case mConv of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just conv ->
-            showStatus StatusWarning $
-                "Pause for " <> conversationName conv <> " not wired yet (3b-ii: Client.pauseSession)"
+        Just conv -> do
+            core <- readCore
+            let client = core ^. coreClient
+                sid = conversationSessionId conv
+            if conv.conversationStatus == ConversationStatus_Paused
+                then do
+                    result <- liftIO $ Client.resumeSession client sid UntilBlocked mempty
+                    reportRunnerResult ("Resumed " <> conversationName conv) result
+                else do
+                    result <- liftIO $ Client.pauseSession client sid
+                    reportRunnerResult ("Paused " <> conversationName conv) result
 
 -------------------------------------------------------------------------------
 -- Core State Manipulation

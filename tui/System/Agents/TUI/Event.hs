@@ -5,11 +5,11 @@
 
 This module is a thin dispatcher that imports and re-exports from submodules.
 
-Phase 3b-i (@todos/os-as-standalone-server.md@): dispatch now matches on
-the runner-shaped 'AppEvent' constructors (Types.Core); handlers that used
-to reach into a live OS-native agent (tool refresh, thread teardown on
-quit) are stubbed with a @TODO(3b-ii)@ naming the
-'System.Agents.Host.Client' helper that replaces them.
+Phase 3b-ii (@todos/os-as-standalone-server.md@): dispatch matches on the
+runner-shaped 'AppEvent' constructors (Types.Core), most of them bridged
+from 'System.Agents.Host.Client.subscribeAll' in "System.Agents.TUI.Core".
+Handlers that reach into the runner (tool refresh, fork-at-turn, quit) go
+through 'System.Agents.Host.Client'.
 -}
 module System.Agents.TUI.Event (
     -- * Main Event Handler
@@ -77,10 +77,11 @@ import qualified Brick.Widgets.List as List
 import Control.Concurrent.Async (async, poll)
 import Control.Concurrent.STM (readTVarIO)
 import Control.Lens (to, use, (%=), (.=), (^.))
-import Control.Monad (filterM, unless, when)
+import Control.Monad (filterM, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
@@ -90,11 +91,17 @@ import qualified Data.Vector as Vector
 import qualified Graphics.Vty as Vty
 import Prod.Tracer (Tracer (..))
 import System.Agents.Base (ConversationId (..))
+import qualified System.Agents.Host.Client as Client
+import System.Agents.Protocol (AgentDescriptor (..), runnerErrorMessage)
 import System.Agents.Session.Base (
+    ControlMsg (StopRun),
+    MailBody (Control),
+    Priority (Interrupt),
     Session (..),
-    newSessionId,
-    newTurnId,
+    SessionStatus (StatusRunning),
  )
+import System.Agents.SessionStore (SessionMeta (..))
+import System.Timeout (timeout)
 import System.Agents.SessionPrint (
     OrderPreference (..),
     PrintVisibility (..),
@@ -137,6 +144,7 @@ import System.Agents.TUI.Types (
     StatusMessage (..),
     StatusSeverity (..),
     Tab (..),
+    TuiAgent (..),
     TuiState,
     TurnNavigationState (..),
     WidgetName (..),
@@ -150,6 +158,7 @@ import System.Agents.TUI.Types (
     conversationList,
     conversationSession,
     conversationStatus,
+    coreClient,
     coreConversations,
     coreOwnedSessions,
     eventChan,
@@ -166,6 +175,7 @@ import System.Agents.TUI.Types (
     sessionList,
     statusMessage,
     tuiCore,
+    tuiSlug,
     tuiUI,
     turnNavigation,
     uiBufferedMessages,
@@ -202,21 +212,35 @@ handleQuit = do
             tuiUI . quitConfirmationPending .= True
             showStatus StatusWarning "Are you sure? Press Ctrl+Q again to quit"
 
-{- | Stop every session this TUI started (embedded mode) before quitting.
-
-TODO(3b-ii): 'System.Agents.Host.Client.sendMail' a @StopRun@ 'Control'
-envelope to every session id in 'coreOwnedSessions' (G1: quit used to be
+{- | Stop every session this TUI started (embedded mode) before quitting:
+'System.Agents.Host.Client.sendMail' a @StopRun@ 'Control' envelope to
+every owned session that is still 'StatusRunning' (G1: quit used to be
 @killThread@ on each conversation's run thread; the runner owns the run
-loop now, so quitting the TUI must ask it to stop, not tear down a local
-thread that no longer exists). An attached TUI (Phase 4, @--attach@) skips
-this entirely, per the spec's Design §4.
+loop now, so quitting the TUI asks it to stop instead). Bounded in time
+(as the old thread-teardown was) so a runner call stuck in a foreign call
+cannot keep the TUI from quitting; no thread is killed here, only the
+runner is asked to stop. An attached TUI (Phase 4, @--attach@) would skip
+this entirely, per the spec's Design §4 -- not reachable yet, since only
+embedded mode exists.
 -}
 stopConversations :: EventM N TuiState ()
 stopConversations = do
     coreRef <- use tuiCore
     core <- liftIO $ readTVarIO coreRef
-    let _owned = core ^. coreOwnedSessions
-    pure ()
+    let client = core ^. coreClient
+        owned = Set.toList (core ^. coreOwnedSessions)
+    liftIO $ void $ timeout conversationShutdownMicros $ mapM_ (stopSession client) owned
+  where
+    stopSession client sid = do
+        result <- Client.getSession client sid
+        case result of
+            Right (_, meta) | meta.smStatus == StatusRunning ->
+                void $ Client.sendMail client sid Interrupt (Control StopRun)
+            _ -> pure ()
+
+-- | How long to wait for owned sessions to stop when quitting.
+conversationShutdownMicros :: Int
+conversationShutdownMicros = 2000000
 
 -- | Reset quit confirmation state.
 resetQuitConfirmation :: EventM N TuiState ()
@@ -247,11 +271,11 @@ handleTurnNavigationEventWithSubcalls tracer navState ev = do
     case ev of
         AppEvent AppEvent_Heartbeat -> handleHeartbeat
         AppEvent (AppEvent_SessionUpdated convId sess meta) -> handleConversationUpdated convId sess meta
-        AppEvent (AppEvent_RunStarted _convId _mode) -> pure ()
+        AppEvent (AppEvent_RunStarted convId _mode) -> updateConversationStatus convId ConversationStatus_Active
         AppEvent (AppEvent_RunStopped convId status) -> handleRunStopped convId status
         AppEvent (AppEvent_SessionFailed convId err) -> showStatus StatusError err >> updateConversationStatus convId ConversationStatus_WaitingForInput
         AppEvent (AppEvent_CallsDeferred convId _calls) -> updateConversationStatus convId ConversationStatus_BlockedOnDeferred
-        AppEvent (AppEvent_SessionCreated _meta) -> pure ()
+        AppEvent (AppEvent_SessionCreated meta) -> handleSessionCreated meta
         AppEvent (AppEvent_SessionDeleted _convId) -> pure ()
         AppEvent (AppEvent_AgentTrace _) -> pure ()
         AppEvent (AppEvent_ShowStatus severity text) -> handleShowStatus severity text
@@ -264,7 +288,7 @@ handleTurnNavigationEventWithSubcalls tracer navState ev = do
             handleSubcallFailed subcallId err
         AppEvent (AppEvent_ToolCallActivity activity) ->
             handleToolCallActivity activity
-        AppEvent (AppEvent_AgentsRefreshed _agents) -> pure ()
+        AppEvent (AppEvent_AgentsRefreshed agents) -> handleAgentsRefreshed agents
         AppEvent (AppEvent_SessionsRefreshed _sessions) -> pure ()
         VtyEvent vtyEv
             | matchesEvent keymap EventExitTurnNavigation vtyEv -> do
@@ -297,11 +321,11 @@ handleNormalEvent tracer ev = do
     case ev of
         AppEvent AppEvent_Heartbeat -> handleHeartbeat
         AppEvent (AppEvent_SessionUpdated convId sess meta) -> handleConversationUpdated convId sess meta
-        AppEvent (AppEvent_RunStarted _convId _mode) -> pure ()
+        AppEvent (AppEvent_RunStarted convId _mode) -> updateConversationStatus convId ConversationStatus_Active
         AppEvent (AppEvent_RunStopped convId status) -> handleRunStopped convId status
         AppEvent (AppEvent_SessionFailed convId err) -> showStatus StatusError err >> updateConversationStatus convId ConversationStatus_WaitingForInput
         AppEvent (AppEvent_CallsDeferred convId _calls) -> updateConversationStatus convId ConversationStatus_BlockedOnDeferred
-        AppEvent (AppEvent_SessionCreated _meta) -> pure ()
+        AppEvent (AppEvent_SessionCreated meta) -> handleSessionCreated meta
         AppEvent (AppEvent_SessionDeleted _convId) -> pure ()
         AppEvent (AppEvent_AgentTrace _) -> pure ()
         AppEvent (AppEvent_ShowStatus severity text) -> handleShowStatus severity text
@@ -314,7 +338,7 @@ handleNormalEvent tracer ev = do
             handleSubcallFailed subcallId err
         AppEvent (AppEvent_ToolCallActivity activity) ->
             handleToolCallActivity activity
-        AppEvent (AppEvent_AgentsRefreshed _agents) -> pure ()
+        AppEvent (AppEvent_AgentsRefreshed agents) -> handleAgentsRefreshed agents
         AppEvent (AppEvent_SessionsRefreshed _sessions) -> pure ()
         VtyEvent vtyEv
             | matchesEvent keymap EventQuit vtyEv -> handleQuit
@@ -427,32 +451,27 @@ handleNormalEvent tracer ev = do
 -- Turn Navigation Event Handler (uses Navigation module but needs subcall handlers)
 -------------------------------------------------------------------------------
 
--- | Fork a new conversation at the selected turn.
--- TODO(3b-ii): System.Agents.Host.Client.forkSession
+{- | Fork a new conversation at the selected turn: 'Client.forkSession' with
+the newest-first turn index navigation already tracks (matches
+'System.Agents.Host.Runner.forkSession': @drop atTurn session.turns@, the
+same index the old local-fork code used), keeping the source's agent, then
+open the fork as a new conversation.
+-}
 handleForkAtTurn :: Tracer IO Trace -> TurnNavigationState -> EventM N TuiState ()
 handleForkAtTurn tracer navState = do
     let session = navState ^. navSession
         selectedIdx = navState ^. navSelectedTurnIndex
-        originalSessionId = session.sessionId
-    let turnsToKeep = drop selectedIdx session.turns
-    newSessionId' <- liftIO newSessionId
-    newTurnId' <- liftIO newTurnId
-    let forkedSession =
-            Session
-                { turns = turnsToKeep
-                , sessionId = newSessionId'
-                , forkedFromSessionId = Just originalSessionId
-                , turnId = newTurnId'
-                , sessionVersion = Just 1
-                , sessionExecutionMode = Nothing
-                , mailCursor = 0
-                }
-    mAgent <- use (tuiUI . agentList . to listSelectedElement)
-    case mAgent of
-        Just (_, baseTuiAgent) -> do
-            runConversation tracer baseTuiAgent forkedSession
+        sourceSessionId = session.sessionId
+    coreRef <- use tuiCore
+    core <- liftIO $ readTVarIO coreRef
+    result <- liftIO $ Client.forkSession (core ^. coreClient) sourceSessionId (Just selectedIdx) Nothing
+    case result of
+        Left err -> showStatus StatusError (runnerErrorMessage err)
+        Right meta -> do
+            markOwnedSession meta.smSessionId
+            runConversation tracer (fromMaybe "" meta.smAgent) meta.smSessionId
+            tuiUI . turnNavigation .= Nothing
             showStatus StatusInfo $ "Forked conversation at turn " <> Text.pack (show (selectedIdx + 1))
-        Nothing -> showStatus StatusWarning "No agent selected to fork conversation"
 
 -------------------------------------------------------------------------------
 -- Widget-Specific Event Handlers
@@ -824,17 +843,34 @@ cleanupAuxiliaryTasks = do
             Nothing -> True
             Just _ -> False
 
-{- | Handle F5 key: refresh tools for the selected agent.
-
-TODO(3b-ii): 'System.Agents.Host.Client.getAgent' to fetch a fresh
-'AgentDescriptor' (tools live on it now, not a live OS-native TVar).
+{- | Handle F5 key: refresh the agent roster from the client
+('Client.listAgents'; tools live on 'AgentDescriptor' now, not a live
+OS-native TVar). Posts 'AppEvent_AgentsRefreshed', handled below like any
+other runner-driven event.
 -}
 handleRefreshTools :: EventM N TuiState ()
 handleRefreshTools = do
-    selected <- use (tuiUI . selectedAgentInfo)
-    case selected of
-        Just _agent -> showStatus StatusWarning "Tool refresh not wired yet (3b-ii: Client.getAgent)"
-        Nothing -> showStatus StatusWarning "No agent selected"
+    coreRef <- use tuiCore
+    core <- liftIO $ readTVarIO coreRef
+    result <- liftIO $ Client.listAgents (core ^. coreClient)
+    case result of
+        Left err -> showStatus StatusError (runnerErrorMessage err)
+        Right agents -> do
+            chan <- use eventChan
+            liftIO $ writeBChan chan (AppEvent_AgentsRefreshed agents)
+
+-- | Apply a fresh agent roster ('AppEvent_AgentsRefreshed'), keeping the current selection by slug when possible.
+handleAgentsRefreshed :: [AgentDescriptor] -> EventM N TuiState ()
+handleAgentsRefreshed agents = do
+    let tuiAgents = Vector.fromList (map TuiAgent agents)
+    mPrevSlug <- fmap (tuiSlug . snd) <$> use (tuiUI . agentList . to listSelectedElement)
+    tuiUI . agentList .= List.list AgentListWidget tuiAgents 1
+    case mPrevSlug >>= \slug -> Vector.findIndex (\a -> tuiSlug a == slug) tuiAgents of
+        Just idx -> tuiUI . agentList . listSelectedL .= Just idx
+        Nothing -> pure ()
+    selected <- use (tuiUI . agentList . to listSelectedElement)
+    tuiUI . selectedAgentInfo .= fmap snd selected
+    showStatus StatusInfo "Agent roster refreshed"
 
 -------------------------------------------------------------------------------
 -- Markdown Export Handlers

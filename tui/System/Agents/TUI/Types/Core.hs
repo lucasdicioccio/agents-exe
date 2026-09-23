@@ -190,7 +190,9 @@ there is no per-step "subcall progress" event carrying a whole child
 data AppEvent
     = AppEvent_Heartbeat
     | -- | A session got a new stored version: its id, the fresh 'Session'
-      -- and 'SessionMeta' (@session.updated@, -- TODO(3b-ii): Client.subscribeAll).
+      -- and 'SessionMeta' (@session.updated@; bridged from
+      -- 'System.Agents.Host.Client.subscribeAll' in
+      -- 'System.Agents.TUI.Core.bridgeRunnerEvents').
       AppEvent_SessionUpdated ConversationId Session SessionMeta
     | -- | A run started on a session (@run.started@).
       AppEvent_RunStarted ConversationId RunMode
