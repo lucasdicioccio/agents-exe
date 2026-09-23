@@ -66,13 +66,50 @@ The Chats tab is for active conversations:
   - `●` - Waiting for input (unread)
   - `⏸` - Paused
   - `📎` - Has file attachments
-- **Main area**: Message editor, attachment list, queued messages (when paused), and conversation history
+- **Main area**: Message editor, attachment list, the draft panel (when the conversation has unsent draft text), and conversation history
+
+#### Draft (unsent text while the session is busy)
+
+Typing a message while a conversation is active, paused, or blocked on
+deferred calls does not post it right away: it is appended to that
+conversation's **draft**, one editable, unsent buffer per conversation
+(`todos/os-as-standalone-server.md` §5, D3). Three messages sent in a row
+while the model is thinking are almost always one message being
+elaborated, so each send appends a new paragraph to the draft instead of
+queuing a discrete message.
+
+- **Collapsed view** (default, shown below the message editor whenever the
+  focused conversation has a non-empty draft): the draft's first line plus
+  a size indicator (`N chars, M paragraphs`).
+- **Edit** (`Ctrl+A`): loads the draft into the message editor (its
+  attachments join the composer's) and clears it -- the editor is a full
+  text editor over the whole draft text; further sends fold right back
+  into a draft, or post, the normal way.
+- **Send now** (`Ctrl+G`): posts the draft immediately, as one message,
+  and clears it.
+- **Clear** (`Ctrl+D`): discards the draft.
+- **Ships automatically**: once the session's run stops with a status that
+  accepts input (idle or ready -- not paused, not blocked on deferred
+  calls, not failed), the TUI posts the whole draft as a single message
+  and clears it. A paused conversation keeps its draft until it is resumed
+  and stops again.
+
+The kernel never sees a draft: it only ever receives real messages and
+interrupts. An interrupt (`Ctrl+U`) always bypasses the draft and posts
+straight through.
 
 ### History Tab
 
-The History tab shows saved sessions:
-- **Left sidebar**: List of saved sessions from the session store
-- **Main area**: Session content viewer with search functionality
+The History tab shows saved sessions, across every backend the runner is
+configured with:
+- **Left sidebar**: List of sessions (`Client.listSessions`, newest
+  updated first), refreshed live as sessions are created, updated, or
+  deleted elsewhere -- a burst of updates during a run coalesces into at
+  most one refresh per heartbeat, and the current selection is kept by
+  session id across a refresh.
+- **Main area**: the selected session's full turn history (fetched once
+  via `Client.getSession` and cached by id), with the same usage summary,
+  signal metrics, and turn navigation/forking as the Chats tab.
 
 ### Help Tab
 
@@ -115,8 +152,6 @@ data UIState = UIState
     , _helpContent :: [Text]       -- Help text lines
     , _turnNavigation :: Maybe TurnNavigationState
     -- ^ When Just, we are in turn navigation mode
-    , _queuedMessagesFocus :: Maybe Int
-    -- ^ Index of currently selected queued message
     , _attachedFiles :: Map ConversationId [MediaAttachment]
     -- ^ Media attachments per conversation
     , _attachmentDialogState :: AttachmentDialogState
