@@ -1076,6 +1076,7 @@ mkAgent world strategy tool =
         , contextConfig = defaultContextConfig
         , ctxWorld = Just world
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Asynchronous
@@ -1095,4 +1096,5 @@ mkAgent world strategy tool =
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
         , ctxInterruptCompletions = False
+        , ctxMailInToolResult = False
         }

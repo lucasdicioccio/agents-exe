@@ -68,7 +68,7 @@ import qualified Data.Map.Strict as Map
 
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Core.World (World)
-import System.Agents.OS.Events (OSEvent)
+import System.Agents.OS.Events (OSEmission, OSEvent)
 import System.Agents.Session.Mailbox (MailRouter, SpawnSession, UnwatchSession, WatchSession)
 import System.Agents.Session.Types (Envelope, Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
 import System.Agents.Tools.Bindings.Types (DerivedNarrowing (..), ScopedBinding (..))
@@ -294,6 +294,12 @@ data ToolExecutionContext = ToolExecutionContext
     can emit events to notify the TUI of subcall lifecycle (start,
     progress, completion, failure).
     -}
+    , ctxEmit :: Maybe (OSEmission -> IO ())
+    {- ^ Optional hook alongside 'ctxEventQueue' (@todos/os-as-standalone-
+    server.md@, Phase 2c): the same subcall lifecycle \/ tool-call
+    activity events, reported so a runner can also broadcast them on its
+    event stream. Copied straight from 'System.Agents.Session.Base.Agent.ctxEmit'.
+    -}
     , ctxParentConversation :: Maybe ConversationId
     {- ^ Optional parent conversation ID for subcalls. When present,
     indicates this context is for a nested agent invocation, enabling
@@ -423,6 +429,8 @@ instance Show ToolExecutionContext where
             ++ worldStr
             ++ ", ctxEventQueue = "
             ++ eventQueueStr
+            ++ ", ctxEmit = "
+            ++ emitStr
             ++ ", ctxParentConversation = "
             ++ show (ctxParentConversation ctx)
             ++ ", ctxProgressCallback = "
@@ -444,6 +452,7 @@ instance Show ToolExecutionContext where
         portalStr = "<portal>"
         worldStr = "<world>"
         eventQueueStr = "<eventQueue>"
+        emitStr = "<emit>"
         progressCallbackStr = "<progressCallback>"
         cancelHookStr = "<cancelToolCall>"
         recordChildSessionStr = "<recordChildSession>"
@@ -485,6 +494,7 @@ instance FromJSON ToolExecutionContext where
             <*> v .: "maxDepth"
             <*> pure dummyPortal
             <*> v .: "allowedTools"
+            <*> pure Nothing
             <*> pure Nothing
             <*> pure Nothing
             <*> v .: "parentConversation"
@@ -568,6 +578,7 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxAllowedTools = tecsAllowedTools snap
         , ctxWorld = mWorld
         , ctxEventQueue = mEventQueue
+        , ctxEmit = Nothing
         , ctxParentConversation = tecsParentConversation snap
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -609,6 +620,7 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxAllowedTools = []
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -658,6 +670,7 @@ mkMinimalContext sessId convId tId portal =
         , ctxAllowedTools = []
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -715,6 +728,7 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxAllowedTools = []
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -774,6 +788,7 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxAllowedTools = allowed
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing

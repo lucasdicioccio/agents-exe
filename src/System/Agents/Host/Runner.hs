@@ -106,6 +106,7 @@ import System.Agents.AgentFactory (AgentDeps (..), AgentRole (..), buildAgent)
 import System.Agents.AgentTree (OSAgentNode (osNodeConfig))
 import qualified System.Agents.Base as Base
 import System.Agents.Host
+import System.Agents.OS.Events (OSEmission (..))
 import System.Agents.Protocol (
     DeleteMode (..),
     DeletionPlan (..),
@@ -556,11 +557,25 @@ newAgent runner live node = do
     -- accept mail (G2) and R1/R2 fold it into the session's turns.
     mailbox <- newDurableMailbox host.hostMail sid
     pure $
-        withWatchSession (serverWatchSession runner sid) (serverUnwatchSession runner) $
-            withSpawnSession (serverSpawnSession runner sid) $
-                withMailRouter (serverMailRouter runner) $
-                    withMailbox mailbox $
-                        withExecutionMode Asynchronous agent
+        withEmit (emit runner sid . toEventBody) $
+            withWatchSession (serverWatchSession runner sid) (serverUnwatchSession runner) $
+                withSpawnSession (serverSpawnSession runner sid) $
+                    withMailRouter (serverMailRouter runner) $
+                        withMailbox mailbox $
+                            withExecutionMode Asynchronous agent
+
+{- | Turn a Phase 2c 'OSEmission' (subcall lifecycle, tool-call activity)
+into the matching 'EventBody', for 'newAgent''s 'ctxEmit' hook. See
+'OSEmission' for why this conversion lives here rather than in
+"System.Agents.OS.Events" or "System.Agents.Protocol" directly: it is the
+one module that already depends on both.
+-}
+toEventBody :: OSEmission -> EventBody
+toEventBody = \case
+    EmitSubcallStarted parent child slug depth -> SubcallStarted parent child slug depth
+    EmitSubcallCompleted child result -> SubcallCompleted child result
+    EmitSubcallFailed child msg -> SubcallFailed child msg
+    EmitToolCallActivity activity -> ToolCallProgressed activity
 
 {- | The server's @spawn-session@ hook (§5): reuses 'spawnSession'
 (durable, recorded with 'sid' as parent) and reports only the new
@@ -759,6 +774,11 @@ watchedEventPayload event = case event of
     ToolCallStarted callId toolName -> Aeson.object ["tool_call_id" .= callId, "tool" .= toolName]
     ToolCallCompleted callId toolName succeeded ->
         Aeson.object ["tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
+    SubcallStarted parent child slug depth ->
+        Aeson.object ["parent_session_id" .= parent, "child_session_id" .= child, "agent" .= slug, "depth" .= depth]
+    SubcallCompleted child result -> Aeson.object ["child_session_id" .= child, "result" .= result]
+    SubcallFailed child msg -> Aeson.object ["child_session_id" .= child, "message" .= msg]
+    ToolCallProgressed activity -> Aeson.toJSON activity
     SessionCreated meta -> Aeson.object ["session_id" .= meta.smSessionId]
     SessionDeleted sid -> Aeson.object ["session_id" .= sid]
 

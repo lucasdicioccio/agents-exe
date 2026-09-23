@@ -53,6 +53,7 @@ import qualified Data.Text as Text
 import qualified Data.UUID as UUID
 
 import System.Agents.Media.Types (MediaAttachment (..))
+import System.Agents.OS.Events (ToolCallActivity)
 import System.Agents.Session.Base (
     ContinuationToken (..),
     DeferredCallView,
@@ -111,6 +112,10 @@ eventKind = \case
     TextDelta{} -> "text.delta"
     ToolCallStarted{} -> "tool.started"
     ToolCallCompleted{} -> "tool.completed"
+    SubcallStarted{} -> "subcall.started"
+    SubcallCompleted{} -> "subcall.completed"
+    SubcallFailed{} -> "subcall.failed"
+    ToolCallProgressed{} -> "tool.progressed"
     SessionCreated{} -> "session.created"
     SessionDeleted{} -> "session.deleted"
 
@@ -119,8 +124,13 @@ eventKind = \case
 instead.
 
 Phase 2c (@todos/os-as-standalone-server.md@) adds @SubcallStarted@,
-@SubcallCompleted@, @SubcallFailed@ and @ToolCallProgressed@ here, once
-'ctxEmit' replaces 'ctxEventQueue'. Not added yet.
+@SubcallCompleted@, @SubcallFailed@ and @ToolCallProgressed@: subcall
+lifecycle and tool-call activity, forwarded through 'ctxEmit' alongside the
+TUI's 'System.Agents.OS.Events.OSEvent' queue (which is not retired yet).
+A sub-agent run is not (yet, G10) its own runner session, so these carry
+'evSession' set to the *parent*'s id -- the session whose event stream a
+client is actually subscribed to -- and name the child by the 'SessionId'
+'System.Agents.AgentTree.OneShotTool' already generates for it.
 -}
 data EventBody
     = RunStarted RunMode
@@ -136,6 +146,18 @@ data EventBody
       ToolCallStarted ToolCallId Text
     | -- | A tracked tool call reached a final state.
       ToolCallCompleted ToolCallId Text Bool
+    | -- | A @prompt_agent_*@ call started a sub-agent run: the parent
+      -- session id, the child's session id, the helper's slug, and the
+      -- call depth (0 = root).
+      SubcallStarted SessionId SessionId Text Int
+    | -- | A sub-agent run finished: the child's session id and its result
+      -- text, when it produced one.
+      SubcallCompleted SessionId (Maybe Text)
+    | -- | A sub-agent run failed: the child's session id and the error message.
+      SubcallFailed SessionId Text
+    | -- | A background tool call started, reported progress, or reached a
+      -- final state.
+      ToolCallProgressed ToolCallActivity
     | -- | A session was created (server\/owner-wide feed only).
       SessionCreated SessionMeta
     | -- | A session was deleted (server\/owner-wide feed only).
@@ -179,10 +201,22 @@ bodyPairs = \case
     TextDelta text -> ["text" .= text]
     ToolCallStarted callId toolName -> ["tool_call_id" .= callId, "tool" .= toolName]
     ToolCallCompleted callId toolName ok -> ["tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= ok]
+    -- 'evSession' (the top-level "session_id") is the *parent* -- the
+    -- session a 'OneSession' subscriber actually watches, per
+    -- 'System.Agents.Host.Runner.matchesScope' -- so the child gets its
+    -- own key here rather than colliding with it.
+    SubcallStarted parent child slug depth ->
+        ["parent_session_id" .= parent, "child_session_id" .= child, "agent" .= slug, "depth" .= depth]
+    SubcallCompleted child result -> ["child_session_id" .= child, "result" .= result]
+    SubcallFailed child msg -> ["child_session_id" .= child, "message" .= msg]
+    ToolCallProgressed activity -> activityPairs activity
     SessionCreated meta -> metaPairs meta
     SessionDeleted sid -> ["session_id" .= sid]
   where
     metaPairs meta = case Aeson.toJSON meta of
+        Aeson.Object o -> KeyMap.toList o
+        _ -> []
+    activityPairs activity = case Aeson.toJSON activity of
         Aeson.Object o -> KeyMap.toList o
         _ -> []
 
@@ -196,6 +230,10 @@ bodyFromKindAndObject kind o = case kind of
     "text.delta" -> TextDelta <$> o .: "text"
     "tool.started" -> ToolCallStarted <$> o .: "tool_call_id" <*> o .: "tool"
     "tool.completed" -> ToolCallCompleted <$> o .: "tool_call_id" <*> o .: "tool" <*> o .: "succeeded"
+    "subcall.started" -> SubcallStarted <$> o .: "parent_session_id" <*> o .: "child_session_id" <*> o .: "agent" <*> o .: "depth"
+    "subcall.completed" -> SubcallCompleted <$> o .: "child_session_id" <*> o .:? "result"
+    "subcall.failed" -> SubcallFailed <$> o .: "child_session_id" <*> o .: "message"
+    "tool.progressed" -> ToolCallProgressed <$> Aeson.parseJSON (Aeson.Object o)
     "session.created" -> SessionCreated <$> Aeson.parseJSON (Aeson.Object o)
     "session.deleted" -> SessionDeleted <$> o .: "session_id"
     other -> fail ("unknown event kind: " <> Text.unpack other)

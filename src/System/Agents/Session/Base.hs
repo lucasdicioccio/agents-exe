@@ -189,6 +189,8 @@ module System.Agents.Session.Base (
     withSpawnSession,
     withWatchSession,
     withInterruptCompletions,
+    withMailInToolResult,
+    withEmit,
     SpawnSession,
 ) where
 
@@ -197,7 +199,7 @@ import Control.Concurrent.STM (TQueue)
 import System.Agents.Base (ConversationId)
 import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Core.World (World)
-import System.Agents.OS.Events (OSEvent)
+import System.Agents.OS.Events (OSEmission, OSEvent)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
 import System.Agents.Session.Mailbox (
@@ -354,6 +356,14 @@ data Agent r = Agent
     can emit events to notify the TUI of subcall lifecycle (start,
     progress, completion, failure).
     -}
+    , ctxEmit :: Maybe (OSEmission -> IO ())
+    {- ^ Optional hook alongside 'ctxEventQueue' (@todos/os-as-standalone-
+    server.md@, Phase 2c, G3\/G10): subcall lifecycle and tool-call
+    activity are reported through this hook too, so they reach a runner's
+    event stream (not only the TUI's single-consumer queue). Threaded down
+    to sub-agents the same way 'ctxEventQueue' is. 'Runner.newAgent' sets
+    it; every other builder leaves it 'Nothing'.
+    -}
     , ctxCallStack :: [CallStackEntry]
     {- ^ Call stack for tracking nested agent invocations. Root entry
     is at depth 0, and each nested call adds a new entry.
@@ -461,6 +471,13 @@ data Agent r = Agent
     Opt-in; 'False' (the default every existing 'Agent' gets) leaves R4
     unused and every other receive point's behaviour unaffected.
     -}
+    , ctxMailInToolResult :: Bool
+    {- ^ @todos/os-as-standalone-server.md@ Design §5 "What the LLM sees":
+    whether R1 folds mail into a trailing text block of the last tool
+    result of a round of attached tool calls, instead of a separate user
+    message. Opt-in; 'False' (the default) leaves R1's mail folding
+    unchanged.
+    -}
     }
     deriving (Functor)
 
@@ -520,6 +537,19 @@ LLM completion (@todos/session-mailbox.md@, R4/D5).
 -}
 withInterruptCompletions :: Bool -> Agent r -> Agent r
 withInterruptCompletions enabled agent = agent{ctxInterruptCompletions = enabled}
+
+{- | Set whether R1 folds mail into the last tool result of a round of
+attached tool calls instead of a separate user message
+(@todos/os-as-standalone-server.md@ Design §5).
+-}
+withMailInToolResult :: Bool -> Agent r -> Agent r
+withMailInToolResult enabled agent = agent{ctxMailInToolResult = enabled}
+
+{- | Install the runner's event-emission hook on an agent
+(@todos/os-as-standalone-server.md@, Phase 2c).
+-}
+withEmit :: (OSEmission -> IO ()) -> Agent r -> Agent r
+withEmit emitFn agent = agent{ctxEmit = Just emitFn}
 
 {- | Set the execution mode for an agent.
 

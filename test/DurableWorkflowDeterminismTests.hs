@@ -94,6 +94,7 @@ mkAsyncAgent policy =
         , contextConfig = defaultContextConfig
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Asynchronous
@@ -113,6 +114,7 @@ mkAsyncAgent policy =
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
         , ctxInterruptCompletions = False
+        , ctxMailInToolResult = False
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

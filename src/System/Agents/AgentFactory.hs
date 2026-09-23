@@ -195,6 +195,7 @@ buildAgent tracer deps role convId node = do
                 , contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
                 , ctxEventQueue = Nothing
+                , ctxEmit = Nothing
                 , ctxCallStack = callStack
                 , ctxParentConversation = parent
                 , ctxExecutionMode = Synchronous
@@ -216,6 +217,7 @@ buildAgent tracer deps role convId node = do
                 , ctxWatchSession = Nothing
                 , ctxUnwatchSession = Nothing
                 , ctxInterruptCompletions = False
+                , ctxMailInToolResult = False
                 }
     disclosed <-
         agentEvaluateActiveTools

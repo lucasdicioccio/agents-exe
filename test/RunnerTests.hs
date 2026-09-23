@@ -94,6 +94,8 @@ tests =
         , testCase "cancelAttachedCalls cancels a call while the loop is blocked waiting on it" cancelAllAttachedDuringWaitTest
         , testCase "pauseSession stops a run and leaves calls running by default" pauseSessionTest
         , testCase "a background call reports tool.started and tool.completed events" toolCallEventsTest
+        , testCase "a background call reports tool.progressed events through ctxEmit" toolCallProgressedEventsTest
+        , testCase "a sub-agent call reports subcall.started and subcall.completed on the parent's stream" subcallEventsTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
         , testCase "unwatch-session stops forwarding" unwatchSessionTest
@@ -1410,6 +1412,74 @@ toolCallEventsTest = do
         final.smStatus @?= StatusIdle
         completeKinds <- eventsUntilStopped completeEvents
         assertBool ("tool.completed among " <> show completeKinds) ("tool.completed" `elem` completeKinds)
+
+{- | Phase 2c (@todos/os-as-standalone-server.md@ G3): the async engine's
+'System.Agents.Session.Async.Engine.emitActivity' reports through
+'ctxEmit' -- which 'newAgent' always installs -- alongside the TUI's
+'ctxEventQueue', so 'tool.progressed' events (started, then completed)
+show up on a runner subscription for a call that runs through the engine,
+independent of the 'tool.started'\/'tool.completed' events
+'emitToolCallEvents' derives by diffing sessions.
+-}
+toolCallProgressedEventsTest :: Assertion
+toolCallProgressedEventsTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner (Base.slug node.osNodeConfig) (message "go") (Just StepOnce)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        startEvents <- subscribeSession runner sid
+        -- Second step: starts the background call, then yields while it runs.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        _ <- expectRight =<< awaitRun runner sid 5
+        startKinds <- eventsUntilStopped startEvents
+        assertBool ("tool.progressed among " <> show startKinds) ("tool.progressed" `elem` startKinds)
+
+        completeEvents <- subscribeSession runner sid
+        putMVar gate ()
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        completeKinds <- eventsUntilStopped completeEvents
+        assertBool ("tool.progressed among " <> show completeKinds) ("tool.progressed" `elem` completeKinds)
+
+{- | Phase 2c (@todos/os-as-standalone-server.md@ G3/G10): a
+@prompt_agent_\<slug\>@ call, run attached (sync) through
+'System.Agents.AgentTree.OneShotTool', reports 'subcall.started' and
+'subcall.completed' through the parent agent's 'ctxEmit' -- inherited by
+the sub-agent's own context the same way 'ctxEventQueue' is -- so they show
+up on the *parent*'s own event stream (its 'SessionId' is what 'newAgent'
+closes 'ctxEmit' over; see 'toEventBody'\'s haddock on why the child is not
+'evSession'). Modeled on 'deleteTest''s parent\/child fixture.
+-}
+subcallEventsTest :: Assertion
+subcallEventsTest = do
+    child <- testNode "{\"slug\": \"child\"}"
+    parent <-
+        testNode
+            "{\"slug\": \"parent\", \"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}}"
+    host <-
+        testHost [parent] $ \node c ->
+            if Base.slug node.osNodeConfig == "child"
+                then mockCompletion c
+                else firstThen [childCall] c
+    agentId <- AgentId <$> nextRandom
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "parent" (message "delegate") Nothing
+        let sid = meta.smSessionId
+        next <- subscribeSession runner sid
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        kinds <- eventsUntilStopped next
+        assertBool ("subcall.started among " <> show kinds) ("subcall.started" `elem` kinds)
+        assertBool ("subcall.completed among " <> show kinds) ("subcall.completed" `elem` kinds)
+  where
+    childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
 
 {- | A watch always permits watching one's own session ('isWithinSubtree's
 own-id short-circuit), so a session watching itself is enough to exercise

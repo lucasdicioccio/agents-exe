@@ -11,6 +11,9 @@ import Data.Time (getCurrentTime)
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import System.Agents.Base (ConversationId (..))
+import System.Agents.OS.Events (ToolCallActivity (..))
+import qualified System.Agents.OS.Events as OSEvents
 import System.Agents.Protocol
 import System.Agents.Session.Types (
     DeferredCallView (..),
@@ -65,6 +68,23 @@ tests =
         , testCase "Event: SessionDeleted" $ do
             sid <- newSessionId
             roundTrip (Event (EventSeq 42) (Just sid) (Just "alice") (SessionDeleted sid))
+        , testCase "Event: SubcallStarted" $ do
+            parent <- newSessionId
+            child <- newSessionId
+            eventRoundTripAt parent (SubcallStarted parent child "helper" 1)
+        , testCase "Event: SubcallCompleted" $ do
+            parent <- newSessionId
+            child <- newSessionId
+            eventRoundTripAt parent (SubcallCompleted child (Just "done"))
+        , testCase "Event: SubcallCompleted, no result" $ do
+            parent <- newSessionId
+            child <- newSessionId
+            eventRoundTripAt parent (SubcallCompleted child Nothing)
+        , testCase "Event: SubcallFailed" $ do
+            parent <- newSessionId
+            child <- newSessionId
+            eventRoundTripAt parent (SubcallFailed child "boom")
+        , testCase "Event: ToolCallProgressed" toolCallProgressedTest
         , testCase "eventKind matches every kind string" eventKindTest
         ]
 
@@ -78,6 +98,42 @@ eventRoundTrip body = do
     sid <- newSessionId
     let ev = Event (EventSeq 42) (Just sid) (Just "alice") body
     roundTrip ev
+
+{- | Like 'eventRoundTrip', but with an explicit 'evSession' -- needed for
+'SubcallStarted'\/'SubcallCompleted'\/'SubcallFailed', whose own payload
+names a *child* session distinct from 'evSession' (the parent the runner
+actually 'emit's on; see 'System.Agents.Protocol.bodyPairs'\'s note on
+"child_session_id" vs. the top-level "session_id").
+-}
+eventRoundTripAt :: SessionId -> EventBody -> Assertion
+eventRoundTripAt sid body = roundTrip (Event (EventSeq 42) (Just sid) (Just "alice") body)
+
+-- | 'ToolCallProgressed' carries a 'ToolCallActivity' whose own
+-- 'tcaSessionId' is the same session the event is about, so (unlike the
+-- subcall events) there is no 'evSession' collision to route around.
+toolCallProgressedTest :: Assertion
+toolCallProgressedTest = do
+    sid <- newSessionId
+    callId <- newToolCallId
+    now <- getCurrentTime
+    let mkActivity phase =
+            ToolCallActivity
+                { tcaSessionId = sid
+                , tcaConversationId = ConversationId (UUID.fromWords 1 2 3 4)
+                , tcaToolCallId = callId
+                , tcaProviderCallId = Just "call_1"
+                , tcaToolName = "search"
+                , tcaPhase = phase
+                , tcaAt = now
+                }
+    mapM_
+        (\phase -> eventRoundTripAt sid (ToolCallProgressed (mkActivity phase)))
+        [ OSEvents.ToolCallStarted
+        , OSEvents.ToolCallProgressed (Aeson.object ["pct" Aeson..= (50 :: Int)])
+        , OSEvents.ToolCallCompleted
+        , OSEvents.ToolCallFailed "timed out"
+        , OSEvents.ToolCallCancelled
+        ]
 
 {- | 'SessionUpdated'\/'SessionCreated' carry a full 'SessionMeta', whose own
 JSON already has @session_id@\/@owner@ fields; the 'Event' wrapper's

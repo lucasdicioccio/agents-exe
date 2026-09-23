@@ -56,7 +56,7 @@ import System.Agents.OS.Core.Types (
  )
 import System.Agents.OS.Core.World (World, setComponent)
 import qualified System.Agents.OS.Core.World as OSWorld
-import System.Agents.OS.Events (OSEvent (..))
+import System.Agents.OS.Events (OSEmission (..), OSEvent (..))
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -309,6 +309,7 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
         -- Extract OS integration fields from context
         let mWorld = Ctx.ctxWorld ctx
         let mEventQueue = Ctx.ctxEventQueue ctx
+        let mEmit = Ctx.ctxEmit ctx
         let mParentBaseConv = Ctx.ctxParentConversation ctx
 
         -- Narrowing helpers, down the call chain (§8.3, Phase 6): the
@@ -351,6 +352,7 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                 sessionAgent0
                     { SessionBase.ctxWorld = mWorld
                     , SessionBase.ctxEventQueue = mEventQueue
+                    , SessionBase.ctxEmit = mEmit
                     , SessionBase.ctxParams = Map.union withOverlay sessionAgent0.ctxParams
                     , SessionBase.ctxInheritedBindings = restBindings
                     , -- Phase 4 (@todos/session-mailbox.md@ §5, D12): handed
@@ -370,6 +372,7 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
         -- Create a fresh session with media support (version 1), identified
         -- like its conversation so that its own sub-agents can name it as parent
         let subcallSessionId = SessionStore.conversationIdToSessionId subcallBaseConvId
+        let parentSessionId = SessionStore.conversationIdToSessionId parentBaseConvId
         session0 <- Session [] subcallSessionId Nothing <$> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
 
         -- Phase 4 (@todos/session-mailbox.md@ §5): report this call's own
@@ -449,6 +452,15 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                 atomically $ writeTQueue eventQueue event
             Nothing -> pure ()
 
+        -- Phase 2c (@todos/os-as-standalone-server.md@ G3/G10): the same
+        -- event, reported to the runner's stream, alongside the TUI queue
+        -- above. The child is not (yet) a runner session, so its
+        -- 'SessionId' is just the id 'OneShotTool' already generates for
+        -- it (the session-shaped view of 'subcallBaseConvId').
+        traverse_
+            (\emitFn -> emitFn (EmitSubcallStarted parentSessionId subcallSessionId (Base.slug agent) depth))
+            mEmit
+
         -- Run the agent and handle result
         -- Session.run uses Base.ConversationId
         result <-
@@ -458,6 +470,7 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                 agentWithQuery
                 mWorld
                 mEventQueue
+                mEmit
                 (Ctx.ctxProgressCallback ctx)
 
         -- Return the result
@@ -477,10 +490,14 @@ runSubAgentWithEventEmission ::
     Agent (LlmTurnContent, Session) ->
     Maybe World ->
     Maybe (TQueue OSEvent) ->
+    -- | Phase 2c: the same lifecycle, alongside 'mEventQueue', reported to
+    -- the runner's stream.
+    Maybe (OSEmission -> IO ()) ->
     -- | Progress callback of the calling tool call, if it runs in the background
     Maybe (Aeson.Value -> IO ()) ->
     IO Text
-runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue mReportProgress = do
+runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue mEmit mReportProgress = do
+    let childSessionId = SessionStore.conversationIdToSessionId baseConvId
     -- Create a progress emitter function that sends SubcallProgress events
     let emitProgress sess = do
             forM_ mReportProgress ($ subAgentProgress sess)
@@ -517,40 +534,43 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue mRepor
                 pure $ Left errMsg
             )
 
-    -- Emit completion or failure event
+    -- Emit completion or failure event, on the TUI queue and (Phase 2c,
+    -- independent of it -- the server sets 'mEmit' without 'mEventQueue')
+    -- through the runner hook, and update the OS World status if any.
     -- OSEvent types use Base.ConversationId
-    case mEventQueue of
-        Just eventQueue -> do
-            case result of
-                Right resultText -> do
-                    let event =
-                            OSEvent_SubcallCompleted
-                                { subcallCompletedConversationId = baseConvId
-                                , subcallCompletedResult = resultText
-                                }
-                    atomically $ writeTQueue eventQueue event
-                    -- Update OS World status if available
-                    -- Convert Base.ConversationId to OS types for World update
-                    case mWorld of
-                        Just world -> do
-                            let osConvId = baseConversationIdToOS baseConvId
-                            updateConversationStatus world osConvId ConversationArchived
-                        Nothing -> pure ()
-                Left errMsg -> do
-                    let event =
-                            OSEvent_SubcallFailed
-                                { subcallFailedConversationId = baseConvId
-                                , subcallFailedError = errMsg
-                                }
-                    atomically $ writeTQueue eventQueue event
-                    -- Update OS World status if available
-                    -- Convert Base.ConversationId to OS types for World update
-                    case mWorld of
-                        Just world -> do
-                            let osConvId = baseConversationIdToOS baseConvId
-                            updateConversationStatus world osConvId (ConversationError errMsg)
-                        Nothing -> pure ()
-        Nothing -> pure ()
+    case result of
+        Right resultText -> do
+            forM_ mEventQueue $ \eventQueue -> do
+                let event =
+                        OSEvent_SubcallCompleted
+                            { subcallCompletedConversationId = baseConvId
+                            , subcallCompletedResult = resultText
+                            }
+                atomically $ writeTQueue eventQueue event
+            traverse_ (\emitFn -> emitFn (EmitSubcallCompleted childSessionId (Just resultText))) mEmit
+            -- Update OS World status if available
+            -- Convert Base.ConversationId to OS types for World update
+            case mWorld of
+                Just world -> do
+                    let osConvId = baseConversationIdToOS baseConvId
+                    updateConversationStatus world osConvId ConversationArchived
+                Nothing -> pure ()
+        Left errMsg -> do
+            forM_ mEventQueue $ \eventQueue -> do
+                let event =
+                        OSEvent_SubcallFailed
+                            { subcallFailedConversationId = baseConvId
+                            , subcallFailedError = errMsg
+                            }
+                atomically $ writeTQueue eventQueue event
+            traverse_ (\emitFn -> emitFn (EmitSubcallFailed childSessionId errMsg)) mEmit
+            -- Update OS World status if available
+            -- Convert Base.ConversationId to OS types for World update
+            case mWorld of
+                Just world -> do
+                    let osConvId = baseConversationIdToOS baseConvId
+                    updateConversationStatus world osConvId (ConversationError errMsg)
+                Nothing -> pure ()
 
     -- Return result or re-throw error
     case result of

@@ -932,6 +932,7 @@ mkAgentWithWorld world mode policy =
         , contextConfig = defaultContextConfig
         , ctxWorld = Just world
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = mode
@@ -951,6 +952,7 @@ mkAgentWithWorld world mode policy =
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
         , ctxInterruptCompletions = False
+        , ctxMailInToolResult = False
         }
 
 -------------------------------------------------------------------------------

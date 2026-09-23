@@ -271,6 +271,7 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , contextConfig = defaultContextConfig
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Asynchronous
@@ -290,6 +291,7 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
         , ctxInterruptCompletions = False
+        , ctxMailInToolResult = False
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -306,6 +308,7 @@ mkSimpleAgent =
         , contextConfig = defaultContextConfig
         , ctxWorld = Nothing
         , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Synchronous
@@ -325,6 +328,7 @@ mkSimpleAgent =
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
         , ctxInterruptCompletions = False
+        , ctxMailInToolResult = False
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

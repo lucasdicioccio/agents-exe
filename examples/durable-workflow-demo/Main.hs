@@ -149,6 +149,7 @@ mkDemoAgent convId = do
             , contextConfig = defaultContextConfig
             , ctxWorld = Nothing
             , ctxEventQueue = Nothing
+            , ctxEmit = Nothing
             , ctxCallStack = [CallStackEntry "durable-demo" convId 0]
             , ctxParentConversation = Nothing
             , ctxExecutionMode = Asynchronous
@@ -170,6 +171,7 @@ mkDemoAgent convId = do
             , ctxWatchSession = Nothing
             , ctxUnwatchSession = Nothing
             , ctxInterruptCompletions = False
+            , ctxMailInToolResult = False
             }
 
 -------------------------------------------------------------------------------
