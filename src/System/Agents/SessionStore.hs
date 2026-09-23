@@ -286,6 +286,27 @@ data SessionQuery = SessionQuery
     }
     deriving (Show, Eq)
 
+instance Aeson.ToJSON SessionQuery where
+    toJSON q =
+        Aeson.object
+            [ "agent" Aeson..= sqAgent q
+            , "statuses" Aeson..= sqStatuses q
+            , "parent" Aeson..= sqParent q
+            , "owner" Aeson..= sqOwner q
+            , "updated_before" Aeson..= sqUpdatedBefore q
+            , "limit" Aeson..= sqLimit q
+            ]
+
+instance Aeson.FromJSON SessionQuery where
+    parseJSON = Aeson.withObject "SessionQuery" $ \o ->
+        SessionQuery
+            <$> o Aeson..:? "agent"
+            <*> o Aeson..:? "statuses"
+            <*> o Aeson..:? "parent"
+            <*> o Aeson..:? "owner"
+            <*> o Aeson..:? "updated_before"
+            <*> o Aeson..:? "limit"
+
 -- | A query matching every session.
 allSessionsQuery :: SessionQuery
 allSessionsQuery = SessionQuery Nothing Nothing Nothing Nothing Nothing Nothing

@@ -42,6 +42,7 @@ module System.Agents.Host.Runner (
     newSessionRunnerWith,
     createSession,
     createSessionAs,
+    createSessionAsWithParent,
     spawnSession,
     sessionOwner,
     postMessage,
@@ -60,6 +61,8 @@ module System.Agents.Host.Runner (
     serverUnwatchSession,
     getSession,
     listSessions,
+    listAgents,
+    getAgent,
     awaitRun,
     recoverOnStartup,
 
@@ -67,6 +70,11 @@ module System.Agents.Host.Runner (
     DeleteMode (..),
     DeletionPlan (..),
     deleteSession,
+
+    -- * Agent descriptors (G6)
+    AgentDescriptor (..),
+    ToolDescriptor (..),
+    AgentParameter (..),
 
     -- * Events
     Event (..),
@@ -103,11 +111,14 @@ import Prod.Tracer (contramap, runTracer)
 import System.Timeout (timeout)
 
 import System.Agents.AgentFactory (AgentDeps (..), AgentRole (..), buildAgent)
-import System.Agents.AgentTree (OSAgentNode (osNodeConfig))
+import System.Agents.AgentTree (OSAgentNode (..))
 import qualified System.Agents.Base as Base
+import System.Agents.AgentStore (StoredAgent (..))
 import System.Agents.Host
 import System.Agents.OS.Events (OSEmission (..))
 import System.Agents.Protocol (
+    AgentDescriptor (..),
+    AgentParameter (..),
     DeleteMode (..),
     DeletionPlan (..),
     Event (..),
@@ -116,7 +127,9 @@ import System.Agents.Protocol (
     NewMessage (..),
     RunMode (..),
     RunnerError (..),
+    RunnerStats (..),
     SubscribeScope (..),
+    ToolDescriptor (..),
     eventKind,
     nextEventSeq,
  )
@@ -142,6 +155,8 @@ import System.Agents.SessionStore (
     freshSessionMeta,
     sessionIdToConversationId,
  )
+import System.Agents.ToolRegistration (ToolRegistration (..))
+import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Params.Types (
     ParamName,
     ParamScope (..),
@@ -218,12 +233,6 @@ data LiveSession = LiveSession
     'MissingRequiredParams' (@todos/tool-partial-application.md@, Phase 4).
     -}
     }
-
-data RunnerStats = RunnerStats
-    { rsLiveSessions :: Int
-    , rsActiveRuns :: Int
-    }
-    deriving (Show, Eq)
 
 -- | A versioned write lost to a writer outside this runner.
 newtype ConcurrentModification = ConcurrentModification VersionConflict
@@ -1689,6 +1698,66 @@ listSessions runner query = do
         case mLive of
             Nothing -> pure meta
             Just live -> maybe meta snd <$> readTVarIO live.lsLatest
+
+{- | Every root agent this host knows, as an 'AgentDescriptor' (G6, the
+"agent details" gap row: model, system prompt, tool activation, helpers --
+a superset of what @GET \/v1\/agents@ used to answer with).
+-}
+listAgents :: SessionRunner -> IO [AgentDescriptor]
+listAgents runner = do
+    agents <- hostAllAgents runner.srHost
+    mapM (uncurry (agentDescriptor runner)) (Map.toList agents)
+
+-- | One root agent's descriptor, by slug; 'Nothing' if there is none.
+getAgent :: SessionRunner -> Text -> IO (Maybe AgentDescriptor)
+getAgent runner slug = do
+    agents <- hostAllAgents runner.srHost
+    mapM (agentDescriptor runner slug) (Map.lookup slug agents)
+
+-- | Build one agent's 'AgentDescriptor' from its live 'OSAgentNode'.
+agentDescriptor :: SessionRunner -> Text -> (AgentSource, OSAgentNode) -> IO AgentDescriptor
+agentDescriptor runner slug (source, node) = do
+    tools <- readTVarIO node.osNodeTools
+    resolved <- readTVarIO node.osNodeParams
+    let host = runner.srHost
+        cfg = node.osNodeConfig
+        pinnedNames = Set.fromList [n | (n, pv) <- Map.toList host.hostProcessParams, pv.pvPinned]
+        decls = fromMaybe [] (Base.parameters cfg)
+        toParam :: ParameterDecl -> AgentParameter
+        toParam d =
+            AgentParameter
+                { apName = d.paramName
+                , apDescription = d.paramDescription
+                , apSecret = d.paramSecret
+                , apScope = d.paramScope
+                , apRequired = d.paramRequired
+                , apBound = Map.member d.paramName resolved
+                , apPinned = d.paramScope == ScopeProcess || d.paramName `Set.member` pinnedNames
+                }
+        toTool :: ToolRegistration -> ToolDescriptor
+        toTool tr =
+            ToolDescriptor
+                { tdName = tr.declareTool.toolDescriptionName.getToolName
+                , tdDescription = tr.declareTool.toolDescriptionText
+                , tdActivation = tr.toolActivation
+                }
+        (src, updatedAt, updatedBy, config) = case source of
+            FromFile -> ("file", Nothing, Nothing, Nothing)
+            FromDatabase sa -> ("database", Just sa.saUpdatedAt, sa.saUpdatedBy, Just (Aeson.toJSON sa.saConfig))
+    pure
+        AgentDescriptor
+            { adSlug = slug
+            , adDescription = Base.announce cfg
+            , adModel = Base.modelName cfg
+            , adSystemPrompt = Base.systemPrompt cfg
+            , adSource = src
+            , adTools = map toTool tools
+            , adParameters = map toParam decls
+            , adHelpers = [Base.slug c.osNodeConfig | c <- node.osNodeChildren]
+            , adUpdatedAt = updatedAt
+            , adUpdatedBy = updatedBy
+            , adConfig = config
+            }
 
 {- | Wait until the session's active run stops, or the timeout expires.
 

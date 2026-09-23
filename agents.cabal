@@ -194,6 +194,7 @@ library agents-lib
                     , System.Agents.AgentStore
                     , System.Agents.Host
                     , System.Agents.Host.Runner
+                    , System.Agents.Host.Client
                     , System.Agents.OneShot
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Client

@@ -41,6 +41,18 @@ module System.Agents.Protocol (
     DeleteMode (..),
     DeletionPlan (..),
     SubscribeScope (..),
+
+    -- * Runner stats
+    RunnerStats (..),
+
+    -- * Agent descriptors (G6, Phase 3a)
+    AgentDescriptor (..),
+    ToolDescriptor (..),
+    AgentParameter (..),
+
+    -- * Commands and replies (Phase 3a)
+    Command (..),
+    Reply (..),
 ) where
 
 import Data.Aeson ((.:), (.:?), (.=))
@@ -48,8 +60,11 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import Data.Int (Int64)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Time (NominalDiffTime, UTCTime)
 import qualified Data.UUID as UUID
 
 import System.Agents.Media.Types (MediaAttachment (..))
@@ -57,14 +72,21 @@ import System.Agents.OS.Events (ToolCallActivity)
 import System.Agents.Session.Base (
     ContinuationToken (..),
     DeferredCallView,
+    Envelope,
+    MailBody,
+    Priority,
+    Receipt,
+    Session,
     SessionId (..),
     SessionStatus (..),
     ToolCallId,
     Turn,
+    UserToolResponse,
     sessionStatusText,
  )
-import System.Agents.SessionStore (SessionMeta, VersionConflict (..))
-import System.Agents.Tools.Params.Types (ParamName)
+import System.Agents.SessionStore (SessionMeta, SessionQuery, VersionConflict (..))
+import System.Agents.Tools.Activation (Activation)
+import System.Agents.Tools.Params.Types (ParamName, ParamScope)
 
 -------------------------------------------------------------------------------
 -- Sequence numbers
@@ -352,6 +374,12 @@ data RunnerError
       (newest first), which this carries instead.
       -}
       UnknownTurn SessionId Int
+    | {- | A 'RunnerClient' helper ('System.Agents.Host.Client') got a
+      'Reply' of the wrong shape for the 'Command' it sent -- a bug in the
+      dispatch table ('inProcessClient'\/a future @httpClient@), not
+      something a caller can provoke.
+      -}
+      UnexpectedReply
     deriving (Show, Eq)
 
 -- | The @error@ code an HTTP answer gives for a 'RunnerError' (matches
@@ -372,6 +400,7 @@ runnerErrorCode = \case
     MissingRequiredParams _ -> "params_required"
     MailboxRejected _ -> "mailbox_full"
     UnknownTurn{} -> "unknown_turn"
+    UnexpectedReply -> "unexpected_reply"
 
 -- | The human-readable @message@ an HTTP answer gives for a 'RunnerError'.
 runnerErrorMessage :: RunnerError -> Text
@@ -390,6 +419,7 @@ runnerErrorMessage = \case
     MissingRequiredParams names -> "required parameter(s) not bound: " <> Text.intercalate ", " names
     MailboxRejected sid -> "session " <> showId sid <> " has too much unread mail; try again later"
     UnknownTurn sid idx -> "session " <> showId sid <> " has no turn at index " <> Text.pack (show idx)
+    UnexpectedReply -> "the runner answered with a reply of the wrong shape for this command"
   where
     showId = Text.pack . show
 
@@ -427,6 +457,7 @@ runnerErrorFromCode code msg = case code of
     "params_required" -> MissingRequiredParams []
     "mailbox_full" -> MailboxRejected placeholderSessionId
     "unknown_turn" -> UnknownTurn placeholderSessionId 0
+    "unexpected_reply" -> UnexpectedReply
     _ -> UnknownAgent msg
   where
     placeholderSessionId = SessionId UUID.nil
@@ -502,3 +533,353 @@ instance Aeson.FromJSON SubscribeScope where
             "owner" -> Owner <$> o .:? "owner"
             "all" -> pure AllSessions
             other -> fail ("unknown subscribe scope: " <> Text.unpack other)
+
+-------------------------------------------------------------------------------
+-- Runner stats
+-------------------------------------------------------------------------------
+
+-- | A snapshot of a 'System.Agents.Host.Runner.SessionRunner''s load,
+-- as @GET \/healthz@ and 'Stats' report it.
+data RunnerStats = RunnerStats
+    { rsLiveSessions :: Int
+    , rsActiveRuns :: Int
+    }
+    deriving (Show, Eq)
+
+instance Aeson.ToJSON RunnerStats where
+    toJSON s = Aeson.object ["live_sessions" .= s.rsLiveSessions, "active_runs" .= s.rsActiveRuns]
+
+instance Aeson.FromJSON RunnerStats where
+    parseJSON = Aeson.withObject "RunnerStats" $ \o ->
+        RunnerStats <$> o .: "live_sessions" <*> o .: "active_runs"
+
+-------------------------------------------------------------------------------
+-- Agent descriptors (G6)
+-------------------------------------------------------------------------------
+
+{- | One declared parameter of an agent, as the Agents tab and @GET
+\/v1\/agents@ show it: never the value (a secret must not leak), only
+whether the process already has one bound and whether a client could
+override it.
+-}
+data AgentParameter = AgentParameter
+    { apName :: ParamName
+    , apDescription :: Maybe Text
+    , apSecret :: Bool
+    , apScope :: ParamScope
+    , apRequired :: Bool
+    , apBound :: Bool
+    , apPinned :: Bool
+    }
+    deriving (Show, Eq)
+
+instance Aeson.ToJSON AgentParameter where
+    toJSON p =
+        Aeson.object $
+            [ "name" .= p.apName
+            , "secret" .= p.apSecret
+            , "scope" .= p.apScope
+            , "required" .= p.apRequired
+            , "bound" .= p.apBound
+            , "pinned" .= p.apPinned
+            ]
+                <> ["description" .= d | Just d <- [p.apDescription]]
+
+instance Aeson.FromJSON AgentParameter where
+    parseJSON = Aeson.withObject "AgentParameter" $ \o ->
+        AgentParameter
+            <$> o .: "name"
+            <*> o .:? "description"
+            <*> o .: "secret"
+            <*> o .: "scope"
+            <*> o .: "required"
+            <*> o .: "bound"
+            <*> o .: "pinned"
+
+{- | One tool an agent's node currently registers, with the activation the
+Agents tab renders as @[A]@\/@[D:group]@\/@[a]@ (Widgets.hs):
+'Nothing' is the "no override" default (rendered @[a]@), @Just
+'System.Agents.Tools.Activation.AlwaysActivated'@ is @[A]@, and @Just
+('System.Agents.Tools.Activation.OnDemandActivated' g)@ is @[D:g]@.
+Reusing 'Activation' (rather than a fresh sum type) keeps this in sync
+with the toolbox configs that set it.
+-}
+data ToolDescriptor = ToolDescriptor
+    { tdName :: Text
+    , tdDescription :: Text
+    , tdActivation :: Maybe Activation
+    }
+    deriving (Show, Eq)
+
+instance Aeson.ToJSON ToolDescriptor where
+    toJSON t =
+        Aeson.object
+            [ "name" .= t.tdName
+            , "description" .= t.tdDescription
+            , "activation" .= t.tdActivation
+            ]
+
+instance Aeson.FromJSON ToolDescriptor where
+    parseJSON = Aeson.withObject "ToolDescriptor" $ \o ->
+        ToolDescriptor
+            <$> o .: "name"
+            <*> o .: "description"
+            <*> o .:? "activation"
+
+{- | A root agent, as the Agents tab (G6, the "agent details" gap row) and
+@GET \/v1\/agents@\/@GET \/v1\/agents\/:slug@ need it: everything
+'System.Agents.AgentTree.OSAgentNode' currently only exposes live, in
+this process's memory, made serializable. A superset of the old
+@AgentBody@ (@examples\/agents-server\/src\/AgentsServer\/Types.hs@): every
+field that shape had is still here under the same name, plus 'adModel',
+'adSystemPrompt' and 'adHelpers'. The one shape change is 'adTools':
+formerly a bare list of tool names, now a list of 'ToolDescriptor' (name,
+description, activation) -- nothing in the codebase (chat page, tests)
+read the old shape, so this widens it rather than adding a parallel field.
+-}
+data AgentDescriptor = AgentDescriptor
+    { adSlug :: Text
+    , adDescription :: Text
+    -- ^ What the agent announces about itself ('Base.announce').
+    , adModel :: Text
+    , adSystemPrompt :: [Text]
+    , adSource :: Text
+    -- ^ @file@ or @database@, exactly as the old @AgentBody.abSource@.
+    , adTools :: [ToolDescriptor]
+    , adParameters :: [AgentParameter]
+    , adHelpers :: [Text]
+    -- ^ Slugs of this node's sub-agents (helpers), if any.
+    , adUpdatedAt :: Maybe UTCTime
+    -- ^ 'Just' only for a @database@ agent.
+    , adUpdatedBy :: Maybe Text
+    -- ^ 'Just' only for a @database@ agent, when it has an owner.
+    , adConfig :: Maybe Aeson.Value
+    -- ^ The stored configuration, for a @database@ agent.
+    }
+    deriving (Show, Eq)
+
+instance Aeson.ToJSON AgentDescriptor where
+    toJSON a =
+        Aeson.object $
+            [ "slug" .= a.adSlug
+            , "description" .= a.adDescription
+            , "model" .= a.adModel
+            , "system_prompt" .= a.adSystemPrompt
+            , "source" .= a.adSource
+            , "tools" .= a.adTools
+            , "parameters" .= a.adParameters
+            , "helpers" .= a.adHelpers
+            ]
+                <> ["updated_at" .= t | Just t <- [a.adUpdatedAt]]
+                <> ["updated_by" .= t | Just t <- [a.adUpdatedBy]]
+                <> ["config" .= c | Just c <- [a.adConfig]]
+
+instance Aeson.FromJSON AgentDescriptor where
+    parseJSON = Aeson.withObject "AgentDescriptor" $ \o ->
+        AgentDescriptor
+            <$> o .: "slug"
+            <*> o .: "description"
+            <*> o .: "model"
+            <*> o .: "system_prompt"
+            <*> o .: "source"
+            <*> o .: "tools"
+            <*> o .: "parameters"
+            <*> o .: "helpers"
+            <*> o .:? "updated_at"
+            <*> o .:? "updated_by"
+            <*> o .:? "config"
+
+-------------------------------------------------------------------------------
+-- Commands and replies (Phase 3a)
+-------------------------------------------------------------------------------
+
+{- | What a client ('System.Agents.Host.Client.RunnerClient') asks the
+runner to do. Mirrors "System.Agents.Host.Runner"'s public operations
+field for field and argument for argument (so 'inProcessClient' is a
+one-to-one dispatch table), plus 'ListAgents'\/'GetAgent' (G6). No
+constructor carries an explicit owner for who is /calling/: that is the
+client's own identity ('System.Agents.Host.Client.inProcessClient'\'s
+first argument), not something a command can spoof. This differs from
+the sketch in @todos/os-as-standalone-server.md@ Design §1 in a few
+places the runner's actual signatures forced:
+
+* 'ForkSession' carries a 0-based, newest-first turn index ('Maybe Int'),
+  not a @TurnId@ -- see 'UnknownTurn'.
+* 'SendMail' carries a 'Priority' and a 'MailBody', not the sketch's
+  informal @MailBody@ shorthand.
+* 'ListMail', 'ListSessions', 'GetSession', 'ListAgents', 'GetAgent' and
+  'AwaitRun' are additions the sketch's prose called for but its type
+  sketch omitted.
+-}
+data Command
+    = -- | Parent (lineage only, G6), agent slug, first message (G2:
+      -- 'Nothing' creates an idle session), run mode, and caller-supplied
+      -- parameter values.
+      CreateSession (Maybe SessionId) Text (Maybe NewMessage) (Maybe RunMode) (Map ParamName Aeson.Value)
+    | -- | @spawn-session@: parent, helper slug, first message.
+      SpawnSession SessionId Text NewMessage
+    | PostMessage SessionId NewMessage (Maybe RunMode) (Map ParamName Aeson.Value)
+    | Resume SessionId RunMode (Map ParamName Aeson.Value)
+    | CompleteCall ContinuationToken UserToolResponse Bool (Map ParamName Aeson.Value)
+    | CancelRun SessionId
+    | CancelAttached SessionId
+    | Pause SessionId
+    | SendMail SessionId Priority MailBody
+    | ListMail SessionId Bool
+    | -- | Source session, turn index (newest-first, 'Nothing' = whole
+      -- session), new agent slug ('Nothing' keeps the source's).
+      ForkSession SessionId (Maybe Int) (Maybe Text)
+    | ListSessions SessionQuery
+    | GetSession SessionId
+    | ListAgents
+    | GetAgent Text
+    | DeleteSession SessionId DeleteMode
+    | AwaitRun SessionId NominalDiffTime
+    | Stats
+    deriving (Show, Eq)
+
+-- | The @cmd@ tag a 'Command' encodes and decodes by.
+commandTag :: Command -> Text
+commandTag = \case
+    CreateSession{} -> "create_session"
+    SpawnSession{} -> "spawn_session"
+    PostMessage{} -> "post_message"
+    Resume{} -> "resume"
+    CompleteCall{} -> "complete_call"
+    CancelRun{} -> "cancel_run"
+    CancelAttached{} -> "cancel_attached"
+    Pause{} -> "pause"
+    SendMail{} -> "send_mail"
+    ListMail{} -> "list_mail"
+    ForkSession{} -> "fork_session"
+    ListSessions{} -> "list_sessions"
+    GetSession{} -> "get_session"
+    ListAgents -> "list_agents"
+    GetAgent{} -> "get_agent"
+    DeleteSession{} -> "delete_session"
+    AwaitRun{} -> "await_run"
+    Stats -> "stats"
+
+instance Aeson.ToJSON Command where
+    toJSON cmd = withFields (Aeson.object (commandPairs cmd)) ["cmd" .= commandTag cmd]
+
+commandPairs :: Command -> [Aeson.Pair]
+commandPairs = \case
+    CreateSession parent agent message mode params ->
+        ["parent" .= parent, "agent" .= agent, "message" .= message, "run" .= mode, "params" .= params]
+    SpawnSession parent agent message ->
+        ["parent" .= parent, "agent" .= agent, "message" .= message]
+    PostMessage sid message mode params ->
+        ["session_id" .= sid, "message" .= message, "run" .= mode, "params" .= params]
+    Resume sid mode params ->
+        ["session_id" .= sid, "run" .= mode, "params" .= params]
+    CompleteCall token result autoResume params ->
+        ["token" .= token, "result" .= result, "resume" .= autoResume, "params" .= params]
+    CancelRun sid -> ["session_id" .= sid]
+    CancelAttached sid -> ["session_id" .= sid]
+    Pause sid -> ["session_id" .= sid]
+    SendMail sid priority body -> ["session_id" .= sid, "priority" .= priority, "body" .= body]
+    ListMail sid unreadOnly -> ["session_id" .= sid, "unread" .= unreadOnly]
+    ForkSession sid atTurn newAgent -> ["session_id" .= sid, "at_turn" .= atTurn, "agent" .= newAgent]
+    ListSessions query -> ["query" .= query]
+    GetSession sid -> ["session_id" .= sid]
+    ListAgents -> []
+    GetAgent slug -> ["agent" .= slug]
+    DeleteSession sid mode -> ["session_id" .= sid, "mode" .= mode]
+    AwaitRun sid limit -> ["session_id" .= sid, "timeout" .= limit]
+    Stats -> []
+
+instance Aeson.FromJSON Command where
+    parseJSON = Aeson.withObject "Command" $ \o -> do
+        tag <- o .: "cmd"
+        case (tag :: Text) of
+            "create_session" ->
+                CreateSession <$> o .:? "parent" <*> o .: "agent" <*> o .:? "message" <*> o .:? "run" <*> paramsField o
+            "spawn_session" -> SpawnSession <$> o .: "parent" <*> o .: "agent" <*> o .: "message"
+            "post_message" -> PostMessage <$> o .: "session_id" <*> o .: "message" <*> o .:? "run" <*> paramsField o
+            "resume" -> Resume <$> o .: "session_id" <*> o .: "run" <*> paramsField o
+            "complete_call" -> CompleteCall <$> o .: "token" <*> o .: "result" <*> o .: "resume" <*> paramsField o
+            "cancel_run" -> CancelRun <$> o .: "session_id"
+            "cancel_attached" -> CancelAttached <$> o .: "session_id"
+            "pause" -> Pause <$> o .: "session_id"
+            "send_mail" -> SendMail <$> o .: "session_id" <*> o .: "priority" <*> o .: "body"
+            "list_mail" -> ListMail <$> o .: "session_id" <*> o .: "unread"
+            "fork_session" -> ForkSession <$> o .: "session_id" <*> o .:? "at_turn" <*> o .:? "agent"
+            "list_sessions" -> ListSessions <$> o .: "query"
+            "get_session" -> GetSession <$> o .: "session_id"
+            "list_agents" -> pure ListAgents
+            "get_agent" -> GetAgent <$> o .: "agent"
+            "delete_session" -> DeleteSession <$> o .: "session_id" <*> o .: "mode"
+            "await_run" -> AwaitRun <$> o .: "session_id" <*> o .: "timeout"
+            "stats" -> pure Stats
+            other -> fail ("unknown command: " <> Text.unpack other)
+      where
+        paramsField o = maybe Map.empty id <$> o .:? "params"
+
+{- | What a 'Command' answers with. 'inProcessClient' builds one of these
+from every runner call's own return shape; 'System.Agents.Host.Client'\'s
+typed helpers unwrap the one they expect, failing with
+'UnexpectedReply' otherwise.
+-}
+data Reply
+    = RSessionMeta SessionMeta
+    | RSession Session SessionMeta
+    | RSessions [SessionMeta]
+    | RMail [Envelope]
+    | RReceipt Receipt
+    | RAgents [AgentDescriptor]
+    | RAgent AgentDescriptor
+    | RDeletion DeletionPlan
+    | RUnit
+    | RStats RunnerStats
+    | -- | 'awaitRun': the latest metadata, and whether a run is still active.
+      RAwait SessionMeta Bool
+    deriving (Show, Eq)
+
+replyTag :: Reply -> Text
+replyTag = \case
+    RSessionMeta{} -> "session_meta"
+    RSession{} -> "session"
+    RSessions{} -> "sessions"
+    RMail{} -> "mail"
+    RReceipt{} -> "receipt"
+    RAgents{} -> "agents"
+    RAgent{} -> "agent"
+    RDeletion{} -> "deletion"
+    RUnit -> "unit"
+    RStats{} -> "stats"
+    RAwait{} -> "await"
+
+instance Aeson.ToJSON Reply where
+    toJSON reply = withFields (Aeson.object (replyPairs reply)) ["reply" .= replyTag reply]
+
+replyPairs :: Reply -> [Aeson.Pair]
+replyPairs = \case
+    RSessionMeta meta -> ["session" .= meta]
+    RSession sess meta -> ["turns" .= sess, "session" .= meta]
+    RSessions metas -> ["sessions" .= metas]
+    RMail envelopes -> ["mail" .= envelopes]
+    RReceipt receipt -> ["receipt" .= receipt]
+    RAgents agents -> ["agents" .= agents]
+    RAgent agent -> ["agent" .= agent]
+    RDeletion plan -> ["deletion" .= plan]
+    RUnit -> []
+    RStats stats -> ["stats" .= stats]
+    RAwait meta active -> ["session" .= meta, "active" .= active]
+
+instance Aeson.FromJSON Reply where
+    parseJSON = Aeson.withObject "Reply" $ \o -> do
+        tag <- o .: "reply"
+        case (tag :: Text) of
+            "session_meta" -> RSessionMeta <$> o .: "session"
+            "session" -> RSession <$> o .: "turns" <*> o .: "session"
+            "sessions" -> RSessions <$> o .: "sessions"
+            "mail" -> RMail <$> o .: "mail"
+            "receipt" -> RReceipt <$> o .: "receipt"
+            "agents" -> RAgents <$> o .: "agents"
+            "agent" -> RAgent <$> o .: "agent"
+            "deletion" -> RDeletion <$> o .: "deletion"
+            "unit" -> pure RUnit
+            "stats" -> RStats <$> o .: "stats"
+            "await" -> RAwait <$> o .: "session" <*> o .: "active"
+            other -> fail ("unknown reply: " <> Text.unpack other)

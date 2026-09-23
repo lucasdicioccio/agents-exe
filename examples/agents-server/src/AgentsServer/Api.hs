@@ -35,7 +35,6 @@ import Data.Foldable (asum)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -50,11 +49,9 @@ import AgentsServer.Auth (AuthTokens, authenticate, bearerToken)
 import AgentsServer.Mcp (McpContext (..), handleMcp)
 import AgentsServer.OpenApi (apiDocument)
 import AgentsServer.UI (uiPage)
-import System.Agents.AgentStore (StoredAgent (..))
-import System.Agents.AgentTree (OSAgentNode (..))
-import qualified System.Agents.Base as Base
-import System.Agents.Host (AgentEditError (..), AgentSource (..), Host (..), deleteStoredAgent, hostAllAgents, putStoredAgent)
-import System.Agents.Host.Runner
+import System.Agents.Host (AgentEditError (..), Host (..), deleteStoredAgent, hostAllAgents, putStoredAgent)
+import System.Agents.Host.Runner hiding (getAgent, listAgents)
+import qualified System.Agents.Host.Runner as Runner
 import System.Agents.Protocol (
     runModeFromText,
     runnerErrorCode,
@@ -63,9 +60,7 @@ import System.Agents.Protocol (
 import System.Agents.Session.Base (ContinuationToken (..), Priority (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls)
 import System.Agents.Session.Wake (findSessionForToken)
 import System.Agents.SessionStore (SessionMeta (..), SessionQuery (..), allSessionsQuery)
-import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Params.Types (ParamName, ParamScope (..), ParameterDecl (..), ProcessValue (..))
+import System.Agents.Tools.Params.Types (ParamName)
 
 data ServerEnv = ServerEnv
     { envHost :: Host
@@ -389,55 +384,21 @@ healthz env = do
     stats <- runnerStats env.envRunner
     pure $ json status200 $ Aeson.object ["ok" .= True, "live_sessions" .= stats.rsLiveSessions, "active_runs" .= stats.rsActiveRuns]
 
-listAgents :: ServerEnv -> IO Response
-listAgents env = do
-    agents <- hostAllAgents env.envHost
-    json status200 <$> mapM (uncurry (agentView env.envHost)) (Map.toList agents)
-
-{- | An agent: its description, tools, where it comes from, and its
-declared parameters (@todos/tool-partial-application.md@, Phase 4). A
+{- | Every root agent, as an 'AgentDescriptor' (G6, @todos/os-as-standalone-server.md@
+Phase 3a): its description, model, system prompt, tools (name, description,
+activation), declared parameters, helpers, and where it comes from. A
 parameter's value is never included, only whether the process already
 supplies one (@bound@) and whether it can be overridden (@pinned@: false
 when the operator locked it down with @--pin@, or when it is process-scope).
 -}
-agentView :: Host -> Text -> (AgentSource, OSAgentNode) -> IO Aeson.Value
-agentView host slug (source, node) = do
-    tools <- readTVarIO node.osNodeTools
-    resolved <- readTVarIO node.osNodeParams
-    let pinnedNames = Set.fromList [n | (n, pv) <- Map.toList host.hostProcessParams, pv.pvPinned]
-        decls = fromMaybe [] (Base.parameters node.osNodeConfig) :: [ParameterDecl]
-        paramView :: ParameterDecl -> Aeson.Value
-        paramView d =
-            Aeson.object $
-                [ "name" .= d.paramName
-                , "secret" .= d.paramSecret
-                , "scope" .= d.paramScope
-                , "required" .= d.paramRequired
-                , "bound" .= Map.member d.paramName resolved
-                , "pinned" .= (d.paramScope == ScopeProcess || d.paramName `Set.member` pinnedNames)
-                ]
-                    <> maybe [] (\desc -> ["description" .= desc]) d.paramDescription
-    pure $
-        Aeson.object $
-            [ "slug" .= slug
-            , "description" .= Base.announce node.osNodeConfig
-            , "tools" .= [t.declareTool.toolDescriptionName.getToolName | t <- tools]
-            , "parameters" .= map paramView decls
-            ]
-                <> case source of
-                    FromFile -> ["source" .= ("file" :: Text)]
-                    FromDatabase sa ->
-                        [ "source" .= ("database" :: Text)
-                        , "updated_at" .= sa.saUpdatedAt
-                        , "updated_by" .= sa.saUpdatedBy
-                        , "config" .= sa.saConfig
-                        ]
+listAgents :: ServerEnv -> IO Response
+listAgents env = json status200 <$> Runner.listAgents env.envRunner
 
 getAgentH :: ServerEnv -> Text -> IO Response
 getAgentH env slug =
-    Map.lookup slug <$> hostAllAgents env.envHost >>= \case
+    Runner.getAgent env.envRunner slug >>= \case
         Nothing -> throwIO $ fromRunnerError (UnknownAgent slug)
-        Just entry -> json status200 <$> agentView env.envHost slug entry
+        Just descriptor -> pure $ json status200 descriptor
 
 {- | Store an agent. The body is the @contents@ of an agent file; its slug
 is the one in the path.

@@ -438,11 +438,23 @@ instance Aeson.FromJSON HealthBody where
 instance ToSchema HealthBody where
     declareNamedSchema = genericDeclareNamedSchema (bodySchemaOptions 2)
 
--- | One agent, as @GET \/v1\/agents@ lists it.
+{- | One agent, as @GET \/v1\/agents@\/@GET \/v1\/agents\/:slug@ answer it
+(@todos/os-as-standalone-server.md@ Phase 3a: an 'AgentDescriptor', model,
+system prompt, tool activation and helpers included, not just slug,
+description, tool names and source). 'abTools' and 'abParameters' are kept
+as 'RawJson' here (each element is a tool\/parameter object -- see
+@docs/agents-server.md@'s API reference) rather than given their own
+schema types, since this module only documents the wire shape, not the
+library's own 'System.Agents.Protocol.ToolDescriptor'\/'System.Agents.Protocol.AgentParameter'.
+-}
 data AgentBody = AgentBody
     { abSlug :: Text
     , abDescription :: Text
-    , abTools :: [Text]
+    , abModel :: Text
+    , abSystemPrompt :: [Text]
+    , abTools :: [RawJson]
+    , abParameters :: [RawJson]
+    , abHelpers :: [Text]
     , abSource :: Text
     -- ^ @file@ or @database@.
     , abUpdatedAt :: Maybe UTCTime
@@ -463,7 +475,11 @@ instance ToSchema AgentBody where
         withFieldDocs
             [ ("slug", says "Names this agent in POST /v1/sessions and in the MCP tool ask_<slug>.")
             , ("description", says "What the agent announces about itself.")
-            , ("tools", says "The tools it can call.")
+            , ("model", says "The model name configured for this agent.")
+            , ("system_prompt", says "The agent's system prompt, one string per line.")
+            , ("tools", says "The tools it can call, each {name, description, activation}.")
+            , ("parameters", says "The agent's declared parameters (name, secret, scope, required, bound, pinned).")
+            , ("helpers", says "Slugs of this agent's sub-agents (helpers), if any.")
             , ("source", oneOfValues "Where the definition comes from." ["file", "database"])
             , ("config", says "The stored configuration, for database agents only.")
             ]
