@@ -563,6 +563,7 @@ test-suite agents-tests
                     , OpenAIStreamTests
                     , ProtocolTests
                     , RunnerTests
+                    , HostClientTests
                     , SessionEditTests
                     , SessionDurableTests
                     , SessionMetadataTests

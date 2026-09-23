@@ -5,7 +5,26 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Tests for the session runner and the host.
-module RunnerTests (tests) where
+module RunnerTests (
+    tests,
+
+    -- * Fixtures, reused by "HostClientTests"
+    testHost,
+    deferAll,
+    backgroundAll,
+    firstThen,
+    onceThen,
+    remoteCall,
+    slowCall,
+    gatedTool,
+    singleToken,
+    message,
+    expectRight,
+    currentSession,
+    responseTexts,
+    hasBackgroundCall,
+    waitUntil,
+) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)

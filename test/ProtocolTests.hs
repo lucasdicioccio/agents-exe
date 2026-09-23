@@ -7,7 +7,8 @@ constructor, plus 'RunMode', 'NewMessage', 'RunnerError', 'DeleteMode',
 module ProtocolTests (tests) where
 
 import qualified Data.Aeson as Aeson
-import Data.Time (getCurrentTime)
+import qualified Data.Map.Strict as Map
+import Data.Time (NominalDiffTime, getCurrentTime)
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -16,20 +17,32 @@ import System.Agents.OS.Events (ToolCallActivity (..))
 import qualified System.Agents.OS.Events as OSEvents
 import System.Agents.Protocol
 import System.Agents.Session.Types (
+    ContinuationToken,
+    ControlMsg (StopRun),
     DeferredCallView (..),
+    Envelope (..),
     LlmToolCall (..),
+    MailBody (..),
+    Priority (..),
     Reason (..),
+    Receipt (..),
+    Sender (..),
     SessionStatus (..),
     SystemPrompt (..),
     ToolCallDisposition (..),
     ToolCallId (..),
     Turn (..),
+    UserQuery (..),
+    UserToolResponse (..),
     UserTurnContent (..),
     newContinuationToken,
+    newMessageId,
     newToolCallId,
  )
-import System.Agents.Session.Base (SessionId (..), newSessionId)
-import System.Agents.SessionStore (SessionMeta (..), freshSessionMeta)
+import System.Agents.Session.Base (Session (..), SessionId (..), TurnId (..), newSessionId)
+import System.Agents.SessionStore (SessionMeta (..), SessionQuery (..), allSessionsQuery, freshSessionMeta)
+import System.Agents.Tools.Activation (Activation (..))
+import System.Agents.Tools.Params.Types (ParamScope (..))
 import qualified Data.UUID as UUID
 
 tests :: TestTree
@@ -86,7 +99,54 @@ tests =
             eventRoundTripAt parent (SubcallFailed child "boom")
         , testCase "Event: ToolCallProgressed" toolCallProgressedTest
         , testCase "eventKind matches every kind string" eventKindTest
+        , testCase "RunnerStats" (roundTrip (RunnerStats 3 1))
+        , testCase "AgentParameter" $ do
+            roundTrip (AgentParameter "tenant" (Just "which tenant") True ScopeSession True False True)
+            roundTrip (AgentParameter "tenant" Nothing False ScopeProcess False True True)
+        , testCase "ToolDescriptor: default activation" (roundTrip (ToolDescriptor "search" "search the web" Nothing))
+        , testCase "ToolDescriptor: always activated" (roundTrip (ToolDescriptor "search" "search the web" (Just AlwaysActivated)))
+        , testCase "ToolDescriptor: on-demand" (roundTrip (ToolDescriptor "search" "search the web" (Just (OnDemandActivated "web"))))
+        , testCase "AgentDescriptor: file agent" (roundTrip =<< fileAgentDescriptor)
+        , testCase "AgentDescriptor: database agent" (roundTrip =<< databaseAgentDescriptor)
+        , testCase "Command: every constructor" commandRoundTripTest
+        , testCase "Reply: every constructor" replyRoundTripTest
+        , testCase "RunnerError: UnexpectedReply code survives" $ do
+            let decoded = Aeson.decode (Aeson.encode UnexpectedReply) :: Maybe RunnerError
+            fmap runnerErrorCode decoded @?= Just (runnerErrorCode UnexpectedReply)
         ]
+
+-- | A minimal 'AgentDescriptor' for a file-based agent.
+fileAgentDescriptor :: IO AgentDescriptor
+fileAgentDescriptor =
+    pure $
+        AgentDescriptor
+            { adSlug = "helper"
+            , adDescription = "a helper agent"
+            , adModel = "gpt-4"
+            , adSystemPrompt = ["You are a helper"]
+            , adSource = "file"
+            , adTools = [ToolDescriptor "search" "search the web" (Just AlwaysActivated)]
+            , adParameters = [AgentParameter "tenant" (Just "which tenant") True ScopeSession True False True]
+            , adHelpers = ["sub-helper"]
+            , adUpdatedAt = Nothing
+            , adUpdatedBy = Nothing
+            , adConfig = Nothing
+            }
+
+-- | Like 'fileAgentDescriptor', for a database-stored agent (with the
+-- extra @updated_at@\/@updated_by@\/@config@ fields).
+databaseAgentDescriptor :: IO AgentDescriptor
+databaseAgentDescriptor = do
+    now <- getCurrentTime
+    base <- fileAgentDescriptor
+    pure
+        base
+            { adSource = "database"
+            , adUpdatedAt = Just now
+            , adUpdatedBy = Just "alice"
+            , adConfig = Just (Aeson.object ["slug" Aeson..= Aeson.String "helper"])
+            }
+
 
 roundTrip :: (Eq a, Show a, Aeson.ToJSON a, Aeson.FromJSON a) => a -> Assertion
 roundTrip x = Aeson.decode (Aeson.encode x) @?= Just x
@@ -208,3 +268,77 @@ eventKindTest = do
     eventKind (SessionFailed "x") @?= "session.failed"
     eventKind (TextDelta "x") @?= "text.delta"
     eventKind (SessionDeleted sid) @?= "session.deleted"
+
+-------------------------------------------------------------------------------
+-- Command / Reply
+-------------------------------------------------------------------------------
+
+-- | Every 'Command' constructor, round-tripped through JSON.
+commandRoundTripTest :: Assertion
+commandRoundTripTest = do
+    sid <- newSessionId
+    parent <- newSessionId
+    token <- newContinuationToken
+    let msg = NewMessage "hi" [] False
+        params = Map.fromList [("tenant", Aeson.String "acme")]
+    mapM_
+        roundTrip
+        [ CreateSession Nothing "helper" (Just msg) (Just StepOnce) params
+        , CreateSession (Just parent) "helper" Nothing Nothing Map.empty
+        , PostMessage sid msg (Just UntilBlocked) params
+        , Resume sid StepOnce params
+        , CompleteCall token (TextResponse "42") True params
+        , CancelRun sid
+        , CancelAttached sid
+        , Pause sid
+        , SendMail sid Normal (Control StopRun)
+        , SendMail sid Interrupt (UserMessage (UserQuery "hi" []))
+        , ListMail sid True
+        , ForkSession sid (Just 2) (Just "other-agent")
+        , ForkSession sid Nothing Nothing
+        , ListSessions allSessionsQuery{sqOwner = Just "alice"}
+        , GetSession sid
+        , ListAgents
+        , GetAgent "helper"
+        , DeleteSession sid DryRun
+        , AwaitRun sid (5 :: NominalDiffTime)
+        , Stats
+        ]
+    roundTrip (SpawnSession parent "helper" msg)
+
+-- | Every 'Reply' constructor, round-tripped through JSON.
+replyRoundTripTest :: Assertion
+replyRoundTripTest = do
+    sid <- newSessionId
+    now <- getCurrentTime
+    mid <- newMessageId
+    let meta = (freshSessionMeta sid now){smOwner = Just "alice"}
+        session = testSession sid
+        envelope = Envelope mid 1 (FromUser (Just "alice")) Normal 0 now (Control StopRun)
+        receipt = Receipt mid 1 False
+    agent <- fileAgentDescriptor
+    mapM_
+        roundTrip
+        [ RSessionMeta meta
+        , RSessions [meta]
+        , RMail [envelope]
+        , RReceipt receipt
+        , RAgents [agent]
+        , RAgent agent
+        , RDeletion (DeletionPlan [sid] 1 False)
+        , RUnit
+        , RStats (RunnerStats 2 1)
+        , RAwait meta True
+        ]
+    roundTrip (RSession session meta)
+  where
+    testSession sid =
+        Session
+            { turns = []
+            , sessionId = sid
+            , forkedFromSessionId = Nothing
+            , turnId = TurnId UUID.nil
+            , sessionVersion = Just 2
+            , sessionExecutionMode = Nothing
+            , mailCursor = 0
+            }

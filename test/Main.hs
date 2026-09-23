@@ -92,6 +92,7 @@ import qualified MediaContentPartTests
 import qualified OpenAIStreamTests
 import qualified ProtocolTests
 import qualified RunnerTests
+import qualified HostClientTests
 import qualified DurableWorkflowTests
 import qualified NarrowingTests
 import qualified MailboxTests
@@ -149,6 +150,7 @@ tests =
         , OpenAIStreamTests.tests
         , ProtocolTests.tests
         , RunnerTests.tests
+        , HostClientTests.tests
         , MailboxTests.tests
         , ConfigLoaderTests.tests
         ]

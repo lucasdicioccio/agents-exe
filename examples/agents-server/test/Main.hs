@@ -327,6 +327,12 @@ agentsHealthTest = withServer "{}" mockCompletion $ \srv -> do
         Aeson.Array xs | [a] <- Vector.toList xs -> do
             field "slug" a @?= "server-test"
             field "description" a @?= "a test agent"
+            -- G6 (@todos/os-as-standalone-server.md@ Phase 3a): the agent
+            -- descriptor carries model, system prompt and tools (now
+            -- objects, not bare names), not just slug/description.
+            field "model" a @?= "mock"
+            field "system_prompt" a @?= Aeson.Array (Vector.fromList ["You are a test"])
+            arrayField "tools" a @?= []
         other -> assertFailure ("expected one agent, got " <> show other)
     (healthStatus, health) <- call srv "GET" "/healthz" Nothing
     (healthStatus, field "ok" health) @?= (200, Aeson.Bool True)
