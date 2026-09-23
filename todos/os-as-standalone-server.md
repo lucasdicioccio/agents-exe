@@ -2,7 +2,7 @@
 
 Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
-(commits 8de2a64..dc01dc8); Phase 2 done (0390c9f..a1e0ea5); Phase 3 in
+(commits 8de2a64..dc01dc8); Phases 2, 3a and 3b done (0390c9f..d2887c6); 3c in
 progress. Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
 
@@ -479,6 +479,20 @@ render and keymap cleanup, unit tests, smoke test. Known regression to
 accept until Phase 5: `AppEvent_SubcallProgress` carried the child's whole
 `Session`; the runner stream has no equivalent, so a subcall shows start,
 completion and failure only.
+
+3b landed (f73c018..d2887c6). The TUI is a `RunnerClient` over an
+in-process runner: promptless `createSession` then `postMessage`; one
+`subscribeAll` bridge thread feeding Brick; pause/resume, interrupt,
+hard cancel, fork, restore (fork when the selected agent differs), F5 and
+quit (`StopRun` mail, no `killThread`) all go through the client; the
+draft buffer replaces the queue (Ctrl+A edit, Ctrl+G send now, Ctrl+D
+clear; "edit" pulls the draft back into the composer); History refreshes
+from events with a per-session cache and Loading/error states;
+`HostConfig.hcLegacySessionDirs` composites old `conv.*.json` directories
+as a read fallback for both the TUI and `serve`. Runner fix along the
+way: `postMessage` accepts the first message of an empty `ready` session.
+An end-to-end pty script against a fake OpenAI endpoint lives in
+`checks/phase3b-iv-e2e/`.
 
 `inProcessClient`; the TUI conversation layer rewritten on `RunnerClient`
 (§4). `agents-exe tui` starts a `Host` + `SessionRunner` over the SQLite
