@@ -117,6 +117,31 @@ The Help tab displays keyboard shortcuts and command reference for quick access 
 
 ## Architecture
 
+The TUI is a client of the in-process runner (`System.Agents.Host.Runner.SessionRunner`),
+not a second agent runtime: `agents-exe tui` opens a `System.Agents.Host.Host`
+the same way `agents-exe serve` does and drives it through an in-process
+`System.Agents.Host.Client.RunnerClient` — every conversation action (new
+message, pause, fork, cancel, ...) is a `Command` sent to the runner, and
+every screen update comes from `Event`s the runner emits. This is the
+groundwork for `agents-exe tui --attach URL|PATH` (not yet implemented):
+the same client interface, backed by an HTTP+SSE or Unix-socket
+implementation instead, would drive the identical TUI code unchanged.
+
+Sessions live in the SQLite database at
+`System.Agents.CLI.ConfigLoader.defaultServerDatabasePath` (next to the
+resolved sessions directory) unless overridden with `tui --db PATH`. Old
+sessions written by the pre-runner file store (`conv.<uuid>.json`, under
+the config's `sessions` read locations) stay readable: the host composites
+them in as a read-only fallback (`Host.hcLegacySessionDirs`) behind the
+SQLite backend.
+
+Sub-agent calls (`prompt_agent_*`) are not yet sessions of their own (see
+`todos/os-as-standalone-server.md`, Phase 5), so the runner has no
+per-step "subcall progress" event carrying a whole child session. The
+Subcall Conversation Visibility section below therefore only ever sees a
+subcall **start**, **complete**, or **fail** — no live token-by-token or
+tool-by-tool progress for the child, unlike the parent conversation.
+
 ### Component Structure
 
 ```

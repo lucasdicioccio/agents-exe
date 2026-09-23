@@ -191,8 +191,19 @@ agents-exe run \
 Start the interactive Terminal UI.
 
 ```bash
-agents-exe tui [--agent-file FILE...]
+agents-exe tui [--agent-file FILE...] [--keymap FILE] [--db PATH]
 ```
+
+The TUI is a client of an in-process `SessionRunner` it starts over the
+same `Host` config `agents-exe serve` uses (see
+[tui.md](tui.md#architecture)).
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|--------------|
+| `--keymap FILE`, `-k FILE` | none | Path to a keymap configuration JSON file |
+| `--db PATH` | next to the resolved sessions directory | SQLite database for the TUI's embedded session runner. Old `conv.<uuid>.json` history under the resolved sessions directories stays readable as a read-only fallback. |
 
 **Features:**
 - Real-time streaming responses
