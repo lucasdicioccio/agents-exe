@@ -397,6 +397,10 @@ sends a `snapshot` of the session's metadata (unless it is a replay -- see
 | `text.delta` | `{session_id, text}`: the next piece of the LLM's answer, with `--stream-tokens` only. |
 | `tool.started` | `{session_id, tool_call_id, tool}`: a tool call still attached to the session (not deferred) started running. |
 | `tool.completed` | `{session_id, tool_call_id, tool, succeeded}`: that call reached a final state. `succeeded` is `false` for a failed or cancelled call. A call that both starts and finishes within one step is not reported (informational only; the stored session remains the source of truth). |
+| `tool.progressed` | `{session_id, tool_call_id, tool, phase, payload?, error?, provider_call_id?, at}`: a background (async-engine) tool call's lifecycle -- `phase` is one of `started`, `progressed` (with a `payload`), `completed`, `failed` (with an `error`), `cancelled`. Reported for every phase, not only intermediate progress; complements `tool.started`/`tool.completed` above, which are derived separately by diffing the stored session. |
+| `subcall.started` | `{session_id, parent_session_id, child_session_id, agent, depth}`: a `prompt_agent_<slug>` call started a sub-agent run. `session_id` (the event's own, top-level field) is the *parent* -- the session actually running the call, whose stream this shows up on -- and `parent_session_id` repeats it explicitly alongside `child_session_id`, the sub-agent's own id. A sub-agent run is not yet its own subscribable session (`prompt_agent_*` runs the child inside the tool call), so `child_session_id` is only the id `OneShotTool` already generates for it, reported as is. |
+| `subcall.completed` | `{session_id, child_session_id, result?}`: that sub-agent run finished, with its result text when it produced one. |
+| `subcall.failed` | `{session_id, child_session_id, message}`: that sub-agent run failed. |
 | `session.created` | `{session_id, …}` (full session metadata): a new session was created. Only seen on `GET /v1/events` (below); a single session's own stream never reports its own creation. |
 | `session.deleted` | `{session_id}`: a session (and everything under it) was deleted. Only seen on `GET /v1/events`. |
 
@@ -550,6 +554,15 @@ cancels an in-flight LLM completion) and asks the model again with this
 message folded in. A detached call's result, if it still arrives, is
 reported on a later run rather than lost. On an idle session `interrupt` has
 no effect: there is nothing to interrupt.
+
+Mail (a message, or any other envelope R1 folds into a turn) normally
+becomes a separate user message after a round of attached tool results. For
+a provider that rejects a user message directly after tool results, set the
+agent's `mailInToolResult` (default `false`): R1 then appends the folded
+mail, with the same `[mail …]` header, as a trailing block of the *last*
+tool result of that round instead. Only applies when the round actually had
+tool calls; a plain user turn (no tool results) is unaffected, and
+detached/deferred results already arrive as mail of their own.
 
 **Results** (`result`). A JSON string is a text result. Other forms are
 `{"type": "text", "content": "…"}`, `{"type": "json", "content": <any>}`,
@@ -855,7 +868,7 @@ and, when known, `session_id`:
 |---|---|
 | `server.started` | `bind`, `port`, `agents`, `admin_owners`, `database`, `authentication` (`bearer` or `none`), `ui`, and `warning` when authentication is off |
 | `http.request` | `method`, `path`, `status`, `ms` (when the response starts) |
-| `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed`, `tool.started`, `tool.completed`, `session.created`, `session.deleted` | `session_id` |
+| `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed`, `tool.started`, `tool.completed`, `tool.progressed`, `subcall.started`, `subcall.completed`, `subcall.failed`, `session.created`, `session.deleted` | `session_id` |
 | `llm.request` / `llm.response` | `bytes`, token counts |
 | `llm.http` | `method`, `host`, `path`, `status` |
 | `sessions.recovered` | `session_ids` |
