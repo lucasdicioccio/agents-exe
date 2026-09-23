@@ -7,7 +7,14 @@
 {- | Main entry point for the TUI application.
 
 This module re-exports functionality from the submodules and provides
-the main initialization and application runner using OS-native structures.
+the main initialization and application runner.
+
+Phase 3b-i (@todos/os-as-standalone-server.md@): the TUI is a client of
+'System.Agents.Host.Client.RunnerClient'. There is no more agent-tree
+loading, OS 'World', or OS-event bridge here (G1): 'System.Agents.CLI.TUI'
+builds a 'RunnerClient' over a 'System.Agents.Host.Runner.SessionRunner'
+(embedded mode) or, eventually, an HTTP\/socket client (Phase 4), and hands
+it to 'runTUIInternal'.
 -}
 module System.Agents.TUI.Core (
     -- Re-export Trace from Runtime.Trace
@@ -41,15 +48,15 @@ module System.Agents.TUI.Core (
     selectedAgentInfo,
     unreadConversations,
     auxiliaryTasks,
-    uiAgentTools,
     attachedFiles,
     attachmentDialogState,
     filePathInput,
     fileBrowser,
     selectedAttachmentIndex,
     coreConversations,
-    corePausedConversations,
-    coreBufferedMessages,
+    coreClient,
+    coreParams,
+    coreOwnedSessions,
     tuiCore,
     tuiUI,
     eventChan,
@@ -104,55 +111,27 @@ module System.Agents.TUI.Core (
     defaultHelpContent,
     initHelpContent,
 
-    -- * Session loading
-    loadSessionFiles,
-
     -- * Main entry points
-    runTUI,
-    runTUIWithConfig,
-    runTUIWithKeymap,
-    runTUIWithUserConfig,
     fileSessionConfig,
-
-    -- * OS-native helpers
-    createTuiAgent,
-    refreshAgentTools,
-    getAgentTools,
+    runTUIWithUserConfig,
+    runTUIInternal,
 ) where
 
-import System.Agents.OS.Conversation (
-    ConversationConfig,
-    ConversationState,
-    Lineage (..),
-    registerToolCallComponents,
- )
-
 import Brick hiding (Down)
-import Brick.BChan (BChan, newBChan, writeBChan)
+import Brick.BChan (newBChan, writeBChan)
 import Brick.Focus (focusGetCurrent)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (STM, TQueue, atomically, newTQueueIO, newTVarIO, readTQueue)
+import Control.Concurrent.STM (newTVarIO)
 import Control.Lens ((^.))
 import Control.Monad (forever, void)
-import Data.Proxy (Proxy (..))
+import qualified Data.Aeson as Aeson
+import Data.Map.Strict (Map)
 import Prod.Tracer (Tracer)
 
-import System.Agents.AgentTree (
-    LoadAgentResult (..),
-    LoadedApiKeys,
-    OSAgentTree (..),
-    Props,
-    loadAgentTree,
- )
-import System.Agents.Base (AgentId)
-import qualified System.Agents.OS.AgentHandle as AgentHandle
-import System.Agents.OS.AgentHandle (createAgentHandle)
-import System.Agents.OS.Core.World (World, newWorld, registerComponentStore)
-import System.Agents.OS.Events (OSEvent (..))
-import System.Agents.Session.Base (Session (..))
+import System.Agents.Host.Client (RunnerClient)
+import qualified System.Agents.Host.Client as Client
 import System.Agents.SessionStore (SessionStore)
-import qualified System.Agents.SessionStore as SessionStore
-import System.Agents.ToolRegistration (ToolRegistration)
+import System.Agents.Tools.Params.Types (ParamName)
 
 -- Import from submodules
 import System.Agents.TUI.Buffer (
@@ -200,14 +179,12 @@ import System.Agents.TUI.Types
 -- Session Configuration
 -------------------------------------------------------------------------------
 
-{- | Create a session configuration from a user config.
-
-This function creates a SessionConfig from the combined TUIUserConfig
-which includes both key mappings and input configuration.
+{- | Create a session configuration from a user config: the legacy file
+store (a read fallback for history), plus the keymap and input config.
 -}
-fileSessionConfig :: SessionStore -> LoadedApiKeys -> TUIUserConfig -> SessionConfig
-fileSessionConfig store apiKeys userConfig =
-    mkSessionConfig store apiKeys userConfig.userConfigKeymap userConfig.userConfigInput
+fileSessionConfig :: SessionStore -> TUIUserConfig -> SessionConfig
+fileSessionConfig store userConfig =
+    mkSessionConfig store userConfig.userConfigKeymap userConfig.userConfigInput
 
 -------------------------------------------------------------------------------
 -- Application Setup
@@ -226,112 +203,41 @@ tui_appStartEvent :: EventM N TuiState ()
 tui_appStartEvent = pure ()
 
 -------------------------------------------------------------------------------
--- Session File Loading
--------------------------------------------------------------------------------
-
-{- | Load all sessions from files matching the prefix pattern.
-Returns a list of (FilePath, Maybe Session) pairs.
-
-This function uses 'SessionStore' internally to discover and load sessions.
--}
-loadSessionFiles :: SessionStore -> IO [(FilePath, Maybe Session)]
-loadSessionFiles store = do
-    sessions <- SessionStore.listSessions store
-    -- Convert to the legacy format (filepath, Maybe Session)
-    pure [(path, mSess) | (path, mSess, _) <- sessions]
-
--------------------------------------------------------------------------------
 -- Main Entry Points
 -------------------------------------------------------------------------------
 
-{- | Initialize and run the TUI with default configuration.
-
-This function:
-1. Loads agent trees from the provided props
-2. Creates TuiAgents with OS-native structures
-3. Initializes the TUI with the agents and loaded sessions
-4. Uses the default key mapping and input configuration
+{- | Build the full session configuration and run the TUI over a
+'RunnerClient' (Design §3): embedded mode wraps a 'SessionRunner' this
+process started itself ('System.Agents.CLI.TUI.handleTUI'); a future
+@--attach@ mode (Phase 4) hands in an @httpClient@\/@socketClient@
+instead. Neither this function nor anything it calls can tell which.
 -}
-runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
-runTUI tracer store apiKeys props =
-    runTUIWithUserConfig tracer store apiKeys defaultTUIUserConfig props
+runTUIWithUserConfig :: Tracer IO Trace -> RunnerClient -> SessionStore -> TUIUserConfig -> Map ParamName Aeson.Value -> IO ()
+runTUIWithUserConfig tracer client store userConfig params = do
+    let config = fileSessionConfig store userConfig
+    runTUIInternal tracer client config params
 
-{- | Initialize the TUI with a custom session configuration.
-Uses the keymap and input config from the SessionConfig.
+{- | Fetch the agent roster from the client (G6: 'Client.listAgents', which
+already carries model, prompt and tool activation -- no live OS-native
+handle needed) and start Brick.
+
+The History tab's session list starts empty: it is only populated
+starting 3b-iii, via 'Client.listSessions'.
 -}
-runTUIWithConfig :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
-runTUIWithConfig tracer config props = do
-    runTUIInternal tracer config props
+runTUIInternal :: Tracer IO Trace -> RunnerClient -> SessionConfig -> Map ParamName Aeson.Value -> IO ()
+runTUIInternal tracer client config params = do
+    descriptors <- either (const []) id <$> Client.listAgents client
+    let tuiAgents = map TuiAgent descriptors :: [TuiAgent]
 
-{- | Initialize the TUI with a custom keymap and default input config.
-
-For full control over both keymap and input configuration,
-use 'runTUIWithUserConfig' instead.
--}
-runTUIWithKeymap :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> KeyMapping -> [Props] -> IO ()
-runTUIWithKeymap tracer store apiKeys keymap props = do
-    let userConfig = TUIUserConfig keymap defaultInputConfig
-    runTUIWithUserConfig tracer store apiKeys userConfig props
-
-{- | Initialize the TUI with a complete user configuration.
-
-This is the most flexible entry point, allowing full customization of
-both key mappings and input configuration.
--}
-runTUIWithUserConfig :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> TUIUserConfig -> [Props] -> IO ()
-runTUIWithUserConfig tracer store apiKeys userConfig props = do
-    let config = fileSessionConfig store apiKeys userConfig
-    runTUIInternal tracer config props
-
--- | Internal function to run the TUI with the given configuration.
-runTUIInternal :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
-runTUIInternal tracer config props = do
-    -- Load agent trees and create TuiAgents
-    trees <- traverse loadAgentTree props
-    let itrees = [tree | Initialized tree <- trees]
-
-    -- Create TUI agents from OS-native trees
-    let tuiAgents = map createTuiAgent itrees
-
-    -- Load existing session files
-    loadedSessions <- loadSessionFiles config.sessionStore
-
-    -- Extract successfully loaded sessions
-    let sessions = [sess | (_, Just sess) <- loadedSessions]
-
-    -- Collect tools from all agents (read from their TVars)
-    agentTools <- collectAgentTools tuiAgents
-
-    -- Create event channel (needed for conversations)
-    evChan <- newBChan 100
-
-    -- Create OS event queue for subcall visibility
-    osEventQueue <- newTQueueIO
-
-    -- Start the event bridge
-    startOSEventBridge osEventQueue evChan
-
-    -- Create and initialize the OS World
-    world <- atomically initWorld
-
-    -- Create core state with World and EventQueue for subcall visibility
-    core0 <- initCore (Just world) (Just osEventQueue)
+    core0 <- initCore client params
     coreTVar <- newTVarIO core0
 
-    -- Generate help content from the keymap
     let helpText = generateHelpContent (sessionKeyMapping config)
+        ui0 = initUIState helpText tuiAgents []
 
-    -- Create UI state with loaded sessions and collected tools
-    -- Also initialize help content with keyboard shortcuts from the keymap
-    let ui0 =
-            (initUIState helpText tuiAgents sessions)
-                { _uiAgentTools = agentTools
-                }
-
-    -- Create TUI state with session configuration and keymap
+    evChan <- newBChan 100
     let st = TuiState coreTVar ui0 evChan config (sessionKeyMapping config)
 
-    -- Build and run the app
     let app =
             App
                 { appDraw = tui_appDraw
@@ -345,89 +251,3 @@ runTUIInternal tracer config props = do
         writeBChan evChan AppEvent_Heartbeat
         threadDelay 1000000
     void $ customMainWithDefaultVty (Just evChan) app st
-
-{- | Create a TuiAgent from an OSAgentTree.
-
-This function extracts the root agent from the tree and creates
-a TuiAgent that provides direct access to OS-native structures.
--}
-createTuiAgent :: OSAgentTree -> TuiAgent
-createTuiAgent tree =
-    TuiAgent
-        { tuaHandle = createAgentHandle tree
-        , tuaWorld = Nothing
-        }
-
-{- | Refresh tools for a TuiAgent.
-
-This function reads the current tools from the OS-native TVar.
--}
-refreshAgentTools :: TuiAgent -> IO [ToolRegistration]
-refreshAgentTools = AgentHandle.getAgentTools . tuaHandle
-
--- | Get tools for a TuiAgent from the OS-native TVar.
-getAgentTools :: TuiAgent -> IO [ToolRegistration]
-getAgentTools = refreshAgentTools
-
--- | Collect tools from all TuiAgents.
-collectAgentTools :: [TuiAgent] -> IO [(AgentId, [ToolRegistration])]
-collectAgentTools agents = mapM collectTools agents
-  where
-    collectTools agent = do
-        tools <- getAgentTools agent
-        pure (tuiAgentId agent, tools)
-
--------------------------------------------------------------------------------
--- OSEvent to AppEvent Bridge
--------------------------------------------------------------------------------
-
-{- | Convert an OSEvent to an AppEvent.
-
-This function bridges OS events to TUI application events, enabling
-subcall visibility and lifecycle tracking in the TUI.
--}
-convertOSEvent :: OSEvent -> Maybe AppEvent
-convertOSEvent (OSEvent_SubcallStarted parentId convId slug depth) =
-    Just $ AppEvent_SubcallStarted parentId convId slug depth
-convertOSEvent (OSEvent_SubcallProgress convId session) =
-    Just $ AppEvent_SubcallProgress convId session
-convertOSEvent (OSEvent_SubcallCompleted convId result) =
-    Just $ AppEvent_SubcallCompleted convId result
-convertOSEvent (OSEvent_SubcallFailed convId err) =
-    Just $ AppEvent_SubcallFailed convId err
-convertOSEvent (OSEvent_ToolCallActivity activity) =
-    Just $ AppEvent_ToolCallActivity activity
-convertOSEvent _ = Nothing
-
-{- | Start a background thread that bridges OSEvents to AppEvents.
-
-This thread reads from the OSEvent queue and writes converted AppEvents
-to the Brick event channel, enabling the TUI to respond to subcall events.
--}
-startOSEventBridge :: TQueue OSEvent -> BChan AppEvent -> IO ()
-startOSEventBridge osEventQueue appEventChan = void $ forkIO $ forever $ do
-    osEvent <- atomically $ readTQueue osEventQueue
-    case convertOSEvent osEvent of
-        Just appEvent -> writeBChan appEventChan appEvent
-        Nothing -> pure () -- Ignore non-TUI events
-
--------------------------------------------------------------------------------
--- World Initialization
--------------------------------------------------------------------------------
-
-{- | Initialize the OS World with required component stores.
-
-This creates a World and registers the component types needed for
-subcall conversation tracking.
--}
-initWorld :: STM World
-initWorld = do
-    world <- newWorld
-    -- Register component stores for conversation tracking
-    world1 <- registerComponentStore world (Proxy @ConversationConfig)
-    world2 <- registerComponentStore world1 (Proxy @ConversationState)
-    world3 <- registerComponentStore world2 (Proxy @Lineage)
-    -- Register component stores for tool-call entities
-    world4 <- registerToolCallComponents world3
-    pure world4
-

@@ -3,8 +3,13 @@
 
 {- | Queued message management event handlers for the TUI.
 
-This module handles queued message management when the conversation is paused,
-including clearing queued messages, deleting selected messages, and navigation.
+Phase 3b-i (@todos/os-as-standalone-server.md@ D3, §5): there is no more
+kernel-visible "queue" of discrete messages -- @Core@ never buffered
+messages to begin with in the new model, and a conversation's draft
+('System.Agents.TUI.Types.Conversation.Draft') is TUI-local. This module's
+"queued messages" list is now purely a UI-local
+'System.Agents.TUI.Types.State.uiBufferedMessages' map, kept only for the
+existing widget until 3b-iii turns it into the real draft editor.
 -}
 module System.Agents.TUI.Event.Queue (
     -- * Queue Management
@@ -15,8 +20,7 @@ module System.Agents.TUI.Event.Queue (
 
 import Brick
 import Brick.BChan (writeBChan)
-import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
-import Control.Lens (to, use, (%=), (.=), (^.))
+import Control.Lens (to, use, (%=), (.=))
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
@@ -32,10 +36,8 @@ import System.Agents.TUI.Types (
     conversationId,
     conversationList,
     conversationStatus,
-    coreBufferedMessages,
     eventChan,
     queuedMessagesFocus,
-    tuiCore,
     tuiUI,
     uiBufferedMessages,
  )
@@ -62,14 +64,11 @@ handleClearQueuedMessages = do
     mConv <- getCurrentConversation
     case mConv of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just conv -> do
+        Just conv ->
             if conversationStatus conv /= ConversationStatus_Paused
                 then showStatus StatusWarning "Can only clear queued messages when paused (Ctrl+E)"
                 else do
                     let convId = conversationId conv
-                    coreRef <- use tuiCore
-                    core <- liftIO $ readTVarIO coreRef
-                    liftIO $ atomically $ modifyTVar (core ^. coreBufferedMessages) $ Map.insert convId []
                     tuiUI . uiBufferedMessages %= Map.insert convId []
                     tuiUI . queuedMessagesFocus .= Nothing
                     showStatus StatusInfo "All queued messages cleared"
@@ -80,7 +79,7 @@ handleDeleteSelectedMessage = do
     mConv <- getCurrentConversation
     case mConv of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just conv -> do
+        Just conv ->
             if conversationStatus conv /= ConversationStatus_Paused
                 then showStatus StatusWarning "Can only delete messages when paused (Ctrl+E)"
                 else do
@@ -97,9 +96,6 @@ handleDeleteSelectedMessage = do
                                         then pure ()
                                         else do
                                             let newMsgs = deleteAt idx msgs
-                                            coreRef <- use tuiCore
-                                            core <- liftIO $ readTVarIO coreRef
-                                            liftIO $ atomically $ modifyTVar (core ^. coreBufferedMessages) $ Map.insert convId newMsgs
                                             tuiUI . uiBufferedMessages %= Map.insert convId newMsgs
                                             let newIdx = if null newMsgs then Nothing else Just (min idx (length newMsgs - 1))
                                             tuiUI . queuedMessagesFocus .= newIdx

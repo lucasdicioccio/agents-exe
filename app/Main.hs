@@ -639,6 +639,13 @@ parseTuiOptions argArgs =
                     <> maybe mempty value argArgs.defaultKeymapPath
                 )
             )
+        <*> optional
+            ( strOption
+                ( long "db"
+                    <> metavar "PATH"
+                    <> help "SQLite database for the TUI's embedded session runner (default: next to the resolved sessions directory)"
+                )
+            )
 
 
 parseOneShotOptions :: Parser OneShotCmd.OneShotOptions
@@ -1385,7 +1392,27 @@ runCommand pargs baseTracer sessionStore files =
         ReplayToolCall opts ->
             ReplayToolCallCmd.handleReplayToolCall Prod.silent opts
         TerminalUI tuiOpts ->
-            TUICmd.handleTUI (Prod.contramap TUICmdTrace baseTracer) sessionStore pargs.apiKeysFile (TUICmd.tuiKeymapPath tuiOpts) files
+            let rc =
+                    ConfigLoader.ResolvedConfig
+                        { ConfigLoader.rcConfigDir = pargs.configDir
+                        , ConfigLoader.rcAgentFiles = files
+                        , ConfigLoader.rcLogJsonHttpEndpoint = Nothing
+                        , ConfigLoader.rcLogJsonFilepath = pargs.logJsonFile
+                        , ConfigLoader.rcLogRawFilepath = Nothing
+                        , ConfigLoader.rcSessionStore = sessionStore
+                        , ConfigLoader.rcPromptAliases = pargs.progPromptAliases
+                        , ConfigLoader.rcSelfDescribeSlug = Nothing
+                        , ConfigLoader.rcSelfDescribeDescription = Nothing
+                        , ConfigLoader.rcKeymapPath = Nothing
+                        }
+             in TUICmd.handleTUI
+                    (Prod.contramap TUICmdTrace baseTracer)
+                    rc
+                    pargs.apiKeysFile
+                    (TUICmd.tuiKeymapPath tuiOpts)
+                    files
+                    (TUICmd.tuiDatabasePath tuiOpts)
+                    pargs.progParams
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->

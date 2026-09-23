@@ -14,10 +14,9 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 
-import System.Agents.AgentTree (OSAgentNode (..))
-import System.Agents.Base (Agent (..))
 import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.Session.Base (Session (..))
+import System.Agents.Protocol (AgentDescriptor (..), ToolDescriptor (..))
+import System.Agents.SessionStore (SessionMeta (..))
 import System.Agents.TUI.Buffer (Buffer, bufferContent)
 import System.Agents.TUI.MessageComposer (
     InputConfig (..),
@@ -28,8 +27,6 @@ import System.Agents.TUI.Render.Attributes
 import System.Agents.TUI.Render.Conversation (formatBytes, getAttachmentCount)
 import System.Agents.TUI.Render.Utils (borderWithFocus)
 import System.Agents.TUI.Types
-import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
-import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Activation (Activation (..))
 
 -------------------------------------------------------------------------------
@@ -50,9 +47,7 @@ render_agentList st =
 -- | Render a single agent item.
 render_agentItem :: Bool -> TuiAgent -> Widget N
 render_agentItem _ agent =
-    txt $ " " <> agentSlug0
-  where
-    agentSlug0 = slug (osNodeConfig (tuiNode agent))
+    txt $ " " <> (tuiAgentDescriptor agent).adSlug
 
 -- | Render agent information panel.
 render_agentInfo :: TuiState -> Widget N
@@ -64,45 +59,42 @@ render_agentInfo st =
         ( case st ^. tuiUI . selectedAgentInfo of
             Nothing -> txt "No agent selected"
             Just agent ->
-                let node = tuiNode agent
-                    agentCfg = osNodeConfig node
-                    mtools = lookup (tuiAgentId agent) (st ^. tuiUI . uiAgentTools)
+                let d = tuiAgentDescriptor agent
                  in viewport AgentInfoWidget Both $
                         vBox $
-                            mconcat [agentHeader agentCfg, renderToolsSection mtools, agentPrompt agentCfg]
+                            mconcat [agentHeader d, renderToolsSection d.adTools, agentPrompt d]
         )
   where
-    agentHeader :: Agent -> [Widget N]
-    agentHeader agentCfg =
-        [ txt $ "# Slug: " <> slug agentCfg
-        , txt $ "# Announce: " <> announce agentCfg
+    agentHeader :: AgentDescriptor -> [Widget N]
+    agentHeader d =
+        [ txt $ "# Slug: " <> d.adSlug
+        , txt $ "# Announce: " <> d.adDescription
         , txt ""
-        , txt $ "# Model: " <> modelName agentCfg
+        , txt $ "# Model: " <> d.adModel
         , txt ""
         ]
-    renderToolsSection :: Maybe [ToolRegistration] -> [Widget N]
-    renderToolsSection Nothing =
-        [ txt "# Tools: not loaded"
+    renderToolsSection :: [ToolDescriptor] -> [Widget N]
+    renderToolsSection [] =
+        [ txt "# Tools: none"
         ]
-    renderToolsSection (Just toolz) =
+    renderToolsSection toolz =
         [ txt "# Tools:"
         , vBox $ map renderToolItem toolz
         ]
-    renderToolItem :: ToolRegistration -> Widget N
+    renderToolItem :: ToolDescriptor -> Widget N
     renderToolItem tool =
-        let toolName = tool.declareTool.toolDescriptionName.getToolName
-            activation = toolActivation tool
-            activationMarker = renderActivationMarker activation
+        let toolName = tool.tdName
+            activationMarker = renderActivationMarker tool.tdActivation
          in hBox [txt "- ", activationMarker, txt $ " " <> toolName]
     renderActivationMarker :: Maybe Activation -> Widget N
     renderActivationMarker Nothing = withAttr activationDefaultAttr $ txt "[a]"
     renderActivationMarker (Just activation) = case activation of
         AlwaysActivated -> withAttr activationAlwaysAttr $ txt "[A]"
         OnDemandActivated group -> withAttr activationOnDemandAttr $ txt $ "[D:" <> group <> "]"
-    agentPrompt :: Agent -> [Widget N]
-    agentPrompt agentCfg =
+    agentPrompt :: AgentDescriptor -> [Widget N]
+    agentPrompt d =
         [ txt "# System Prompt:"
-        , txt $ Text.unlines $ systemPrompt agentCfg
+        , txt $ Text.unlines d.adSystemPrompt
         ]
 
 -------------------------------------------------------------------------------
@@ -132,9 +124,9 @@ render_sessionList st =
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
 -- | Render a single session item.
-render_sessionItem :: TuiState -> Bool -> Session -> Widget N
-render_sessionItem _st _isSelected sess =
-    txt $ Text.pack $ " " <> show sess.sessionId
+render_sessionItem :: TuiState -> Bool -> SessionMeta -> Widget N
+render_sessionItem _st _isSelected meta =
+    txt $ Text.pack $ " " <> show meta.smSessionId
 
 -------------------------------------------------------------------------------
 -- Message Editor Rendering

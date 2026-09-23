@@ -20,6 +20,7 @@ import System.Agents.Base (ConversationId (..))
 import System.Agents.OS.Events (ToolCallActivity (..))
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Signals (calculateTrajectorySignals)
+import System.Agents.SessionStore (SessionMeta (..))
 import System.Agents.TUI.Render.Attributes
 import System.Agents.TUI.Render.Utils (borderWithFocus)
 import System.Agents.TUI.ToolCallActivity (ToolCallView (..), describeToolCallView, runningToolCallViews, sessionToolCallViews)
@@ -136,6 +137,7 @@ renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv 
             ConversationStatus_WaitingForInput ->
                 if isUnread then "● " else "○ "
             ConversationStatus_Paused -> "⏸ "
+            ConversationStatus_BlockedOnDeferred -> "⧗ "
         -- Tree branch prefix based on ancestor status
         branchPrefix = makePrefix ancestorIsLasts isLast
         -- Selection marker
@@ -200,7 +202,13 @@ render_conversationView st =
                         (conversationSession conv)
                         mNavState
 
--- | Render the session history view.
+{- | Render the session history view.
+
+The History tab's list holds 'SessionMeta' only (starts empty until
+3b-iii, 'System.Agents.Host.Client.listSessions'); there is no full
+'Session' with turns to render from there yet, so this shows the
+metadata instead of turns until then.
+-}
 render_sessionView :: TuiState -> Widget N
 render_sessionView st =
     content
@@ -208,9 +216,12 @@ render_sessionView st =
     content =
         case listSelectedElement (st ^. tuiUI . sessionList) of
             Nothing -> txt "No session selected"
-            Just (_, session) ->
-                let mNavState = st ^. tuiUI . turnNavigation
-                 in render_session st SessionViewWidget (Just session) mNavState
+            Just (_, meta) ->
+                vBox
+                    [ txt $ "Session: " <> Text.pack (show meta.smSessionId)
+                    , txt $ "Status: " <> Text.pack (show meta.smStatus)
+                    , txt "(full turn history not loaded yet -- TODO(3b-iii): Client.getSession)"
+                    ]
 
 -- | Render a session's turns.
 render_session :: TuiState -> WidgetName -> Maybe Session -> Maybe TurnNavigationState -> Widget N

@@ -12,12 +12,9 @@ module System.Agents.TUI.Types.State (
     -- * Core State
     Core (..),
     coreConversations,
-    coreAgentTools,
-    coreBufferedMessages,
-    corePausedConversations,
-    coreWorld,
-    coreOSEventQueue,
-    coreMailRouter,
+    coreClient,
+    coreParams,
+    coreOwnedSessions,
     initCore,
 
     -- * Focus Ring
@@ -46,7 +43,6 @@ module System.Agents.TUI.Types.State (
     fileBrowser,
     auxiliaryTasks,
     uiBufferedMessages,
-    uiAgentTools,
     buffers,
     bufferFocus,
     toolCallViews,
@@ -66,8 +62,9 @@ import Brick.Focus (FocusRing, focusRing)
 import Brick.Widgets.Edit (Editor, editorText)
 import Brick.Widgets.FileBrowser (FileBrowser)
 import Brick.Widgets.List (List, list)
-import Control.Concurrent.STM (TQueue, TVar, newTVarIO)
+import Control.Concurrent.STM (TVar)
 import Control.Lens (makeLenses)
+import qualified Data.Aeson as Aeson
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
@@ -76,12 +73,12 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Vector as Vector
 
-import System.Agents.Base (AgentId, ConversationId (..))
+import System.Agents.Base (ConversationId (..))
+import System.Agents.Host.Client (RunnerClient)
 import System.Agents.Media.Types (MediaAttachment)
-import System.Agents.OS.Core.World (World)
-import System.Agents.OS.Events (OSEvent)
-import System.Agents.Session.Base (Session)
-import System.Agents.Session.Mailbox (MailRouter, newMailRouter)
+import System.Agents.Session.Base (SessionId)
+import System.Agents.SessionStore (SessionMeta)
+import System.Agents.Tools.Params.Types (ParamName)
 import System.Agents.TUI.Buffer (Buffer)
 import System.Agents.TUI.KeyMapping (KeyMapping)
 import System.Agents.TUI.ToolCallActivity (ToolCallViews)
@@ -97,7 +94,6 @@ import System.Agents.TUI.Types.Core (
     TurnNavigationState,
     WidgetName (..),
  )
-import System.Agents.ToolRegistration (ToolRegistration)
 
 -------------------------------------------------------------------------------
 -- Core State
@@ -107,51 +103,38 @@ import System.Agents.ToolRegistration (ToolRegistration)
 
 This is stored in a TVar for thread-safe access. It contains
 mutable state that needs to be accessed from multiple threads.
+
+Phase 3b-i: everything that used to be owned by the TUI's own runtime
+(@_coreWorld@, @_coreOSEventQueue@, @_coreMailRouter@,
+@_coreBufferedMessages@, @_corePausedConversations@) is gone. The TUI now
+only keeps its own view of the sessions it has open, plus the
+'RunnerClient' it drives them through.
 -}
 data Core = Core
     { _coreConversations :: [Conversation]
-    -- ^ Active conversations
-    , _coreAgentTools :: [(AgentId, [ToolRegistration])]
-    -- ^ Tools per agent for display
-    , _coreBufferedMessages :: TVar (Map ConversationId [Text])
-    -- ^ Buffered messages per conversation (queued while agent is processing)
-    , _corePausedConversations :: Set ConversationId
-    -- ^ Set of paused conversation IDs
-    , _coreWorld :: Maybe World
-    {- ^ Optional OS World for ECS operations. Enables subcall visibility
-    in the TUI by allowing sub-agent conversations to be tracked as entities.
-    -}
-    , _coreOSEventQueue :: Maybe (TQueue OSEvent)
-    {- ^ Optional OS event queue for subcall event emission. Enables the TUI
-    to receive notifications about subcall lifecycle (start, progress, completion).
-    -}
-    , _coreMailRouter :: MailRouter
-    {- ^ One process-wide 'MailRouter' (@todos/session-mailbox.md@, Phase 4,
-    D12), the TUI's routing table of live conversation mailboxes. Every
-    conversation created by 'System.Agents.TUI.Event.Conversation.runConversation'
-    registers its mailbox here, keyed by
-    'System.Agents.SessionStore.conversationIdToSessionId', so
-    @send-message@\/@spawn-session@\/@watch-session@ can address it from any
-    other session (in this process or, via a future front-end, another).
-    -}
+    -- ^ Active conversations (client-side views of sessions)
+    , _coreClient :: RunnerClient
+    -- ^ The client every command goes through (Design §3).
+    , _coreParams :: Map ParamName Aeson.Value
+    -- ^ Non-secret and secret parameter values resupplied on every
+    -- 'CreateSession'\/'PostMessage' (D7): the TUI's own
+    -- @--params-file@, since the runner never stores secrets.
+    , _coreOwnedSessions :: Set SessionId
+    -- ^ Sessions this TUI process started (embedded mode): on quit, a
+    -- 'SendMail' 'StopRun' is due to each of them (-- TODO(3b-ii)).
     }
 
 makeLenses ''Core
 
--- | Initialize core state with optional World and EventQueue.
-initCore :: Maybe World -> Maybe (TQueue OSEvent) -> IO Core
-initCore mWorld mEventQueue = do
-    bufferedVar <- newTVarIO Map.empty
-    router <- newMailRouter
+-- | Initialize core state with the client this TUI drives its sessions through.
+initCore :: RunnerClient -> Map ParamName Aeson.Value -> IO Core
+initCore client params =
     pure
         Core
             { _coreConversations = []
-            , _coreAgentTools = []
-            , _coreBufferedMessages = bufferedVar
-            , _corePausedConversations = Set.empty
-            , _coreWorld = mWorld
-            , _coreOSEventQueue = mEventQueue
-            , _coreMailRouter = router
+            , _coreClient = client
+            , _coreParams = params
+            , _coreOwnedSessions = Set.empty
             }
 
 -------------------------------------------------------------------------------
@@ -186,8 +169,8 @@ data UIState = UIState
     -- ^ List widget for agents
     , _conversationList :: List WidgetName Conversation
     -- ^ List widget for conversations
-    , _sessionList :: List WidgetName Session
-    -- ^ List widget for saved sessions
+    , _sessionList :: List WidgetName SessionMeta
+    -- ^ List widget for saved sessions (History tab; empty until 3b-iii)
     , _messageEditor :: Editor Text WidgetName
     -- ^ Editor for message input
     , _selectedAgentInfo :: Maybe TuiAgent
@@ -205,9 +188,8 @@ data UIState = UIState
     , _auxiliaryTasks :: [AuxiliaryTask]
     -- ^ Background tasks (e.g., external viewers)
     , _uiBufferedMessages :: Map ConversationId [Text]
-    -- ^ Copy of buffered messages from Core for UI rendering
-    , _uiAgentTools :: [(AgentId, [ToolRegistration])]
-    -- ^ Tools per agent for display (mirror of Core's coreAgentTools)
+    -- ^ TUI-local draft/queue rendering state (§5); not derived from
+    -- 'Core' any more -- see 'System.Agents.TUI.Event.Queue'.
     , _buffers :: [Buffer]
     -- ^ Global in-memory buffers (most recent first)
     , _bufferFocus :: Maybe Int
@@ -237,7 +219,7 @@ buildFocusRingForTab tab =
             focusRing [AgentListWidget, ConversationListWidget, SessionsListWidget]
 
 -- | Initialize UI state with default values.
-initUIState :: [Text] -> [TuiAgent] -> [Session] -> UIState
+initUIState :: [Text] -> [TuiAgent] -> [SessionMeta] -> UIState
 initUIState helpText agents sessions =
     UIState
         { _uiFocusRing = buildFocusRingForTab AgentsTab
@@ -261,7 +243,6 @@ initUIState helpText agents sessions =
         , _fileBrowser = Nothing
         , _auxiliaryTasks = []
         , _uiBufferedMessages = Map.empty
-        , _uiAgentTools = []
         , _buffers = []
         , _bufferFocus = Nothing
         , _toolCallViews = Map.empty

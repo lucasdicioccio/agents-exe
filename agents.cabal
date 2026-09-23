@@ -314,6 +314,7 @@ library agents-tui
                       process,
                       process-extras,
                       prodapi,
+                      sqlite-simple,
                       stm,
                       temporary,
                       text,
