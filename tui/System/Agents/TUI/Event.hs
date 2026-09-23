@@ -365,6 +365,10 @@ handleNormalEvent tracer ev = do
                 resetQuitConfirmation
                 handleCancelAttachedConversation
         VtyEvent vtyEv
+            | matchesEvent keymap EventPauseRun vtyEv -> do
+                resetQuitConfirmation
+                handlePauseRunConversation
+        VtyEvent vtyEv
             | matchesEvent keymap EventAttachFile vtyEv -> do
                 resetQuitConfirmation
                 openFilePathDialog

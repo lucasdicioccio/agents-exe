@@ -85,6 +85,7 @@ data EventName
     | EventTogglePause
     | EventInterruptRun
     | EventCancelAttached
+    | EventPauseRun
     | EventAttachFile
     | EventClearAttachments
     | EventPasteClipboard
@@ -123,6 +124,7 @@ eventNameToText EventContinueSession = "continue-session"
 eventNameToText EventTogglePause = "toggle-pause"
 eventNameToText EventInterruptRun = "interrupt-run"
 eventNameToText EventCancelAttached = "cancel-attached"
+eventNameToText EventPauseRun = "pause-run"
 eventNameToText EventAttachFile = "attach-file"
 eventNameToText EventClearAttachments = "clear-attachments"
 eventNameToText EventPasteClipboard = "paste-clipboard"
@@ -156,6 +158,7 @@ eventNameFromText "continue-session" = Just EventContinueSession
 eventNameFromText "toggle-pause" = Just EventTogglePause
 eventNameFromText "interrupt-run" = Just EventInterruptRun
 eventNameFromText "cancel-attached" = Just EventCancelAttached
+eventNameFromText "pause-run" = Just EventPauseRun
 eventNameFromText "attach-file" = Just EventAttachFile
 eventNameFromText "clear-attachments" = Just EventClearAttachments
 eventNameFromText "paste-clipboard" = Just EventPasteClipboard
@@ -400,6 +403,7 @@ defaultKeyMapping =
             , (EventTogglePause, [KeyBinding (KeyChar 'e') ctrlModifier])
             , (EventInterruptRun, [KeyBinding (KeyChar 'u') ctrlModifier])
             , (EventCancelAttached, [KeyBinding (KeyChar 'x') ctrlModifier])
+            , (EventPauseRun, [KeyBinding (KeyChar 'b') ctrlModifier])
             , (EventAttachFile, [KeyBinding (KeyChar 'f') ctrlModifier])
             , (EventClearAttachments, [KeyBinding (KeyChar 'F') (Modifiers True False True)])
             , (EventPasteClipboard, [KeyBinding (KeyChar 'v') ctrlModifier])
@@ -563,11 +567,12 @@ generateHelpContent keymap =
     , ""
     , "Conversations:"
     , "  " <> formatBindings EventNewConversation <> " - Start new conversation with selected agent"
-    , "  " <> formatBindings EventContinueSession <> " - Continue restored session"
+    , "  " <> formatBindings EventContinueSession <> " - Continue restored session (also resumes one paused with " <> formatBindings EventPauseRun <> ")"
     , "  " <> formatBindings EventSendMessage <> " - Send message"
-    , "  " <> formatBindings EventTogglePause <> " - Pause/unpause conversation"
+    , "  " <> formatBindings EventTogglePause <> " - Pause/unpause conversation (local only; does not stop the run)"
     , "  " <> formatBindings EventInterruptRun <> " - Interrupt attached tool calls (asynchronous agents only)"
     , "  " <> formatBindings EventCancelAttached <> " - Cancel attached tool calls, killing them (asynchronous agents only)"
+    , "  " <> formatBindings EventPauseRun <> " - Pause the run itself; resume with " <> formatBindings EventContinueSession
     , ""
     , "Attachments:"
     , "  " <> formatBindings EventAttachFile <> " - Attach file (opens file browser)"

@@ -97,6 +97,7 @@ tests =
             ]
         , testCase "markdown export shows partial turn call status" markdownPartialTurn
         , testCase "runUntilBlocked returns a session blocked on deferred calls" runUntilBlockedOnDeferred
+        , testCase "runUntilBlocked stops on a Control Pause sent mid-wait" runUntilBlockedStopsOnPauseMidWait
         , testCase "a failing run cancels background calls" runFailureCancelsBackgroundCalls
         , testCase "a call that outlives ctxAsyncCallTimeout fails" callTimesOut
         , testGroup
@@ -593,6 +594,50 @@ interruptDetachesAttachedCalls = do
                 other -> assertFailure $ "expected one tracked call, got " <> show other
             assertBool "the interrupt mail was folded into the turn" (not (null partial.pUserMail))
         other -> assertFailure $ "expected one partial turn, got " <> show (length other)
+
+{- | A 'Pause' 'Control' message sent to the mailbox while 'runUntilBlocked'
+is genuinely blocked inside R3a's wait (on an attached, forever-running
+'RunSync' call) stops the loop at its next iteration -- the same way
+'System.Agents.Host.Runner''s run loop reacts to 'Control' mail, but here
+through 'Loop.runUntilBlocked' itself, which has no 'SessionRunner' of its
+own (this is what the TUI drives its conversations with). The attached
+call is left running (unlike 'CancelAllAttached'/'CancelCalls'): its gate
+is never filled, so a loop that never applied 'Control' mail at all -- as
+'runUntilBlocked' used to, before it gained its own 'applyControlMail'
+dispatch -- would hang here until the timeout below fires.
+-}
+runUntilBlockedStopsOnPauseMidWait :: Assertion
+runUntilBlockedStopsOnPauseMidWait = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gate <- newEmptyMVar -- never filled: proves the loop stopped, not that the call finished
+    let agent =
+            (mkAgent world YieldWhenAllDone (gatedToolCall gate))
+                { ctxToolCallPolicy = \_ _ -> RunSync
+                , ctxMailbox = Just mb
+                }
+    _ <-
+        forkIO $ do
+            threadDelay 100000
+            _ <-
+                mb.mbSend
+                    Outgoing
+                        { outId = Nothing
+                        , outFrom = FromUser Nothing
+                        , outPriority = Normal
+                        , outHops = 0
+                        , outBody = Control Pause
+                        }
+            pure ()
+    result <- timeout 5000000 $ runUntilBlocked convId agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case result of
+        Nothing -> assertFailure "runUntilBlocked did not return: Control Pause mail sent mid-wait was not observed"
+        Just (Left _) -> assertFailure "expected the loop to pause with a session, not complete"
+        Just (Right sess1) -> case partialTurns sess1 of
+            [partial] -> case partial.pTrackedToolCalls of
+                [tc] -> tc.tcState @?= Running
+                other -> assertFailure $ "expected one tracked call, got " <> show other
+            other -> assertFailure $ "expected one partial turn, got " <> show (length other)
 
 {- | A non-'Interrupt' envelope must never detach an attached call: only
 'Interrupt' priority pre-empts R3a.

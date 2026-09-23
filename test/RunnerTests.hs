@@ -89,6 +89,7 @@ tests =
         , testCase "Control (CancelCalls ids) cancels one attached call" controlCancelCallsTest
         , testCase "cancelAttachedCalls cancels the running call without needing its id" cancelAllAttachedTest
         , testCase "cancelAttachedCalls cancels a call while the loop is blocked waiting on it" cancelAllAttachedDuringWaitTest
+        , testCase "pauseSession stops a run and leaves calls running by default" pauseSessionTest
         , testCase "a background call reports tool.started and tool.completed events" toolCallEventsTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
@@ -919,6 +920,35 @@ cancelAllAttachedTest = do
         final.smStatus @?= StatusIdle
         sessF <- currentSession runner sid
         assertBool ("call reported cancelled: " <> show (sessionTexts sessF)) (any ("cancelled" `Text.isInfixOf`) (sessionTexts sessF))
+
+{- | 'pauseSession' (the agents-server \"pause\" endpoint's underlying call,
+and the TUI pause action's server-side counterpart) posts 'Pause' mail at
+'Normal' priority -- unlike the test-only 'sendControl' helper, which sends
+at 'Interrupt' priority and so would pass even if a caller only reacted to
+interrupts. The next run picks it up and stops, leaving the attached call
+running, exactly like 'controlPauseTest' (which drives the same mail
+through 'sendControl' instead).
+-}
+pauseSessionTest :: Assertion
+pauseSessionTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        _ <- expectRight =<< pauseSession runner sid
+
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, active) <- expectRight =<< awaitRun runner sid 5
+        (paused.smStatus, active) @?= (StatusPaused, False)
+        stillRunning <- hasBackgroundCall <$> currentSession runner sid
+        assertBool "the background call keeps running through the pause by default" stillRunning
+
+        putMVar gate ()
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
 
 {- | 'cancelAttachedCalls' must still work while the run loop is genuinely
 blocked inside 'waitAttachedCalls' on a forever-attached ('RunSync') call

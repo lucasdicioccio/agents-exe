@@ -44,6 +44,7 @@ module System.Agents.TUI.Event.Conversation (
     -- * Interrupt
     handleInterruptConversation,
     handleCancelAttachedConversation,
+    handlePauseRunConversation,
 
     -- * Progress Callbacks
     buildOnProgress,
@@ -385,12 +386,15 @@ spawnConversationIO config tracer coreRef outChan roster baseTuiAgent session mP
             Left _ -> pure ()
             Right blocked -> do
                 notifyProgress (SessionUpdated blocked)
-                writeBChan
-                    outChan
-                    ( AppEvent_ShowStatus
-                        StatusWarning
-                        "Conversation stopped: waiting for deferred tool calls. Complete them with the 'session' commands."
-                    )
+                -- 'runUntilBlocked' halts either on deferred calls or on a
+                -- 'StopRun'/'Pause' 'Control' message; the returned session
+                -- alone doesn't say which, but by then it's the only other
+                -- possibility.
+                let msg
+                        | Loop.isBlockedOnDeferredCalls blocked =
+                            "Conversation stopped: waiting for deferred tool calls. Complete them with the 'session' commands."
+                        | otherwise = "Conversation paused."
+                writeBChan outChan (AppEvent_ShowStatus StatusWarning msg)
         notifyProgress (SessionCompleted session)
     let conv =
             Conversation
@@ -738,6 +742,45 @@ handleCancelAttachedConversation = do
                             Right _ ->
                                 showStatus StatusInfo $
                                     "Cancel sent to " <> conversationName conv <> ": attached tool calls will be killed shortly"
+
+{- | Pause the focused conversation's run: posts 'Pause' 'Control' mail,
+which stops its run loop at its next iteration (attached calls, if any,
+keep running unless separately cancelled -- see
+'handleCancelAttachedConversation'). Unlike 'handleTogglePauseConversation'
+(a purely local, TUI-side "don't send input yet" toggle), this actually
+ends the conversation's run loop; resume it the same way a restored
+session is continued, with 'EventContinueSession'.
+-}
+handlePauseRunConversation :: EventM N TuiState ()
+handlePauseRunConversation = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> case conv.conversationSession of
+            Nothing -> showStatus StatusWarning "Conversation has no session yet"
+            Just sess -> do
+                coreRef <- use tuiCore
+                core <- liftIO $ readTVarIO coreRef
+                let router = core ^. coreMailRouter
+                mTarget <- liftIO $ router.mrLookup sess.sessionId
+                case mTarget of
+                    Nothing -> showStatus StatusWarning "Conversation has no mailbox to pause"
+                    Just (_, mailbox) -> do
+                        sent <-
+                            liftIO $
+                                mailbox.mbSend
+                                    Outgoing
+                                        { outId = Nothing
+                                        , outFrom = FromUser Nothing
+                                        , outPriority = Normal
+                                        , outHops = 0
+                                        , outBody = Control Pause
+                                        }
+                        case sent of
+                            Left _ -> showStatus StatusWarning "Could not send pause (mailbox full)"
+                            Right _ ->
+                                showStatus StatusInfo $
+                                    "Pause sent to " <> conversationName conv <> ": the run will stop shortly"
 
 -------------------------------------------------------------------------------
 -- Progress Callbacks

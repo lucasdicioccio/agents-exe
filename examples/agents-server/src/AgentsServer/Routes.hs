@@ -128,6 +128,15 @@ type SessionsAPI =
                                     \and lets them finish."
                                 :> "cancel-attached"
                                 :> Post '[JSON] SessionMetaBody
+                            :<|> Summary "Pause the run"
+                                :> Description
+                                    "Stops the run at its next iteration and persists `StatusPaused`. \
+                                    \Attached calls keep running unless the agent's config sets \
+                                    \`pauseCancelsCalls`; cancel them explicitly with `cancel-attached` \
+                                    \instead. Resume with `resume`, which works from `StatusPaused` \
+                                    \regardless of whether this took effect yet."
+                                :> "pause"
+                                :> Post '[JSON] SessionMetaBody
                             :<|> Summary "The deferred calls this session waits on"
                                 :> "pending"
                                 :> Get '[JSON] PendingBody

@@ -49,6 +49,7 @@ module System.Agents.Session.Loop (
 ) where
 
 import Control.Exception (onException)
+import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 
 import System.Agents.Base (ConversationId)
@@ -97,10 +98,17 @@ withEngineShutdown agent0 action = do
 
 {- | Like 'run', but returns the session instead of looping when nothing can
 progress in this process: the head partial turn only waits on deferred calls
-(see 'isBlockedOnDeferredCalls'), which an external worker must complete.
+(see 'isBlockedOnDeferredCalls'), which an external worker must complete, or
+a 'StopRun' or 'Pause' 'Control' message has arrived on the agent's mailbox.
 
 Background calls running in this process are waited for, since they cannot
-outlive it.
+outlive it -- unless the 'Control' mail that stopped this loop was itself a
+'CancelCalls'/'CancelAllAttached', which kills them outright through the
+agent's async engine before returning (mirroring
+'System.Agents.Host.Runner''s run loop, the other driver of this same
+'applyControlMail'/'cancelAttachedCall' pair, so a front-end with no
+'SessionRunner' of its own -- e.g. the TUI -- still reacts to the same
+'Control' mail the same way).
 -}
 runUntilBlocked :: forall r. ConversationId -> Agent r -> Session -> IO (Either r Session)
 runUntilBlocked convId agent sess =
@@ -110,11 +118,18 @@ runUntilBlocked convId agent sess =
     go latest agent0 sess0
         | isBlockedOnDeferredCalls sess0 = pure (Right sess0)
         | otherwise = do
-            (agent1, res) <- runStepM convId agent0 sess0
-            writeIORef latest agent1
-            case res of
-                Left r -> pure (Left r)
-                Right sess1 -> go latest agent1 sess1
+            (sess0', controls) <- applyControlMail agent0 sess0
+            mapM_ (cancelAttachedCall agent0) [cid | CancelCalls ids <- controls, cid <- ids]
+            when (CancelAllAttached `elem` controls) $
+                mapM_ (cancelAttachedCall agent0) (runningToolCallIds sess0')
+            if StopRun `elem` controls || Pause `elem` controls
+                then pure (Right sess0')
+                else do
+                    (agent1, res) <- runStepM convId agent0 sess0'
+                    writeIORef latest agent1
+                    case res of
+                        Left r -> pure (Left r)
+                        Right sess1 -> go latest agent1 sess1
 
 -------------------------------------------------------------------------------
 -- Asynchronous Execution with Progress Callbacks

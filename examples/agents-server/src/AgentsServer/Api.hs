@@ -191,6 +191,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("POST", ["v1", "sessions", sid, "resume"]) -> withSession sid (resumeH env req)
     ("POST", ["v1", "sessions", sid, "cancel"]) -> withSession sid (cancelH env)
     ("POST", ["v1", "sessions", sid, "cancel-attached"]) -> withSession sid (cancelAttachedH env)
+    ("POST", ["v1", "sessions", sid, "pause"]) -> withSession sid (pauseH env)
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
     ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env)
     ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
@@ -212,7 +213,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
-        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pending", "events"]
+        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "events"]
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
         _ -> False
@@ -459,6 +460,16 @@ stopping the run itself (unlike 'cancelH', a full teardown). Posts
 -}
 cancelAttachedH :: ServerEnv -> SessionId -> IO Response
 cancelAttachedH env sid = json status200 <$> orThrow (cancelAttachedCalls env.envRunner sid)
+
+{- | Pause a session's run: posts 'Pause' 'Control' mail, which the runner
+loop reacts to at its next iteration by stopping the run and persisting
+'StatusPaused' (attached calls keep running unless the agent's config sets
+'pauseCancelsCalls' -- see 'cancelAttachedH' to cancel them explicitly).
+Resume with 'resumeH', which works from 'StatusPaused' regardless of
+whether this mail was ever read.
+-}
+pauseH :: ServerEnv -> SessionId -> IO Response
+pauseH env sid = json status200 <$> orThrow (pauseSession env.envRunner sid)
 
 pendingH :: ServerEnv -> SessionId -> IO Response
 pendingH env sid = do

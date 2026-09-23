@@ -602,6 +602,48 @@ applyAttachOutcome outcome tc
         RunAsync (Just secs) -> "still running after " <> Text.pack (show secs) <> "s"
         _ -> "still running"
 
+{- | Every tool-call id still tracked as 'Running' anywhere in a session
+(the head turn's attached calls, and any left behind in earlier partial
+turns).
+-}
+runningToolCallIds :: Session -> [ToolCallId]
+runningToolCallIds sess =
+    [tc.tcId | PartialUserTurn partial _ <- sess.turns, tc <- partial.pTrackedToolCalls, tc.tcState == Running]
+
+-- | Cancel one attached call through the agent's async engine, if any. A
+-- no-op (per 'Engine.cancelToolCall') for an unknown or already-final call
+-- id, so it is safe to call again for a 'Control' envelope a caller has
+-- already reacted to on an earlier iteration.
+cancelAttachedCall :: Agent r -> ToolCallId -> IO ()
+cancelAttachedCall agent callId = forM_ agent.ctxAsyncEngine $ \engine -> void $ Engine.cancelToolCall engine callId
+
+{- | Read unread 'Control' mail (e.g. 'Pause', 'CancelAllAttached'); when
+the whole unread batch is 'Control', commit the cursor past it
+("consumed... but render nothing", per 'mailQuery') so it doesn't sit
+there to re-trigger a caller reacting to it on every subsequent iteration.
+A batch that mixes in other mail is left alone: the next ordinary receive
+point is what renders it, and advancing the cursor here would silently
+drop it unread.
+
+Shared by every driver of a session's step loop -- both
+'System.Agents.Host.Runner' (server-backed sessions) and
+'System.Agents.Session.Loop' (in-process ones, e.g. the TUI) -- so
+'Control' mail sent mid-run is acted on the same way regardless of which
+one is stepping the session.
+-}
+applyControlMail :: Agent r -> Session -> IO (Session, [ControlMsg])
+applyControlMail agent sess = case agent.ctxMailbox of
+    Nothing -> pure (sess, [])
+    Just mb -> do
+        envelopes <- atomically (mbUnread mb sess.mailCursor)
+        let controls = [msg | e <- envelopes, Control msg <- [e.envBody]]
+            allControl = not (null envelopes) && length controls == length envelopes
+            sess' =
+                if allControl
+                    then sess{mailCursor = maximum (map (.envSeq) envelopes)}
+                    else sess
+        pure (sess', controls)
+
 {- | Retry until the predicate ('any' or 'all') holds over the entities'
 finality.
 -}

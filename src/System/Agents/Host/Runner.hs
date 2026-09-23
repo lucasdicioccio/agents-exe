@@ -43,6 +43,7 @@ module System.Agents.Host.Runner (
     sessionOwner,
     postMessage,
     cancelAttachedCalls,
+    pauseSession,
     resume,
     completeCall,
     cancelRun,
@@ -94,10 +95,17 @@ import System.Agents.Host
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
-import qualified System.Agents.Session.Async.Engine as Engine
 import System.Agents.Session.AgentConfig (matchGlob)
 import System.Agents.Session.Base hiding (SessionProgress (..))
-import System.Agents.Session.Step (applyContinuationMail, buildContext, refreshHeadPartialTurn, runStepM)
+import System.Agents.Session.Step (
+    applyContinuationMail,
+    applyControlMail,
+    buildContext,
+    cancelAttachedCall,
+    refreshHeadPartialTurn,
+    runningToolCallIds,
+    runStepM,
+ )
 import System.Agents.Session.Wake (WakeOutcome (..), findSessionForToken, wakeSessionWith)
 import System.Agents.SessionStore (
     SessionMeta (..),
@@ -903,37 +911,6 @@ runLoop runner live mode agent0 = do
                 void $ storeOrThrow runner live meta sess' StatusRunning
             go agent' (steps + 1) done
 
-    -- | Every unread 'Control' message waiting in the session's mailbox.
-    -- | Read unread 'Control' mail; when the whole unread batch is
-    -- 'Control', commit the cursor past it. See the call site for why a
-    -- mixed batch is left uncommitted.
-    applyControlMail :: RunnerAgent -> Session -> IO (Session, [ControlMsg])
-    applyControlMail agent sess = case agent.ctxMailbox of
-        Nothing -> pure (sess, [])
-        Just mb -> do
-            envelopes <- atomically (mbUnread mb sess.mailCursor)
-            let controls = [msg | e <- envelopes, Control msg <- [e.envBody]]
-                allControl = not (null envelopes) && length controls == length envelopes
-                sess' =
-                    if allControl
-                        then sess{mailCursor = maximum (map (.envSeq) envelopes)}
-                        else sess
-            pure (sess', controls)
-
-    -- | Cancel one attached call through the agent's async engine, if any.
-    -- A no-op (per 'Engine.cancelToolCall') for an unknown or already-final
-    -- call id, so it is safe to call again for a 'Control' envelope this
-    -- loop has already reacted to on an earlier iteration.
-    cancelAttachedCall :: RunnerAgent -> ToolCallId -> IO ()
-    cancelAttachedCall agent callId = for_ agent.ctxAsyncEngine $ \engine -> void $ Engine.cancelToolCall engine callId
-
--- | Every tool-call id still tracked as 'Running' anywhere in a session
--- (the head turn's attached calls, and any left behind in earlier partial
--- turns).
-runningToolCallIds :: Session -> [ToolCallId]
-runningToolCallIds sess =
-    [tc.tcId | PartialUserTurn partial _ <- sess.turns, tc <- partial.pTrackedToolCalls, tc.tcState == Running]
-
 -- | Whether an agent's JSON config enables a given boolean option, looked
 -- up by the session's recorded agent slug.
 agentBoolOption :: SessionRunner -> SessionMeta -> (Base.Agent -> Maybe Bool) -> IO Bool
@@ -1397,7 +1374,24 @@ the session currently has an active run, since 'Control' mail is picked
 up the next time one does.
 -}
 cancelAttachedCalls :: SessionRunner -> SessionId -> IO (Either RunnerError SessionMeta)
-cancelAttachedCalls runner sid =
+cancelAttachedCalls runner sid = sendControlMail runner sid CancelAllAttached
+
+{- | Pause a session: posts 'Pause' 'Control' mail, which the runner loop
+reacts to at its next iteration by stopping the run (persisting
+'StatusPaused') without cancelling any attached calls, unless the agent's
+config sets 'pauseCancelsCalls'. Reached the same way as
+'cancelAttachedCalls': works whether or not a run is currently active,
+since 'Control' mail is picked up the next time one starts. Resuming is
+'resume', which (per its own doc) works from 'StatusPaused' regardless of
+this mail ever being read.
+-}
+pauseSession :: SessionRunner -> SessionId -> IO (Either RunnerError SessionMeta)
+pauseSession runner sid = sendControlMail runner sid Pause
+
+-- | Post 'Control' mail to a session at 'Normal' priority, shared by
+-- 'cancelAttachedCalls' and 'pauseSession'.
+sendControlMail :: SessionRunner -> SessionId -> ControlMsg -> IO (Either RunnerError SessionMeta)
+sendControlMail runner sid msg =
     withLive runner sid $ \live ->
         loadLatest runner live >>= \case
             Nothing -> pure $ Left $ UnknownSession sid
@@ -1414,7 +1408,7 @@ cancelAttachedCalls runner sid =
                                         , outFrom = FromUser Nothing
                                         , outPriority = Normal
                                         , outHops = 0
-                                        , outBody = Control CancelAllAttached
+                                        , outBody = Control msg
                                         }
                             pure $ either (const (Left (MailboxRejected sid))) (const (Right meta)) sent
 
