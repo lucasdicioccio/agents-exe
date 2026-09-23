@@ -42,11 +42,36 @@ cabal run agents-server -- \
 | `--stream-tokens` | off | Stream LLM answers: the events stream gets `text.delta` events as the text arrives. See [Streaming answers](#streaming-answers). |
 | `--no-ui` | off | Do not serve the chat page at `/`. See [Finding your way around](#finding-your-way-around). |
 | `--cors-origin ORIGIN` | (none) | Allow this origin to call the server cross-origin (a browser page on another host or port). Repeatable, or `*` for any origin — refused at startup together with `--auth-tokens`. See [Authentication](#authentication). |
+| `--socket PATH` | (none) | Also listen on this Unix domain socket, in addition to `--bind`/`--port`. A stale file at the path is removed at start; the socket is created with mode `0600`. Requests over it carry no `Origin` header and need no bearer token beyond what `--auth-tokens` imposes elsewhere: the socket, and who can reach it on the filesystem, is the trust boundary. Closed and unlinked on shutdown. |
 | `--set NAME=VALUE`, `--set-json NAME=JSON` | (none) | Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters). |
 | `--pin NAME=VALUE`, `--pin-json NAME=JSON` | (none) | Like `--set`, but sessions cannot override it. Repeatable. See [Parameters](#parameters). |
 
 Sub-agents work as they do elsewhere: their sessions are stored in the same
 database, linked to the parent session.
+
+### Configuration
+
+`agents-server` itself only ever takes agent files from `--agent-file`: it has
+no config file of its own. `agents-exe serve` is the same code (see
+[Embedding the runner in your own program](#embedding-the-runner-in-your-own-program))
+behind agents-exe's own config loading: it reads `agents-exe.cfg.json` and
+resolves agent files the way the TUI and every other `agents-exe` command do
+(`agentsFiles`, `agentsDirectories`, the `~/.config/agents-exe/default`
+fallback, `--agent-file`, `--agent SLUG` to pick one agent by name), and
+shares agents-exe's global `--api-keys`, `--set`/`--pin`/`--set-json`/
+`--pin-json` and `--params-file`. Its own flags are the rest of this table
+(`--db`, `--bind`, `--port`, `--live-session-ttl`, `--shutdown-grace`,
+`--auth-tokens`, `--stream-tokens`, `--admin-owners`, `--no-ui`,
+`--cors-origin`, `--socket`); `--db` defaults next to the resolved sessions
+directory instead of `./agents-server.db`:
+
+```bash
+agents-exe --agent-file ./weather.json serve --port 8080
+# or, from a directory with an agents-exe.cfg.json:
+agents-exe serve --port 8080
+```
+
+See [cli-commands.md](cli-commands.md#serve) for the full flag list.
 
 ### Finding your way around
 
@@ -621,14 +646,19 @@ their tokens stay valid across restarts.
 
 ## Running as a service
 
-`agents-server` is already service-ready: every path it needs is a flag, it
-logs JSON lines on stderr (see [Logs](#logs) below), `SIGTERM`/`SIGINT`
-trigger the graceful shutdown described above (`--shutdown-grace` bounds it),
-and `recoverOnStartup` runs before the first request is accepted. A `systemd`
-unit only needs to point it at the right files and restart it on crash.
+Both `agents-server` and `agents-exe serve` are already service-ready: every
+path either needs is a flag, they log JSON lines on stderr (see
+[Logs](#logs) below), `SIGTERM`/`SIGINT` trigger the graceful shutdown
+described above (`--shutdown-grace` bounds it), and `recoverOnStartup` runs
+before the first request is accepted. A `systemd` unit only needs to point
+one at the right files and restart it on crash.
 
 Create a user and directories for its state, put the agent files, API keys
-and token file somewhere readable, and write a unit:
+and token file somewhere readable, and write a unit. This one uses
+`agents-exe serve`, so agents-exe.cfg.json in `WorkingDirectory` can carry
+the agent files instead of repeating `--agent-file`; `agents-server` works
+the same way with `ExecStart=/usr/local/bin/agents-server` and the agent
+files always on the command line:
 
 ```ini
 # /etc/systemd/system/agents-server.service
@@ -640,7 +670,7 @@ After=network.target
 Type=simple
 User=agents-server
 Group=agents-server
-ExecStart=/usr/local/bin/agents-server \
+ExecStart=/usr/local/bin/agents-exe serve \
     --agent-file /etc/agents-server/weather.json \
     --api-keys /etc/agents-server/keys.json \
     --db /var/lib/agents-server/agents.db \

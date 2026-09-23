@@ -659,6 +659,60 @@ echo '{"command": "ls -la"}' | \
     agents-exe tool-call bash --log-file ./tool-debug.log
 ```
 
+### serve
+
+Run agents over HTTP, like `agents-server`, loading agents-exe.cfg.json like the TUI does.
+
+```bash
+agents-exe serve [--agent-file FILE...] [--agent SLUG] [OPTIONS]
+```
+
+**Description:**
+
+`agents-exe serve` is `agents-server`'s code (sessions in SQLite or Postgres,
+the HTTP API and SSE stream, MCP over HTTP, the chat page) run behind
+agents-exe's own config loading, so it resolves agent files the same way
+every other `agents-exe` command does: `--agent-file` (repeatable), else
+`agents-exe.cfg.json`'s `agentsFiles` plus every `.json` file under
+`agentsDirectories`, else `~/.config/agents-exe/default`; `--agent SLUG`
+narrows to one agent by slug, failing with the list of available slugs if it
+does not match. It shares agents-exe's global `--api-keys`,
+`--set`/`--set-json`/`--pin`/`--pin-json` and `--params-file`, so those are
+not repeated below.
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--db FILE\|URL` | next to the resolved sessions directory | SQLite file, or `postgresql://` URL, for sessions and continuations |
+| `--bind HOST` | `127.0.0.1` | Address to listen on |
+| `--port PORT` | `8080` | Port to listen on |
+| `--live-session-ttl SECONDS` | `900` | Idle time before a session's in-memory state is dropped |
+| `--shutdown-grace SECONDS` | `10` | Time open requests get to finish on shutdown |
+| `--auth-tokens FILE` | (none) | Bearer tokens and their owners; without, no authentication |
+| `--stream-tokens` | off | Stream LLM answers as `text.delta` events |
+| `--admin-owners OWNER,…` | (none) | Owners allowed to store and delete agents over the API (needs `--auth-tokens`) |
+| `--no-ui` | off | Do not serve the chat page at `/` |
+| `--cors-origin ORIGIN` | (none) | Allow this origin to call the server cross-origin; repeatable, or `*` for any (needs no `--auth-tokens`) |
+| `--socket PATH` | (none) | Also listen on this Unix domain socket, in addition to `--bind`/`--port`; created `0600`, a stale file removed at start, closed and unlinked on shutdown. The socket is the local trust boundary: no `Origin`, no bearer token beyond `--auth-tokens`. |
+
+See [agents-server.md](agents-server.md) for everything the running server
+does (the HTTP API, sessions, deferred calls, CORS, authentication, running
+it as a service).
+
+**Examples:**
+
+```bash
+# Explicit agent files, like agents-server
+agents-exe serve --agent-file ./weather.json --api-keys ./keys.json --port 8080
+
+# From a directory with an agents-exe.cfg.json
+agents-exe serve --port 8080
+
+# One agent from a multi-agent config, over a local socket only auth-tokens gate
+agents-exe serve --agent architect --socket /run/agents-exe/agents.sock --auth-tokens ./tokens.json
+```
+
 ### check-tool-call
 
 Validate a tool call payload against a tool schema (reads JSON from stdin).
