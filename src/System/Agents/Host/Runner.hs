@@ -55,6 +55,7 @@ module System.Agents.Host.Runner (
     serverWatchSession,
     serverUnwatchSession,
     getSession,
+    listSessions,
     awaitRun,
     recoverOnStartup,
 
@@ -1505,6 +1506,26 @@ sessionOwner runner = go []
 -- | The latest stored version of a session.
 getSession :: SessionRunner -> SessionId -> IO (Maybe (Session, SessionMeta))
 getSession runner sid = runner.srHost.hostBackend.sbLoadMeta sid
+
+{- | Metadata of matching sessions, most recently updated first (G6,
+@todos/os-as-standalone-server.md@): 'sbQuery' on the runner's backend,
+with each result's metadata replaced by this process's own live, cached
+copy when the session is live here, so a caller sees a status this process
+just set (e.g. 'StatusRunning') without waiting for the next store to
+land. A session live in another process is unaffected: only this
+process's 'srLive' is consulted.
+-}
+listSessions :: SessionRunner -> SessionQuery -> IO [SessionMeta]
+listSessions runner query = do
+    stored <- runner.srHost.hostBackend.sbQuery query
+    mapM preferLive stored
+  where
+    preferLive :: SessionMeta -> IO SessionMeta
+    preferLive meta = do
+        mLive <- lookupLive runner meta.smSessionId
+        case mLive of
+            Nothing -> pure meta
+            Just live -> maybe meta snd <$> readTVarIO live.lsLatest
 
 {- | Wait until the session's active run stops, or the timeout expires.
 

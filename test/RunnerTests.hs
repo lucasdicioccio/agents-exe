@@ -48,7 +48,7 @@ import System.Agents.Session.Async (ContinuationStore (..), mkSqliteContinuation
 import System.Agents.Session.Base hiding (SessionProgress (..))
 import System.Agents.Session.Mailbox (Mailbox (..), MailboxInfo (..), MailRouter (..), newInMemoryMailbox, newMailRouter)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
-import System.Agents.SessionStore
+import System.Agents.SessionStore hiding (listSessions)
 import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM)
 import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.Context (ToolExecutionContext (..), ToolPortal, ToolResult (..), mkMinimalContext)
@@ -109,6 +109,7 @@ tests =
         , testCase "an owner-scoped subscription only sees that owner's events" ownerScopeTest
         , testCase "session.created and session.deleted are emitted" sessionCreatedDeletedTest
         , testCase "createSessionAs with no message creates an idle session with no turn and starts no run" createNoMessageTest
+        , testCase "listSessions filters by owner and reflects a live session's current status" listSessionsRunnerTest
         ]
 
 -------------------------------------------------------------------------------
@@ -897,6 +898,26 @@ createNoMessageTest = do
         (afterWait, running) <- expectRight =<< awaitRun runner meta.smSessionId 1
         afterWait.smStatus @?= StatusReady
         running @?= False
+
+{- | 'listSessions' on the runner (G6): filters like 'sbQuery' (an
+owner query only sees that owner's sessions), and reflects this process's
+own live, cached status for a session it is running, rather than only what
+was last stored.
+-}
+listSessionsRunnerTest :: Assertion
+listSessionsRunnerTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        alice <- expectRight =<< createSessionAs runner (Just "alice") "test-agent" (Just (message "hi")) Nothing Map.empty
+        bob <- expectRight =<< createSessionAs runner (Just "bob") "test-agent" (Just (message "hi")) Nothing Map.empty
+        onlyAlice <- listSessions runner allSessionsQuery{sqOwner = Just "alice"}
+        map (.smSessionId) onlyAlice @?= [alice.smSessionId]
+        _ <- expectRight =<< resume runner bob.smSessionId UntilBlocked Map.empty
+        _ <- expectRight =<< awaitRun runner bob.smSessionId 5
+        got <- listSessions runner allSessionsQuery{sqParent = Nothing}
+        let bobStatus = [m.smStatus | m <- got, m.smSessionId == bob.smSessionId]
+        bobStatus @?= [StatusIdle]
 
 -- | Like 'withSessionRunner', with the runner already built (so tests can
 -- pick a config other than the default, e.g. a small event ring).

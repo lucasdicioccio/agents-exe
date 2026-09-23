@@ -72,7 +72,7 @@ import System.Agents.Session.Base (
     pendingDeferredCalls,
  )
 import Control.Concurrent.STM (atomically)
-import System.Agents.SessionStore
+import System.Agents.SessionStore hiding (listSessions)
 
 main :: IO ()
 main = do

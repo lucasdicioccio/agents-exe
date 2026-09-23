@@ -62,7 +62,7 @@ import System.Agents.Protocol (
  )
 import System.Agents.Session.Base (ContinuationToken (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls)
 import System.Agents.Session.Wake (findSessionForToken)
-import System.Agents.SessionStore (SessionBackend (..), SessionMeta (..), SessionQuery (..), allSessionsQuery)
+import System.Agents.SessionStore (SessionMeta (..), SessionQuery (..), allSessionsQuery)
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Params.Types (ParamName, ParamScope (..), ParameterDecl (..), ProcessValue (..))
@@ -206,7 +206,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("PUT", ["v1", "agents", slug]) -> requireAdmin env caller >>= \by -> putAgentH env req by slug
     ("DELETE", ["v1", "agents", slug]) -> requireAdmin env caller >> deleteAgentH env slug
     ("POST", ["v1", "sessions"]) -> createH env req caller
-    ("GET", ["v1", "sessions"]) -> listSessions env req caller
+    ("GET", ["v1", "sessions"]) -> listSessionsH env req caller
     ("GET", ["v1", "sessions", sid]) -> withSession sid (getH env)
     ("DELETE", ["v1", "sessions", sid]) -> withSession sid (deleteH env req)
     ("POST", ["v1", "sessions", sid, "messages"]) -> withSession sid (messagesH env req)
@@ -491,8 +491,8 @@ createH env req (Caller owner) = do
             [(hContentType, jsonType), ("Location", "/v1/sessions/" <> Text.encodeUtf8 (showId sid))]
             (Aeson.encode view)
 
-listSessions :: ServerEnv -> Request -> Caller -> IO Response
-listSessions env req caller@(Caller owner) = do
+listSessionsH :: ServerEnv -> Request -> Caller -> IO Response
+listSessionsH env req caller@(Caller owner) = do
     let params = queryParams req
     statuses <- traverse (mapM parseStatus . Text.splitOn ",") (param "status" params)
     parent <- traverse (maybe (badRequest "parent must be a session id") (pure . SessionId) . UUID.fromText) (param "parent" params)
@@ -510,7 +510,7 @@ listSessions env req caller@(Caller owner) = do
                 , sqUpdatedBefore = before
                 , sqLimit = Just limit
                 }
-    metas <- env.envHost.hostBackend.sbQuery query
+    metas <- listSessions env.envRunner query
     let nextBefore
             | length metas == limit, (m : _) <- reverse metas = Just m.smUpdatedAt
             | otherwise = Nothing
