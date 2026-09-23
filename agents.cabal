@@ -38,6 +38,7 @@ library agents-lib
                     , System.Agents.CLI.Base
                     , System.Agents.CLI.Check
                     , System.Agents.CLI.CheckToolCall
+                    , System.Agents.CLI.ConfigLoader
                     , System.Agents.CLI.Cowsay
                     , System.Agents.CLI.DescribeTool
                     , System.Agents.CLI.EchoPrompt
@@ -524,6 +525,7 @@ test-suite agents-tests
     other-modules:    ActivationSessionTests
                     , AgentFactoryTests
                     , BindingsTests
+                    , ConfigLoaderTests
                     , NarrowingTests
                     , ContinuationConsistencyTests
                     , AsyncToolCallsTests

@@ -94,6 +94,7 @@ import qualified RunnerTests
 import qualified DurableWorkflowTests
 import qualified NarrowingTests
 import qualified MailboxTests
+import qualified ConfigLoaderTests
 
 main :: IO ()
 main = defaultMain tests
@@ -147,6 +148,7 @@ tests =
         , OpenAIStreamTests.tests
         , RunnerTests.tests
         , MailboxTests.tests
+        , ConfigLoaderTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
