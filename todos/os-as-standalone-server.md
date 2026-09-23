@@ -2,7 +2,8 @@
 
 Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
-(commits 8de2a64..dc01dc8); Phase 2 in progress. Builds on
+(commits 8de2a64..dc01dc8); Phase 2a done (0390c9f..2d65359); 2b in
+progress. Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
 
 ## Goal
@@ -406,6 +407,19 @@ server re-implemented on them; 2b the missing runner operations
 (`listSessions`, `sendMail`, create with no message, `forkSession`) and
 their routes; 2c `ctxEmit` replacing `ctxEventQueue` so subcall and
 tool-activity events reach the runner stream, and `mailInToolResult`.
+
+2a landed as `System.Agents.Protocol` (`Event { seq, session_id, owner,
+body }`, `EventBody` with the old `SessionEvent` kinds plus
+`session.created` / `session.deleted`, JSON for `NewMessage`, `RunMode`,
+`RunnerError`, `DeleteMode`, `DeletionPlan`, `SubscribeScope`), a 4096-event
+ring in the runner, `subscribe`/`subscribeSTM` taking a scope and an
+`after`, `Last-Event-ID` and `?after=` on the session stream, and
+`GET /v1/events?scope=owner|all`. Deviations from the sketch: `evSession`
+and `evOwner` are always set, also on the server-wide events, because the
+JSON merges them with the embedded `SessionMeta` fields; `RunnerError`'s
+decoder is lossy (only the code survives, by design of the existing
+`{error, message}` shape); the snapshot fallback on an unavailable replay
+keeps the pre-existing tiny gap between snapshot and re-subscribe.
 
 `System.Agents.Protocol` with `Command`, `Event`, `EventBody`, JSON
 instances, and codecs for `NewMessage`, `RunMode`, `RunnerError`,
