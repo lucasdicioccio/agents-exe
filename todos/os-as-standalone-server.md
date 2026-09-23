@@ -2,7 +2,7 @@
 
 Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
-(commits 8de2a64..dc01dc8); Phases 2, 3a and 3b done (0390c9f..d2887c6); 3c in
+(commits 8de2a64..dc01dc8); Phases 2 and 3 done (0390c9f..5eeb4b0); Phase 4 in
 progress. Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
 
@@ -493,6 +493,16 @@ as a read fallback for both the TUI and `serve`. Runner fix along the
 way: `postMessage` accepts the first message of an empty `ready` session.
 An end-to-end pty script against a fake OpenAI endpoint lives in
 `checks/phase3b-iv-e2e/`.
+
+3c landed (c5f017f, 5eeb4b0): `OSEvent` and `ctxEventQueue` are gone;
+`OSEmission` + `ctxEmit` is the one emission mechanism, with
+`queueEmitter` for local consumers; new event kind `hook.failed`; the
+per-step subcall progress snapshot is gone with no successor until Phase
+5. The TUI has a Pending panel and `answer-pending` (Ctrl+Y) that
+completes the oldest deferred call through `completeCall` with
+auto-resume. `UserToolResponse` has no error form, so there is no
+`fail-pending`. Open: no selection among several pending calls; no UI
+for `hook.failed`.
 
 `inProcessClient`; the TUI conversation layer rewritten on `RunnerClient`
 (§4). `agents-exe tui` starts a `Host` + `SessionRunner` over the SQLite
