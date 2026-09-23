@@ -41,6 +41,7 @@ cabal run agents-server -- \
 | `--admin-owners OWNER,…` | (none) | Owners allowed to store and delete agents over the API. Needs `--auth-tokens`. See [Storing agents](#storing-agents). |
 | `--stream-tokens` | off | Stream LLM answers: the events stream gets `text.delta` events as the text arrives. See [Streaming answers](#streaming-answers). |
 | `--no-ui` | off | Do not serve the chat page at `/`. See [Finding your way around](#finding-your-way-around). |
+| `--cors-origin ORIGIN` | (none) | Allow this origin to call the server cross-origin (a browser page on another host or port). Repeatable, or `*` for any origin — refused at startup together with `--auth-tokens`. See [Authentication](#authentication). |
 | `--set NAME=VALUE`, `--set-json NAME=JSON` | (none) | Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters). |
 | `--pin NAME=VALUE`, `--pin-json NAME=JSON` | (none) | Like `--set`, but sessions cannot override it. Repeatable. See [Parameters](#parameters). |
 
@@ -193,6 +194,7 @@ Each session has a `status`:
 | `running` | A run is active. | Wait for it, or `cancel` it. |
 | `waiting_external` | Only deferred calls remain. | Post their results to `/v1/continuations/:token`. |
 | `idle` | The LLM answered. | Post a new message. |
+| `paused` | Stopped by `pause`. | `resume`, or any mail if the agent's `resumeOnAnyMail` option is set. |
 | `failed` | The last run failed; `status_detail` says why. | `resume` retries from the last stored version. |
 
 Every stored change increments the session's `version`.
@@ -305,6 +307,8 @@ per change:
 | `run.stopped` | `{session_id, status}` |
 | `session.failed` | `{session_id, message}`, followed by `run.stopped` with status `failed`. |
 | `text.delta` | `{session_id, text}`: the next piece of the LLM's answer, with `--stream-tokens` only. |
+| `tool.started` | `{session_id, tool_call_id, tool}`: a tool call still attached to the session (not deferred) started running. |
+| `tool.completed` | `{session_id, tool_call_id, tool, succeeded}`: that call reached a final state. `succeeded` is `false` for a failed or cancelled call. A call that both starts and finishes within one step is not reported (informational only; the stored session remains the source of truth). |
 
 A typical run, from a `resume`:
 
@@ -365,9 +369,11 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?, run?, params?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request`, see [Parameters](#parameters) |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
 | `GET /v1/sessions/:id` | | `200` session | 404 `unknown_session` |
-| `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?, params?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages`, see [Parameters](#parameters) |
+| `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?, params?, interrupt?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages`, see [Parameters](#parameters) |
 | `POST /v1/sessions/:id/resume?wait=&timeout=` | `{mode?, params?}` or no body | `202` or `200` session | 404, 409 `run_in_progress`, see [Parameters](#parameters) |
 | `POST /v1/sessions/:id/cancel` | | `200` session metadata | 404, 409 `no_active_run` |
+| `POST /v1/sessions/:id/cancel-attached` | | `200` session metadata | 404 |
+| `POST /v1/sessions/:id/pause` | | `200` session metadata | 404 |
 | `GET /v1/sessions/:id/pending` | | `200 {calls}` | 404 |
 | `GET /v1/sessions/:id/events` | | `200 text/event-stream` | 404 |
 | `POST /v1/continuations/:token?wait=&timeout=` | `{result, resume?, params?}` | `202` or `200` session | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict`, see [Parameters](#parameters) |
@@ -381,8 +387,16 @@ Other errors: `401 unauthorized` when authentication is on (with a
 `404 not_found` for an unknown path, `405 method_not_allowed`,
 `413 payload_too_large` for bodies over 32 MiB, and `500 internal_error`.
 
-**Messages** (`prompt`, `media`). `media` is a list of
-`{"mime": "image/png", "base64": "…", "filename": "optional"}`.
+**Messages** (`prompt`, `media`, `interrupt`). `media` is a list of
+`{"mime": "image/png", "base64": "…", "filename": "optional"}`. `interrupt`
+(default `false`) only matters against a busy session (`status: "running"`):
+instead of being refused with `409 not_accepting_messages`, the message is
+posted as interrupt-priority mail, which detaches the session's currently
+attached tool calls (and, with the agent's `interruptCompletions` on,
+cancels an in-flight LLM completion) and asks the model again with this
+message folded in. A detached call's result, if it still arrives, is
+reported on a later run rather than lost. On an idle session `interrupt` has
+no effect: there is nothing to interrupt.
 
 **Results** (`result`). A JSON string is a text result. Other forms are
 `{"type": "text", "content": "…"}`, `{"type": "json", "content": <any>}`,
@@ -398,6 +412,17 @@ of a session; another owner's session answers `404 unknown_session`). `limit` is
 **Cancelling** stops the active run and its background tool calls. The
 session is stored with the status its turns imply, usually `ready`. The
 cancelled calls are reported to the LLM on the next run.
+
+**`cancel-attached`** hard-cancels every tool call currently attached to the
+session, through the async engine, *without* stopping the run itself. A
+cancelled call's result never arrives. Contrast with posting a message with
+`interrupt: true`, which only detaches attached calls and lets them finish.
+
+**`pause`** posts `Pause` control mail: the run stops at its next iteration
+and the session is stored as `status: "paused"`. Attached calls keep running
+unless the agent's config sets `pauseCancelsCalls` — cancel them explicitly
+with `cancel-attached` instead. `resume` works from `paused` regardless of
+whether the pause has taken effect yet.
 
 **Deleting** removes the session, all its sub-sessions, and their
 continuation tokens. It is refused while a run is active on any of them or on
@@ -493,12 +518,48 @@ Several tokens may share an owner. The file is read at startup.
 All owners share the agents and the API keys of the server.
 
 **Browser origins.** Without `--auth-tokens`, requests carrying an `Origin`
-header that is not `localhost`, `127.0.0.1`, or `[::1]` answer
-`403 forbidden_origin`. This stops a web page from reaching a local server
-through DNS rebinding. Clients that send no `Origin` (curl, servers, MCP
-clients) are not affected. With authentication on, origins are not checked.
-`/healthz`, `/openapi.json` and `/` are answered before the check, so a
-monitor or a documentation browser reaches them from anywhere.
+header that is not `localhost`, `127.0.0.1`, `[::1]`, or a `--cors-origin`
+answer `403 forbidden_origin`. This stops a web page from reaching a local
+server through DNS rebinding. Clients that send no `Origin` (curl, servers,
+MCP clients) are not affected. With authentication on, origins are not
+checked (a bearer token already proves the caller is authorized; there is no
+cookie to leak). `/healthz`, `/openapi.json` and `/` are answered before the
+check, so a monitor or a documentation browser reaches them from anywhere.
+
+**Cross-origin browser access (CORS).** `--cors-origin ORIGIN` (repeatable)
+lets a page served by a *different* origin — another host, port, or scheme —
+call the API and open its event stream directly, instead of proxying
+through that page's own backend. An origin must match exactly: scheme and
+port are significant, host is compared case-insensitively (so
+`http://app.example:5173` and `https://app.example` are different origins,
+and each needs its own `--cors-origin`). `--cors-origin '*'` allows any
+origin and is refused at startup together with `--auth-tokens`, since with
+tokens in play a bearer credential must not be sent to a page the operator
+never named.
+
+A listed origin:
+
+* passes the origin check above even without `--auth-tokens` — it was opted
+  in explicitly, unlike an arbitrary non-loopback origin;
+* gets `Access-Control-Allow-Origin` (echoing the request's own `Origin`,
+  never a literal `*`), `Vary: Origin`, and
+  `Access-Control-Expose-Headers: Location` on every response, including
+  errors and the event stream (`fetch` needs `Location` to read the
+  `Location` header `POST /v1/sessions` answers with; `EventSource`/`fetch`
+  need the others to read the response at all);
+* gets its `OPTIONS` preflight requests answered with `204` and
+  `Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS`,
+  `Access-Control-Allow-Headers: Authorization, Content-Type, Last-Event-ID`,
+  and `Access-Control-Max-Age: 600`. Preflight is answered on any path,
+  before authentication and before the origin check the real request would
+  otherwise get — except that a non-loopback origin not on the list still
+  gets `403 forbidden_origin` here too, when there is no `--auth-tokens`,
+  matching what the real request would get.
+
+`GET /v1/sessions/:id/events` keeps working cross-origin the same way it
+works same-origin: `EventSource` cannot set the `Authorization` header, so
+with `--auth-tokens` the token still goes as `?access_token=` (see above);
+without tokens, a listed origin needs nothing extra.
 
 ---
 
@@ -555,6 +616,75 @@ between runs of a session, but not a restart. A session is not dropped at
 the TTL while one of its background calls is still running: it is kept until
 they finish. Deferred calls are the durable kind:
 their tokens stay valid across restarts.
+
+---
+
+## Running as a service
+
+`agents-server` is already service-ready: every path it needs is a flag, it
+logs JSON lines on stderr (see [Logs](#logs) below), `SIGTERM`/`SIGINT`
+trigger the graceful shutdown described above (`--shutdown-grace` bounds it),
+and `recoverOnStartup` runs before the first request is accepted. A `systemd`
+unit only needs to point it at the right files and restart it on crash.
+
+Create a user and directories for its state, put the agent files, API keys
+and token file somewhere readable, and write a unit:
+
+```ini
+# /etc/systemd/system/agents-server.service
+[Unit]
+Description=agents-server
+After=network.target
+
+[Service]
+Type=simple
+User=agents-server
+Group=agents-server
+ExecStart=/usr/local/bin/agents-server \
+    --agent-file /etc/agents-server/weather.json \
+    --api-keys /etc/agents-server/keys.json \
+    --db /var/lib/agents-server/agents.db \
+    --bind 127.0.0.1 \
+    --port 8080 \
+    --auth-tokens /etc/agents-server/tokens.json \
+    --shutdown-grace 10
+Restart=on-failure
+RestartSec=2
+# The database directory must exist and be writable before the first start.
+StateDirectory=agents-server
+WorkingDirectory=/var/lib/agents-server
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now agents-server
+```
+
+* `--bind 127.0.0.1` keeps the service off the network; put a reverse proxy
+  (for TLS, or to publish it beyond this machine) in front of it, or add
+  `--cors-origin` if a browser page on another origin on this machine needs
+  to reach it directly (see [Authentication](#authentication)).
+* `--auth-tokens` is strongly recommended for anything not strictly
+  loopback-only: see the warning at the top of this document.
+* The server writes one JSON object per line to stderr, with no other output
+  on stdout; under `systemd` that means `journalctl -u agents-server -f`
+  shows the log stream directly, one JSON line per entry, without extra
+  timestamps or framing getting in the way of `jq`. `journalctl -u
+  agents-server -o cat | jq .` is a convenient way to filter it.
+* On `sudo systemctl stop agents-server` (or a redeploy), `systemd` sends
+  `SIGTERM`: the server stops accepting new connections, ends event streams,
+  answers waiting requests with their current state, and gives other open
+  requests up to `--shutdown-grace` seconds before it cancels active runs
+  (storing their sessions) and exits. Set `TimeoutStopSec` in the unit at
+  least a few seconds above `--shutdown-grace`, or `systemd` may `SIGKILL`
+  the process before the grace period elapses.
+* `Restart=on-failure` restarts the service if it exits non-zero (for
+  example, a database it cannot open); it does not restart on a clean
+  `systemctl stop`. `recoverOnStartup` then picks up sessions a crash left
+  `running`, as described above.
 
 ---
 

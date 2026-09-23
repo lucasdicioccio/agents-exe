@@ -228,6 +228,7 @@ data MessageBody = MessageBody
     { mbPrompt :: Text
     , mbMedia :: Maybe [MediaItem]
     , mbRun :: Maybe Text
+    , mbInterrupt :: Maybe Bool
     }
     deriving (Show, Eq, Generic)
 
@@ -242,6 +243,14 @@ instance ToSchema MessageBody where
         withFieldDocs
             [ ("prompt", says "The next message in this conversation.")
             , ("run", oneOfValues "How far the run should go." ["none", "step", "until_blocked"])
+            ,
+                ( "interrupt"
+                , says
+                    "Only against a running session (default false): instead of 409 \
+                    \not_accepting_messages, detach its attached tool calls (and, with \
+                    \the agent's interruptCompletions on, cancel an in-flight LLM call) \
+                    \and ask the model again with this message folded in."
+                )
             ]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
 
@@ -400,7 +409,7 @@ data SessionMetaBody = SessionMetaBody
     , smbParentSessionId :: Maybe SessionId
     , smbOwner :: Maybe Text
     , smbStatus :: Text
-    -- ^ @ready@, @running@, @waiting_external@, @idle@, or @failed@.
+    -- ^ @ready@, @running@, @waiting_external@, @idle@, @paused@, or @failed@.
     , smbStatusDetail :: Maybe Text
     , smbVersion :: Int
     -- ^ Incremented on every stored change.
@@ -418,7 +427,7 @@ instance Aeson.FromJSON SessionMetaBody where
 instance ToSchema SessionMetaBody where
     declareNamedSchema p =
         withFieldDocs
-            [ ("status", oneOfValues statusHelp ["ready", "running", "waiting_external", "idle", "failed"])
+            [ ("status", oneOfValues statusHelp ["ready", "running", "waiting_external", "idle", "paused", "failed"])
             , ("status_detail", says "Why the last run failed.")
             , ("version", says "Incremented on every stored change; a conflicting write answers 409.")
             , ("owner", says "Who the session belongs to, when the server authenticates callers.")
@@ -429,8 +438,8 @@ instance ToSchema SessionMetaBody where
 statusHelp :: Text
 statusHelp =
     "ready: can progress, call resume. running: a run is active. waiting_external: \
-    \blocked on the deferred calls in `pending`. idle: the agent answered. failed: \
-    \the last run failed."
+    \blocked on the deferred calls in `pending`. idle: the agent answered. paused: \
+    \stopped by pause, call resume. failed: the last run failed."
 
 {- | A session's metadata, its conversation, and its pending deferred calls:
 what the session endpoints answer.
