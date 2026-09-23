@@ -50,6 +50,7 @@ module System.Agents.Host.Runner (
     sendMail,
     sendControlMail,
     listMail,
+    forkSession,
     resume,
     completeCall,
     cancelRun,
@@ -1556,6 +1557,81 @@ listMail runner sid unreadOnly = do
                     then maybe 0 ((.mailCursor) . fst) <$> getSession runner sid
                     else pure 0
             Right <$> atomically (mb.mbUnread cursor)
+
+{- | Fork a session (G6): copy it, or a prefix of it up to and including
+one turn, into a fresh session with its own id, recording 'forkedFromSessionId'
+and starting no run.
+
+'atTurn', when given, is a 0-based index into the source session's 'turns'
+(newest first, matching the TUI's own @navSelectedTurnIndex@\/
+@handleForkAtTurn@): the fork keeps that turn and every older one,
+dropping anything newer, the same truncation the TUI performs today.
+'Nothing' copies the whole session. See 'RunnerError.UnknownTurn' for why
+this is an index rather than the @TurnId@ the design sketch shows -- 'Turn'
+carries no id of its own to fork at.
+
+The fork keeps the source's agent unless @newAgentSlug@ names another one
+(validated to exist, 'UnknownAgent' otherwise -- this also covers
+"continue with another agent": a fork at the head, i.e. @atTurn = Just 0@
+or 'Nothing', with a new slug). It also keeps the source's parent link and
+its non-secret session parameters (as the initial live overlay, so a
+resumed fork does not immediately hit 'MissingRequiredParams' for values
+the source already had bound), but never its status: a fork's status is
+whatever 'sessionStatusOf' derives from the turns it kept, so it never
+shares a later status change with the session it was forked from (a
+paused or failed source forks into a session that is simply ready or idle
+per its copied turns).
+-}
+forkSession :: SessionRunner -> Maybe Text -> SessionId -> Maybe Int -> Maybe Text -> IO (Either RunnerError SessionMeta)
+forkSession runner owner sourceSid atTurn newAgentSlug =
+    runner.srHost.hostBackend.sbLoadMeta sourceSid >>= \case
+        Nothing -> pure $ Left $ UnknownSession sourceSid
+        Just (sourceSess, sourceMeta) -> case atTurn of
+            Just idx
+                | idx < 0 || idx >= length sourceSess.turns -> pure $ Left $ UnknownTurn sourceSid idx
+            _ -> resolveAgent sourceSess sourceMeta
+  where
+    resolveAgent :: Session -> SessionMeta -> IO (Either RunnerError SessionMeta)
+    resolveAgent sourceSess sourceMeta = case newAgentSlug of
+        Just slug ->
+            lookupAgent runner.srHost slug >>= \case
+                Nothing -> pure $ Left $ UnknownAgent slug
+                Just _ -> doFork sourceSess sourceMeta slug
+        Nothing -> case sourceMeta.smAgent of
+            Nothing -> pure $ Left $ UnknownAgent ""
+            Just slug -> doFork sourceSess sourceMeta slug
+
+    doFork :: Session -> SessionMeta -> Text -> IO (Either RunnerError SessionMeta)
+    doFork sourceSess sourceMeta slug = do
+        newSid <- newSessionId
+        newTid <- newTurnId
+        now <- getCurrentTime
+        let keptTurns = maybe sourceSess.turns (`drop` sourceSess.turns) atTurn
+            forked =
+                Session
+                    { turns = keptTurns
+                    , sessionId = newSid
+                    , forkedFromSessionId = Just sourceSid
+                    , turnId = newTid
+                    , sessionVersion = Just 2
+                    , sessionExecutionMode = sourceSess.sessionExecutionMode
+                    , mailCursor = 0
+                    }
+            status = sessionStatusOf forked
+            meta0 =
+                (freshSessionMeta newSid now)
+                    { smAgent = Just slug
+                    , smOwner = owner
+                    , smParent = sourceMeta.smParent
+                    , smParams = sourceMeta.smParams
+                    }
+        withLive runner newSid $ \live -> do
+            atomically $ writeTVar live.lsParams (Map.map (\v -> ParamValue v False) sourceMeta.smParams)
+            store runner live meta0 forked status Nothing >>= \case
+                Left conflict -> pure (Left (Conflict conflict))
+                Right meta -> do
+                    emit runner newSid (SessionCreated meta)
+                    pure (Right meta)
 
 {- | Who a session belongs to: the owner of its root session, since
 sub-sessions record none. 'Nothing' when the session does not exist.

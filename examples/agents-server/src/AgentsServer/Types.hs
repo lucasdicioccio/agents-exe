@@ -35,6 +35,7 @@ module AgentsServer.Types (
     DeferredCallBody (..),
     MailPostBody (..),
     MailListBody (..),
+    ForkBody (..),
     RawJson (..),
 
     -- * Encoding shared by the two
@@ -365,6 +366,37 @@ instance ToSchema MailListBody where
                     "Each is an Envelope: {id, seq, from, priority, hops, sentAt, body}. \
                     \See the Mail section of docs/agents-server.md."
                 )
+            ]
+            <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
+
+{- | @POST \/v1\/sessions\/:id\/fork@ (G6). @at_turn@ is a 0-based index into
+the source session's turns, newest first (as the TUI counts them); absent,
+the whole session is copied. @agent@ rebinds the fork to another agent,
+which also covers "continue with another agent" (fork with no @at_turn@,
+or @at_turn: 0@, and an @agent@).
+-}
+data ForkBody = ForkBody
+    { fbAtTurn :: Maybe Int
+    , fbAgent :: Maybe Text
+    }
+    deriving (Show, Eq, Generic)
+
+instance Aeson.ToJSON ForkBody where
+    toJSON = Aeson.genericToJSON (bodyOptions 2)
+
+instance Aeson.FromJSON ForkBody where
+    parseJSON = Aeson.genericParseJSON (bodyOptions 2)
+
+instance ToSchema ForkBody where
+    declareNamedSchema p =
+        withFieldDocs
+            [
+                ( "at_turn"
+                , says
+                    "A 0-based turn index, newest first. Absent copies the whole \
+                    \session; 0 forks at the head (e.g. to continue with another agent)."
+                )
+            , ("agent", says "Rebind the fork to another agent's slug; absent keeps the source's agent.")
             ]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
 

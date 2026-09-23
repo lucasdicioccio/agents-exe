@@ -113,6 +113,12 @@ tests =
         , testCase "sendMail with Control StopRun stops a run" sendMailStopRunTest
         , testCase "sendMail with AgentMessage wakes a paused session when wakeOn/resumeOnAnyMail allow it" sendMailAgentMessageWakesPausedTest
         , testCase "listMail lists all mail, or only what is still unread" listMailTest
+        , testCase "forkSession with no at_turn copies the whole session" forkWholeTest
+        , testCase "forkSession with at_turn keeps that turn and every older one" forkAtTurnTest
+        , testCase "forkSession with a new agent slug rebinds the fork" forkWithNewAgentTest
+        , testCase "forkSession refuses a turn index out of range" forkUnknownTurnTest
+        , testCase "forkSession refuses an unknown agent slug" forkUnknownAgentTest
+        , testCase "forkSession's status is derived from its own turns, not shared with the source" forkDoesNotShareStatusTest
         ]
 
 -------------------------------------------------------------------------------
@@ -303,6 +309,117 @@ awaitRunTest = do
         missing <- newSessionId
         unknown <- awaitRun runner missing 0.1
         fmap fst unknown @?= Left (UnknownSession missing)
+
+-------------------------------------------------------------------------------
+-- forkSession (G6)
+-------------------------------------------------------------------------------
+
+-- | With no @at_turn@, a fork copies every turn, records
+-- 'forkedFromSessionId', keeps the source's agent, and starts no run.
+forkWholeTest :: Assertion
+forkWholeTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        (sourceSess, _) <- maybe (assertFailure "source session missing") pure =<< getSession runner sid
+
+        forked <- expectRight =<< forkSession runner (Just "alice") sid Nothing Nothing
+        (forked.smSessionId /= sid) @? "the fork has a fresh session id"
+        forked.smAgent @?= Just "test-agent"
+        forked.smOwner @?= Just "alice"
+        (active, _) <- expectRight =<< awaitRun runner forked.smSessionId 0.2
+        active.smSessionId @?= forked.smSessionId -- no run started
+
+        (forkedSess, _) <- maybe (assertFailure "forked session missing") pure =<< getSession runner forked.smSessionId
+        forkedSess.forkedFromSessionId @?= Just sid
+        forkedSess.turns @?= sourceSess.turns
+
+-- | @at_turn@ (a 0-based index into 'turns', newest first, matching the
+-- TUI's own turn navigation) keeps that turn and every older one, the
+-- same truncation @handleForkAtTurn@ performs in the TUI.
+forkAtTurnTest :: Assertion
+forkAtTurnTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        (sourceSess, _) <- maybe (assertFailure "source session missing") pure =<< getSession runner sid
+        assertBool "at least two turns to fork a prefix of" (length sourceSess.turns >= 2)
+
+        forked <- expectRight =<< forkSession runner Nothing sid (Just 1) Nothing
+        (forkedSess, _) <- maybe (assertFailure "forked session missing") pure =<< getSession runner forked.smSessionId
+        forkedSess.turns @?= drop 1 sourceSess.turns
+
+-- | An @agent@ slug rebinds the fork to another agent instead of the
+-- source's own (also how "continue with another agent" is done: a fork at
+-- the head with a new agent).
+forkWithNewAgentTest :: Assertion
+forkWithNewAgentTest = do
+    node1 <- testNode "{}"
+    node2 <- testNode "{\"slug\": \"other-agent\"}"
+    host <- testHost [node1, node2] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+
+        forked <- expectRight =<< forkSession runner Nothing sid Nothing (Just "other-agent")
+        forked.smAgent @?= Just "other-agent"
+
+-- | A turn index outside @[0, length turns)@ is refused with 'UnknownTurn'.
+forkUnknownTurnTest :: Assertion
+forkUnknownTurnTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        result <- forkSession runner Nothing sid (Just 999) Nothing
+        result @?= Left (UnknownTurn sid 999)
+
+-- | An unknown @agent@ slug is refused with 'UnknownAgent', same as
+-- 'createSessionAs'.
+forkUnknownAgentTest :: Assertion
+forkUnknownAgentTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        result <- forkSession runner Nothing sid Nothing (Just "no-such-agent")
+        result @?= Left (UnknownAgent "no-such-agent")
+
+-- | A fork's status is derived from the turns it copied, independently of
+-- whatever happens to the source afterwards (pausing the source here does
+-- not pause its fork).
+forkDoesNotShareStatusTest :: Assertion
+forkDoesNotShareStatusTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+
+        forked <- expectRight =<< forkSession runner Nothing sid Nothing Nothing
+        forked.smStatus @?= StatusIdle
+        let forkedSid = forked.smSessionId
+
+        _ <- expectRight =<< pauseSession runner sid
+        -- The mailbox is checked before any step, so this stops at once.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, _) <- expectRight =<< awaitRun runner sid 5
+        paused.smStatus @?= StatusPaused
+
+        (_, forkedMeta) <- maybe (assertFailure "forked session missing") pure =<< getSession runner forkedSid
+        forkedMeta.smStatus @?= StatusIdle
 
 deleteTest :: Assertion
 deleteTest = do

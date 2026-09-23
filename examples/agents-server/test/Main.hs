@@ -86,6 +86,7 @@ main =
             , testCase "GET /v1/events is owner-scoped when auth is on" ownerScopedEventsTest
             , testCase "POST /v1/sessions with no prompt creates an idle session with no turn" createNoPromptTest
             , testCase "POST and GET /v1/sessions/:id/mail send and list mail" mailRouteTest
+            , testCase "POST /v1/sessions/:id/fork forks whole, at a turn, with a new agent, and refuses bad input" forkRouteTest
             ]
 
 -------------------------------------------------------------------------------
@@ -291,6 +292,32 @@ mailRouteTest = withServer "{}" mockCompletion $ \srv -> do
 
     (missing, err) <- call srv "GET" "/v1/sessions/00000000-0000-0000-0000-000000000000/mail" Nothing
     (missing, field "error" err) @?= (404, "unknown_session")
+
+{- | Fork whole (default), fork at a turn (a prefix), an unknown turn index
+(404 unknown_turn), and an unknown agent slug (404 unknown_agent).
+-}
+forkRouteTest :: Assertion
+forkRouteTest = withServer "{}" mockCompletion $ \srv -> do
+    (created, view) <- call srv "POST" "/v1/sessions?wait=true" (Just (createBody []))
+    created @?= 201
+    let sid = textField "session_id" view
+        sourceTurns = arrayField "turns" (field "session" view)
+    assertBool "at least two turns" (length sourceTurns >= 2)
+
+    (forkedStatus, forked) <- call srv "POST" ("/v1/sessions/" <> sid <> "/fork") (Just (Aeson.object []))
+    forkedStatus @?= 201
+    field "forkedFromSessionId" (field "session" forked) @?= Aeson.String sid
+    arrayField "turns" (field "session" forked) @?= sourceTurns
+
+    (atTurnStatus, atTurnForked) <- call srv "POST" ("/v1/sessions/" <> sid <> "/fork") (Just (Aeson.object ["at_turn" .= (1 :: Int)]))
+    atTurnStatus @?= 201
+    arrayField "turns" (field "session" atTurnForked) @?= drop 1 sourceTurns
+
+    (badTurn, badTurnErr) <- call srv "POST" ("/v1/sessions/" <> sid <> "/fork") (Just (Aeson.object ["at_turn" .= (999 :: Int)]))
+    (badTurn, field "error" badTurnErr) @?= (404, "unknown_turn")
+
+    (badAgent, badAgentErr) <- call srv "POST" ("/v1/sessions/" <> sid <> "/fork") (Just (Aeson.object ["agent" .= ("no-such-agent" :: Text)]))
+    (badAgent, field "error" badAgentErr) @?= (404, "unknown_agent")
 
 agentsHealthTest :: Assertion
 agentsHealthTest = withServer "{}" mockCompletion $ \srv -> do
@@ -679,6 +706,7 @@ openApiTest = do
                 , "/v1/sessions/{id}/cancel"
                 , "/v1/sessions/{id}/cancel-attached"
                 , "/v1/sessions/{id}/events"
+                , "/v1/sessions/{id}/fork"
                 , "/v1/sessions/{id}/mail"
                 , "/v1/sessions/{id}/messages"
                 , "/v1/sessions/{id}/pause"

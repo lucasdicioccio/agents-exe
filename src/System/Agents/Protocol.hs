@@ -305,6 +305,15 @@ data RunnerError
       MissingRequiredParams [ParamName]
     | -- | The session's mailbox refused the message (full, per 'mailboxMaxUnread').
       MailboxRejected SessionId
+    | {- | 'forkSession' (G6): the turn index does not name a turn of this
+      session. The sketch in @todos/os-as-standalone-server.md@ Design §1
+      spells this as a @TurnId@, but 'Turn' carries no id of its own --
+      only 'Session.turnId' does, and that names the latest turn, not a
+      historical one. 'forkSession' addresses a turn the same way the
+      TUI's own @handleForkAtTurn@ does: a 0-based index into 'turns'
+      (newest first), which this carries instead.
+      -}
+      UnknownTurn SessionId Int
     deriving (Show, Eq)
 
 -- | The @error@ code an HTTP answer gives for a 'RunnerError' (matches
@@ -324,6 +333,7 @@ runnerErrorCode = \case
     InvalidParams _ -> "invalid_params"
     MissingRequiredParams _ -> "params_required"
     MailboxRejected _ -> "mailbox_full"
+    UnknownTurn{} -> "unknown_turn"
 
 -- | The human-readable @message@ an HTTP answer gives for a 'RunnerError'.
 runnerErrorMessage :: RunnerError -> Text
@@ -341,6 +351,7 @@ runnerErrorMessage = \case
     InvalidParams names -> "secret parameter(s) must be given as strings: " <> Text.intercalate ", " names
     MissingRequiredParams names -> "required parameter(s) not bound: " <> Text.intercalate ", " names
     MailboxRejected sid -> "session " <> showId sid <> " has too much unread mail; try again later"
+    UnknownTurn sid idx -> "session " <> showId sid <> " has no turn at index " <> Text.pack (show idx)
   where
     showId = Text.pack . show
 
@@ -377,6 +388,7 @@ runnerErrorFromCode code msg = case code of
     "invalid_params" -> InvalidParams []
     "params_required" -> MissingRequiredParams []
     "mailbox_full" -> MailboxRejected placeholderSessionId
+    "unknown_turn" -> UnknownTurn placeholderSessionId 0
     _ -> UnknownAgent msg
   where
     placeholderSessionId = SessionId UUID.nil

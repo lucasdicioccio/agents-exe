@@ -140,6 +140,7 @@ fromRunnerError e = ApiError (statusFor (runnerErrorCode e)) (runnerErrorCode e)
         "unknown_agent" -> status404
         "unknown_session" -> status404
         "unknown_token" -> status404
+        "unknown_turn" -> status404
         "token_already_completed" -> status409
         "run_in_progress" -> status409
         "no_active_run" -> status409
@@ -217,6 +218,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
     ("POST", ["v1", "sessions", sid, "mail"]) -> withSession sid (mailPostH env req caller)
     ("GET", ["v1", "sessions", sid, "mail"]) -> withSession sid (mailListH env req)
+    ("POST", ["v1", "sessions", sid, "fork"]) -> withSession sid (forkH env req caller)
     ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env req)
     ("GET", ["v1", "events"]) -> allEventsH env req caller
     ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
@@ -238,7 +240,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
-        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "mail", "events"]
+        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "mail", "fork", "events"]
         ["v1", "events"] -> True
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
@@ -572,6 +574,25 @@ whether this mail was ever read.
 -}
 pauseH :: ServerEnv -> SessionId -> IO Response
 pauseH env sid = json status200 <$> orThrow (pauseSession env.envRunner sid)
+
+{- | Fork a session (G6): @{at_turn?, agent?}@. @at_turn@ is a 0-based
+turn index, newest first (as the TUI's own turn navigation counts them);
+absent, the whole session is copied. @agent@ rebinds the fork to another
+agent (also covers "continue with another agent": a fork with no
+@at_turn@, or @at_turn: 0@, and an @agent@). Starts no run.
+-}
+forkH :: ServerEnv -> Request -> Caller -> SessionId -> IO Response
+forkH env req (Caller owner) sid = do
+    body <- jsonBodyOrEmpty req
+    (atTurn, agentSlug) <- parseBody body $ \o -> (,) <$> o .:? "at_turn" <*> o .:? "agent"
+    meta <- orThrow $ forkSession env.envRunner owner sid atTurn agentSlug
+    let newSid = meta.smSessionId
+    view <- loadView env newSid
+    pure $
+        responseLBS
+            status201
+            [(hContentType, jsonType), ("Location", "/v1/sessions/" <> Text.encodeUtf8 (showId newSid))]
+            (Aeson.encode view)
 
 pendingH :: ServerEnv -> SessionId -> IO Response
 pendingH env sid = do

@@ -156,6 +156,14 @@ type SessionsAPI =
                                 :> "mail"
                                 :> QueryParam "unread" Bool
                                 :> Get '[JSON] MailListBody
+                            :<|> Summary "Fork this session"
+                                :> Description
+                                    "Copies the session, or a prefix of it up to and including one turn, into \
+                                    \a fresh session with its own id and forkedFromSessionId set. Starts no \
+                                    \run. The answer carries a Location header naming the new session."
+                                :> "fork"
+                                :> ReqBody '[JSON] ForkBody
+                                :> PostCreated '[JSON] SessionBody
                        )
            )
 

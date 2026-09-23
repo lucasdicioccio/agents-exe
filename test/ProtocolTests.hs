@@ -133,6 +133,7 @@ runnerErrorCodeTest = do
         , InvalidParams ["p"]
         , MissingRequiredParams ["p"]
         , MailboxRejected sid
+        , UnknownTurn sid 3
         ]
   where
     checkCode e = do
