@@ -38,6 +38,7 @@ import System.Agents.Host.Runner (withSessionRunner)
 import System.Agents.Protocol
 import qualified System.Agents.Session.Base as SessionBase
 import System.Agents.Session.Base (
+    ControlMsg (StopRun),
     MailBody (AgentMessage, Control),
     Priority (..),
     SessionStatus (..),
@@ -57,6 +58,7 @@ tests =
         , testCase "SendMail/ListMail generic mail, ForkSession, DeleteSession" mailForkDeleteTest
         , testCase "AwaitRun waits for the run to stop; Stats reports load" awaitStatsTest
         , testCase "rcSubscribe sees session.created" subscribeSeesSessionCreatedTest
+        , testCase "the TUI's own command sequence, in order, over one subscription" tuiSequenceTest
         ]
 
 -------------------------------------------------------------------------------
@@ -214,3 +216,67 @@ subscribeSeesSessionCreatedTest = do
         createdMeta <- findCreated
         createdMeta.smSessionId @?= meta.smSessionId
         subClose sub
+
+{- | Mirrors exactly the sequence "System.Agents.TUI.Core" and
+"System.Agents.TUI.Event.Conversation" issue against a 'RunnerClient', end
+to end, without a real LLM ('mockCompletion' answers immediately): a
+promptless create (G2), 'subscribeAll' (the event bridge), a
+'postMessage' observed as @run.started@ / @session.updated@ / @run.stopped@
+in that order, an interrupting 'postMessage' (@nmInterrupt = True@), a
+pause then a resume (the chat page's 'UntilBlocked'), a fork at turn 0, and
+finally the @StopRun@ mail quitting the TUI sends every owned, still-running
+session.
+-}
+tuiSequenceTest :: Assertion
+tuiSequenceTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (const mockCompletion)
+    withSessionRunner host $ \runner -> do
+        let client = inProcessClient (Just "tui") runner
+
+        sub <- expectRight =<< subscribeAll client
+
+        -- Promptless create (G2): a ready session with no turn, no run.
+        meta0 <- expectRight =<< createSession client "test-agent" Nothing Nothing Map.empty
+        meta0.smStatus @?= StatusReady
+        let sid = meta0.smSessionId
+
+        -- Send: PostMessage, which the runner runs to an answer.
+        _ <- expectRight =<< postMessage client sid (message "hi") (Just UntilBlocked) Map.empty
+        awaitKind sub "run.started"
+        awaitKind sub "session.updated"
+        (final1, _) <- expectRight =<< awaitRun client sid 5
+        final1.smStatus @?= StatusIdle
+        awaitKind sub "run.stopped"
+
+        -- Interrupt: PostMessage with nmInterrupt.
+        _ <- expectRight =<< postMessage client sid (NewMessage "more" [] True) (Just UntilBlocked) Map.empty
+        (final2, _) <- expectRight =<< awaitRun client sid 5
+        final2.smStatus @?= StatusIdle
+
+        -- Pause, then resume with the chat page's mode (UntilBlocked). A
+        -- pause posted while idle only queues a 'Control' 'Pause' envelope
+        -- (nothing is running to act on it -- 'sendMail's own Haddock);
+        -- 'resumeSession' still starts a run, which folds that queued
+        -- envelope in at its first receive point, so the run may re-pause
+        -- itself immediately. Either way, both calls must succeed.
+        paused <- expectRight =<< pauseSession client sid
+        paused.smSessionId @?= sid
+        _ <- expectRight =<< resumeSession client sid UntilBlocked Map.empty
+        (final3, _) <- expectRight =<< awaitRun client sid 5
+        assertBool ("resumed to " <> show final3.smStatus) (final3.smStatus `elem` [StatusIdle, StatusPaused])
+
+        -- Fork at turn 0 (newest-first index), keeping the source's agent.
+        forked <- expectRight =<< forkSession client sid (Just 0) Nothing
+        forked.smParent @?= meta0.smParent
+
+        -- Quit: StopRun mail to every owned session that is still running
+        -- (none is, here -- the sequence only checks the call succeeds the
+        -- way "System.Agents.TUI.Event".stopConversations issues it).
+        _ <- expectRight =<< sendMail client sid Interrupt (Control StopRun)
+
+        subClose sub
+  where
+    awaitKind sub wanted = do
+        ev <- subNext sub
+        if eventKind ev.evBody == wanted then pure () else awaitKind sub wanted
