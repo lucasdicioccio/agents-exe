@@ -375,6 +375,7 @@ executable agents-exe
     build-depends:    base  >=4.18.3.0,
                       agents-lib,
                       agents-tui,
+                      agents-server-internal,
                       aeson,
                       aeson-pretty,
                       bytestring,

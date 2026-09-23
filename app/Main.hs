@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Main entry point for the agents-exe executable.
 
@@ -10,6 +11,7 @@ in separate modules under 'System.Agents.CLI'.
 -}
 module Main where
 
+import Control.Exception (SomeException, displayException, try)
 import Control.Monad (unless, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -56,6 +58,8 @@ import qualified System.Agents.CLI.Spec as SpecCmd
 import qualified System.Agents.CLI.TUI as TUICmd
 import qualified System.Agents.CLI.ToolCall as ToolCallCmd
 import qualified System.Agents.FileLoader as FileLoader
+import qualified AgentsServer.Log as SrvLog
+import qualified AgentsServer.Server as Srv
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import System.Agents.Session.Search.Types (DateFilter (..), IndexOperation (..))
@@ -398,6 +402,7 @@ data Command
     | New NewCmd.NewOptions
     | ToolCall ToolCallCmd.ToolCallOptions
     | SessionDurable SessionDurableCmd.SessionDurableOptions
+    | Serve ServeOptions
 
 instance Show Command where
     show (Check _) = "Check"
@@ -422,6 +427,7 @@ instance Show Command where
     show (New _) = "New"
     show (ToolCall _) = "ToolCall"
     show (SessionDurable _) = "SessionDurable"
+    show (Serve _) = "Serve"
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -1085,6 +1091,30 @@ parseSessionRunIsolatedCommand :: Parser SessionDurableCmd.SessionDurableCommand
 parseSessionRunIsolatedCommand =
     SessionDurableCmd.SessionRunIsolated <$> parseSessionIdArgument
 
+-------------------------------------------------------------------------------
+-- serve: agents-server over the agents-exe config (§6, G7)
+-------------------------------------------------------------------------------
+
+{- | @agents-exe serve@'s own options: the server flags 'AgentsServer.Server'
+does not already share with agents-exe's global @--agent-file@\/@--agent@,
+@--api-keys@, @--set@\/@--pin@ and @--params-file@ (see 'Prog' and 'runCommand').
+-}
+newtype ServeOptions = ServeOptions
+    { serveFlags :: Srv.ServerFlags
+    }
+
+parseServeCommand :: ArgParserArgs -> Parser Command
+parseServeCommand argArgs = Serve <$> parseServeOptions argArgs
+
+parseServeOptions :: ArgParserArgs -> Parser ServeOptions
+parseServeOptions argArgs =
+    ServeOptions
+        <$> Srv.serverFlags defaultDb
+  where
+    -- Next to the resolved sessions directory, not ./agents-server.db as
+    -- plain `agents-server` defaults to (todos/os-as-standalone-server.md, §6).
+    defaultDb = argArgs.defaultSessionStore.sessionWritePrefix </> "agents-server.db"
+
 -- | Parse a session id argument (UUID).
 parseSessionIdArgument :: Parser SessionId
 parseSessionIdArgument =
@@ -1215,6 +1245,12 @@ parseProgOptions argparserargs =
                     ( info
                         parseToolCallCommand
                         (progDesc "Call a tool from the first loaded agent with JSON payload from stdin")
+                    )
+                <> command
+                    "serve"
+                    ( info
+                        (parseServeCommand argparserargs)
+                        (progDesc "Run agents over HTTP (like agents-server), loading agents-exe.cfg.json like the TUI does")
                     )
             )
         <*> pure argparserargs.defaultSessionStore
@@ -1378,6 +1414,24 @@ runCommand pargs baseTracer sessionStore files =
             ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
         SessionDurable opts ->
             SessionDurableCmd.handleSessionDurable sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
+        Serve opts ->
+            handleServe pargs files opts
+
+{- | @agents-exe serve@: like @agents-server@, but with the agent files,
+API keys and process parameters agents-exe already resolved from
+@agents-exe.cfg.json@, @--agent-file@\/@--agent@, @--api-keys@,
+@--set@\/@--pin@ and @--params-file@.
+-}
+handleServe :: Prog -> [FilePath] -> ServeOptions -> IO ()
+handleServe pargs files opts = do
+    logger <- SrvLog.newHandleLogger stderr
+    let serverOpts = Srv.serverOptionsFromFlags files pargs.apiKeysFile opts.serveFlags pargs.progParams
+    result <- try (Srv.runServer serverOpts logger)
+    case result of
+        Right () -> pure ()
+        Left (e :: SomeException) -> do
+            SrvLog.logLine logger "server.failed" ["message" .= displayException e]
+            exitFailure
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)

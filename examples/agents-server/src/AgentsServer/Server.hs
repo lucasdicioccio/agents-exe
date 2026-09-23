@@ -6,6 +6,13 @@ module AgentsServer.Server (
     ServerOptions (..),
     serverOptions,
     runServer,
+
+    -- * Reusing the server flags from another executable (@agents-exe serve@)
+    agentFileOption,
+    apiKeysOption,
+    ServerFlags (..),
+    serverFlags,
+    serverOptionsFromFlags,
 ) where
 
 import Control.Exception (throwIO)
@@ -65,10 +72,46 @@ data ServerOptions = ServerOptions
 
 serverOptions :: Parser ServerOptions
 serverOptions =
-    ServerOptions
-        <$> some (strOption (long "agent-file" <> metavar "FILE" <> help "Root agent file; repeat for several agents"))
-        <*> strOption (long "api-keys" <> metavar "FILE" <> help "API keys file")
-        <*> strOption (long "db" <> metavar "FILE|URL" <> value "agents-server.db" <> showDefault <> help "SQLite file, or postgresql:// URL, for sessions")
+    serverOptionsFromFlags
+        <$> agentFileOption
+        <*> apiKeysOption
+        <*> serverFlags "agents-server.db"
+        <*> parseProcessParamsOptions
+
+-- | @--agent-file@, repeatable, required at least once (as for @agents-server@).
+agentFileOption :: Parser [FilePath]
+agentFileOption = some (strOption (long "agent-file" <> metavar "FILE" <> help "Root agent file; repeat for several agents"))
+
+-- | @--api-keys@, required (as for @agents-server@).
+apiKeysOption :: Parser FilePath
+apiKeysOption = strOption (long "api-keys" <> metavar "FILE" <> help "API keys file")
+
+{- | The server's own flags: everything in 'ServerOptions' except the agent
+files, the API keys file and the process parameters, which @agents-exe
+serve@ gets from agents-exe's own global @--agent-file@\/@--agent@,
+@--api-keys@ and @--set@\/@--pin@ instead of duplicating them (see
+'AgentsServer.Server.ServerOptions' vs. 'ServerFlags').
+-}
+data ServerFlags = ServerFlags
+    { sfDatabase :: FilePath
+    , sfBind :: String
+    , sfPort :: Int
+    , sfLiveSessionTtl :: NominalDiffTime
+    , sfShutdownGrace :: Int
+    , sfAuthTokens :: Maybe FilePath
+    , sfStreamTokens :: Bool
+    , sfAdminOwners :: [Text]
+    , sfNoUI :: Bool
+    , sfCorsOrigins :: [Text]
+    }
+
+-- | @db@'s default value is the caller's to choose (@agents-exe serve@
+-- defaults it next to the resolved sessions directory; @agents-server@
+-- defaults it to @agents-server.db@ in the current directory).
+serverFlags :: FilePath -> Parser ServerFlags
+serverFlags defaultDb =
+    ServerFlags
+        <$> strOption (long "db" <> metavar "FILE|URL" <> value defaultDb <> showDefault <> help "SQLite file, or postgresql:// URL, for sessions")
         <*> strOption (long "bind" <> metavar "HOST" <> value "127.0.0.1" <> showDefault <> help "Address to listen on")
         <*> option auto (long "port" <> metavar "PORT" <> value 8080 <> showDefault <> help "Port to listen on")
         <*> (fromInteger <$> option auto (long "live-session-ttl" <> metavar "SECONDS" <> value 900 <> showDefault <> help "Idle time before a session's in-memory state is dropped"))
@@ -80,7 +123,25 @@ serverOptions =
             )
         <*> switch (long "no-ui" <> help "Do not serve the chat page at /")
         <*> many (Text.pack <$> strOption (long "cors-origin" <> metavar "ORIGIN" <> help "Allow this origin to call the server cross-origin (e.g. http://localhost:5173); repeat for several, or pass \"*\" for any (needs no --auth-tokens)"))
-        <*> parseProcessParamsOptions
+
+-- | Assemble a 'ServerOptions' from agent files, an API keys path, 'ServerFlags' and process parameters.
+serverOptionsFromFlags :: [FilePath] -> FilePath -> ServerFlags -> ProcessParams -> ServerOptions
+serverOptionsFromFlags agentFiles apiKeysFile flags params =
+    ServerOptions
+        { soAgentFiles = agentFiles
+        , soApiKeysFile = apiKeysFile
+        , soDatabase = flags.sfDatabase
+        , soBind = flags.sfBind
+        , soPort = flags.sfPort
+        , soLiveSessionTtl = flags.sfLiveSessionTtl
+        , soShutdownGrace = flags.sfShutdownGrace
+        , soAuthTokens = flags.sfAuthTokens
+        , soStreamTokens = flags.sfStreamTokens
+        , soAdminOwners = flags.sfAdminOwners
+        , soNoUI = flags.sfNoUI
+        , soCorsOrigins = flags.sfCorsOrigins
+        , soProcessParams = params
+        }
 
 {- | Parse @--set@/@--set-json@/@--pin@/@--pin-json@ (all repeatable) into
 'ProcessParams'. The @-json@ variant accepts any JSON value; the plain
