@@ -469,6 +469,17 @@ and `Reply`; `System.Agents.Host.Client` with `RunnerClient`,
 operation. The owner is the client's identity, not a `Command` field, so a
 command cannot spoof another owner.
 
+3b is itself split in four, because Brick's single `TuiState`/`AppEvent`
+means old and new conversation models cannot coexist: 3b-i the new
+`Conversation`/`Core`/`AppEvent` types and the startup on `Host` +
+`SessionRunner` + `inProcessClient`, with handlers stubbed so the shape
+compiles; 3b-ii the event bridge (`subscribeAll` → `AppEvent`) and the
+command dispatch; 3b-iii the draft buffer and the History tab; 3b-iv
+render and keymap cleanup, unit tests, smoke test. Known regression to
+accept until Phase 5: `AppEvent_SubcallProgress` carried the child's whole
+`Session`; the runner stream has no equivalent, so a subcall shows start,
+completion and failure only.
+
 `inProcessClient`; the TUI conversation layer rewritten on `RunnerClient`
 (§4). `agents-exe tui` starts a `Host` + `SessionRunner` over the SQLite
 backend chosen from config (Phase 1), with the file store composited in for history.
