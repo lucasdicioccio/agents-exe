@@ -572,10 +572,12 @@ test-suite agents-tests
                     , SkillsTests
                     , ToolPortalTests
                     , OS.CompatibilityTests
+                    , TuiDraftTests
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
                       agents-lib,
+                      agents-tui,
                       base64-bytestring,
                       aeson,
                       async,

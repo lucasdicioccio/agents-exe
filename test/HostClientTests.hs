@@ -8,9 +8,10 @@ against a real runner fixture (reusing "RunnerTests"' fixtures), plus a
 -}
 module HostClientTests (tests) where
 
-import Control.Concurrent.MVar (newEmptyMVar)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, writeTVar)
 import qualified Data.Map.Strict as Map
+import qualified Data.Text as Text
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -27,6 +28,7 @@ import RunnerTests (
     onceThen,
     remoteCall,
     responseTexts,
+    sessionTexts,
     singleToken,
     slowCall,
     testHost,
@@ -59,6 +61,8 @@ tests =
         , testCase "AwaitRun waits for the run to stop; Stats reports load" awaitStatsTest
         , testCase "rcSubscribe sees session.created" subscribeSeesSessionCreatedTest
         , testCase "the TUI's own command sequence, in order, over one subscription" tuiSequenceTest
+        , testCase "PostMessage while running is accepted as mail (§5, D3: what a busy draft ships into)" postWhileRunningBecomesMailTest
+        , testCase "the TUI's draft-ship sequence: append while running, post one message on run.stopped" tuiDraftShipSequenceTest
         ]
 
 -------------------------------------------------------------------------------
@@ -280,3 +284,64 @@ tuiSequenceTest = do
     awaitKind sub wanted = do
         ev <- subNext sub
         if eventKind ev.evBody == wanted then pure () else awaitKind sub wanted
+
+{- | The runner behaviour the TUI's draft (@todos/os-as-standalone-server.md@
+§5, D3) relies on: 'postMessage' sent while a session is 'StatusRunning' is
+accepted, not refused, and folded in as mail rather than added as a turn
+right away -- this is exactly what lets 'System.Agents.TUI.Event.Conversation.sendMessageTo'
+treat "session busy" and "post now" as the same call on the client's side,
+appending to the draft only to avoid three separate 'postMessage' calls in
+a row.
+-}
+postWhileRunningBecomesMailTest :: Assertion
+postWhileRunningBecomesMailTest = do
+    gate <- newEmptyMVar
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> readMVar gate >> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        let client = inProcessClient (Just "tui") runner
+        meta <- expectRight =<< createSession client "test-agent" (Just (message "hello")) (Just UntilBlocked) Map.empty
+        let sid = meta.smSessionId
+        waitUntil $ (== StatusRunning) . (.smStatus) . snd <$> (expectRight =<< getSession client sid)
+        accepted <- expectRight =<< postMessage client sid (message "too early") (Just UntilBlocked) Map.empty
+        accepted.smStatus @?= StatusRunning
+        putMVar gate ()
+        (final, _) <- expectRight =<< awaitRun client sid 5
+        final.smStatus @?= StatusIdle
+
+{- | Mirrors the exact sequence 'sendMessageTo'\/'handleRunStopped' issue for
+a draft (§5): while the session is running, the TUI never calls
+'postMessage' for a second and third message typed in a row -- it only
+appends them to a local 'Draft' and posts once, when @run.stopped@ reports
+a status that accepts input ('shouldShipDraft'). This exercises only the
+'RunnerClient' side of that: one 'postMessage' call standing in for the
+whole appended draft, sent only after the run that was in progress when
+drafting started has actually stopped.
+-}
+tuiDraftShipSequenceTest :: Assertion
+tuiDraftShipSequenceTest = do
+    gate <- newEmptyMVar
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> readMVar gate >> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        let client = inProcessClient (Just "tui") runner
+        meta <- expectRight =<< createSession client "test-agent" (Just (message "hello")) (Just UntilBlocked) Map.empty
+        let sid = meta.smSessionId
+        waitUntil $ (== StatusRunning) . (.smStatus) . snd <$> (expectRight =<< getSession client sid)
+
+        -- The TUI would have appended "more detail" and "and one more
+        -- thing" to the draft locally here, without calling postMessage --
+        -- nothing to assert against the client for that part (D3: a draft
+        -- never crosses the wire).
+
+        -- run.stopped, accepting input: the TUI ships the whole draft as
+        -- one postMessage.
+        putMVar gate ()
+        (idle, _) <- expectRight =<< awaitRun client sid 5
+        idle.smStatus @?= StatusIdle
+        _ <- expectRight =<< postMessage client sid (message "more detail\n\nand one more thing") (Just UntilBlocked) Map.empty
+        (final, _) <- expectRight =<< awaitRun client sid 5
+        final.smStatus @?= StatusIdle
+        (sess, _) <- expectRight =<< getSession client sid
+        let texts = sessionTexts sess
+        assertBool ("draft text reached the session: " <> show texts) (any ("more detail" `Text.isInfixOf`) texts && any ("and one more thing" `Text.isInfixOf`) texts)

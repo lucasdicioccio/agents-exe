@@ -22,6 +22,7 @@ module RunnerTests (
     expectRight,
     currentSession,
     responseTexts,
+    sessionTexts,
     hasBackgroundCall,
     waitUntil,
 ) where
