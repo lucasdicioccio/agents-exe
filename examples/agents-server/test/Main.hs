@@ -41,6 +41,8 @@ import Test.Tasty.HUnit
 
 import AgentsServer.Api
 import AgentsServer.Auth (authTokensFromList, authenticate, bearerToken, loadAuthTokens, tokenDigest)
+import AgentsServer.Log (silentLogger)
+import AgentsServer.Server (ServerOptions (..), runServer)
 import Control.Exception (IOException, try)
 import System.Agents.AgentFactory (Completion)
 import System.Agents.Host
@@ -65,6 +67,8 @@ main =
             , testCase "MCP over HTTP: a call stopping on deferred calls reports the tokens" mcpDeferredTest
             , testCase "MCP over HTTP: Agents-Param- headers and _meta set session params" mcpParamsTest
             , testCase "without authentication, non-local browser origins are refused" originTest
+            , testCase "CORS: preflight, matching origins, refused origins, SSE" corsTest
+            , testCase "CORS: --cors-origin '*' is refused at startup with --auth-tokens" corsWildcardStartupTest
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
             , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
             , testCase "without admin owners, storing agents is disabled" agentEditsDisabledTest
@@ -356,6 +360,73 @@ originTest = do
     withServerAuth (Just tokens) "{}" mockCompletion $ \srv -> do
         (withToken, _) <- call srv{srvHeaders = [("Origin", "http://evil.example")], srvToken = Just "alice-token"} "GET" "/v1/agents" Nothing
         withToken @?= 200
+
+{- | @--cors-origin@: a listed origin gets preflight and response headers and
+passes 'checkOrigin' even without authentication; a non-listed, non-loopback
+origin is still refused; the event stream carries the headers too.
+-}
+corsTest :: Assertion
+corsTest = do
+    let allowed = "http://allowed.example" :: ByteString.ByteString
+    withServerConfig Nothing "{}" id (\env -> env{envCorsOrigins = ["http://allowed.example"]}) $ \srv -> do
+        -- Preflight from the allowed origin: 204, the CORS headers, no auth needed.
+        preflightReq <- request srv{srvHeaders = [("Origin", allowed)]} "OPTIONS" "/v1/sessions" Nothing
+        preflightRsp <- Http.httpLbs preflightReq srv.srvManager
+        statusCode (Http.responseStatus preflightRsp) @?= 204
+        let preflightHeaders = Http.responseHeaders preflightRsp
+        lookup "Access-Control-Allow-Origin" preflightHeaders @?= Just allowed
+        lookup "Access-Control-Allow-Methods" preflightHeaders @?= Just "GET, POST, PUT, DELETE, OPTIONS"
+        lookup "Access-Control-Allow-Headers" preflightHeaders @?= Just "Authorization, Content-Type, Last-Event-ID"
+        lookup "Access-Control-Max-Age" preflightHeaders @?= Just "600"
+        lookup "Vary" preflightHeaders @?= Just "Origin"
+        -- A real POST from the allowed origin carries the header and succeeds
+        -- (an allowed origin passes checkOrigin even without --auth-tokens).
+        createReq <- request srv{srvHeaders = [("Origin", allowed)]} "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+        createRsp <- Http.httpLbs createReq srv.srvManager
+        statusCode (Http.responseStatus createRsp) @?= 201
+        lookup "Access-Control-Allow-Origin" (Http.responseHeaders createRsp) @?= Just allowed
+        lookup "Access-Control-Expose-Headers" (Http.responseHeaders createRsp) @?= Just "Location"
+        -- A non-listed, non-loopback origin is still refused without authentication.
+        (refused, err) <- call srv{srvHeaders = [("Origin", "http://evil.example")]} "GET" "/v1/agents" Nothing
+        (refused, field "error" err) @?= (403, "forbidden_origin")
+        -- The event stream, opened cross-origin, carries the same header.
+        view <- Aeson.decode (Http.responseBody createRsp) `orFail` "the create response was not JSON"
+        let sid = textField "session_id" view
+        eventsReq <- request srv{srvHeaders = [("Origin", allowed)]} "GET" ("/v1/sessions/" <> sid <> "/events") Nothing
+        Http.withResponse eventsReq srv.srvManager $ \rsp -> do
+            statusCode (Http.responseStatus rsp) @?= 200
+            lookup "Access-Control-Allow-Origin" (Http.responseHeaders rsp) @?= Just allowed
+            chunk <- Http.brRead (Http.responseBody rsp)
+            assertBool "the stream sent a snapshot" ("event: snapshot" `ByteString.isInfixOf` chunk)
+  where
+    orFail (Just v) _ = pure v
+    orFail Nothing msg = assertFailure msg
+
+-- | The startup check runs before any file is touched, so bogus paths are fine.
+corsWildcardStartupTest :: Assertion
+corsWildcardStartupTest = withSystemTempDirectory "agents-server-cors" $ \dir -> do
+    let tokensFile = dir </> "tokens.json"
+    writeFile tokensFile "{\"tokens\": [{\"owner\": \"alice\", \"token\": \"alice-token\"}]}"
+    let opts =
+            ServerOptions
+                { soAgentFiles = ["/nonexistent/agent.json"]
+                , soApiKeysFile = "/nonexistent/keys.json"
+                , soDatabase = dir </> "agents.db"
+                , soBind = "127.0.0.1"
+                , soPort = 0
+                , soLiveSessionTtl = 900
+                , soShutdownGrace = 1
+                , soAuthTokens = Just tokensFile
+                , soStreamTokens = False
+                , soAdminOwners = []
+                , soNoUI = True
+                , soCorsOrigins = ["*"]
+                , soProcessParams = mempty
+                }
+    result <- try (runServer opts silentLogger)
+    case result of
+        Left (_ :: IOException) -> pure ()
+        Right () -> assertFailure "expected --cors-origin '*' with --auth-tokens to be refused at startup"
 
 streamingTest :: Assertion
 streamingTest = do

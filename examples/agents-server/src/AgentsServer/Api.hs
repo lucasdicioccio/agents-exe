@@ -85,12 +85,20 @@ data ServerEnv = ServerEnv
     {- ^ The OpenAPI document, built once: it is the same for every
     request, and deriving it again per request would be wasted work.
     -}
+    , envCorsOrigins :: [Text]
+    {- ^ Origins allowed to call this server cross-origin (@--cors-origin@,
+    repeatable). @"*"@ matches any origin and is only ever set when
+    'envAuth' is 'Nothing' (checked at startup in "AgentsServer.Server").
+    An origin here passes 'checkOrigin' even without authentication, and
+    every response to a matching request carries @Access-Control-*@
+    headers; see 'corsHeadersFor'.
+    -}
     }
 
 newServerEnv :: Host -> SessionRunner -> Maybe AuthTokens -> IO ServerEnv
 newServerEnv host runner auth = do
     shutdown <- newTVarIO False
-    pure $ ServerEnv host runner shutdown 15_000_000 auth [] False (Aeson.toJSON (apiDocument Nothing))
+    pure $ ServerEnv host runner shutdown 15_000_000 auth [] False (Aeson.toJSON (apiDocument Nothing)) []
 
 -- | Who is calling: an owner when authentication is on, 'Nothing' when off.
 newtype Caller = Caller (Maybe Text)
@@ -147,19 +155,24 @@ badRequest = throwIO . ApiError status400 "bad_request"
 
 application :: ServerEnv -> Application
 application env req respond = do
+    let corsHdrs = corsHeadersFor env req
+        respond' rsp = respond (addHeaders corsHdrs rsp)
     result <- try (route env req)
     case result of
-        Right rsp -> respond rsp
+        Right rsp -> respond' rsp
         Left (e :: SomeException)
             | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
-            | Just apiError <- fromException e -> respond (errorResponse apiError)
-            | otherwise -> respond $ errorResponse $ ApiError status500 "internal_error" (Text.pack (displayException e))
+            | Just apiError <- fromException e -> respond' (errorResponse apiError)
+            | otherwise -> respond' $ errorResponse $ ApiError status500 "internal_error" (Text.pack (displayException e))
 
 {- | The three endpoints a client can reach before it has a token describe
 the server itself; everything else needs one, when tokens are in use.
+@OPTIONS@ (a CORS preflight) is answered on any path, before both auth and
+'checkOrigin': see 'preflightResponse'.
 -}
 route :: ServerEnv -> Request -> IO Response
 route env req = case (requestMethod req, path) of
+    ("OPTIONS", _) -> preflightResponse env req
     ("GET", ["healthz"]) -> healthz env
     ("GET", ["openapi.json"]) -> pure $ json status200 env.envDocument
     ("GET", []) | env.envUI -> pure uiResponse
@@ -224,14 +237,18 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
 
 {- | Without authentication, refuse requests that a browser sends from a
 page that is not on this machine. This blocks DNS-rebinding attacks, where a
-remote page reaches the server through a name that resolves to 127.0.0.1.
-Requests without an @Origin@ header (curl, servers, MCP clients) pass.
+remote page reaches the server through a name that resolves to 127.0.0.1. An
+origin named by @--cors-origin@ is allowed too, even without authentication:
+the operator opted it in explicitly. Requests without an @Origin@ header
+(curl, servers, MCP clients) pass.
 -}
 checkOrigin :: ServerEnv -> Request -> IO ()
 checkOrigin env req = case (env.envAuth, lookup "Origin" (requestHeaders req)) of
     (Nothing, Just origin)
-        | not (isLoopbackOrigin origin) ->
-            throwIO $ ApiError status403 "forbidden_origin" "cross-origin requests need authentication (--auth-tokens)"
+        | isLoopbackOrigin origin -> pure ()
+        | Just _ <- matchOrigin env.envCorsOrigins origin -> pure ()
+        | otherwise ->
+            throwIO $ ApiError status403 "forbidden_origin" "cross-origin requests need authentication (--auth-tokens), or list the origin with --cors-origin"
     _ -> pure ()
 
 -- | @http(s)://localhost@, @127.0.0.1@, or @[::1]@, with any port.
@@ -246,6 +263,79 @@ isLoopbackOrigin origin = case Text.breakOn "://" (Text.decodeUtf8Lenient origin
     hostOf hp
         | "[" `Text.isPrefixOf` hp = Text.takeWhile (/= ']') hp <> "]"
         | otherwise = Text.takeWhile (/= ':') hp
+
+-------------------------------------------------------------------------------
+-- CORS
+-------------------------------------------------------------------------------
+
+{- | Whether a request's @Origin@ is allowed by @--cors-origin@, and what to
+echo back in @Access-Control-Allow-Origin@ if so: the request's own origin,
+verbatim, never a literal @"*"@ (so the header is meaningful even when a
+browser sends credentials). Matching is exact on scheme and port; the host
+is compared case-insensitively. A configured @"*"@ matches any origin.
+-}
+matchOrigin :: [Text] -> ByteString.ByteString -> Maybe Text
+matchOrigin allowed originBytes
+    | "*" `elem` allowed = Just originText
+    | any ((== normalizeOrigin originText) . normalizeOrigin) allowed = Just originText
+    | otherwise = Nothing
+  where
+    originText = Text.decodeUtf8Lenient originBytes
+
+-- | Lower-cases the scheme and host of an origin; the port is left as-is.
+normalizeOrigin :: Text -> Text
+normalizeOrigin o = case Text.breakOn "://" o of
+    (scheme, rest)
+        | Just hostPort <- Text.stripPrefix "://" rest ->
+            Text.toLower scheme <> "://" <> Text.toLower hostPort
+    _ -> Text.toLower o
+
+{- | @Access-Control-*@ headers to add to every response to a request whose
+@Origin@ matches @--cors-origin@: the origin echoed back, @Vary: Origin@ (a
+cache must not serve this response to a different origin), and
+@Access-Control-Expose-Headers: Location@, which a fetch client needs to
+read the @Location@ header @POST \/v1\/sessions@ answers with. Applied in
+'application' to every response, success or error, so it also covers the
+SSE stream and CORS-refused answers alike.
+-}
+corsHeadersFor :: ServerEnv -> Request -> [Header]
+corsHeadersFor env req = case lookup "Origin" (requestHeaders req) of
+    Nothing -> []
+    Just origin -> case matchOrigin env.envCorsOrigins origin of
+        Nothing -> []
+        Just matched ->
+            [ ("Access-Control-Allow-Origin", Text.encodeUtf8 matched)
+            , ("Vary", "Origin")
+            , ("Access-Control-Expose-Headers", "Location")
+            ]
+
+addHeaders :: [Header] -> Response -> Response
+addHeaders hdrs = mapResponseHeaders (hdrs <>)
+
+{- | A CORS preflight: answered on any path, before authentication and
+before 'checkOrigin' rejects a request outright. It still runs the same
+origin check 'checkOrigin' would (so a non-loopback, non-listed origin
+without authentication gets @403 forbidden_origin@ here too, rather than a
+misleading 204 that the real request would then refuse), then answers with
+no body and:
+
+* @204@ (no content);
+* the 'corsHeadersFor' headers, when the origin matches @--cors-origin@;
+* @Access-Control-Allow-Methods@, @Access-Control-Allow-Headers@ (the ones
+  every route reads: @Authorization@, @Content-Type@, and @Last-Event-ID@
+  for a reconnecting event stream), and @Access-Control-Max-Age@, always.
+-}
+preflightResponse :: ServerEnv -> Request -> IO Response
+preflightResponse env req = do
+    checkOrigin env req
+    pure $ responseLBS status204 (corsHeadersFor env req <> preflightHeaders) ""
+
+preflightHeaders :: [Header]
+preflightHeaders =
+    [ ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    , ("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID")
+    , ("Access-Control-Max-Age", "600")
+    ]
 
 {- | The bearer token of a request. The event stream also accepts it as an
 @access_token@ query parameter, because @EventSource@ cannot set headers;

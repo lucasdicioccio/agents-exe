@@ -51,6 +51,11 @@ data ServerOptions = ServerOptions
     -- ^ Owners allowed to store and delete agents.
     , soNoUI :: Bool
     -- ^ Do not serve the chat page, even on a loopback bind.
+    , soCorsOrigins :: [Text]
+    {- ^ @--cors-origin@, repeatable: origins allowed to call this server
+    cross-origin. @"*"@ is refused at startup when @--auth-tokens@ is on
+    (see 'runServer').
+    -}
     , soProcessParams :: ProcessParams
     {- ^ @--set@/@--set-json@/@--pin@/@--pin-json@: process-scope parameter
     values shared by every loaded agent (@todos/tool-partial-application.md@,
@@ -74,6 +79,7 @@ serverOptions =
                 <$> optional (strOption (long "admin-owners" <> metavar "OWNER,…" <> help "Owners allowed to store and delete agents over the API (needs --auth-tokens)"))
             )
         <*> switch (long "no-ui" <> help "Do not serve the chat page at /")
+        <*> many (Text.pack <$> strOption (long "cors-origin" <> metavar "ORIGIN" <> help "Allow this origin to call the server cross-origin (e.g. http://localhost:5173); repeat for several, or pass \"*\" for any (needs no --auth-tokens)"))
         <*> parseProcessParamsOptions
 
 {- | Parse @--set@/@--set-json@/@--pin@/@--pin-json@ (all repeatable) into
@@ -125,6 +131,9 @@ runServer opts logger = do
     when (not (null opts.soAdminOwners) && null auth) $
         throwIO $
             userError "--admin-owners needs --auth-tokens: without authentication, owners cannot be told apart"
+    when ("*" `elem` opts.soCorsOrigins && isJust auth) $
+        throwIO $
+            userError "--cors-origin '*' needs no authentication: with --auth-tokens, list the exact origins allowed to send bearer tokens"
     let cfg =
             (defaultHostConfig opts.soAgentFiles opts.soApiKeysFile opts.soDatabase)
                 { hcLiveSessionTtl = opts.soLiveSessionTtl
@@ -146,6 +155,7 @@ runServer opts logger = do
                         { envAdmins = opts.soAdminOwners
                         , envUI = ui
                         , envDocument = Aeson.toJSON (apiDocument (Just (baseUrl opts)))
+                        , envCorsOrigins = opts.soCorsOrigins
                         }
             let started =
                     logLine logger "server.started" $
@@ -156,6 +166,7 @@ runServer opts logger = do
                         , "database" .= redactDatabase opts.soDatabase
                         , "authentication" .= (maybe "none" (const "bearer") auth :: String)
                         , "ui" .= ui
+                        , "cors_origins" .= opts.soCorsOrigins
                         ]
                             <> [ "warning" .= ("no authentication: anyone who can reach this address can run the agents" :: String)
                                | Nothing <- [auth]
