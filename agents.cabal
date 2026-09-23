@@ -187,6 +187,7 @@ library agents-lib
                     , System.Agents.Session.Search.Query
                     , System.Agents.Session.Search.Types
                     , System.Agents.SessionStore
+                    , System.Agents.Protocol
                     , System.Agents.HttpClient
                     , System.Agents.HttpLogger
                     , System.Agents.AgentFactory
@@ -559,6 +560,7 @@ test-suite agents-tests
                     , PostgRESTParseTest
                     , MediaContentPartTests
                     , OpenAIStreamTests
+                    , ProtocolTests
                     , RunnerTests
                     , SessionEditTests
                     , SessionDurableTests

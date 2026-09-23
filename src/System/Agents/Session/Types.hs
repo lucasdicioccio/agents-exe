@@ -235,6 +235,15 @@ instance ToJSON DeferredCallView where
             , "call" .= v.dcvCall
             ]
 
+instance FromJSON DeferredCallView where
+    parseJSON = Aeson.withObject "DeferredCallView" $ \o ->
+        DeferredCallView
+            <$> o .: "tool_call_id"
+            <*> o .:? "continuation_token"
+            <*> o .: "tool"
+            <*> o .: "disposition"
+            <*> o .: "call"
+
 -- | The deferred calls of the head partial turn.
 pendingDeferredCalls :: Session -> [DeferredCallView]
 pendingDeferredCalls sess =

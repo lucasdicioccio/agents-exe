@@ -90,6 +90,7 @@ import qualified SessionMetadataTests
 import qualified ContinuationConsistencyTests
 import qualified MediaContentPartTests
 import qualified OpenAIStreamTests
+import qualified ProtocolTests
 import qualified RunnerTests
 import qualified DurableWorkflowTests
 import qualified NarrowingTests
@@ -146,6 +147,7 @@ tests =
         , ContinuationConsistencyTests.tests
         , MediaContentPartTests.tests
         , OpenAIStreamTests.tests
+        , ProtocolTests.tests
         , RunnerTests.tests
         , MailboxTests.tests
         , ConfigLoaderTests.tests
