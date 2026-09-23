@@ -98,6 +98,7 @@ tests =
             child <- newSessionId
             eventRoundTripAt parent (SubcallFailed child "boom")
         , testCase "Event: ToolCallProgressed" toolCallProgressedTest
+        , testCase "Event: HookFailed" (eventRoundTrip (HookFailed "before hook returned invalid JSON"))
         , testCase "eventKind matches every kind string" eventKindTest
         , testCase "RunnerStats" (roundTrip (RunnerStats 3 1))
         , testCase "AgentParameter" $ do
@@ -268,6 +269,7 @@ eventKindTest = do
     eventKind (SessionFailed "x") @?= "session.failed"
     eventKind (TextDelta "x") @?= "text.delta"
     eventKind (SessionDeleted sid) @?= "session.deleted"
+    eventKind (HookFailed "x") @?= "hook.failed"
 
 -------------------------------------------------------------------------------
 -- Command / Reply

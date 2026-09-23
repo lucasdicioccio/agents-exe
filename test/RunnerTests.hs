@@ -1435,11 +1435,12 @@ toolCallEventsTest = do
 
 {- | Phase 2c (@todos/os-as-standalone-server.md@ G3): the async engine's
 'System.Agents.Session.Async.Engine.emitActivity' reports through
-'ctxEmit' -- which 'newAgent' always installs -- alongside the TUI's
-'ctxEventQueue', so 'tool.progressed' events (started, then completed)
-show up on a runner subscription for a call that runs through the engine,
-independent of the 'tool.started'\/'tool.completed' events
-'emitToolCallEvents' derives by diffing sessions.
+'ctxEmit' -- which 'newAgent' always installs, the one emission mechanism
+since 'OSEvent' and @ctxEventQueue@ were retired (Phase 3c) -- so
+'tool.progressed' events (started, then completed) show up on a runner
+subscription for a call that runs through the engine, independent of the
+'tool.started'\/'tool.completed' events 'emitToolCallEvents' derives by
+diffing sessions.
 -}
 toolCallProgressedEventsTest :: Assertion
 toolCallProgressedEventsTest = do
@@ -1470,7 +1471,7 @@ toolCallProgressedEventsTest = do
 @prompt_agent_\<slug\>@ call, run attached (sync) through
 'System.Agents.AgentTree.OneShotTool', reports 'subcall.started' and
 'subcall.completed' through the parent agent's 'ctxEmit' -- inherited by
-the sub-agent's own context the same way 'ctxEventQueue' is -- so they show
+the sub-agent's own context the same way 'ctxWorld' is -- so they show
 up on the *parent*'s own event stream (its 'SessionId' is what 'newAgent'
 closes 'ctxEmit' over; see 'toEventBody'\'s haddock on why the child is not
 'evSession'). Modeled on 'deleteTest''s parent\/child fixture.

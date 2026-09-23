@@ -97,7 +97,6 @@ mkAsyncAgent policy =
         , complete = \_ -> pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [])
         , contextConfig = defaultContextConfig
         , ctxWorld = Nothing
-        , ctxEventQueue = Nothing
         , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing

@@ -194,7 +194,6 @@ buildAgent tracer deps role convId node = do
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
-                , ctxEventQueue = Nothing
                 , ctxEmit = Nothing
                 , ctxCallStack = callStack
                 , ctxParentConversation = parent

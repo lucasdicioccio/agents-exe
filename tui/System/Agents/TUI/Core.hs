@@ -336,6 +336,11 @@ bridgeRunnerEvents client chan sub = loop
         Protocol.TextDelta _ -> pure ()
         Protocol.ToolCallStarted{} -> pure ()
         Protocol.ToolCallCompleted{} -> pure ()
+        -- Phase 3c (@todos/os-as-standalone-server.md@): a hook failure is
+        -- not a session failure -- the run continues -- so the TUI has no
+        -- dedicated view for it yet; ignored like the other diagnostic-only
+        -- kinds above.
+        Protocol.HookFailed _ -> pure ()
 
     withSid :: Protocol.Event -> (SessionId -> IO ()) -> IO ()
     withSid ev f = maybe (pure ()) f ev.evSession

@@ -11,7 +11,7 @@ module AsyncToolCallsTests (tests) where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
-import Control.Concurrent.STM (atomically, flushTQueue, newTQueueIO)
+import Control.Concurrent.STM (atomically, flushTQueue)
 import Control.Exception (IOException, onException, throwIO, try)
 import Control.Monad (void)
 import Data.Aeson (Value (..), object, toJSON, (.=))
@@ -32,7 +32,7 @@ import qualified System.Agents.Base as Base
 import System.Agents.OS.Conversation.ToolCalls (createToolCallEntity, recordChildSession, registerToolCallComponents)
 import System.Agents.OS.Core.Types (EntityId (..))
 import System.Agents.OS.Core.World (World, newWorld)
-import System.Agents.OS.Events (OSEvent (..), ToolCallActivity (..), ToolCallPhase (..))
+import System.Agents.OS.Events (OSEmission (..), ToolCallActivity (..), ToolCallPhase (..), newQueueEmitter)
 import System.Agents.Session.Base
 import System.Agents.SessionStore (readSessionFromFile, storeSessionToFile)
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
@@ -373,18 +373,18 @@ maxConcurrencyBoundsCalls = do
         _ -> assertFailure "expected a full user turn"
     readIORef peak >>= (@?= 1)
 
--- | Start, progress, and completion reach the OS event queue.
+-- | Start, progress, and completion reach the 'ctxEmit' queue emitter.
 engineEmitsActivity :: Assertion
 engineEmitsActivity = do
     world <- mkWorld
-    queue <- newTQueueIO
+    (queue, emitter) <- newQueueEmitter
     let tool ctx _ = do
             mapM_ ($ String "halfway") (Ctx.ctxProgressCallback ctx)
             pure $ TextResponse "done"
-    let agent = (mkAgent world YieldWhenAllDone tool){ctxEventQueue = Just queue}
+    let agent = (mkAgent world YieldWhenAllDone tool){ctxEmit = Just emitter}
     _ <- stepOk agent (sessionWithCalls [mkCall "call_a" "a"])
     events <- atomically $ flushTQueue queue
-    [(act.tcaProviderCallId, act.tcaToolName, act.tcaPhase) | OSEvent_ToolCallActivity act <- events]
+    [(act.tcaProviderCallId, act.tcaToolName, act.tcaPhase) | EmitToolCallActivity act <- events]
         @?= [ (Just "call_a", "a", ToolCallStarted)
             , (Just "call_a", "a", ToolCallProgressed (String "halfway"))
             , (Just "call_a", "a", ToolCallCompleted)
@@ -1075,7 +1075,6 @@ mkAgent world strategy tool =
         , complete = \_ -> pure (LlmResponse Nothing Nothing Null Nothing, [])
         , contextConfig = defaultContextConfig
         , ctxWorld = Just world
-        , ctxEventQueue = Nothing
         , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing

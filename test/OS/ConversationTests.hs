@@ -931,7 +931,6 @@ mkAgentWithWorld world mode policy =
         , complete = \_ -> pure (Session.LlmResponse Nothing Nothing Null Nothing, [])
         , contextConfig = defaultContextConfig
         , ctxWorld = Just world
-        , ctxEventQueue = Nothing
         , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing

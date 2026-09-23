@@ -403,6 +403,7 @@ sends a `snapshot` of the session's metadata (unless it is a replay -- see
 | `subcall.failed` | `{session_id, child_session_id, message}`: that sub-agent run failed. |
 | `session.created` | `{session_id, …}` (full session metadata): a new session was created. Only seen on `GET /v1/events` (below); a single session's own stream never reports its own creation. |
 | `session.deleted` | `{session_id}`: a session (and everything under it) was deleted. Only seen on `GET /v1/events`. |
+| `hook.failed` | `{session_id, message}`: a tool-call hook (a before/after command hook) failed outside of the normal tool-call result path. Not a session failure -- the run continues, unlike `session.failed`. |
 
 A typical run, from a `resume`:
 
@@ -868,7 +869,7 @@ and, when known, `session_id`:
 |---|---|
 | `server.started` | `bind`, `port`, `agents`, `admin_owners`, `database`, `authentication` (`bearer` or `none`), `ui`, and `warning` when authentication is off |
 | `http.request` | `method`, `path`, `status`, `ms` (when the response starts) |
-| `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed`, `tool.started`, `tool.completed`, `tool.progressed`, `subcall.started`, `subcall.completed`, `subcall.failed`, `session.created`, `session.deleted` | `session_id` |
+| `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed`, `tool.started`, `tool.completed`, `tool.progressed`, `subcall.started`, `subcall.completed`, `subcall.failed`, `session.created`, `session.deleted`, `hook.failed` | `session_id` |
 | `llm.request` / `llm.response` | `bytes`, token counts |
 | `llm.http` | `method`, `host`, `path`, `status` |
 | `sessions.recovered` | `session_ids` |

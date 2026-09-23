@@ -2,28 +2,29 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{- | OS Event types for subcall visibility and TUI integration.
+{- | Event types for subcall visibility and TUI\/runner integration.
 
-This module provides event types that are used for communication between
-the OS layer and the TUI, particularly for tracking subcall lifecycle
-(started, progress, completed, failed).
+This module provides event types used for communication between the OS
+layer, the session runner and its clients, particularly for tracking
+subcall lifecycle (started, progress, completed, failed) and tool-call
+activity.
 
 By placing these types in a separate module, we avoid circular dependencies
-between OS.Interfaces, Session.Base, and Tools.Context.
+between Session.Base, Tools.Context and Protocol.
 -}
 module System.Agents.OS.Events (
-    -- * OS Event Types
-    OSEvent (..),
-
     -- * Tool-call activity
     ToolCallActivity (..),
     ToolCallPhase (..),
     isFinalToolCallPhase,
 
-    -- * Phase 2c emission (ctxEmit)
+    -- * Emission (ctxEmit)
     OSEmission (..),
+    newQueueEmitter,
+    queueEmitter,
 ) where
 
+import Control.Concurrent.STM (TQueue, atomically, newTQueueIO, writeTQueue)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
@@ -31,49 +32,7 @@ import qualified Data.Text as Text
 import Data.Time (UTCTime)
 
 import System.Agents.Base (ConversationId)
-import System.Agents.Session.Types (Session, SessionId, ToolCallId)
-
--- | Events that can be emitted by the OS.
-data OSEvent
-    = OSEvent_Error Text
-    | -- \** Subcall Events for TUI visibility
-
-      -- | Emitted when a subcall (helper agent invocation) starts
-      OSEvent_SubcallStarted
-        { subcallParentConversationId :: ConversationId
-        -- ^ The parent conversation that initiated the subcall
-        , subcallConversationId :: ConversationId
-        -- ^ The new conversation ID for the subcall
-        , subcallAgentSlug :: Text
-        -- ^ The slug of the agent being called
-        , subcallDepth :: Int
-        -- ^ The recursion depth of this subcall (0 = root)
-        }
-    | -- | Emitted when a subcall makes progress
-      OSEvent_SubcallProgress
-        { subcallProgressConversationId :: ConversationId
-        -- ^ The subcall conversation ID
-        , subcallProgressSession :: Session
-        -- ^ The current session state
-        }
-    | -- | Emitted when a subcall completes successfully
-      OSEvent_SubcallCompleted
-        { subcallCompletedConversationId :: ConversationId
-        -- ^ The subcall conversation ID
-        , subcallCompletedResult :: Text
-        -- ^ The result/response text from the subcall
-        }
-    | -- | Emitted when a subcall fails
-      OSEvent_SubcallFailed
-        { subcallFailedConversationId :: ConversationId
-        -- ^ The subcall conversation ID
-        , subcallFailedError :: Text
-        -- ^ The error message
-        }
-    | -- | Emitted when a background (async) tool call starts, reports
-      -- progress, or finishes
-      OSEvent_ToolCallActivity ToolCallActivity
-    deriving (Show)
+import System.Agents.Session.Types (SessionId, ToolCallId)
 
 -- | Lifecycle phase of a background tool call.
 data ToolCallPhase
@@ -164,15 +123,19 @@ instance FromJSON ToolCallActivity where
             <*> parseJSON (Aeson.Object o)
             <*> o .: "at"
 
-{- | The subcall lifecycle and tool-activity events forwarded through
+{- | The single in-library event emission type: subcall lifecycle,
+tool-activity and hook-failure events forwarded through
 'System.Agents.Session.Base.ctxEmit' \/ 'System.Agents.Tools.Context.ctxEmit'
-(@todos/os-as-standalone-server.md@, Phase 2c). Kept as a small type here,
-independent of 'System.Agents.Protocol.EventBody', so that 'Session.Base'
-and 'Tools.Context' do not have to depend on 'Protocol' (which itself
-depends on 'Session.Base' for 'SessionId' and friends -- a cycle).
-'System.Agents.Host.Runner' turns each constructor into the matching
-'EventBody' (@subcall.started@\/@subcall.completed@\/@subcall.failed@\/
-@tool.progressed@) and 'emit's it on the owning session's stream.
+(@todos/os-as-standalone-server.md@, Phase 2c\/3c). It is the one emission
+mechanism now that 'OSEvent' and @ctxEventQueue@ are retired (Phase 3c).
+Kept as a small type here, independent of 'System.Agents.Protocol.EventBody',
+so that 'Session.Base' and 'Tools.Context' do not have to depend on
+'Protocol' (which itself depends on 'Session.Base' for 'SessionId' and
+friends -- a cycle). 'System.Agents.Host.Runner' turns each constructor into
+the matching 'EventBody' (@subcall.started@\/@subcall.completed@\/
+@subcall.failed@\/@tool.progressed@\/@hook.failed@) and 'emit's it on the
+owning session's stream. A local consumer that is not a runner (a CLI path,
+a test) installs 'System.Agents.OS.Events.queueEmitter' instead.
 -}
 data OSEmission
     = -- | Parent session id, child session id, the helper's slug, call depth.
@@ -182,4 +145,21 @@ data OSEmission
     | -- | Child session id, the failure message.
       EmitSubcallFailed SessionId Text
     | EmitToolCallActivity ToolCallActivity
+    | -- | A hook (e.g. a tool-call middleware) failed outside of the normal
+      -- tool-call result path. Not a session failure: the run continues.
+      EmitError Text
     deriving (Show)
+
+{- | Create an in-memory queue and an emitter function that writes to it, for
+local (non-runner) consumers that used to drain @ctxEventQueue@: install the
+returned function as 'System.Agents.Session.Base.ctxEmit' \/
+'System.Agents.Tools.Context.ctxEmit' and read emissions back off the queue.
+-}
+newQueueEmitter :: IO (TQueue OSEmission, OSEmission -> IO ())
+newQueueEmitter = do
+    q <- newTQueueIO
+    pure (q, queueEmitter q)
+
+-- | An emitter that writes every emission to the given queue.
+queueEmitter :: TQueue OSEmission -> (OSEmission -> IO ())
+queueEmitter q emission = atomically $ writeTQueue q emission

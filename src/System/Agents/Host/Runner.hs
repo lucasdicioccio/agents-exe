@@ -585,6 +585,7 @@ toEventBody = \case
     EmitSubcallCompleted child result -> SubcallCompleted child result
     EmitSubcallFailed child msg -> SubcallFailed child msg
     EmitToolCallActivity activity -> ToolCallProgressed activity
+    EmitError msg -> HookFailed msg
 
 {- | The server's @spawn-session@ hook (§5): reuses 'spawnSession'
 (durable, recorded with 'sid' as parent) and reports only the new
@@ -790,6 +791,7 @@ watchedEventPayload event = case event of
     ToolCallProgressed activity -> Aeson.toJSON activity
     SessionCreated meta -> Aeson.object ["session_id" .= meta.smSessionId]
     SessionDeleted sid -> Aeson.object ["session_id" .= sid]
+    HookFailed msg -> Aeson.object ["message" .= msg]
 
 {- | Whether 'targetSid' is reachable from 'ownSid' under the given
 'MailScope', walking each session's recorded parent up from the target for

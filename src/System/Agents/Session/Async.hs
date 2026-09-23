@@ -185,7 +185,7 @@ instance Aeson.FromJSON ToolContinuation where
 
 This is the durable representation that is stored in a 'ContinuationStore'.
 It omits the non-serializable runtime fields of the execution context
-('ctxToolPortal', 'ctxWorld', 'ctxEventQueue') and includes only the
+('ctxToolPortal', 'ctxWorld', 'ctxEmit') and includes only the
 fields needed to re-hydrate the call later.
 -}
 data ToolContinuationSnapshot = ToolContinuationSnapshot

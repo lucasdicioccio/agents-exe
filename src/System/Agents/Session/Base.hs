@@ -194,12 +194,10 @@ module System.Agents.Session.Base (
     SpawnSession,
 ) where
 
-import Control.Concurrent.STM (TQueue)
-
 import System.Agents.Base (ConversationId)
 import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Core.World (World)
-import System.Agents.OS.Events (OSEmission, OSEvent)
+import System.Agents.OS.Events (OSEmission)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
 import System.Agents.Session.Mailbox (
@@ -351,18 +349,14 @@ data Agent r = Agent
     insert entities and components into the OS. This enables subcall
     conversations to be visible in the TUI.
     -}
-    , ctxEventQueue :: Maybe (TQueue OSEvent)
-    {- ^ Optional event queue for OS event emission. When present, tools
-    can emit events to notify the TUI of subcall lifecycle (start,
-    progress, completion, failure).
-    -}
     , ctxEmit :: Maybe (OSEmission -> IO ())
-    {- ^ Optional hook alongside 'ctxEventQueue' (@todos/os-as-standalone-
-    server.md@, Phase 2c, G3\/G10): subcall lifecycle and tool-call
-    activity are reported through this hook too, so they reach a runner's
-    event stream (not only the TUI's single-consumer queue). Threaded down
-    to sub-agents the same way 'ctxEventQueue' is. 'Runner.newAgent' sets
-    it; every other builder leaves it 'Nothing'.
+    {- ^ Optional hook (@todos/os-as-standalone-server.md@, Phase 2c\/3c,
+    G3\/G10): the single mechanism for subcall lifecycle and tool-call
+    activity, so they reach a runner's event stream. Threaded down to
+    sub-agents the same way 'ctxWorld' is. 'Runner.newAgent' sets it;
+    every other builder leaves it 'Nothing', or installs
+    'System.Agents.OS.Events.queueEmitter' for a local (non-runner)
+    consumer.
     -}
     , ctxCallStack :: [CallStackEntry]
     {- ^ Call stack for tracking nested agent invocations. Root entry
@@ -445,7 +439,7 @@ data Agent r = Agent
     {- ^ Optional process-wide table of live mailboxes (@todos/session-mailbox.md@,
     Phase 4, D12). When present, 'System.Agents.Tools.SystemToolbox' capabilities
     like @send-message@ can address another session by id. Handed down to
-    sub-agents the same way 'ctxWorld' \/ 'ctxEventQueue' are.
+    sub-agents the same way 'ctxWorld' \/ 'ctxEmit' are.
     -}
     , ctxSpawnSession :: Maybe SpawnSession
     {- ^ Optional @spawn-session@ hook (@todos/session-mailbox.md@, Phase 4,

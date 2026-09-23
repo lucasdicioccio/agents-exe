@@ -1375,7 +1375,7 @@ The context is populated according to 'ContextConfig' settings:
 This uses the agent's 'ctxCallStack' to maintain the call chain for nested
 agent invocations, supporting arbitrarily deep nesting of sub-conversations.
 
-The context also includes the agent's 'ctxWorld' and 'ctxEventQueue' if present,
+The context also includes the agent's 'ctxWorld' and 'ctxEmit' if present,
 which enables subcall conversations to be visible in the TUI, and a cancel
 hook backed by the agent's async engine.
 -}
@@ -1394,7 +1394,6 @@ buildContext agent sess convId =
                 Nothing -- No max recursion depth by default
      in baseCtx
             { Ctx.ctxWorld = agent.ctxWorld
-            , Ctx.ctxEventQueue = agent.ctxEventQueue
             , Ctx.ctxEmit = agent.ctxEmit
             , Ctx.ctxCancelToolCall = fmap Engine.cancelToolCall agent.ctxAsyncEngine
             , -- Phase 2 (@todos/session-mailbox.md@ §3): built once per turn

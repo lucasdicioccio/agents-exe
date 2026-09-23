@@ -140,6 +140,7 @@ eventKind = \case
     ToolCallProgressed{} -> "tool.progressed"
     SessionCreated{} -> "session.created"
     SessionDeleted{} -> "session.deleted"
+    HookFailed{} -> "hook.failed"
 
 {- | The body of an 'Event'. Every constructor that used to carry a
 'SessionId' (the old @SessionEvent@) no longer does: it is 'evSession'
@@ -147,12 +148,17 @@ instead.
 
 Phase 2c (@todos/os-as-standalone-server.md@) adds @SubcallStarted@,
 @SubcallCompleted@, @SubcallFailed@ and @ToolCallProgressed@: subcall
-lifecycle and tool-call activity, forwarded through 'ctxEmit' alongside the
-TUI's 'System.Agents.OS.Events.OSEvent' queue (which is not retired yet).
+lifecycle and tool-call activity, forwarded through 'ctxEmit'.
 A sub-agent run is not (yet, G10) its own runner session, so these carry
 'evSession' set to the *parent*'s id -- the session whose event stream a
 client is actually subscribed to -- and name the child by the 'SessionId'
 'System.Agents.AgentTree.OneShotTool' already generates for it.
+
+Phase 3c retires 'System.Agents.OS.Events.OSEvent' and @ctxEventQueue@:
+'ctxEmit' is the one emission mechanism now. It also adds 'HookFailed': a
+tool-call hook (a before\/after command hook) failed outside of the normal
+tool-call result path. This is not a session failure -- the run continues --
+so it is distinct from 'SessionFailed'.
 -}
 data EventBody
     = RunStarted RunMode
@@ -184,6 +190,9 @@ data EventBody
       SessionCreated SessionMeta
     | -- | A session was deleted (server\/owner-wide feed only).
       SessionDeleted SessionId
+    | -- | A tool-call hook (before\/after command hook) failed. Not a
+      -- session failure: the run continues.
+      HookFailed Text
     deriving (Show, Eq)
 
 instance Aeson.ToJSON Event where
@@ -234,6 +243,7 @@ bodyPairs = \case
     ToolCallProgressed activity -> activityPairs activity
     SessionCreated meta -> metaPairs meta
     SessionDeleted sid -> ["session_id" .= sid]
+    HookFailed msg -> ["message" .= msg]
   where
     metaPairs meta = case Aeson.toJSON meta of
         Aeson.Object o -> KeyMap.toList o
@@ -258,6 +268,7 @@ bodyFromKindAndObject kind o = case kind of
     "tool.progressed" -> ToolCallProgressed <$> Aeson.parseJSON (Aeson.Object o)
     "session.created" -> SessionCreated <$> Aeson.parseJSON (Aeson.Object o)
     "session.deleted" -> SessionDeleted <$> o .: "session_id"
+    "hook.failed" -> HookFailed <$> o .: "message"
     other -> fail ("unknown event kind: " <> Text.unpack other)
 
 -------------------------------------------------------------------------------

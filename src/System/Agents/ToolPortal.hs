@@ -32,7 +32,7 @@ Security:
 
 Context Propagation:
 When a parent context is provided (Just ctx), the portal propagates the OS
-integration fields (ctxWorld, ctxEventQueue) AND the conversation identifiers
+integration fields (ctxWorld, ctxEmit) AND the conversation identifiers
 (ctxSessionId, ctxConversationId, ctxTurnId, ctxCallStack) to the nested tool
 call. This ensures proper conversation tracking when tools call sub-agents.
 When called with Nothing, a fresh minimal context is created without OS
@@ -272,7 +272,7 @@ executeTool tracer portal mParentCtx tool args =
             let minimalCtx =
                     (Ctx.mkMinimalContext sessId convId turnId portal)
                         { Ctx.ctxWorld = Ctx.ctxWorld parentCtx
-                        , Ctx.ctxEventQueue = Ctx.ctxEventQueue parentCtx
+                        , Ctx.ctxEmit = Ctx.ctxEmit parentCtx
                         , Ctx.ctxParentConversation = Just (Ctx.ctxConversationId parentCtx)
                         , Ctx.ctxCallStack = Ctx.ctxCallStack parentCtx
                         }
