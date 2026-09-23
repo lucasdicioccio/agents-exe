@@ -99,6 +99,7 @@ import qualified NarrowingTests
 import qualified MailboxTests
 import qualified ConfigLoaderTests
 import qualified TuiDraftTests
+import qualified TuiPendingTests
 
 main :: IO ()
 main = defaultMain tests
@@ -157,6 +158,7 @@ tests =
         , MailboxTests.tests
         , ConfigLoaderTests.tests
         , TuiDraftTests.tests
+        , TuiPendingTests.tests
         ]
 
 openAIRateLimitTests :: TestTree

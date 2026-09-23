@@ -45,6 +45,7 @@ import System.Agents.Session.Base (
     Priority (..),
     SessionStatus (..),
     UserToolResponse (..),
+    dcvToken,
  )
 import System.Agents.SessionStore (SessionMeta (..), allSessionsQuery)
 
@@ -63,6 +64,7 @@ tests =
         , testCase "the TUI's own command sequence, in order, over one subscription" tuiSequenceTest
         , testCase "PostMessage while running is accepted as mail (§5, D3: what a busy draft ships into)" postWhileRunningBecomesMailTest
         , testCase "the TUI's draft-ship sequence: append while running, post one message on run.stopped" tuiDraftShipSequenceTest
+        , testCase "the TUI's pending-call sequence: postMessage, calls.deferred, completeCall, run.started, run.stopped" tuiPendingCallSequenceTest
         ]
 
 -------------------------------------------------------------------------------
@@ -345,3 +347,47 @@ tuiDraftShipSequenceTest = do
         (sess, _) <- expectRight =<< getSession client sid
         let texts = sessionTexts sess
         assertBool ("draft text reached the session: " <> show texts) (any ("more detail" `Text.isInfixOf`) texts && any ("and one more thing" `Text.isInfixOf`) texts)
+
+{- | Phase 3c (@todos/os-as-standalone-server.md@, Design §4): the exact
+sequence the TUI's Pending panel issues -- 'postMessage' on an agent whose
+tool-call policy defers a tool, a @calls.deferred@ event on the
+subscription (which is what fills 'Conversation.conversationPending'),
+'completeCall' with @autoResume = True@
+('System.Agents.TUI.Event.Pending.handleSendOrAnswer'), then a fresh
+@run.started@\/@run.stopped@ pair as the run resumes and finishes on its
+own -- the same sequence the server's own @/v1/sessions/:id/pending@
+workers rely on 'completeCall' for.
+-}
+tuiPendingCallSequenceTest :: Assertion
+tuiPendingCallSequenceTest = do
+    node <- testNode deferAll
+    host <- testHost [node] (\_ c -> firstThen [remoteCall "call_1"] c)
+    withSessionRunner host $ \runner -> do
+        let client = inProcessClient (Just "tui") runner
+        sub <- expectRight =<< subscribeAll client
+        meta <- expectRight =<< createSession client "test-agent" (Just (message "fetch it")) (Just UntilBlocked) Map.empty
+        let sid = meta.smSessionId
+        awaitKind sub "run.started"
+        deferred <- awaitDeferred sub
+        length deferred @?= 1
+        (blocked, _) <- expectRight =<< awaitRun client sid 5
+        blocked.smStatus @?= StatusWaitingExternal
+        token <- singleToken runner sid
+        Just token @?= dcvToken (head deferred)
+        _ <- expectRight =<< completeCall client token (TextResponse "42") True Map.empty
+        awaitKind sub "run.started"
+        awaitKind sub "run.stopped"
+        (final, _) <- expectRight =<< awaitRun client sid 5
+        final.smStatus @?= StatusIdle
+        sess <- currentSession runner sid
+        assertBool "tool result delivered" ("42" `elem` responseTexts sess)
+        subClose sub
+  where
+    awaitKind sub wanted = do
+        ev <- subNext sub
+        if eventKind ev.evBody == wanted then pure () else awaitKind sub wanted
+    awaitDeferred sub = do
+        ev <- subNext sub
+        case ev.evBody of
+            CallsDeferred calls -> pure calls
+            _ -> awaitDeferred sub

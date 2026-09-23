@@ -95,6 +95,7 @@ data EventName
     | EventClearDraft
     | EventEditDraft
     | EventSendDraftNow
+    | EventAnswerPending
     | EventCycleTabForward
     | EventCycleTabBackward
     | EventCycleFocusForward
@@ -136,6 +137,7 @@ eventNameToText EventViewSessionReverse = "view-session-reverse"
 eventNameToText EventClearDraft = "clear-draft"
 eventNameToText EventEditDraft = "edit-draft"
 eventNameToText EventSendDraftNow = "send-draft-now"
+eventNameToText EventAnswerPending = "answer-pending"
 eventNameToText EventCycleTabForward = "next-tab"
 eventNameToText EventCycleTabBackward = "prev-tab"
 eventNameToText EventCycleFocusForward = "next-focus"
@@ -176,6 +178,7 @@ eventNameFromText "clear-draft" = Just EventClearDraft
 eventNameFromText "clear-queued" = Just EventClearDraft
 eventNameFromText "edit-draft" = Just EventEditDraft
 eventNameFromText "send-draft-now" = Just EventSendDraftNow
+eventNameFromText "answer-pending" = Just EventAnswerPending
 eventNameFromText "next-tab" = Just EventCycleTabForward
 eventNameFromText "prev-tab" = Just EventCycleTabBackward
 eventNameFromText "next-focus" = Just EventCycleFocusForward
@@ -423,6 +426,7 @@ defaultKeyMapping =
             , (EventClearDraft, [KeyBinding (KeyChar 'd') ctrlModifier])
             , (EventEditDraft, [KeyBinding (KeyChar 'a') ctrlModifier])
             , (EventSendDraftNow, [KeyBinding (KeyChar 'g') ctrlModifier])
+            , (EventAnswerPending, [KeyBinding (KeyChar 'y') ctrlModifier])
             , (EventCycleTabForward, [KeyBinding (KeyChar ']') ctrlModifier])
             , (EventCycleTabBackward, [KeyBinding (KeyChar '[') ctrlModifier])
             , (EventCycleFocusForward, [KeyBinding KeyTab noModifiers])
@@ -604,6 +608,9 @@ generateHelpContent keymap =
     , "  " <> formatBindings EventSendDraftNow <> " - Send the draft now"
     , "  " <> formatBindings EventClearDraft <> " - Clear the draft"
     , "  The draft posts automatically once the session accepts input again"
+    , ""
+    , "Pending calls (deferred tool calls waiting for an external result):"
+    , "  " <> formatBindings EventAnswerPending <> " - Answer the oldest pending call; type the result, then send"
     , ""
     , "Session Navigation & Forking:"
     , "  " <> formatBindings EventEnterTurnNavigation <> " - Enter turn navigation mode (when on conversation)"

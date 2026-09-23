@@ -24,6 +24,7 @@ import System.Agents.TUI.Render.Widgets (
     render_buffer_manager,
     render_messageEditor,
     render_draft_manager,
+    render_pending_manager,
     render_messageEditorWithAttachments,
     render_sessionList,
  )
@@ -130,6 +131,7 @@ render_conversationArea st =
                 , render_attachmentList st conv
                 , render_buffer_manager st
                 , render_draft_manager st conv
+                , render_pending_manager st conv
                 , render_conversationView st
                 , render_shortcutsHelp
                 ]

@@ -61,6 +61,10 @@ module System.Agents.TUI.Event.Conversation (
     setConversationDraft,
     shipDraftIfAny,
 
+    -- * Pending calls (Phase 3c)
+    setConversationPending,
+    handleCallsDeferred,
+
     -- * Core State Manipulation
     appendConversation,
     mkConversation,
@@ -94,7 +98,7 @@ import System.Agents.Base (ConversationId (..))
 import qualified System.Agents.Host.Client as Client
 import System.Agents.OS.Events (ToolCallActivity)
 import System.Agents.Protocol (NewMessage (..), RunMode (..), RunnerError, runnerErrorMessage)
-import System.Agents.Session.Base (Session (..), SessionId, SessionStatus (..))
+import System.Agents.Session.Base (DeferredCallView, Session (..), SessionId, SessionStatus (..))
 import System.Agents.SessionStore (SessionMeta (..), conversationIdToSessionId, sessionIdToConversationId)
 import System.Agents.TUI.ToolCallActivity (applyToolCallActivity)
 import System.Agents.TUI.Types (
@@ -172,6 +176,7 @@ mkConversation meta mSess isSubcall parentId depth =
         , conversationParentId = parentId
         , conversationSubcallDepth = depth
         , conversationDraft = emptyDraft :: Draft
+        , conversationPending = []
         }
   where
     slug = fromMaybe "?" meta.smAgent
@@ -417,6 +422,7 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
                 , conversationParentId = Just parentId
                 , conversationSubcallDepth = depth
                 , conversationDraft = emptyDraft :: Draft
+                , conversationPending = []
                 }
     addConversationToCore conv
     let convShort = shortConvId convId
@@ -495,6 +501,31 @@ updateConversationStatus convId newStatus = do
                     )
                     (c ^. coreConversations)
             }
+
+{- | Set a conversation's pending deferred calls (Phase 3c, Design §4): from
+'AppEvent_CallsDeferred', or @[]@ on @run.started@
+('System.Agents.TUI.Event.handleRunStarted').
+-}
+setConversationPending :: ConversationId -> [DeferredCallView] -> EventM N TuiState ()
+setConversationPending convId calls = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c
+            { _coreConversations =
+                map
+                    ( \conv ->
+                        if conversationId conv == convId
+                            then conv{conversationPending = calls}
+                            else conv
+                    )
+                    (c ^. coreConversations)
+            }
+
+-- | @calls.deferred@: block the conversation and record its pending calls.
+handleCallsDeferred :: ConversationId -> [DeferredCallView] -> EventM N TuiState ()
+handleCallsDeferred convId calls = do
+    updateConversationStatus convId ConversationStatus_BlockedOnDeferred
+    setConversationPending convId calls
 
 -- | Record a background tool call event for rendering.
 handleToolCallActivity :: ToolCallActivity -> EventM N TuiState ()

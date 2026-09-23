@@ -220,8 +220,35 @@ conversation still accepts input: whichever comes first — your message or the
 results — is sent to the model.
 
 A conversation that waits on *deferred* calls (completed by an external
-worker) stops with a status message instead of waiting; use the `session`
-commands to complete those calls.
+worker) stops with a status message instead of waiting; see "Pending calls"
+below to answer them from the TUI itself.
+
+## Pending calls
+
+When a run stops on deferred calls (`calls.deferred`), the conversation's
+status becomes "blocked on deferred" and a Pending panel appears below the
+Draft panel, listing each call's tool name, a prefix of its continuation
+token, and its arguments:
+
+```
+┌ Pending (1) ──────────────────────────────────────┐
+│ Ctrl+Y: answer oldest pending call, then send      │
+│                                                     │
+│ - bash_command (token a1b2c3d4): {"cmd": "ls"}     │
+└─────────────────────────────────────────────────────┘
+```
+
+`Ctrl+Y` (`answer-pending`) puts the message editor into "answer mode" for
+the oldest pending call with a continuation token; type the result and
+send it (`Ctrl+Enter`/the usual send trigger) the way you would any other
+message. That calls `completeCall` with `autoResume = true`, the same
+mechanism the server's own `GET /v1/sessions/:id/pending` workers use, so
+the run resumes on its own — a fresh `run.started`/`run.stopped` pair
+follows. The panel clears once the run starts again.
+
+There is no separate "fail this call" binding: `UserToolResponse` has no
+dedicated error form, so a call is always answered with a text (or JSON)
+result; report a failure as an ordinary text result that says so.
 
 ## Subcall Conversation Visibility
 

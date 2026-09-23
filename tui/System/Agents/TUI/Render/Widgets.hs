@@ -14,9 +14,15 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 
+import qualified Data.Aeson.Encode.Pretty as AesonPretty
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Text.Encoding as TextEncoding
+
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Protocol (AgentDescriptor (..), ToolDescriptor (..))
+import System.Agents.Session.Base (DeferredCallView (..), LlmToolCall (..))
 import System.Agents.SessionStore (SessionMeta (..))
+import System.Agents.Tools.Cache (extractToolInfo)
 import System.Agents.TUI.Buffer (Buffer, bufferContent)
 import System.Agents.TUI.MessageComposer (
     InputConfig (..),
@@ -290,6 +296,54 @@ render_draft_panel st draft =
             <> " chars, "
             <> Text.pack (show paras)
             <> if paras == 1 then " paragraph" else " paragraphs"
+
+-------------------------------------------------------------------------------
+-- Pending Calls Rendering (Phase 3c, @todos/os-as-standalone-server.md@ Design §4)
+-------------------------------------------------------------------------------
+
+{- | Render the Pending panel for a conversation: one line per deferred
+call (tool name, a short prefix of its continuation token, and its
+arguments) and the keybinding hint. Hidden when there is nothing pending,
+like the Draft panel.
+-}
+render_pending_manager :: TuiState -> Conversation -> Widget N
+render_pending_manager st conv =
+    if null pending
+        then emptyWidget
+        else render_pending_panel st pending
+  where
+    pending = conv.conversationPending
+
+-- | Render the pending-calls summary panel.
+render_pending_panel :: TuiState -> [DeferredCallView] -> Widget N
+render_pending_panel st pending =
+    borderWithFocus
+        st
+        PendingPanelWidget
+        (" Pending (" <> Text.pack (show (length pending)) <> ") ")
+        $ vBox
+            [ txt "Ctrl+Y: answer oldest pending call, then send"
+            , txt ""
+            , vBox (map render_pending_call pending)
+            ]
+
+-- | Render one deferred call: tool name, token prefix, arguments.
+render_pending_call :: DeferredCallView -> Widget N
+render_pending_call call =
+    txt $
+        "- "
+            <> call.dcvToolName
+            <> " (token "
+            <> tokenPrefix
+            <> "): "
+            <> argsText
+  where
+    tokenPrefix = case call.dcvToken of
+        Nothing -> "none"
+        Just tok -> Text.take 8 (Text.pack (show tok))
+    (LlmToolCall callVal) = call.dcvCall
+    (_, args) = extractToolInfo callVal
+    argsText = TextEncoding.decodeUtf8 (LBS.toStrict (AesonPretty.encodePretty args))
 
 -------------------------------------------------------------------------------
 -- Buffer Rendering

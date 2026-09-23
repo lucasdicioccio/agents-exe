@@ -25,6 +25,8 @@ module System.Agents.TUI.Event (
     module System.Agents.TUI.Event.Conversation,
     -- Draft (§5, D3)
     module System.Agents.TUI.Event.Draft,
+    -- Pending calls (Phase 3c)
+    module System.Agents.TUI.Event.Pending,
     -- Attachment
     module System.Agents.TUI.Event.Attachment,
 
@@ -126,6 +128,7 @@ import System.Agents.TUI.Event.Conversation
 import System.Agents.TUI.Event.Dialog
 import System.Agents.TUI.Event.Draft
 import System.Agents.TUI.Event.Navigation hiding (handleForkAtTurn)
+import System.Agents.TUI.Event.Pending
 import System.Agents.TUI.KeyMapping (
     EventName (..),
     KeyMapping,
@@ -276,10 +279,10 @@ handleTurnNavigationEventWithSubcalls tracer navState ev = do
     case ev of
         AppEvent AppEvent_Heartbeat -> handleHeartbeat
         AppEvent (AppEvent_SessionUpdated convId sess meta) -> handleConversationUpdated convId sess meta >> cacheHistorySession convId sess >> markHistoryDirty
-        AppEvent (AppEvent_RunStarted convId _mode) -> updateConversationStatus convId ConversationStatus_Active
+        AppEvent (AppEvent_RunStarted convId _mode) -> updateConversationStatus convId ConversationStatus_Active >> setConversationPending convId []
         AppEvent (AppEvent_RunStopped convId status) -> handleRunStopped convId status
         AppEvent (AppEvent_SessionFailed convId err) -> showStatus StatusError err >> updateConversationStatus convId ConversationStatus_WaitingForInput
-        AppEvent (AppEvent_CallsDeferred convId _calls) -> updateConversationStatus convId ConversationStatus_BlockedOnDeferred
+        AppEvent (AppEvent_CallsDeferred convId calls) -> handleCallsDeferred convId calls
         AppEvent (AppEvent_SessionCreated meta) -> handleSessionCreated meta >> markHistoryDirty
         AppEvent (AppEvent_SessionDeleted convId) -> handleSessionDeletedEvent convId
         AppEvent (AppEvent_AgentTrace _) -> pure ()
@@ -326,10 +329,10 @@ handleNormalEvent tracer ev = do
     case ev of
         AppEvent AppEvent_Heartbeat -> handleHeartbeat
         AppEvent (AppEvent_SessionUpdated convId sess meta) -> handleConversationUpdated convId sess meta >> cacheHistorySession convId sess >> markHistoryDirty
-        AppEvent (AppEvent_RunStarted convId _mode) -> updateConversationStatus convId ConversationStatus_Active
+        AppEvent (AppEvent_RunStarted convId _mode) -> updateConversationStatus convId ConversationStatus_Active >> setConversationPending convId []
         AppEvent (AppEvent_RunStopped convId status) -> handleRunStopped convId status
         AppEvent (AppEvent_SessionFailed convId err) -> showStatus StatusError err >> updateConversationStatus convId ConversationStatus_WaitingForInput
-        AppEvent (AppEvent_CallsDeferred convId _calls) -> updateConversationStatus convId ConversationStatus_BlockedOnDeferred
+        AppEvent (AppEvent_CallsDeferred convId calls) -> handleCallsDeferred convId calls
         AppEvent (AppEvent_SessionCreated meta) -> handleSessionCreated meta
         AppEvent (AppEvent_SessionDeleted _convId) -> pure ()
         AppEvent (AppEvent_AgentTrace _) -> pure ()
@@ -382,7 +385,7 @@ handleNormalEvent tracer ev = do
         VtyEvent vtyEv
             | matchesEvent keymap EventSendMessage vtyEv -> do
                 resetQuitConfirmation
-                handleSendMessage
+                handleSendOrAnswer
         VtyEvent vtyEv
             | matchesEvent keymap EventTogglePause vtyEv -> do
                 resetQuitConfirmation
@@ -435,6 +438,10 @@ handleNormalEvent tracer ev = do
             | matchesEvent keymap EventSendDraftNow vtyEv -> do
                 resetQuitConfirmation
                 handleSendDraftNow
+        VtyEvent vtyEv
+            | matchesEvent keymap EventAnswerPending vtyEv -> do
+                resetQuitConfirmation
+                handleAnswerPending
         VtyEvent vtyEv
             | matchesEvent keymap EventSaveBuffer vtyEv -> do
                 resetQuitConfirmation
@@ -593,7 +600,7 @@ handleMessageEditorEvent ev = do
     zoom (tuiUI . messageEditor) $ handleEditorEvent ev
     case ev of
         VtyEvent (Vty.EvKey Vty.KEnter mods)
-            | Vty.MCtrl `elem` mods -> handleSendMessage
+            | Vty.MCtrl `elem` mods -> handleSendOrAnswer
         _ -> checkTripleNewlineTrigger
 
 -- | Check if triple-newline trigger should send the message.
@@ -608,7 +615,7 @@ checkTripleNewlineTrigger = do
         -- Strip the trigger suffix before sending
         let cleanedText = stripSendTrigger inputCfg msgText
         tuiUI . messageEditor . editContentsL .= TextZipper.textZipper (Text.lines cleanedText) Nothing
-        handleSendMessage
+        handleSendOrAnswer
 
 -- | Handle conversation view scrolling and turn navigation.
 handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> KeyMapping -> EventM N TuiState ()

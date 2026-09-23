@@ -104,6 +104,8 @@ data WidgetName
       TurnNavigationWidget
     | -- | For focusing the draft panel
       DraftPanelWidget
+    | -- | For focusing the pending-calls panel (Phase 3c)
+      PendingPanelWidget
     | -- | For the attachment list below the message editor
       AttachmentListWidget
     | -- | For the file path input dialog

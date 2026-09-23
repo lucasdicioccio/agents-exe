@@ -46,6 +46,7 @@ module System.Agents.TUI.Types.State (
     toolCallViews,
     historySessionCache,
     historyDirty,
+    answeringPendingCall,
     initUIState,
 
     -- * TUI State
@@ -76,7 +77,7 @@ import qualified Data.Vector as Vector
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Host.Client (RunnerClient)
 import System.Agents.Media.Types (MediaAttachment)
-import System.Agents.Session.Base (SessionId)
+import System.Agents.Session.Base (DeferredCallView, SessionId)
 import System.Agents.SessionStore (SessionMeta)
 import System.Agents.Tools.Params.Types (ParamName)
 import System.Agents.TUI.Buffer (Buffer)
@@ -204,6 +205,14 @@ data UIState = UIState
     -- 'Client.listSessions' when this is set, then clears it -- at most one
     -- 'Client.listSessions' round trip per heartbeat even for a burst of
     -- events.
+    , _answeringPendingCall :: Maybe (ConversationId, DeferredCallView)
+    {- ^ Phase 3c (@todos/os-as-standalone-server.md@, Design §4): when
+    'Just', the message editor is in "answer mode" for that conversation's
+    given deferred call ('System.Agents.TUI.Event.Pending.handleAnswerPending'
+    sets it); the next 'EventSendMessage' completes that call
+    ('System.Agents.Host.Client.completeCall') instead of posting a normal
+    message, then clears this back to 'Nothing'.
+    -}
     }
 
 makeLenses ''UIState
@@ -220,7 +229,7 @@ buildFocusRingForTab tab =
         AgentsTab ->
             focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
         ChatsTab ->
-            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, BufferListWidget, DraftPanelWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, BufferListWidget, DraftPanelWidget, PendingPanelWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
         HistoryTab ->
             focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
         HelpTab ->
@@ -254,6 +263,7 @@ initUIState helpText agents sessions =
         , _toolCallViews = Map.empty
         , _historySessionCache = Map.empty
         , _historyDirty = True
+        , _answeringPendingCall = Nothing
         }
 
 -------------------------------------------------------------------------------

@@ -32,6 +32,9 @@ module System.Agents.TUI.Types.Conversation (
     -- * Conversation
     Conversation (..),
 
+    -- * Pending calls (Phase 3c)
+    pendingSummaryLine,
+
     -- * Utility Functions
     updateConversationSession,
 ) where
@@ -42,7 +45,7 @@ import qualified Data.Text as Text
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Protocol (NewMessage (..))
-import System.Agents.Session.Base (Session, SessionId, SessionStatus (..))
+import System.Agents.Session.Base (DeferredCallView (..), Session, SessionId, SessionStatus (..))
 import System.Agents.SessionStore (SessionMeta)
 
 -------------------------------------------------------------------------------
@@ -173,8 +176,26 @@ data Conversation = Conversation
     -- ^ Subcall nesting depth (0 = root, 1+ = nested)
     , conversationDraft :: Draft
     -- ^ The unsent draft (§5); never posted until the session's turn.
+    , conversationPending :: [DeferredCallView]
+    {- ^ The run's deferred calls (Phase 3c, @todos/os-as-standalone-server.md@
+    Design §4), set from 'AppEvent_CallsDeferred' and cleared on
+    @run.started@ -- the Pending panel's source of truth. Answered through
+    'System.Agents.Host.Client.completeCall' by
+    'System.Agents.TUI.Event.Pending.handleAnswerPending'.
+    -}
     }
     deriving (Show)
+
+{- | The Pending panel's collapsed summary line: @"N pending calls: tool_a,
+tool_b"@, or @""@ for none (the panel is hidden then, like the Draft one).
+-}
+pendingSummaryLine :: [DeferredCallView] -> Text
+pendingSummaryLine [] = ""
+pendingSummaryLine calls =
+    Text.pack (show n) <> (if n == 1 then " pending call: " else " pending calls: ") <> names
+  where
+    n = length calls
+    names = Text.intercalate ", " (map dcvToolName calls)
 
 -------------------------------------------------------------------------------
 -- Utility Functions
