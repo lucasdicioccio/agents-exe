@@ -12,6 +12,7 @@ module Main (main) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait)
+import qualified Control.Concurrent.Async as Async
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -30,9 +31,12 @@ import qualified Data.Text.Encoding as Text
 import qualified Data.Vector as Vector
 import qualified Network.HTTP.Client as Http
 import Network.HTTP.Types (Header, Method, status200, statusCode, urlEncode)
+import qualified Network.Socket as NS
+import qualified Network.Socket.ByteString as NSB
 import qualified Network.Wai as Wai
 import Network.Wai.Handler.Warp (testWithApplication)
 import Prod.Tracer (silent)
+import System.Directory (doesFileExist)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Timeout (timeout)
@@ -76,6 +80,7 @@ main =
             , testCase "the chat page is served only when it is enabled" uiPageTest
             , testCase "EventSource may carry its token as a query parameter" accessTokenTest
             , testCase "an attached file is stored on the turn that carried it" mediaRoundTripTest
+            , testCase "--socket: /healthz answers over a Unix domain socket" socketHealthzTest
             ]
 
 -------------------------------------------------------------------------------
@@ -421,6 +426,7 @@ corsWildcardStartupTest = withSystemTempDirectory "agents-server-cors" $ \dir ->
                 , soAdminOwners = []
                 , soNoUI = True
                 , soCorsOrigins = ["*"]
+                , soSocket = Nothing
                 , soProcessParams = mempty
                 }
     result <- try (runServer opts silentLogger)
@@ -878,3 +884,113 @@ arrayField name v = case field name v of
 
 encode :: Text -> Text
 encode = Text.decodeUtf8 . urlEncode True . Text.encodeUtf8
+
+-------------------------------------------------------------------------------
+-- --socket
+-------------------------------------------------------------------------------
+
+{- | @runServer@ with @--socket@ set, on a real (if throwaway) TCP port
+alongside it. Confirms the socket file appears, is reachable with a plain
+HTTP/1.1 request, and is gone once the server stops.
+-}
+socketHealthzTest :: Assertion
+socketHealthzTest = withSystemTempDirectory "agents-server-socket" $ \dir -> do
+    let agentFile = dir </> "agent.json"
+        keysFile = dir </> "keys.json"
+        sockPath = dir </> "agents-server.sock"
+    LByteString.writeFile agentFile $
+        Aeson.encode $
+            Aeson.object
+                [ "tag" .= ("OpenAIAgentDescription" :: Text)
+                , "contents"
+                    .= Aeson.object
+                        [ "slug" .= ("server-test" :: Text)
+                        , "apiKeyId" .= ("none" :: Text)
+                        , "flavor" .= ("OpenAIv1" :: Text)
+                        , "modelUrl" .= ("http://127.0.0.1:1" :: Text)
+                        , "modelName" .= ("mock" :: Text)
+                        , "announce" .= ("a test agent" :: Text)
+                        , "systemPrompt" .= ["You are a test" :: Text]
+                        , "builtinToolboxes" .= ([] :: [Text])
+                        , "mcpServers" .= ([] :: [Text])
+                        ]
+                ]
+    writeFile keysFile "{}"
+    port <- getFreePort
+    let opts =
+            ServerOptions
+                { soAgentFiles = [agentFile]
+                , soApiKeysFile = keysFile
+                , soDatabase = dir </> "agents.db"
+                , soBind = "127.0.0.1"
+                , soPort = port
+                , soLiveSessionTtl = 900
+                , soShutdownGrace = 1
+                , soAuthTokens = Nothing
+                , soStreamTokens = False
+                , soAdminOwners = []
+                , soNoUI = True
+                , soCorsOrigins = []
+                , soSocket = Just sockPath
+                , soProcessParams = mempty
+                }
+    serverAsync <- async (runServer opts silentLogger)
+    waitForFile sockPath
+    response <- httpOverUnixSocket sockPath "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    Async.cancel serverAsync
+    assertBool ("expected 200 OK, got: " <> Char8.unpack response) ("200 OK" `ByteString.isInfixOf` response)
+    assertBool ("expected the healthz body, got: " <> Char8.unpack response) ("\"ok\":true" `ByteString.isInfixOf` response)
+    waitForFileGone sockPath
+
+-- | A free TCP port on loopback, picked by asking the kernel for one (a
+-- small, accepted race: nothing stops another process taking it before
+-- 'runServer' binds).
+getFreePort :: IO Int
+getFreePort = do
+    sock <- NS.socket NS.AF_INET NS.Stream NS.defaultProtocol
+    NS.bind sock (NS.SockAddrInet 0 (NS.tupleToHostAddress (127, 0, 0, 1)))
+    addr <- NS.getSocketName sock
+    NS.close sock
+    case addr of
+        NS.SockAddrInet p _ -> pure (fromIntegral p)
+        other -> assertFailure ("expected an IPv4 address, got: " <> show other) >> pure 0
+
+waitForFile :: FilePath -> IO ()
+waitForFile path = do
+    got <- timeout 5_000_000 poll
+    case got of
+        Just () -> pure ()
+        Nothing -> assertFailure ("expected " <> path <> " to appear in time")
+  where
+    poll = do
+        exists <- doesFileExist path
+        if exists then pure () else threadDelay 20_000 >> poll
+
+waitForFileGone :: FilePath -> IO ()
+waitForFileGone path = do
+    got <- timeout 5_000_000 poll
+    case got of
+        Just () -> pure ()
+        Nothing -> assertFailure ("expected " <> path <> " to be removed on shutdown")
+  where
+    poll = do
+        exists <- doesFileExist path
+        if exists then threadDelay 20_000 >> poll else pure ()
+
+-- | A minimal HTTP/1.1 request over a Unix domain socket: sends the raw
+-- request bytes, then reads until the peer closes the connection (the
+-- request above sends @Connection: close@).
+httpOverUnixSocket :: FilePath -> ByteString.ByteString -> IO ByteString.ByteString
+httpOverUnixSocket path rawRequest = do
+    sock <- NS.socket NS.AF_UNIX NS.Stream NS.defaultProtocol
+    NS.connect sock (NS.SockAddrUnix path)
+    NSB.sendAll sock rawRequest
+    chunks <- readAll sock
+    NS.close sock
+    pure (ByteString.concat chunks)
+  where
+    readAll sock = do
+        chunk <- NSB.recv sock 4096
+        if ByteString.null chunk
+            then pure []
+            else (chunk :) <$> readAll sock

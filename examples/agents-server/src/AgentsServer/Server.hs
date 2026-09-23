@@ -1,5 +1,7 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Command-line options and the server's lifecycle.
 module AgentsServer.Server (
@@ -15,8 +17,9 @@ module AgentsServer.Server (
     serverOptionsFromFlags,
 ) where
 
-import Control.Exception (throwIO)
-import Control.Monad (void, when)
+import Control.Concurrent.Async (concurrently_)
+import Control.Exception (IOException, catch, finally, throwIO, try)
+import Control.Monad (forM_, void, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Map.Strict as Map
@@ -27,7 +30,10 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
 import Data.Time (NominalDiffTime)
 import Network.Wai.Handler.Warp
+import qualified Network.Socket as Socket
 import Options.Applicative
+import System.Directory (doesFileExist, removeFile)
+import System.Posix.Files (ownerReadMode, ownerWriteMode, setFileMode, unionFileModes)
 import System.Posix.Signals (Handler (CatchOnce), installHandler, sigINT, sigTERM)
 
 import AgentsServer.Api
@@ -62,6 +68,13 @@ data ServerOptions = ServerOptions
     {- ^ @--cors-origin@, repeatable: origins allowed to call this server
     cross-origin. @"*"@ is refused at startup when @--auth-tokens@ is on
     (see 'runServer').
+    -}
+    , soSocket :: Maybe FilePath
+    {- ^ @--socket@: also listen on this Unix domain socket, in addition to
+    @--bind@\/@--port@. A stale file at this path is removed at start; the
+    socket is created with mode 0600. Requests over it carry no @Origin@
+    and need no bearer token beyond what @--auth-tokens@ imposes elsewhere:
+    the socket itself, and who can reach it, is the trust boundary.
     -}
     , soProcessParams :: ProcessParams
     {- ^ @--set@/@--set-json@/@--pin@/@--pin-json@: process-scope parameter
@@ -103,6 +116,7 @@ data ServerFlags = ServerFlags
     , sfAdminOwners :: [Text]
     , sfNoUI :: Bool
     , sfCorsOrigins :: [Text]
+    , sfSocket :: Maybe FilePath
     }
 
 -- | @db@'s default value is the caller's to choose (@agents-exe serve@
@@ -123,6 +137,7 @@ serverFlags defaultDb =
             )
         <*> switch (long "no-ui" <> help "Do not serve the chat page at /")
         <*> many (Text.pack <$> strOption (long "cors-origin" <> metavar "ORIGIN" <> help "Allow this origin to call the server cross-origin (e.g. http://localhost:5173); repeat for several, or pass \"*\" for any (needs no --auth-tokens)"))
+        <*> optional (strOption (long "socket" <> metavar "PATH" <> help "Also listen on this Unix domain socket (in addition to --bind/--port); a stale file there is removed at start, the socket is created 0600. The socket is the local trust boundary: requests over it carry no Origin and need no bearer token beyond --auth-tokens"))
 
 -- | Assemble a 'ServerOptions' from agent files, an API keys path, 'ServerFlags' and process parameters.
 serverOptionsFromFlags :: [FilePath] -> FilePath -> ServerFlags -> ProcessParams -> ServerOptions
@@ -140,6 +155,7 @@ serverOptionsFromFlags agentFiles apiKeysFile flags params =
         , soAdminOwners = flags.sfAdminOwners
         , soNoUI = flags.sfNoUI
         , soCorsOrigins = flags.sfCorsOrigins
+        , soSocket = flags.sfSocket
         , soProcessParams = params
         }
 
@@ -218,10 +234,12 @@ runServer opts logger = do
                         , envDocument = Aeson.toJSON (apiDocument (Just (baseUrl opts)))
                         , envCorsOrigins = opts.soCorsOrigins
                         }
+            mUnixSock <- traverse openUnixSocket opts.soSocket
             let started =
                     logLine logger "server.started" $
                         [ "bind" .= opts.soBind
                         , "port" .= opts.soPort
+                        , "socket" .= opts.soSocket
                         , "agents" .= Map.keys host.hostAgents
                         , "admin_owners" .= opts.soAdminOwners
                         , "database" .= redactDatabase opts.soDatabase
@@ -232,24 +250,62 @@ runServer opts logger = do
                             <> [ "warning" .= ("no authentication: anyone who can reach this address can run the agents" :: String)
                                | Nothing <- [auth]
                                ]
+                -- Only the TCP listener installs the OS signal handlers (once);
+                -- 'onSignals' also closes the Unix socket, so both listeners
+                -- stop accepting new connections on the same SIGTERM/SIGINT.
                 settings =
                     setHost (fromString opts.soBind)
                         . setPort opts.soPort
                         . setBeforeMainLoop started
                         . setGracefulShutdownTimeout (Just opts.soShutdownGrace)
-                        . setInstallShutdownHandler (onSignals env)
+                        . setInstallShutdownHandler (onSignals env mUnixSock)
                         $ defaultSettings
-            runSettings settings (requestLogger logger (application env))
+                runTcp = runSettings settings (requestLogger logger (application env))
+                runUnix sock =
+                    let unixSettings = setGracefulShutdownTimeout (Just opts.soShutdownGrace) defaultSettings
+                     in runSettingsSocket unixSettings sock (requestLogger logger (application env))
+                        `finally` closeUnixSocket sock opts.soSocket
+            case mUnixSock of
+                Nothing -> runTcp
+                Just sock -> concurrently_ runTcp (runUnix sock)
             logLine logger "server.stopping" []
     logLine logger "server.stopped" []
   where
-    onSignals env closeSocket = do
+    onSignals :: ServerEnv -> Maybe Socket.Socket -> IO () -> IO ()
+    onSignals env mUnixSock closeSocket = do
         let stop = do
                 logLine logger "server.signal" []
                 requestShutdown env
                 closeSocket
+                -- Stop accepting on the Unix socket too; connections it already
+                -- accepted keep running until they finish (bounded in practice
+                -- by the process exiting, same as the TCP listener's --shutdown-grace).
+                forM_ mUnixSock $ \sock -> try (Socket.close sock) >>= \case
+                    Right () -> pure ()
+                    Left (_ :: IOException) -> pure ()
         void $ installHandler sigTERM (CatchOnce stop) Nothing
         void $ installHandler sigINT (CatchOnce stop) Nothing
+
+{- | Bind, listen, and secure the Unix domain socket for @--socket@: remove a
+stale file at the path (from a previous, uncleanly stopped run), then
+create the socket 0600.
+-}
+openUnixSocket :: FilePath -> IO Socket.Socket
+openUnixSocket path = do
+    stale <- doesFileExist path
+    when stale $ removeFile path `catch` \(_ :: IOException) -> pure ()
+    sock <- Socket.socket Socket.AF_UNIX Socket.Stream Socket.defaultProtocol
+    Socket.bind sock (Socket.SockAddrUnix path)
+    Socket.listen sock Socket.maxListenQueue
+    setFileMode path (ownerReadMode `unionFileModes` ownerWriteMode)
+    pure sock
+
+-- | Close and unlink the socket on shutdown; tolerant of it having already
+-- been closed by 'onSignals', or the file already having been removed.
+closeUnixSocket :: Socket.Socket -> Maybe FilePath -> IO ()
+closeUnixSocket sock mpath = do
+    _ <- try (Socket.close sock) :: IO (Either IOException ())
+    forM_ mpath $ \path -> removeFile path `catch` \(_ :: IOException) -> pure ()
 
 {- | The URL the OpenAPI document names as this server's own. A wildcard
 bind is reported as localhost, which is where a reader of the document on
