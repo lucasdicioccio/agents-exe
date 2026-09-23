@@ -1,7 +1,8 @@
 # Spec: the OS as a standalone server (TUI and web UI as clients)
 
 Status: proposal, 2026-09-23, revised the same day after checking service
-readiness. Phase 0 in progress on branch `feature/os-standalone-server`. Builds on
+readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
+(commits 8de2a64..dc01dc8); Phase 2 in progress. Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
 
 ## Goal
@@ -365,7 +366,7 @@ Phases 0 and 1 need nothing and make the service usable from a local web
 app on their own. Phase 2 needs nothing either. Phase 3 needs Phase 2.
 Phase 4 needs 1, 2 and 3. Phase 5 needs only Phase 2.
 
-### Phase 0: service readiness (G12, G13)
+### Phase 0: service readiness (G12, G13) — done
 
 `--cors-origin ORIGIN` on `agents-server`, repeatable, `*` allowed only
 without auth: emits `Access-Control-Allow-Origin` (echoing the matched
@@ -381,7 +382,16 @@ table and the authentication section. Also add the undocumented
 `tool.completed` to the same doc. Tests: preflight, allowed and refused
 origins, SSE with `access_token` from an allowed origin.
 
-### Phase 1: `agents-exe serve` and config parity (G7)
+### Phase 1: `agents-exe serve` and config parity (G7) — done
+
+Landed as `System.Agents.CLI.ConfigLoader` (not `CLI.Config`: the TUI
+library already owns that module name), `hostConfigFromResolved`,
+`agents-exe serve` reusing the global `--agent-file`/`--agent`/`--params-file`
+flags, and `--socket`. The Unix listener stops accepting on SIGTERM and
+unlinks its file but does not drain in-flight requests through
+`--shutdown-grace`; only the TCP listener does.
+
+Original scope:
 
 Config loading into the library (§6); `serve` subcommand on `agents-exe`;
 `--socket`. The `agents-server` executable stays as the flags-only entry
@@ -389,6 +399,13 @@ point over the same code. Docs: `docs/agents-server.md` gains the config
 section; `docs/cli-commands.md` gains `serve`.
 
 ### Phase 2: the protocol, in the library
+
+Split in three sequential steps: 2a the `Protocol` types with JSON, event
+sequence numbers, the ring and replay, the cross-session feed, and the
+server re-implemented on them; 2b the missing runner operations
+(`listSessions`, `sendMail`, create with no message, `forkSession`) and
+their routes; 2c `ctxEmit` replacing `ctxEventQueue` so subcall and
+tool-activity events reach the runner stream, and `mailInToolResult`.
 
 `System.Agents.Protocol` with `Command`, `Event`, `EventBody`, JSON
 instances, and codecs for `NewMessage`, `RunMode`, `RunnerError`,
