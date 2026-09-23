@@ -1099,12 +1099,20 @@ failRun runner live reason = withMVar live.lsLock $ \_ -> do
 -- Operations
 -------------------------------------------------------------------------------
 
--- | Create a session for an agent, and start a run unless the mode is 'Nothing'.
+-- | Create a session for an agent with a first message, and start a run
+-- unless the mode is 'Nothing'. A convenience over 'createSessionAs' for
+-- the common case; see it (and 'createSessionAsWithParent') for a session
+-- with no first message (G2).
 createSession :: SessionRunner -> Text -> NewMessage -> Maybe RunMode -> IO (Either RunnerError SessionMeta)
-createSession runner slug message mode = createSessionAs runner Nothing slug message mode Map.empty
+createSession runner slug message mode = createSessionAs runner Nothing slug (Just message) mode Map.empty
 
--- | Like 'createSession', for an owner, with caller-supplied parameter values.
-createSessionAs :: SessionRunner -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+{- | Like 'createSession', for an owner, with caller-supplied parameter
+values. 'Nothing' for the message (G2, @todos/os-as-standalone-server.md@
+Design §1) creates an idle session with no turn at all: no LLM call, no
+'RunMode' honoured (a run needs something to step), just a fresh
+'SessionMeta' at 'StatusReady', ready for a later 'postMessage' or 'resume'.
+-}
+createSessionAs :: SessionRunner -> Maybe Text -> Text -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
 createSessionAs runner owner slug message mode supplied =
     createSessionAsWithParent runner Nothing owner slug message mode supplied
 
@@ -1114,7 +1122,7 @@ Shared by 'createSessionAs' (no parent) and 'spawnSession' (a parent, and
 never a run mode -- a spawned session always starts running and answers by
 mail, not by handing its final result back to the caller).
 -}
-createSessionAsWithParent :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+createSessionAsWithParent :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
 createSessionAsWithParent runner parent owner slug message mode supplied =
     lookupAgent runner.srHost slug >>= \case
         Nothing -> pure $ Left $ UnknownAgent slug
@@ -1130,15 +1138,29 @@ createSessionAsWithParent runner parent owner slug message mode supplied =
                             Left err -> pure (Left err)
                             Right agent -> case missingRequiredParams node agent overlay of
                                 missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
-                                [] -> do
-                                    sPrompt <- agent.sysPrompt
-                                    sTools <- agent.sysTools
-                                    sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery message.nmText message.nmMedia)
-                                    store runner live meta0 sess StatusReady Nothing >>= \case
-                                        Left conflict -> pure (Left (Conflict conflict))
-                                        Right meta -> do
-                                            emit runner sid (SessionCreated meta)
-                                            maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
+                                [] -> case message of
+                                    Nothing -> do
+                                        -- G2: no first message, no turn, no run --
+                                        -- regardless of 'mode'. 'sessionStatusOf'
+                                        -- would already say 'StatusReady' for an
+                                        -- empty turn list; 'store' is given it
+                                        -- explicitly like every other branch here.
+                                        tid <- newTurnId
+                                        let sess = Session [] sid Nothing tid (Just 2) (Just Asynchronous) 0
+                                        store runner live meta0 sess StatusReady Nothing >>= \case
+                                            Left conflict -> pure (Left (Conflict conflict))
+                                            Right meta -> do
+                                                emit runner sid (SessionCreated meta)
+                                                pure (Right meta)
+                                    Just msg -> do
+                                        sPrompt <- agent.sysPrompt
+                                        sTools <- agent.sysTools
+                                        sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery msg.nmText msg.nmMedia)
+                                        store runner live meta0 sess StatusReady Nothing >>= \case
+                                            Left conflict -> pure (Left (Conflict conflict))
+                                            Right meta -> do
+                                                emit runner sid (SessionCreated meta)
+                                                maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
 
 {- | @spawn-session@ (§5): start a new, durable, detached child session
 running a caller's helper agent, recorded with 'parentSid' as parent in
@@ -1150,7 +1172,7 @@ whenever it has something to say).
 -}
 spawnSession :: SessionRunner -> SessionId -> Text -> NewMessage -> IO (Either RunnerError SessionMeta)
 spawnSession runner parentSid slug message =
-    createSessionAsWithParent runner (Just parentSid) Nothing slug message (Just UntilBlocked) Map.empty
+    createSessionAsWithParent runner (Just parentSid) Nothing slug (Just message) (Just UntilBlocked) Map.empty
 
 -- | Add a user message to an idle session, and start a run unless the mode is 'Nothing'.
 {- | Add a user message to a session.

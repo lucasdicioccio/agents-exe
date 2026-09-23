@@ -201,7 +201,9 @@ instance ToSchema MediaItem where
 data CreateSessionBody = CreateSessionBody
     { csAgent :: Text
     -- ^ The slug of the agent to run; see @GET \/v1\/agents@.
-    , csPrompt :: Text
+    , csPrompt :: Maybe Text
+    -- ^ Absent (and no 'csMedia'): create an idle session with no turn at
+    -- all, ready for a later message or 'resume' (G2).
     , csMedia :: Maybe [MediaItem]
     , csRun :: Maybe Text
     -- ^ @none@, @step@, or @until_blocked@ (the default).
@@ -218,7 +220,7 @@ instance ToSchema CreateSessionBody where
     declareNamedSchema p =
         withFieldDocs
             [ ("agent", says "The slug of the agent to run; GET /v1/agents lists them.")
-            , ("prompt", says "What to ask the agent.")
+            , ("prompt", says "What to ask the agent. Absent: create an idle session with no turn yet.")
             , ("run", oneOfValues "How far the run should go." ["none", "step", "until_blocked"])
             ]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p

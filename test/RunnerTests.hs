@@ -108,6 +108,7 @@ tests =
         , testCase "replay after a sequence number ahead of the server's own is unavailable" replayFutureSeqTest
         , testCase "an owner-scoped subscription only sees that owner's events" ownerScopeTest
         , testCase "session.created and session.deleted are emitted" sessionCreatedDeletedTest
+        , testCase "createSessionAs with no message creates an idle session with no turn and starts no run" createNoMessageTest
         ]
 
 -------------------------------------------------------------------------------
@@ -314,7 +315,7 @@ deleteTest = do
     agentId <- AgentId <$> nextRandom
     atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
     withSessionRunner host $ \runner -> do
-        meta <- expectRight =<< createSessionAs runner (Just "alice") "parent" (message "delegate") (Just UntilBlocked) Map.empty
+        meta <- expectRight =<< createSessionAs runner (Just "alice") "parent" (Just (message "delegate")) (Just UntilBlocked) Map.empty
         let sid = meta.smSessionId
             children = map (.smSessionId) <$> host.hostBackend.sbQuery allSessionsQuery{sqParent = Just sid}
         waitUntil $ not . null <$> children
@@ -846,8 +847,8 @@ ownerScopeTest = do
     node <- testNode "{}"
     host <- testHost [node] (\_ c -> mockCompletion c)
     withSessionRunner host $ \runner -> do
-        alice <- expectRight =<< createSessionAs runner (Just "alice") "test-agent" (message "hi") Nothing Map.empty
-        bob <- expectRight =<< createSessionAs runner (Just "bob") "test-agent" (message "hi") Nothing Map.empty
+        alice <- expectRight =<< createSessionAs runner (Just "alice") "test-agent" (Just (message "hi")) Nothing Map.empty
+        bob <- expectRight =<< createSessionAs runner (Just "bob") "test-agent" (Just (message "hi")) Nothing Map.empty
         next <- expectSubscribed runner (Owner (Just "alice")) Nothing
         _ <- expectRight =<< resume runner alice.smSessionId UntilBlocked Map.empty
         aliceEvents <- collectUntilStopped next
@@ -879,6 +880,23 @@ sessionCreatedDeletedTest = do
             Just ev
                 | eventKind ev.evBody == kind -> pure ()
                 | otherwise -> untilKind next kind
+
+-- | G2: 'createSessionAs' with no message stores an idle session with no
+-- turn, emits 'SessionCreated', and starts no run even when a 'RunMode' is
+-- given (a run needs something to step).
+createNoMessageTest :: Assertion
+createNoMessageTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSessionAs runner (Just "alice") "test-agent" Nothing (Just UntilBlocked) Map.empty
+        meta.smStatus @?= StatusReady
+        (sess, meta') <- maybe (assertFailure "session missing") pure =<< getSession runner meta.smSessionId
+        sess.turns @?= []
+        meta'.smStatus @?= StatusReady
+        (afterWait, running) <- expectRight =<< awaitRun runner meta.smSessionId 1
+        afterWait.smStatus @?= StatusReady
+        running @?= False
 
 -- | Like 'withSessionRunner', with the runner already built (so tests can
 -- pick a config other than the default, e.g. a small event ring).

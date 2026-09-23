@@ -478,7 +478,7 @@ createH env req (Caller owner) = do
     body <- jsonBody req
     (agent, msg, mode, params) <- parseBody body $ \o -> do
         agent <- o .: "agent"
-        msg <- messageFields o
+        msg <- optionalMessageFields o
         mode <- runField o
         params <- paramsField o
         pure (agent, msg, mode, params)
@@ -861,6 +861,16 @@ waiting behind them).
 -}
 messageFields :: Aeson.Object -> Aeson.Parser NewMessage
 messageFields o = Aeson.parseJSON (Aeson.Object o)
+
+{- | Like 'messageFields', for @POST \/v1\/sessions@ (G2): absent or @null@
+@prompt@ means no first message at all (an idle session with no turn),
+rather than a parse failure over a missing required field.
+-}
+optionalMessageFields :: Aeson.Object -> Aeson.Parser (Maybe NewMessage)
+optionalMessageFields o =
+    o .:? "prompt" >>= \case
+        Nothing -> pure Nothing
+        Just (_ :: Text) -> Just <$> messageFields o
 
 -- | @run@: @none@, @step@, or @until_blocked@ (the default).
 runField :: Aeson.Object -> Aeson.Parser (Maybe RunMode)

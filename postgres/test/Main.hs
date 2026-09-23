@@ -195,7 +195,7 @@ runnerTest baseUrl = withDatabase baseUrl $ \url -> withSystemTempDirectory "age
     withPostgresStores url $ \stores ->
         withHostStores cfg stores silent $ \host ->
             withSessionRunner host $ \runner -> do
-                meta <- expectRight =<< createSessionAs runner (Just "alice") "pg-test" (NewMessage "fetch it" [] False) (Just UntilBlocked) Map.empty
+                meta <- expectRight =<< createSessionAs runner (Just "alice") "pg-test" (Just (NewMessage "fetch it" [] False)) (Just UntilBlocked) Map.empty
                 let sid = meta.smSessionId
                 (blocked, _) <- expectRight =<< awaitRun runner sid 5
                 blocked.smStatus @?= StatusWaitingExternal

@@ -84,6 +84,7 @@ main =
             , testCase "reconnecting with Last-Event-ID replays exactly the missed events" reconnectLastEventIdTest
             , testCase "GET /v1/events sees session.created and session.deleted" crossSessionEventsTest
             , testCase "GET /v1/events is owner-scoped when auth is on" ownerScopedEventsTest
+            , testCase "POST /v1/sessions with no prompt creates an idle session with no turn" createNoPromptTest
             ]
 
 -------------------------------------------------------------------------------
@@ -244,6 +245,20 @@ listDeleteTest = withServer "{}" mockCompletion $ \srv -> do
     (deleted, field "dry_run" plan) @?= (200, Aeson.Bool False)
     (gone, err) <- call srv "GET" ("/v1/sessions/" <> target) Nothing
     (gone, field "error" err) @?= (404, "unknown_session")
+
+-- | G2: no `prompt` (and no `media`) creates an idle session with no turn
+-- and no run, unlike `prompt` present which behaves as today.
+createNoPromptTest :: Assertion
+createNoPromptTest = withServer "{}" mockCompletion $ \srv -> do
+    (status, body) <- call srv "POST" "/v1/sessions" (Just (Aeson.object ["agent" .= ("server-test" :: Text)]))
+    status @?= 201
+    field "status" body @?= Aeson.String "ready"
+    arrayField "session" body @?= []
+    let sid = textField "session_id" body
+    (getStatus, got) <- call srv "GET" ("/v1/sessions/" <> sid) Nothing
+    getStatus @?= 200
+    field "status" got @?= Aeson.String "ready"
+    arrayField "session" got @?= []
 
 agentsHealthTest :: Assertion
 agentsHealthTest = withServer "{}" mockCompletion $ \srv -> do
