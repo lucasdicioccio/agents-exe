@@ -22,6 +22,12 @@ module System.Agents.TUI.Types.Conversation (
     -- * Draft buffer
     Draft (..),
     emptyDraft,
+    appendDraft,
+    draftToMessage,
+    shouldShipDraft,
+    draftIsEmpty,
+    draftParagraphCount,
+    draftFirstLine,
 
     -- * Conversation
     Conversation (..),
@@ -31,10 +37,12 @@ module System.Agents.TUI.Types.Conversation (
 ) where
 
 import Data.Text (Text)
+import qualified Data.Text as Text
 
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Media.Types (MediaAttachment)
-import System.Agents.Session.Base (Session, SessionId)
+import System.Agents.Protocol (NewMessage (..))
+import System.Agents.Session.Base (Session, SessionId, SessionStatus (..))
 import System.Agents.SessionStore (SessionMeta)
 
 -------------------------------------------------------------------------------
@@ -76,6 +84,67 @@ data Draft = Draft
 -- | The draft a new conversation starts with.
 emptyDraft :: Draft
 emptyDraft = Draft{draftText = "", draftMedia = []}
+
+{- | Append text (as a new paragraph, blank-line separated) and\/or media to
+a draft. Sending while the model is busy calls this instead of posting
+(@todos/os-as-standalone-server.md@ §5): three messages typed in a row
+while the run is active become one elaborated draft. Appending empty text
+with no media is a no-op.
+-}
+appendDraft :: Text -> [MediaAttachment] -> Draft -> Draft
+appendDraft newText newMedia d =
+    d{draftText = joinedText, draftMedia = draftMedia d ++ newMedia}
+  where
+    trimmed = Text.strip newText
+    joinedText
+        | Text.null trimmed = draftText d
+        | Text.null (Text.strip (draftText d)) = trimmed
+        | otherwise = draftText d <> "\n\n" <> trimmed
+
+-- | Whether a draft has nothing to post.
+draftIsEmpty :: Draft -> Bool
+draftIsEmpty d = Text.null (Text.strip (draftText d)) && null (draftMedia d)
+
+{- | Turn a non-empty draft into the single 'NewMessage' it ships as (§5):
+paragraphs already joined by 'appendDraft', media concatenated, never an
+interrupt (a draft is always ordinary input, never 'nmInterrupt'). Nothing
+for an empty draft.
+-}
+draftToMessage :: Draft -> Maybe NewMessage
+draftToMessage d
+    | draftIsEmpty d = Nothing
+    | otherwise = Just NewMessage{nmText = draftText d, nmMedia = draftMedia d, nmInterrupt = False}
+
+{- | Whether a 'SessionStatus' accepts input right now, i.e. whether a
+pending draft should ship on @run.stopped@ (§5): ready and idle sessions
+do; a paused, deferred-blocked, still-running or failed one keeps its
+draft until it is resumed and stops again.
+-}
+shouldShipDraft :: SessionStatus -> Bool
+shouldShipDraft StatusIdle = True
+shouldShipDraft StatusReady = True
+shouldShipDraft StatusRunning = False
+shouldShipDraft StatusWaitingExternal = False
+shouldShipDraft StatusPaused = False
+shouldShipDraft StatusFailed = False
+
+-- | Number of paragraphs in a draft (blank-line separated), 0 for an empty one.
+draftParagraphCount :: Draft -> Int
+draftParagraphCount d
+    | Text.null (Text.strip (draftText d)) = 0
+    | otherwise = length (paragraphsOf (draftText d))
+  where
+    paragraphsOf =
+        filter (not . Text.null) . map Text.strip . splitOnBlankLines
+
+    splitOnBlankLines :: Text -> [Text]
+    splitOnBlankLines = Text.splitOn "\n\n"
+
+-- | The draft's first line, for the collapsed Draft tab view.
+draftFirstLine :: Draft -> Text
+draftFirstLine d = case Text.lines (draftText d) of
+    (l : _) -> l
+    [] -> ""
 
 {- | A conversation with an agent: the client-side view of one runner
 session.

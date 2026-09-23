@@ -26,7 +26,6 @@ module System.Agents.TUI.Types.State (
     currentTab,
     helpContent,
     turnNavigation,
-    queuedMessagesFocus,
     attachedFiles,
     attachmentDialogState,
     filePathInput,
@@ -42,10 +41,11 @@ module System.Agents.TUI.Types.State (
     unreadConversations,
     fileBrowser,
     auxiliaryTasks,
-    uiBufferedMessages,
     buffers,
     bufferFocus,
     toolCallViews,
+    historySessionCache,
+    historyDirty,
     initUIState,
 
     -- * TUI State
@@ -76,7 +76,7 @@ import qualified Data.Vector as Vector
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Host.Client (RunnerClient)
 import System.Agents.Media.Types (MediaAttachment)
-import System.Agents.Session.Base (SessionId)
+import System.Agents.Session.Base (Session, SessionId)
 import System.Agents.SessionStore (SessionMeta)
 import System.Agents.Tools.Params.Types (ParamName)
 import System.Agents.TUI.Buffer (Buffer)
@@ -155,8 +155,6 @@ data UIState = UIState
     -- ^ Help text content lines
     , _turnNavigation :: Maybe TurnNavigationState
     -- ^ When Just, we are in turn navigation mode
-    , _queuedMessagesFocus :: Maybe Int
-    -- ^ Index of currently selected queued message
     , _attachedFiles :: Map ConversationId [MediaAttachment]
     -- ^ Media attachments per conversation
     , _attachmentDialogState :: AttachmentDialogState
@@ -187,15 +185,22 @@ data UIState = UIState
     -- ^ File browser widget for attachments
     , _auxiliaryTasks :: [AuxiliaryTask]
     -- ^ Background tasks (e.g., external viewers)
-    , _uiBufferedMessages :: Map ConversationId [Text]
-    -- ^ TUI-local draft/queue rendering state (§5); not derived from
-    -- 'Core' any more -- see 'System.Agents.TUI.Event.Queue'.
     , _buffers :: [Buffer]
     -- ^ Global in-memory buffers (most recent first)
     , _bufferFocus :: Maybe Int
     -- ^ Index of selected buffer in the widget
     , _toolCallViews :: ToolCallViews
     -- ^ Live status of background tool calls, per session
+    , _historySessionCache :: Map SessionId Session
+    -- ^ Full 'Session's fetched for the History tab ('Client.getSession'),
+    -- keyed by id; overwritten (never merged) on @session.updated@ for that
+    -- id, so a cached entry is always the freshest one this TUI has seen.
+    , _historyDirty :: Bool
+    -- ^ Set by any @session.created@\/@session.updated@\/@session.deleted@
+    -- since the last refresh; the heartbeat refreshes 'sessionList' via
+    -- 'Client.listSessions' when this is set, then clears it -- at most one
+    -- 'Client.listSessions' round trip per heartbeat even for a burst of
+    -- events.
     }
 
 makeLenses ''UIState
@@ -226,7 +231,6 @@ initUIState helpText agents sessions =
         , _currentTab = AgentsTab
         , _helpContent = helpText
         , _turnNavigation = Nothing
-        , _queuedMessagesFocus = Nothing
         , _attachedFiles = Map.empty
         , _attachmentDialogState = AttachmentDialogClosed
         , _filePathInput = editorText FilePathInputWidget (Just 1) ""
@@ -242,10 +246,11 @@ initUIState helpText agents sessions =
         , _unreadConversations = Set.empty
         , _fileBrowser = Nothing
         , _auxiliaryTasks = []
-        , _uiBufferedMessages = Map.empty
         , _buffers = []
         , _bufferFocus = Nothing
         , _toolCallViews = Map.empty
+        , _historySessionCache = Map.empty
+        , _historyDirty = True
         }
 
 -------------------------------------------------------------------------------

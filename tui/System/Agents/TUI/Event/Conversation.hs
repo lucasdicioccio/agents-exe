@@ -57,12 +57,18 @@ module System.Agents.TUI.Event.Conversation (
     handleCancelAttachedConversation,
     handlePauseRunConversation,
 
+    -- * Draft buffer (§5, D3)
+    setConversationDraft,
+    shipDraftIfAny,
+
     -- * Core State Manipulation
     appendConversation,
     mkConversation,
     addConversationToCore,
     markOwnedSession,
     reportRunnerResult,
+    readCore,
+    clearEditorAndAttachments,
 ) where
 
 import Brick
@@ -72,6 +78,7 @@ import Brick.Widgets.List (listInsert, listSelectedElement)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
 import Control.Lens (to, use, (%=), (.=), (^.))
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -101,6 +108,7 @@ import System.Agents.TUI.Types (
     TuiAgent (..),
     TuiState,
     agentList,
+    appendDraft,
     attachedFiles,
     conversationId,
     conversationList,
@@ -109,11 +117,13 @@ import System.Agents.TUI.Types (
     coreConversations,
     coreOwnedSessions,
     coreParams,
+    draftToMessage,
     emptyDraft,
     eventChan,
     messageEditor,
     selectedAttachmentIndex,
     sessionList,
+    shouldShipDraft,
     tuiCore,
     tuiSlug,
     toolCallViews,
@@ -293,14 +303,21 @@ runConversation _tracer slug sid = do
 -- Send Message
 -------------------------------------------------------------------------------
 
-{- | Post the message editor's content (plus any attachments) to a
-conversation's session: 'Client.postMessage', with @interrupt@ controlling
-'System.Agents.Protocol.nmInterrupt' (bypasses a busy run rather than being
-folded as ordinary mail -- 'handleInterruptConversation').
+-- | Clear the message editor and the conversation's attachments.
+clearEditorAndAttachments :: Conversation -> EventM N TuiState ()
+clearEditorAndAttachments conv = do
+    tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
+    tuiUI . attachedFiles %= Map.delete (conversationId conv)
+    tuiUI . selectedAttachmentIndex .= Nothing
 
-TODO(3b-iii): append-to-draft semantics (§5, D3) when the session is busy;
-for now, sending while a run is active still calls 'Client.postMessage',
-which the runner folds as mail.
+{- | Post the message editor's content (plus any attachments) to a
+conversation's session, or append it to the conversation's draft (§5, D3)
+when the session is busy: 'Client.postMessage' when it is idle
+('ConversationStatus_WaitingForInput'), 'appendDraft' when a run is
+active, paused, or blocked on deferred calls. An interrupt
+('nmInterrupt', 'handleInterruptConversation') always bypasses the draft
+and posts straight through, since it is meant to reach a running session
+right away.
 -}
 sendMessageTo :: Conversation -> Bool -> EventM N TuiState ()
 sendMessageTo conv interrupt = do
@@ -310,27 +327,31 @@ sendMessageTo conv interrupt = do
     let attachments = Map.findWithDefault [] (conversationId conv) atts
     if Text.null msgText && null attachments
         then showStatus StatusWarning "Nothing to send"
-        else do
-            core <- readCore
-            let nm = NewMessage{nmText = msgText, nmMedia = attachments, nmInterrupt = interrupt}
-            result <-
-                liftIO $
-                    Client.postMessage
-                        (core ^. coreClient)
-                        (conversationSessionId conv)
-                        nm
-                        (Just UntilBlocked)
-                        (core ^. coreParams)
-            case result of
-                Left err -> showStatus StatusError (runnerErrorMessage err)
-                Right meta -> do
-                    tuiUI . messageEditor . editContentsL .= TextZipper.textZipper [] Nothing
-                    tuiUI . attachedFiles %= Map.delete (conversationId conv)
-                    tuiUI . selectedAttachmentIndex .= Nothing
-                    updateConversationStatus (conversationId conv) (statusFromSessionStatus meta.smStatus)
-                    markOwnedSession meta.smSessionId
-                    showStatus StatusInfo $
-                        if interrupt then "Interrupted " <> conversationName conv else "Sent to " <> conversationName conv
+        else
+            if not interrupt && conversationStatus conv /= ConversationStatus_WaitingForInput
+                then do
+                    setConversationDraft (conversationId conv) (appendDraft msgText attachments (conversationDraft conv))
+                    clearEditorAndAttachments conv
+                    showStatus StatusInfo $ "Added to draft for " <> conversationName conv
+                else do
+                    core <- readCore
+                    let nm = NewMessage{nmText = msgText, nmMedia = attachments, nmInterrupt = interrupt}
+                    result <-
+                        liftIO $
+                            Client.postMessage
+                                (core ^. coreClient)
+                                (conversationSessionId conv)
+                                nm
+                                (Just UntilBlocked)
+                                (core ^. coreParams)
+                    case result of
+                        Left err -> showStatus StatusError (runnerErrorMessage err)
+                        Right meta -> do
+                            clearEditorAndAttachments conv
+                            updateConversationStatus (conversationId conv) (statusFromSessionStatus meta.smStatus)
+                            markOwnedSession meta.smSessionId
+                            showStatus StatusInfo $
+                                if interrupt then "Interrupted " <> conversationName conv else "Sent to " <> conversationName conv
 
 -- | Send (or draft) a message in the current conversation.
 handleSendMessage :: EventM N TuiState ()
@@ -408,10 +429,56 @@ createSubcallConversationEntry tuiAgent convId parentId depth = do
 
 {- | Translate a run's stop status into the conversation's local status
 (replaces the old @AppEvent_AgentNeedsInput@: there is no separate
-"needs input" runner event, only @run.stopped@ with a 'SessionStatus').
+"needs input" runner event, only @run.stopped@ with a 'SessionStatus'),
+then ship the conversation's draft (§5) if the new status accepts input.
 -}
 handleRunStopped :: ConversationId -> SessionStatus -> EventM N TuiState ()
-handleRunStopped convId status = updateConversationStatus convId (statusFromSessionStatus status)
+handleRunStopped convId status = do
+    updateConversationStatus convId (statusFromSessionStatus status)
+    when (shouldShipDraft status) $ shipDraftIfAny convId
+
+{- | Replace a conversation's draft in 'Core'.
+-}
+setConversationDraft :: ConversationId -> Draft -> EventM N TuiState ()
+setConversationDraft convId newDraft = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c
+            { _coreConversations =
+                map
+                    ( \conv ->
+                        if conversationId conv == convId
+                            then conv{conversationDraft = newDraft}
+                            else conv
+                    )
+                    (c ^. coreConversations)
+            }
+
+{- | Post a conversation's draft as one 'Client.postMessage', then clear it
+(§5): fires from 'handleRunStopped' when the new status accepts input, and
+from "System.Agents.TUI.Event.Draft"'s "Send now" action. A no-op when the
+draft is empty.
+-}
+shipDraftIfAny :: ConversationId -> EventM N TuiState ()
+shipDraftIfAny convId = do
+    core <- readCore
+    case [c | c <- core ^. coreConversations, conversationId c == convId] of
+        (conv : _) | Just nm <- draftToMessage (conversationDraft conv) -> do
+            result <-
+                liftIO $
+                    Client.postMessage
+                        (core ^. coreClient)
+                        (conversationSessionId conv)
+                        nm
+                        (Just UntilBlocked)
+                        (core ^. coreParams)
+            case result of
+                Left err -> showStatus StatusError (runnerErrorMessage err)
+                Right meta -> do
+                    setConversationDraft convId emptyDraft
+                    updateConversationStatus convId (statusFromSessionStatus meta.smStatus)
+                    markOwnedSession meta.smSessionId
+        _ -> pure ()
 
 -- | Update conversation status in core.
 updateConversationStatus :: ConversationId -> ConversationStatus -> EventM N TuiState ()

@@ -23,8 +23,8 @@ module System.Agents.TUI.Event (
     module System.Agents.TUI.Event.Navigation,
     -- Conversation
     module System.Agents.TUI.Event.Conversation,
-    -- Queue
-    module System.Agents.TUI.Event.Queue,
+    -- Draft (§5, D3)
+    module System.Agents.TUI.Event.Draft,
     -- Attachment
     module System.Agents.TUI.Event.Attachment,
 
@@ -53,7 +53,6 @@ module System.Agents.TUI.Event (
     handleConversationViewEvent,
     handleSessionViewEvent,
     handleAgentInfoEvent,
-    handleQueuedMessageListEvent,
     handleBufferListEvent,
     checkTripleNewlineTrigger,
 
@@ -75,7 +74,7 @@ import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.List (handleListEvent, listSelectedElement, listSelectedL)
 import qualified Brick.Widgets.List as List
 import Control.Concurrent.Async (async, poll)
-import Control.Concurrent.STM (readTVarIO)
+import Control.Concurrent.STM (atomically, modifyTVar, readTVarIO)
 import Control.Lens (to, use, (%=), (.=), (^.))
 import Control.Monad (filterM, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
@@ -100,7 +99,12 @@ import System.Agents.Session.Base (
     Session (..),
     SessionStatus (StatusRunning),
  )
-import System.Agents.SessionStore (SessionMeta (..))
+import System.Agents.SessionStore (
+    SessionMeta (..),
+    SessionQuery (..),
+    allSessionsQuery,
+    conversationIdToSessionId,
+ )
 import System.Timeout (timeout)
 import System.Agents.SessionPrint (
     OrderPreference (..),
@@ -120,8 +124,8 @@ import System.Agents.TUI.Buffer (bufferContent, newBufferWithContent)
 import System.Agents.TUI.Event.Attachment
 import System.Agents.TUI.Event.Conversation
 import System.Agents.TUI.Event.Dialog
+import System.Agents.TUI.Event.Draft
 import System.Agents.TUI.Event.Navigation hiding (handleForkAtTurn)
-import System.Agents.TUI.Event.Queue
 import System.Agents.TUI.KeyMapping (
     EventName (..),
     KeyMapping,
@@ -140,6 +144,7 @@ import System.Agents.TUI.Types (
     AuxiliaryTask (..),
     Conversation (..),
     ConversationStatus (..),
+    Core (..),
     N,
     StatusMessage (..),
     StatusSeverity (..),
@@ -157,17 +162,17 @@ import System.Agents.TUI.Types (
     conversationId,
     conversationList,
     conversationSession,
-    conversationStatus,
     coreClient,
     coreConversations,
     coreOwnedSessions,
     eventChan,
+    historyDirty,
+    historySessionCache,
     keyMapping,
     messageEditor,
     navSelectedTurnIndex,
     navSession,
     navTotalTurns,
-    queuedMessagesFocus,
     quitConfirmationPending,
     selectedAgentInfo,
     sessionConfig,
@@ -178,7 +183,6 @@ import System.Agents.TUI.Types (
     tuiSlug,
     tuiUI,
     turnNavigation,
-    uiBufferedMessages,
     uiFocusRing,
     unreadConversations,
  )
@@ -270,13 +274,13 @@ handleTurnNavigationEventWithSubcalls tracer navState ev = do
     keymap <- use keyMapping
     case ev of
         AppEvent AppEvent_Heartbeat -> handleHeartbeat
-        AppEvent (AppEvent_SessionUpdated convId sess meta) -> handleConversationUpdated convId sess meta
+        AppEvent (AppEvent_SessionUpdated convId sess meta) -> handleConversationUpdated convId sess meta >> cacheHistorySession convId sess >> markHistoryDirty
         AppEvent (AppEvent_RunStarted convId _mode) -> updateConversationStatus convId ConversationStatus_Active
         AppEvent (AppEvent_RunStopped convId status) -> handleRunStopped convId status
         AppEvent (AppEvent_SessionFailed convId err) -> showStatus StatusError err >> updateConversationStatus convId ConversationStatus_WaitingForInput
         AppEvent (AppEvent_CallsDeferred convId _calls) -> updateConversationStatus convId ConversationStatus_BlockedOnDeferred
-        AppEvent (AppEvent_SessionCreated meta) -> handleSessionCreated meta
-        AppEvent (AppEvent_SessionDeleted _convId) -> pure ()
+        AppEvent (AppEvent_SessionCreated meta) -> handleSessionCreated meta >> markHistoryDirty
+        AppEvent (AppEvent_SessionDeleted convId) -> handleSessionDeletedEvent convId
         AppEvent (AppEvent_AgentTrace _) -> pure ()
         AppEvent (AppEvent_ShowStatus severity text) -> handleShowStatus severity text
         AppEvent AppEvent_ClearStatus -> handleClearStatus
@@ -289,7 +293,7 @@ handleTurnNavigationEventWithSubcalls tracer navState ev = do
         AppEvent (AppEvent_ToolCallActivity activity) ->
             handleToolCallActivity activity
         AppEvent (AppEvent_AgentsRefreshed agents) -> handleAgentsRefreshed agents
-        AppEvent (AppEvent_SessionsRefreshed _sessions) -> pure ()
+        AppEvent (AppEvent_SessionsRefreshed sessions) -> handleSessionsRefreshed sessions
         VtyEvent vtyEv
             | matchesEvent keymap EventExitTurnNavigation vtyEv -> do
                 tuiUI . turnNavigation .= Nothing
@@ -320,7 +324,7 @@ handleNormalEvent tracer ev = do
     keymap <- use keyMapping
     case ev of
         AppEvent AppEvent_Heartbeat -> handleHeartbeat
-        AppEvent (AppEvent_SessionUpdated convId sess meta) -> handleConversationUpdated convId sess meta
+        AppEvent (AppEvent_SessionUpdated convId sess meta) -> handleConversationUpdated convId sess meta >> cacheHistorySession convId sess >> markHistoryDirty
         AppEvent (AppEvent_RunStarted convId _mode) -> updateConversationStatus convId ConversationStatus_Active
         AppEvent (AppEvent_RunStopped convId status) -> handleRunStopped convId status
         AppEvent (AppEvent_SessionFailed convId err) -> showStatus StatusError err >> updateConversationStatus convId ConversationStatus_WaitingForInput
@@ -419,9 +423,17 @@ handleNormalEvent tracer ev = do
                 resetQuitConfirmation
                 handleViewSessionWithExternalViewer Antichronological
         VtyEvent vtyEv
-            | matchesEvent keymap EventClearQueuedMessages vtyEv -> do
+            | matchesEvent keymap EventClearDraft vtyEv -> do
                 resetQuitConfirmation
-                handleClearQueuedMessages
+                handleClearDraft
+        VtyEvent vtyEv
+            | matchesEvent keymap EventEditDraft vtyEv -> do
+                resetQuitConfirmation
+                handleEditDraft
+        VtyEvent vtyEv
+            | matchesEvent keymap EventSendDraftNow vtyEv -> do
+                resetQuitConfirmation
+                handleSendDraftNow
         VtyEvent vtyEv
             | matchesEvent keymap EventSaveBuffer vtyEv -> do
                 resetQuitConfirmation
@@ -441,7 +453,7 @@ handleNormalEvent tracer ev = do
                 Just ConversationViewWidget -> handleConversationViewEvent tracer vtyEv keymap
                 Just SessionViewWidget -> handleSessionViewEvent tracer vtyEv keymap
                 Just AgentInfoWidget -> handleAgentInfoEvent vtyEv
-                Just QueuedMessageListWidget -> handleQueuedMessageListEvent vtyEv keymap
+                Just QueuedMessageListWidget -> pure ()
                 Just AttachmentListWidget -> handleAttachmentListEvent vtyEv keymap
                 Just BufferListWidget -> handleBufferListEvent vtyEv keymap
                 _ -> pure ()
@@ -506,9 +518,67 @@ handleConversationListEvent ev keymap =
                     tuiUI . unreadConversations %= Set.delete (conversationId conv)
                 Nothing -> pure ()
 
--- | Handle sessions list navigation.
+{- | Handle sessions list navigation (History tab): after moving the
+selection, fetch the newly selected session's full 'Session' via
+'Client.getSession' if it is not already cached ('historySessionCache'),
+so 'render_sessionView' has turns to show without a fetch per frame.
+-}
 handleSessionsListEvent :: Vty.Event -> EventM N TuiState ()
-handleSessionsListEvent ev = zoom (tuiUI . sessionList) $ handleListEvent ev
+handleSessionsListEvent ev = do
+    zoom (tuiUI . sessionList) $ handleListEvent ev
+    mSelected <- use (tuiUI . sessionList . to listSelectedElement)
+    case mSelected of
+        Just (_, meta) -> ensureHistorySessionCached meta
+        Nothing -> pure ()
+
+-- | Fetch and cache a history session if it is not already cached.
+ensureHistorySessionCached :: SessionMeta -> EventM N TuiState ()
+ensureHistorySessionCached meta = do
+    cache <- use (tuiUI . historySessionCache)
+    unless (Map.member meta.smSessionId cache) $ do
+        coreRef <- use tuiCore
+        core <- liftIO $ readTVarIO coreRef
+        result <- liftIO $ Client.getSession (core ^. coreClient) meta.smSessionId
+        case result of
+            Right (sess, _) -> tuiUI . historySessionCache %= Map.insert meta.smSessionId sess
+            Left _ -> pure ()
+
+{- | Cache a fresh 'Session' pushed by @session.updated@, keyed by its own
+id (D4: the same UUID as its 'ConversationId', so the caller's convId is
+redundant here).
+-}
+cacheHistorySession :: ConversationId -> Session -> EventM N TuiState ()
+cacheHistorySession _convId sess =
+    tuiUI . historySessionCache %= Map.insert sess.sessionId sess
+
+-- | Mark the History tab's session list as needing a refresh on the next heartbeat.
+markHistoryDirty :: EventM N TuiState ()
+markHistoryDirty = tuiUI . historyDirty .= True
+
+{- | A session was deleted (@session.deleted@): drop it from the open
+conversation list if it is there, drop it from the history cache, and mark
+the History tab dirty so it drops out of 'sessionList' on the next
+heartbeat refresh.
+-}
+handleSessionDeletedEvent :: ConversationId -> EventM N TuiState ()
+handleSessionDeletedEvent convId = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c{_coreConversations = filter (\conv -> conversationId conv /= convId) (c ^. coreConversations)}
+    tuiUI . historySessionCache %= Map.delete (conversationIdToSessionId convId)
+    markHistoryDirty
+
+{- | Apply a freshly listed History tab roster ('AppEvent_SessionsRefreshed',
+'Client.listSessions'), keeping the current selection by session id when
+possible.
+-}
+handleSessionsRefreshed :: [SessionMeta] -> EventM N TuiState ()
+handleSessionsRefreshed sessions = do
+    mPrevId <- fmap (smSessionId . snd) <$> use (tuiUI . sessionList . to listSelectedElement)
+    tuiUI . sessionList .= List.list SessionsListWidget (Vector.fromList sessions) 1
+    case mPrevId >>= \sid -> Vector.findIndex (\m -> m.smSessionId == sid) (Vector.fromList sessions) of
+        Just idx -> tuiUI . sessionList . listSelectedL .= Just idx
+        Nothing -> pure ()
 
 -- | Handle message editor events.
 handleMessageEditorEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
@@ -535,16 +605,7 @@ checkTripleNewlineTrigger = do
 
 -- | Handle conversation view scrolling and turn navigation.
 handleConversationViewEvent :: Tracer IO Trace -> Vty.Event -> KeyMapping -> EventM N TuiState ()
-handleConversationViewEvent _tracer ev keymap = do
-    mConv <- getFocusedConversation
-    hasQueuedMessages <- case mConv of
-        Just conv -> do
-            buffered <- use (tuiUI . uiBufferedMessages)
-            pure $ case Map.lookup (conversationId conv) buffered of
-                Just msgs | conversationStatus conv == ConversationStatus_Paused -> not (null msgs)
-                _ -> False
-        Nothing -> pure False
-
+handleConversationViewEvent _tracer ev keymap =
     case ev of
         Vty.EvKey key mods
             | matchesEvent keymap EventEnterTurnNavigation (Vty.EvKey key mods) -> do
@@ -560,15 +621,6 @@ handleConversationViewEvent _tracer ev keymap = do
                         tuiUI . turnNavigation .= Just navState
                         showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
                     _ -> showStatus StatusWarning "No session or empty session to navigate"
-        Vty.EvKey key mods
-            | hasQueuedMessages && matchesEvent keymap EventNavigateUp (Vty.EvKey key mods) ->
-                handleQueueNavigation (-1)
-        Vty.EvKey key mods
-            | hasQueuedMessages && matchesEvent keymap EventNavigateDown (Vty.EvKey key mods) ->
-                handleQueueNavigation 1
-        Vty.EvKey key mods
-            | hasQueuedMessages && matchesEvent keymap EventDeleteItem (Vty.EvKey key mods) ->
-                handleDeleteSelectedMessage
         Vty.EvKey Vty.KUp _ -> vScrollBy (viewportScroll ConversationViewWidget) (-1)
         Vty.EvKey Vty.KDown _ -> vScrollBy (viewportScroll ConversationViewWidget) 1
         Vty.EvKey Vty.KLeft _ -> hScrollBy (viewportScroll ConversationViewWidget) (-1)
@@ -577,14 +629,31 @@ handleConversationViewEvent _tracer ev keymap = do
         Vty.EvKey Vty.KPageDown _ -> vScrollPage (viewportScroll ConversationViewWidget) Down
         _ -> pure ()
 
--- | Handle session view scrolling.
---
--- The History tab's session list holds 'SessionMeta' only (starts empty
--- until 3b-iii); there is no full 'Session' to turn-navigate from there
--- yet, so this only scrolls.
+{- | Handle session view scrolling and turn navigation (History tab): the
+entered turn navigation reads from 'historySessionCache' -- the full
+'Session' fetched for the selected 'SessionMeta' by 'ensureHistorySessionCached'.
+-}
 handleSessionViewEvent :: Tracer IO Trace -> Vty.Event -> KeyMapping -> EventM N TuiState ()
-handleSessionViewEvent _tracer ev _keymap =
+handleSessionViewEvent _tracer ev keymap =
     case ev of
+        Vty.EvKey key mods
+            | matchesEvent keymap EventEnterTurnNavigation (Vty.EvKey key mods) -> do
+                mSelected <- use (tuiUI . sessionList . to listSelectedElement)
+                case mSelected of
+                    Nothing -> showStatus StatusWarning "No session selected"
+                    Just (_, meta) -> do
+                        cache <- use (tuiUI . historySessionCache)
+                        case Map.lookup meta.smSessionId cache of
+                            Just session | not (null session.turns) -> do
+                                let navState =
+                                        TurnNavigationState
+                                            { _navSession = session
+                                            , _navSelectedTurnIndex = length session.turns - 1
+                                            , _navTotalTurns = length session.turns
+                                            }
+                                tuiUI . turnNavigation .= Just navState
+                                showStatus StatusInfo "Navigation mode: Up/Down to navigate, F to fork, Enter/Esc to exit"
+                            _ -> showStatus StatusWarning "No session or empty session to navigate"
         Vty.EvKey Vty.KUp _ -> vScrollBy (viewportScroll SessionViewWidget) (-1)
         Vty.EvKey Vty.KDown _ -> vScrollBy (viewportScroll SessionViewWidget) 1
         Vty.EvKey Vty.KLeft _ -> hScrollBy (viewportScroll SessionViewWidget) (-1)
@@ -602,45 +671,6 @@ handleAgentInfoEvent ev =
         Vty.EvKey Vty.KLeft _ -> hScrollBy (viewportScroll AgentInfoWidget) (-1)
         Vty.EvKey Vty.KRight _ -> hScrollBy (viewportScroll AgentInfoWidget) 1
         _ -> pure ()
-
--- | Handle queued message list events.
-handleQueuedMessageListEvent :: Vty.Event -> KeyMapping -> EventM N TuiState ()
-handleQueuedMessageListEvent ev keymap = do
-    mConv <- getFocusedConversation
-    case mConv of
-        Nothing -> pure ()
-        Just conv -> do
-            if conversationStatus conv /= ConversationStatus_Paused
-                then pure ()
-                else do
-                    let convId = conversationId conv
-                    buffered <- use (tuiUI . uiBufferedMessages)
-                    case Map.lookup convId buffered of
-                        Nothing -> pure ()
-                        Just msgs -> do
-                            let count = length msgs
-                            case ev of
-                                Vty.EvKey key mods
-                                    | matchesEvent keymap EventNavigateUp (Vty.EvKey key mods) -> do
-                                        current <- use (tuiUI . queuedMessagesFocus)
-                                        let newIdx = case current of
-                                                Nothing -> count - 1
-                                                Just idx -> max 0 (idx - 1)
-                                        tuiUI . queuedMessagesFocus .= Just newIdx
-                                Vty.EvKey key mods
-                                    | matchesEvent keymap EventNavigateDown (Vty.EvKey key mods) -> do
-                                        current <- use (tuiUI . queuedMessagesFocus)
-                                        let newIdx = case current of
-                                                Nothing -> 0
-                                                Just idx -> min (count - 1) (idx + 1)
-                                        tuiUI . queuedMessagesFocus .= Just newIdx
-                                Vty.EvKey key mods
-                                    | matchesEvent keymap EventDeleteItem (Vty.EvKey key mods) ->
-                                        handleDeleteSelectedMessage
-                                Vty.EvKey key mods
-                                    | matchesEvent keymap EventClearQueuedMessages (Vty.EvKey key mods) ->
-                                        handleClearQueuedMessages
-                                _ -> pure ()
 
 -- | Handle buffer list navigation and actions.
 handleBufferListEvent :: Vty.Event -> KeyMapping -> EventM N TuiState ()
@@ -773,12 +803,10 @@ handleClearStatus = tuiUI . statusMessage .= Nothing
 -- Session Helpers
 -------------------------------------------------------------------------------
 
-{- | Get the currently focused session, if any.
-
-Only the focused conversation's own (possibly not-yet-loaded) 'Session' is
-considered: the History tab's 'sessionList' holds 'SessionMeta' only
-(starts empty until 3b-iii, 'Client.listSessions'), which carries no
-turns to navigate.
+{- | Get the currently focused session, if any: the currently selected
+conversation's own (possibly not-yet-loaded) 'Session' (Chats tab). The
+History tab's own selected session is read separately, from
+'historySessionCache' -- see 'handleSessionViewEvent'.
 -}
 getFocusedSession :: EventM N TuiState (Maybe Session)
 getFocusedSession = do
@@ -827,7 +855,32 @@ handleHeartbeat = do
             when (diffUTCTime now status.statusTimestamp > 5) $
                 tuiUI . statusMessage .= Nothing
         Nothing -> pure ()
+    refreshHistoryIfDirty
     cleanupAuxiliaryTasks
+
+{- | Refresh the History tab's 'sessionList' via 'Client.listSessions' if
+anything marked it dirty since the last heartbeat ('markHistoryDirty'):
+a burst of @session.created@\/@session.updated@\/@session.deleted@ events
+during a run only costs one 'Client.listSessions' round trip per
+heartbeat, not one per event.
+-}
+refreshHistoryIfDirty :: EventM N TuiState ()
+refreshHistoryIfDirty = do
+    dirty <- use (tuiUI . historyDirty)
+    when dirty $ do
+        tuiUI . historyDirty .= False
+        coreRef <- use tuiCore
+        core <- liftIO $ readTVarIO coreRef
+        let query = allSessionsQuery{sqLimit = Just historyListLimit}
+        result <- liftIO $ Client.listSessions (core ^. coreClient) query
+        case result of
+            Right sessions -> handleSessionsRefreshed sessions
+            Left _ -> pure ()
+
+-- | Default page size for the History tab's 'Client.listSessions' refresh
+-- (matches the HTTP @GET \/v1\/sessions@ default limit).
+historyListLimit :: Int
+historyListLimit = 50
 
 -- | Remove completed auxiliary tasks from the state.
 cleanupAuxiliaryTasks :: EventM N TuiState ()

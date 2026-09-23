@@ -255,57 +255,41 @@ formatAttachmentSize base64Data =
      in formatBytes originalBytes
 
 -------------------------------------------------------------------------------
--- Queued Messages Management Rendering
+-- Draft Management Rendering (§5, D3: the Draft tab)
 -------------------------------------------------------------------------------
 
--- | Render the queued messages management panel.
-render_queued_messages_manager :: TuiState -> Conversation -> Widget N
-render_queued_messages_manager st conv =
-    if conversationStatus conv /= ConversationStatus_Paused
+{- | Render the draft panel for a conversation: collapsed, it shows the
+draft's first line and a size indicator (chars, paragraphs)
+(@todos/os-as-standalone-server.md@ §5). Hidden when the draft is empty.
+-}
+render_draft_manager :: TuiState -> Conversation -> Widget N
+render_draft_manager st conv =
+    if draftIsEmpty draft
         then emptyWidget
-        else
-            let queuedMsgs = getQueuedMessages st conv
-                count = length queuedMsgs
-             in if count == 0
-                    then emptyWidget
-                    else render_queue_panel st count queuedMsgs
+        else render_draft_panel st draft
+  where
+    draft = conversationDraft conv
 
--- | Get the list of queued messages for a conversation.
-getQueuedMessages :: TuiState -> Conversation -> [Text]
-getQueuedMessages st conv =
-    let buffered = st ^. tuiUI . uiBufferedMessages
-     in case Map.lookup (conversationId conv) buffered of
-            Nothing -> []
-            Just msgs -> reverse msgs
-
--- | Render the queue management UI panel.
-render_queue_panel :: TuiState -> Int -> [Text] -> Widget N
-render_queue_panel st count msgs =
+-- | Render the collapsed draft summary panel.
+render_draft_panel :: TuiState -> Draft -> Widget N
+render_draft_panel st draft =
     borderWithFocus
         st
         QueuedMessageListWidget
-        (" Queued Messages (" <> Text.pack (show count) <> ") ")
+        (" Draft (" <> sizeText <> ") ")
         $ vBox
-            [ txt "Ctrl+D: clear all | Del/Backspace: delete selected | Up/Down: select"
+            [ txt "Ctrl+A: edit draft | Ctrl+G: send now | Ctrl+D: clear"
             , txt ""
-            , render_queued_message_list selectedIdx msgs
+            , withAttr queuedMessageAttr $ txt (draftFirstLine draft)
             ]
   where
-    selectedIdx = st ^. tuiUI . queuedMessagesFocus
-
--- | Render the list of queued messages with selection.
-render_queued_message_list :: Maybe Int -> [Text] -> Widget N
-render_queued_message_list selectedIdx msgs =
-    vBox $ zipWith (render_queued_item selectedIdx) [0 ..] msgs
-
--- | Render a single queued message item.
-render_queued_item :: Maybe Int -> Int -> Text -> Widget N
-render_queued_item selectedIdx idx msg =
-    let isSelected = selectedIdx == Just idx
-        marker = if isSelected then "▶ " else "  "
-        truncated = Text.take 60 msg <> if Text.length msg > 60 then "..." else ""
-        attr = if isSelected then queuedMessageSelectedAttr else queuedMessageAttr
-     in withAttr attr $ txt $ marker <> truncated
+    chars = Text.length (draftText draft)
+    paras = draftParagraphCount draft
+    sizeText =
+        Text.pack (show chars)
+            <> " chars, "
+            <> Text.pack (show paras)
+            <> if paras == 1 then " paragraph" else " paragraphs"
 
 -------------------------------------------------------------------------------
 -- Buffer Rendering

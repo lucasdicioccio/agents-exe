@@ -92,7 +92,9 @@ data EventName
     | EventExportSession
     | EventViewSessionChronological
     | EventViewSessionReverse
-    | EventClearQueuedMessages
+    | EventClearDraft
+    | EventEditDraft
+    | EventSendDraftNow
     | EventCycleTabForward
     | EventCycleTabBackward
     | EventCycleFocusForward
@@ -131,7 +133,9 @@ eventNameToText EventPasteClipboard = "paste-clipboard"
 eventNameToText EventExportSession = "export-session"
 eventNameToText EventViewSessionChronological = "view-session-chrono"
 eventNameToText EventViewSessionReverse = "view-session-reverse"
-eventNameToText EventClearQueuedMessages = "clear-queued"
+eventNameToText EventClearDraft = "clear-draft"
+eventNameToText EventEditDraft = "edit-draft"
+eventNameToText EventSendDraftNow = "send-draft-now"
 eventNameToText EventCycleTabForward = "next-tab"
 eventNameToText EventCycleTabBackward = "prev-tab"
 eventNameToText EventCycleFocusForward = "next-focus"
@@ -165,7 +169,13 @@ eventNameFromText "paste-clipboard" = Just EventPasteClipboard
 eventNameFromText "export-session" = Just EventExportSession
 eventNameFromText "view-session-chrono" = Just EventViewSessionChronological
 eventNameFromText "view-session-reverse" = Just EventViewSessionReverse
-eventNameFromText "clear-queued" = Just EventClearQueuedMessages
+eventNameFromText "clear-draft" = Just EventClearDraft
+-- Alias kept for existing keymap config files: the Queue tab is now the
+-- Draft tab (@todos/os-as-standalone-server.md@ §5), but a user's
+-- "clear-queued": [...] binding should keep working unchanged.
+eventNameFromText "clear-queued" = Just EventClearDraft
+eventNameFromText "edit-draft" = Just EventEditDraft
+eventNameFromText "send-draft-now" = Just EventSendDraftNow
 eventNameFromText "next-tab" = Just EventCycleTabForward
 eventNameFromText "prev-tab" = Just EventCycleTabBackward
 eventNameFromText "next-focus" = Just EventCycleFocusForward
@@ -410,7 +420,9 @@ defaultKeyMapping =
             , (EventExportSession, [KeyBinding (KeyChar 'p') ctrlModifier])
             , (EventViewSessionChronological, [KeyBinding (KeyChar 't') ctrlModifier])
             , (EventViewSessionReverse, [KeyBinding (KeyChar 'r') ctrlModifier])
-            , (EventClearQueuedMessages, [KeyBinding (KeyChar 'd') ctrlModifier])
+            , (EventClearDraft, [KeyBinding (KeyChar 'd') ctrlModifier])
+            , (EventEditDraft, [KeyBinding (KeyChar 'a') ctrlModifier])
+            , (EventSendDraftNow, [KeyBinding (KeyChar 'g') ctrlModifier])
             , (EventCycleTabForward, [KeyBinding (KeyChar ']') ctrlModifier])
             , (EventCycleTabBackward, [KeyBinding (KeyChar '[') ctrlModifier])
             , (EventCycleFocusForward, [KeyBinding KeyTab noModifiers])
@@ -586,10 +598,12 @@ generateHelpContent keymap =
     , "  " <> formatBindings EventResumeBuffer <> " - Resume editing selected buffer"
     , "  " <> formatBindings EventClearBuffers <> " - Clear all buffers"
     , ""
-    , "Queue Management (when paused):"
-    , "  " <> formatBindings EventClearQueuedMessages <> " - Clear all queued messages"
-    , "  " <> formatBindings EventDeleteItem <> " - Delete selected queued message"
-    , "  " <> formatBindings EventNavigateUp <> "/" <> formatBindings EventNavigateDown <> " - Select queued message"
+    , "Draft (unsent text while the model is busy, paused, or blocked):"
+    , "  Sending while busy appends a paragraph to the draft instead of posting"
+    , "  " <> formatBindings EventEditDraft <> " - Edit the draft in the message editor"
+    , "  " <> formatBindings EventSendDraftNow <> " - Send the draft now"
+    , "  " <> formatBindings EventClearDraft <> " - Clear the draft"
+    , "  The draft posts automatically once the session accepts input again"
     , ""
     , "Session Navigation & Forking:"
     , "  " <> formatBindings EventEnterTurnNavigation <> " - Enter turn navigation mode (when on conversation)"
