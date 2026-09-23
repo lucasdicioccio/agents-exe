@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -10,7 +11,9 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, newTVarIO, readTVarIO, writeTVar)
+import Control.Exception (bracket)
 import Control.Monad (void)
+import Data.List (group, sortOn)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
@@ -98,6 +101,12 @@ tests =
         , testCase "list-sessions merges live MailRouter entries with the persisted catalog" listSessionsMergeTest
         , testCase "run's spawn-session resolves a helper slug into a registered child session" oneShotSpawnSessionTest
         , testCase "run's spawn-session refuses an unknown helper slug" oneShotSpawnSessionUnknownSlugTest
+        , testCase "event sequence numbers are strictly increasing" eventSeqIncreasingTest
+        , testCase "replay after N returns exactly the events after N, from the ring" replayAfterNTest
+        , testCase "replay across the boundary into live events has no gap or duplicate" replayLiveBoundaryTest
+        , testCase "a ring smaller than the run's events reports replay unavailable" replayUnavailableTest
+        , testCase "an owner-scoped subscription only sees that owner's events" ownerScopeTest
+        , testCase "session.created and session.deleted are emitted" sessionCreatedDeletedTest
         ]
 
 -------------------------------------------------------------------------------
@@ -114,7 +123,7 @@ deferredFlowTest = do
         (blocked, active) <- expectRight =<< awaitRun runner sid 5
         (blocked.smStatus, active) @?= (StatusWaitingExternal, False)
         token <- singleToken runner sid
-        next <- subscribe runner sid
+        next <- subscribeSession runner sid
         _ <- expectRight =<< completeCall runner token (TextResponse "42") True Map.empty
         kinds <- eventsUntilStopped next
         assertBool ("events: " <> show kinds) (take 1 kinds == ["session.updated"] && "run.started" `elem` kinds && last kinds == "run.stopped")
@@ -375,7 +384,7 @@ subscribeFilterTest = do
     withSessionRunner host $ \runner -> do
         a <- expectRight =<< createSession runner "test-agent" (message "first") Nothing
         b <- expectRight =<< createSession runner "test-agent" (message "second") Nothing
-        next <- subscribe runner b.smSessionId
+        next <- subscribeSession runner b.smSessionId
         -- Session a's events come first in the stream.
         _ <- expectRight =<< resume runner a.smSessionId UntilBlocked Map.empty
         _ <- expectRight =<< awaitRun runner a.smSessionId 5
@@ -735,6 +744,127 @@ oneShotSpawnSessionUnknownSlugTest = withSystemTempDirectory "oneshot-spawn-sess
         Left _ -> pure ()
         Right sid -> assertFailure ("expected an unknown slug to be refused, got session " <> show sid)
 
+-------------------------------------------------------------------------------
+-- Sequence numbers, ring and replay (Phase 2a, G5)
+-------------------------------------------------------------------------------
+
+-- | Every event of one run, in order, replayed from the ring from the very
+-- start (@after = EventSeq 0@, older than any real event).
+runEventsFromRing :: SessionRunner -> SessionId -> IO [Event]
+runEventsFromRing runner sid = do
+    next <- expectSubscribed runner (OneSession sid) (Just (EventSeq 0))
+    collectUntilStopped next
+
+eventSeqIncreasingTest :: Assertion
+eventSeqIncreasingTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        events <- runEventsFromRing runner sid
+        assertBool "at least a few events" (length events >= 3)
+        let seqs = map (.evSeq) events
+        assertBool ("strictly increasing: " <> show seqs) (and (zipWith (<) seqs (drop 1 seqs)))
+
+replayAfterNTest :: Assertion
+replayAfterNTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        allEvents <- runEventsFromRing runner sid
+        assertBool "at least two events to split" (length allEvents >= 2)
+        let cut = head allEvents
+        next <- expectSubscribed runner (OneSession sid) (Just cut.evSeq)
+        replayed <- collectUntilStopped next
+        replayed @?= drop 1 allEvents
+
+-- | Subscribing with an @after@ still inside the ring, then generating more
+-- events live, sees each event exactly once across the replay/live
+-- boundary -- the point of taking the ring snapshot and the channel
+-- duplicate in one STM transaction.
+replayLiveBoundaryTest :: Assertion
+replayLiveBoundaryTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        first <- expectRight =<< createSession runner "test-agent" (message "first") (Just UntilBlocked)
+        let sid = first.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        before <- runEventsFromRing runner sid
+        let cut = head before
+        -- Subscribe for the replay + live boundary: 'before's own events
+        -- past 'cut' replay first, then a second run's events come live.
+        next <- expectSubscribed runner (OneSession sid) (Just cut.evSeq)
+        got <- collectUntilStopped next
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        after <- collectUntilStopped next
+        let seqs = map (.evSeq) (got <> after)
+        assertBool "no gap or duplicate across the boundary" (and (zipWith (<) seqs (drop 1 seqs)))
+        (seqs == nubOrd seqs) @? "no duplicate sequence numbers"
+  where
+    nubOrd = map head . group . sortOn id
+
+replayUnavailableTest :: Assertion
+replayUnavailableTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner_ (newSessionRunnerWith (RunnerConfig 2) host) $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        subscribe runner (OneSession sid) (Just (EventSeq 0)) >>= \case
+            Left ReplayUnavailable -> pure ()
+            Right _ -> assertFailure "expected replay to be unavailable with a 2-event ring"
+
+ownerScopeTest :: Assertion
+ownerScopeTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        alice <- expectRight =<< createSessionAs runner (Just "alice") "test-agent" (message "hi") Nothing Map.empty
+        bob <- expectRight =<< createSessionAs runner (Just "bob") "test-agent" (message "hi") Nothing Map.empty
+        next <- expectSubscribed runner (Owner (Just "alice")) Nothing
+        _ <- expectRight =<< resume runner alice.smSessionId UntilBlocked Map.empty
+        aliceEvents <- collectUntilStopped next
+        assertBool "only alice's session" (all ((== Just alice.smSessionId) . (.evSession)) aliceEvents)
+        _ <- expectRight =<< resume runner bob.smSessionId UntilBlocked Map.empty
+        _ <- expectRight =<< awaitRun runner bob.smSessionId 5
+        -- No event of bob's ever showed up on alice's subscription.
+        stray <- timeout 200_000 next
+        stray @?= Nothing
+
+sessionCreatedDeletedTest :: Assertion
+sessionCreatedDeletedTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        next <- expectSubscribed runner AllSessions Nothing
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") Nothing
+        untilKind next "session.created"
+        _ <- expectRight =<< deleteSession runner meta.smSessionId DeleteForReal
+        untilKind next "session.deleted"
+  where
+    -- 'createSession' also emits 'session.updated' (the initial store);
+    -- skip past anything that is not the kind under test.
+    untilKind :: IO Event -> Text -> IO ()
+    untilKind next kind = do
+        mEv <- timeout 5_000_000 next
+        case mEv of
+            Nothing -> assertFailure ("no " <> Text.unpack kind <> " within 5 seconds")
+            Just ev
+                | eventKind ev.evBody == kind -> pure ()
+                | otherwise -> untilKind next kind
+
+-- | Like 'withSessionRunner', with the runner already built (so tests can
+-- pick a config other than the default, e.g. a small event ring).
+withSessionRunner_ :: IO SessionRunner -> (SessionRunner -> IO a) -> IO a
+withSessionRunner_ mkRunner = bracket mkRunner shutdownSessionRunner
+
 {- | Get a session to the point where one call runs in the background,
 using the deterministic 'StepOnce'-driven flow 'engineKeptTest' also uses:
 first step issues the call, second step yields while it runs. Driving the
@@ -1003,14 +1133,14 @@ toolCallEventsTest = do
         meta <- expectRight =<< createSession runner (Base.slug node.osNodeConfig) (message "go") (Just StepOnce)
         let sid = meta.smSessionId
         _ <- expectRight =<< awaitRun runner sid 5
-        startEvents <- subscribe runner sid
+        startEvents <- subscribeSession runner sid
         -- Second step: starts the background call, then yields while it runs.
         _ <- expectRight =<< resume runner sid StepOnce Map.empty
         _ <- expectRight =<< awaitRun runner sid 5
         startKinds <- eventsUntilStopped startEvents
         assertBool ("tool.started among " <> show startKinds) ("tool.started" `elem` startKinds)
 
-        completeEvents <- subscribe runner sid
+        completeEvents <- subscribeSession runner sid
         putMVar gate ()
         _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
         (final, _) <- expectRight =<< awaitRun runner sid 5
@@ -1329,7 +1459,7 @@ responseTexts sess =
     render other = Text.pack (show other)
 
 -- | Event kinds until the run stops (or 5 seconds pass).
-eventsUntilStopped :: IO SessionEvent -> IO [Text]
+eventsUntilStopped :: IO Event -> IO [Text]
 eventsUntilStopped next = go []
   where
     go acc = do
@@ -1337,10 +1467,33 @@ eventsUntilStopped next = go []
         case mEvent of
             Nothing -> assertFailure ("no run.stopped after " <> show (reverse acc))
             Just event ->
-                let acc' = sessionEventKind event : acc
-                 in case event of
+                let acc' = eventKind event.evBody : acc
+                 in case event.evBody of
                         RunStopped{} -> pure (reverse acc')
                         _ -> go acc'
+
+-- | Full events (not just kinds) until the run stops (or 5 seconds pass).
+collectUntilStopped :: IO Event -> IO [Event]
+collectUntilStopped next = go []
+  where
+    go acc = do
+        mEvent <- timeout 5_000_000 next
+        case mEvent of
+            Nothing -> assertFailure ("no run.stopped after " <> show (map (eventKind . (.evBody)) (reverse acc)))
+            Just event ->
+                let acc' = event : acc
+                 in case event.evBody of
+                        RunStopped{} -> pure (reverse acc')
+                        _ -> go acc'
+
+-- | 'subscribe', asserting the replay is available (never unavailable with
+-- @after = Nothing@, or right after events the caller knows are still in
+-- the ring).
+expectSubscribed :: SessionRunner -> SubscribeScope -> Maybe EventSeq -> IO (IO Event)
+expectSubscribed runner scope after =
+    subscribe runner scope after >>= \case
+        Right next -> pure next
+        Left ReplayUnavailable -> assertFailure "replay unexpectedly unavailable"
 
 -- | Poll a condition every 20ms for up to 5 seconds.
 waitUntil :: IO Bool -> Assertion

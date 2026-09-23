@@ -37,6 +37,9 @@ module System.Agents.Host.Runner (
     RunMode (..),
     NewMessage (..),
     RunnerError (..),
+    RunnerConfig (..),
+    defaultRunnerConfig,
+    newSessionRunnerWith,
     createSession,
     createSessionAs,
     spawnSession,
@@ -61,11 +64,15 @@ module System.Agents.Host.Runner (
     deleteSession,
 
     -- * Events
-    SessionEvent (..),
-    sessionEventKind,
-    sessionEventSession,
+    Event (..),
+    EventBody (..),
+    EventSeq (..),
+    SubscribeScope (..),
+    ReplayUnavailable (..),
+    eventKind,
     subscribe,
     subscribeSTM,
+    subscribeSession,
 ) where
 
 import Control.Concurrent (threadDelay)
@@ -76,11 +83,13 @@ import Control.Exception (Exception, SomeAsyncException, SomeException, bracket,
 import Control.Monad (filterM, forM, forM_, forever, unless, void, when)
 import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=))
-import Data.Foldable (for_)
+import Data.Foldable (for_, toList)
 import Data.List (nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
+import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -92,7 +101,19 @@ import System.Agents.AgentFactory (AgentDeps (..), AgentRole (..), buildAgent)
 import System.Agents.AgentTree (OSAgentNode (osNodeConfig))
 import qualified System.Agents.Base as Base
 import System.Agents.Host
-import System.Agents.Media.Types (MediaAttachment)
+import System.Agents.Protocol (
+    DeleteMode (..),
+    DeletionPlan (..),
+    Event (..),
+    EventBody (..),
+    EventSeq (..),
+    NewMessage (..),
+    RunMode (..),
+    RunnerError (..),
+    SubscribeScope (..),
+    eventKind,
+    nextEventSeq,
+ )
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
 import System.Agents.Session.AgentConfig (matchGlob)
@@ -128,100 +149,27 @@ import System.Agents.Tools.Params.Types (
 -- Types
 -------------------------------------------------------------------------------
 
--- | How far a run goes.
-data RunMode
-    = -- | One step, e.g. one LLM call or one batch of tool calls.
-      StepOnce
-    | -- | Until the LLM answers, or only deferred calls remain.
-      UntilBlocked
-    deriving (Show, Eq)
+{- | 'RunMode', 'NewMessage', 'RunnerError', 'DeleteMode', 'DeletionPlan',
+'Event', 'EventBody', 'EventSeq' and 'SubscribeScope' now live in
+"System.Agents.Protocol", the one module owning the wire types and their
+JSON. Re-exported here unchanged so nothing outside this module (and
+"System.Agents.Protocol" itself) needs to know that split.
+-}
 
--- | A user message.
-data NewMessage = NewMessage
-    { nmText :: Text
-    , nmMedia :: [MediaAttachment]
-    , nmInterrupt :: Bool
-    {- ^ Post this as 'Interrupt'-priority mail rather than 'Normal'
-    (@todos/session-mailbox.md@ R3a\/R4): a running session's attached tool
-    calls are detached and, if @interruptCompletions@ is on, an in-flight
-    LLM completion is cancelled, either way asked again with this message
-    folded in. Only meaningful for 'acceptAsMail' (a busy session); ignored
-    on the idle path, where there is nothing to interrupt.
-    -}
+-- | Tunables for a 'SessionRunner', beyond the 'Host' it runs.
+newtype RunnerConfig = RunnerConfig
+    { rcEventRingSize :: Int
+    -- ^ How many past events 'subscribe'\/'subscribeSTM' can replay from,
+    -- per server (not per session). Default 4096.
     }
-
-data RunnerError
-    = UnknownAgent Text
-    | UnknownSession SessionId
-    | UnknownToken ContinuationToken
-    | TokenAlreadyCompleted ContinuationToken
-    | -- | A run owns the session (on delete: a session of the tree, or an ancestor).
-      RunInProgress SessionId
-    | NoActiveRun SessionId
-    | NotAcceptingMessages SessionId SessionStatus
-    | Conflict VersionConflict
-    | -- | Supplied parameter names the agent does not declare.
-      UnknownParams [ParamName]
-    | -- | Supplied parameter names that are process-scope, or pinned by the operator.
-      ForbiddenParams [ParamName]
-    | -- | Supplied values for @secret@ parameters that are not JSON strings.
-      InvalidParams [ParamName]
-    | -- | Required parameters still unbound once caller-supplied values are merged in.
-      MissingRequiredParams [ParamName]
-    | -- | The session's mailbox refused the message (full, per 'mailboxMaxUnread').
-      MailboxRejected SessionId
     deriving (Show, Eq)
 
--- | What happened to a session, in the order it happened.
-data SessionEvent
-    = RunStarted SessionId RunMode
-    | -- | A new version was stored; carries the head turn.
-      SessionUpdated SessionId SessionMeta (Maybe Turn)
-    | -- | The run stopped on deferred calls, which an external worker must complete.
-      CallsDeferred SessionId [DeferredCallView]
-    | RunStopped SessionId SessionStatus
-    | SessionFailed SessionId Text
-    | -- | A piece of the LLM's answer, when the host streams tokens.
-      TextDelta SessionId Text
-    | -- | A tracked tool call started running (@todos/session-mailbox.md@ §7).
-      ToolCallStarted SessionId ToolCallId Text
-    | -- | A tracked tool call reached a final state (@todos/session-mailbox.md@ §7).
-      ToolCallCompleted SessionId ToolCallId Text Bool
-    deriving (Show)
+defaultRunnerConfig :: RunnerConfig
+defaultRunnerConfig = RunnerConfig{rcEventRingSize = 4096}
 
--- | The event's name in the HTTP events stream.
-sessionEventKind :: SessionEvent -> Text
-sessionEventKind = \case
-    RunStarted{} -> "run.started"
-    SessionUpdated{} -> "session.updated"
-    CallsDeferred{} -> "calls.deferred"
-    RunStopped{} -> "run.stopped"
-    SessionFailed{} -> "session.failed"
-    TextDelta{} -> "text.delta"
-    ToolCallStarted{} -> "tool.started"
-    ToolCallCompleted{} -> "tool.completed"
-
-sessionEventSession :: SessionEvent -> SessionId
-sessionEventSession = \case
-    RunStarted sid _ -> sid
-    SessionUpdated sid _ _ -> sid
-    CallsDeferred sid _ -> sid
-    RunStopped sid _ -> sid
-    SessionFailed sid _ -> sid
-    TextDelta sid _ -> sid
-    ToolCallStarted sid _ _ -> sid
-    ToolCallCompleted sid _ _ _ -> sid
-
-data DeleteMode = DryRun | DeleteForReal
-    deriving (Show, Eq)
-
-data DeletionPlan = DeletionPlan
-    { dpSessions :: [SessionId]
-    -- ^ The session and all its descendants, deepest first.
-    , dpContinuations :: Int
-    -- ^ Continuation rows removed, or that would be.
-    , dpDryRun :: Bool
-    }
+-- | A subscription's @after@ is older than every event still in the ring:
+-- the caller missed some, and should fall back to a fresh snapshot.
+data ReplayUnavailable = ReplayUnavailable
     deriving (Show, Eq)
 
 type RunnerAgent = Agent (LlmTurnContent, Session)
@@ -229,11 +177,16 @@ type RunnerAgent = Agent (LlmTurnContent, Session)
 data SessionRunner = SessionRunner
     { srHost :: Host
     , srLive :: TVar (Map SessionId LiveSession)
-    , srEvents :: TChan SessionEvent
-    -- ^ Broadcast; subscribers filter by session, so eviction loses nothing.
+    , srEvents :: TChan Event
+    -- ^ Broadcast; subscribers filter by scope, so eviction loses nothing.
     , srReaper :: Async ()
     , srWatches :: TVar (Map Text WatchHandle)
     -- ^ Active @watch-session@ registrations (@todos/session-mailbox.md@ §7), keyed by watch id.
+    , srSeq :: TVar EventSeq
+    -- ^ The last 'EventSeq' stamped; monotonically increasing.
+    , srRing :: TVar (Seq Event)
+    -- ^ Bounded history of recent events (oldest first), for replay.
+    , srRingSize :: Int
     }
 
 -- | One active watch: who is watching, and the thread forwarding matches.
@@ -277,18 +230,25 @@ instance Exception ConcurrentModification
 -------------------------------------------------------------------------------
 
 newSessionRunner :: Host -> IO SessionRunner
-newSessionRunner host = do
+newSessionRunner = newSessionRunnerWith defaultRunnerConfig
+
+-- | Like 'newSessionRunner', with the event ring size configurable.
+newSessionRunnerWith :: RunnerConfig -> Host -> IO SessionRunner
+newSessionRunnerWith config host = do
     live <- newTVarIO Map.empty
     events <- newBroadcastTChanIO
     watches <- newTVarIO Map.empty
+    seqVar <- newTVarIO (EventSeq 0)
+    ring <- newTVarIO Seq.empty
     let ttl = host.hostLiveSessionTtl
+        ringSize = max 1 config.rcEventRingSize
     self <- newEmptyTMVarIO
     reaper <- async $ do
         runner <- atomically $ readTMVar self
         forever $ do
             threadDelay (reaperInterval ttl)
             evictIdle runner
-    let runner = SessionRunner host live events reaper watches
+    let runner = SessionRunner host live events reaper watches seqVar ring ringSize
     atomically $ putTMVar self runner
     pure runner
 
@@ -395,35 +355,117 @@ evictIdle runner = do
 -- Events and storage
 -------------------------------------------------------------------------------
 
-emit :: SessionRunner -> SessionEvent -> IO ()
-emit runner event = do
-    atomically $ writeTChan runner.srEvents event
-    case event of
+{- | Stamp and broadcast an event of one session: a fresh, strictly
+increasing 'EventSeq', the owner looked up from that session's cached
+'SessionMeta' (best effort; 'Nothing' if the session has no live, cached
+meta -- e.g. a freshly deleted session, which 'emitOwned' covers instead),
+appended to the ring and written to the broadcast channel in one
+transaction (so a concurrent 'subscribeSTM' never sees a torn view: either
+before this event, ring and channel both including it, or after).
+-}
+emit :: SessionRunner -> SessionId -> EventBody -> IO ()
+emit runner sid body = do
+    owner <- ownerOfLive runner sid
+    emitOwned runner sid owner body
+
+-- | Like 'emit', with the owner supplied by the caller rather than looked
+-- up live (needed once a session's 'LiveSession' is already gone, e.g.
+-- 'SessionDeleted').
+emitOwned :: SessionRunner -> SessionId -> Maybe Text -> EventBody -> IO ()
+emitOwned runner sid owner body = do
+    atomically $ do
+        n <- nextEventSeq <$> readTVar runner.srSeq
+        writeTVar runner.srSeq n
+        let ev = Event n (Just sid) owner body
+        modifyTVar' runner.srRing (pushRing runner.srRingSize ev)
+        writeTChan runner.srEvents ev
+    case body of
         -- One per token: too many, and too revealing, for the logs.
         TextDelta{} -> pure ()
-        _ -> runTracer runner.srHost.hostTracer $ HostRunnerTrace (sessionEventKind event) (sessionEventSession event)
+        _ -> runTracer runner.srHost.hostTracer $ HostRunnerTrace (eventKind body) sid
+
+-- | A session's owner, from this process's cached copy of its 'SessionMeta'
+-- (never hits the backend); 'Nothing' if this process has no live copy.
+ownerOfLive :: SessionRunner -> SessionId -> IO (Maybe Text)
+ownerOfLive runner sid = do
+    mLive <- lookupLive runner sid
+    case mLive of
+        Nothing -> pure Nothing
+        Just live -> do
+            cached <- readTVarIO live.lsLatest
+            pure (cached >>= (smOwner . snd))
+
+-- | Append to a bounded ring, dropping the oldest entries past 'cap'.
+pushRing :: Int -> Event -> Seq Event -> Seq Event
+pushRing cap ev s =
+    let s' = s Seq.|> ev
+     in if Seq.length s' > cap then Seq.drop (Seq.length s' - cap) s' else s'
 
 {- | Next events of one session. Each call to 'subscribe' gets its own
-stream, starting now; the returned action blocks until the next event.
+stream, starting now (or, with @after@, replayed from the ring first); the
+returned action blocks until the next matching event. 'Left
+ReplayUnavailable' when @after@ names an event older than everything the
+ring still holds: the caller should fall back to a fresh snapshot and
+subscribe again with @after = Nothing@.
 -}
-subscribe :: SessionRunner -> SessionId -> IO (IO SessionEvent)
-subscribe runner sid = do
-    next <- subscribeSTM runner sid
-    -- One transaction per event: after a 'readTChan', 'retry' would roll the
-    -- read back and block on the same event of another session forever.
-    let loop = atomically next >>= maybe loop pure
-    pure loop
+subscribe :: SessionRunner -> SubscribeScope -> Maybe EventSeq -> IO (Either ReplayUnavailable (IO Event))
+subscribe runner scope after = do
+    result <- subscribeSTM runner scope after
+    pure $ case result of
+        Left e -> Left e
+        Right next ->
+            -- One transaction per event: after a 'readTChan', 'retry' would
+            -- roll the read back and block on the same event forever.
+            Right (let loop = atomically next >>= maybe loop pure in loop)
 
-{- | Like 'subscribe', as a transaction to combine with others (timers,
-shutdown flags). Each run consumes one event of any session, and yields
-'Nothing' for another session's event.
+{- | Like 'subscribe', to combine with others (timers, shutdown flags) as a
+transaction. Each run consumes one event, and yields 'Nothing' for one that
+does not match 'scope'.
+
+The ring snapshot and the broadcast channel's duplicate are taken in one
+STM transaction: any event committed by 'emit' either lands in both (and
+this call's replay list sees it) or in neither (and the live stream, taken
+over from exactly this point, sees it) -- never a gap, never a duplicate.
 -}
-subscribeSTM :: SessionRunner -> SessionId -> IO (STM (Maybe SessionEvent))
-subscribeSTM runner sid = do
-    chan <- atomically $ dupTChan runner.srEvents
-    pure $ do
-        event <- readTChan chan
-        pure $ if sessionEventSession event == sid then Just event else Nothing
+subscribeSTM :: SessionRunner -> SubscribeScope -> Maybe EventSeq -> IO (Either ReplayUnavailable (STM (Maybe Event)))
+subscribeSTM runner scope after = atomically $ do
+    ring <- readTVar runner.srRing
+    chan <- dupTChan runner.srEvents
+    case after of
+        Nothing -> pure $ Right (liveOnly chan)
+        Just n
+            | replayAvailable ring n -> do
+                replayBuf <- newTVar (filter (matchesScope scope) (toList (Seq.filter ((> n) . evSeq) ring)))
+                pure $ Right (replayThenLive replayBuf chan)
+            | otherwise -> pure (Left ReplayUnavailable)
+  where
+    liveOnly chan = do
+        ev <- readTChan chan
+        pure $ if matchesScope scope ev then Just ev else Nothing
+    replayThenLive replayBuf chan = do
+        buf <- readTVar replayBuf
+        case buf of
+            (ev : rest) -> writeTVar replayBuf rest >> pure (Just ev)
+            [] -> liveOnly chan
+
+-- | Whether @after@ is recent enough that nothing between it and the
+-- ring's oldest kept event was evicted (an empty ring never lost anything).
+replayAvailable :: Seq Event -> EventSeq -> Bool
+replayAvailable ring n = case Seq.viewl ring of
+    Seq.EmptyL -> True
+    ev Seq.:< _ -> n >= EventSeq (let EventSeq k = evSeq ev in k - 1)
+
+matchesScope :: SubscribeScope -> Event -> Bool
+matchesScope (OneSession sid) ev = ev.evSession == Just sid
+matchesScope (Owner o) ev = ev.evOwner == o
+matchesScope AllSessions _ = True
+
+-- | Like 'subscribe' for one session, never replaying: always available.
+subscribeSession :: SessionRunner -> SessionId -> IO (IO Event)
+subscribeSession runner sid =
+    subscribe runner (OneSession sid) Nothing >>= \case
+        Right next -> pure next
+        Left ReplayUnavailable -> error "subscribeSession: unreachable, after = Nothing is always available"
 
 -- | Store a new version of a session (call under its lock).
 store :: SessionRunner -> LiveSession -> SessionMeta -> Session -> SessionStatus -> Maybe Text -> IO (Either VersionConflict SessionMeta)
@@ -435,7 +477,7 @@ store runner live meta sess status detail = do
             sess
     for_ result $ \meta' -> do
         atomically $ writeTVar live.lsLatest (Just (sess, meta'))
-        emit runner $ SessionUpdated live.lsSessionId meta' (headTurn sess)
+        emit runner live.lsSessionId $ SessionUpdated meta' (headTurn sess)
     pure result
 
 -- | The session's session-scope parameters that may be persisted (never secret ones).
@@ -491,7 +533,7 @@ newAgent runner live node = do
     let host = runner.srHost
         sid = live.lsSessionId
     let deps0
-            | host.hostStreamTokens = host.hostDeps{adOnTextDelta = Just (emit runner . TextDelta sid)}
+            | host.hostStreamTokens = host.hostDeps{adOnTextDelta = Just (emit runner sid . TextDelta)}
             | otherwise = host.hostDeps
         deps = deps0{adLiveParams = readTVarIO live.lsParams}
     agent <- buildAgent (contramap HostAgentTrace host.hostTracer) deps RootAgent (sessionIdToConversationId sid) node
@@ -629,13 +671,13 @@ serverWatchSession runner watcherSid req = do
                 then pure $ Left "too many active watches for this session"
                 else do
                     watchId <- Text.pack . show <$> newContinuationToken
-                    next <- subscribe runner req.wrTarget
+                    next <- subscribeSession runner req.wrTarget
                     deadline <- addUTCTime (fromIntegral (fromMaybe defaultWatchTtlSeconds req.wrTtlSeconds)) <$> getCurrentTime
                     handle <- async $ forwardLoop watchId next deadline
                     atomically $ modifyTVar' runner.srWatches (Map.insert watchId (WatchHandle watcherSid handle))
                     pure $ Right watchId
   where
-    forwardLoop :: Text -> IO SessionEvent -> UTCTime -> IO ()
+    forwardLoop :: Text -> IO Event -> UTCTime -> IO ()
     forwardLoop watchId next deadline = do
         now <- getCurrentTime
         let remainingMicros = round (max 0 (diffUTCTime deadline now)) * 1_000_000
@@ -652,7 +694,7 @@ serverWatchSession runner watcherSid req = do
     dropWatch :: Text -> IO ()
     dropWatch watchId = atomically $ modifyTVar' runner.srWatches (Map.delete watchId)
 
-    forwardEvent :: SessionId -> SessionId -> SessionEvent -> IO ()
+    forwardEvent :: SessionId -> SessionId -> Event -> IO ()
     forwardEvent watcher target event = do
         mTarget <- (serverMailRouter runner).mrLookup watcher
         forM_ mTarget $ \(_, mb) ->
@@ -663,7 +705,7 @@ serverWatchSession runner watcherSid req = do
                         , outFrom = FromSystem "watch-session"
                         , outPriority = Normal
                         , outHops = 0
-                        , outBody = WatchedEvent target (sessionEventKind event) (watchedEventPayload event)
+                        , outBody = WatchedEvent target (eventKind event.evBody) (watchedEventPayload event.evBody)
                         }
 
 -- | Stop a previously registered watch (§7).
@@ -677,32 +719,34 @@ serverUnwatchSession runner watchId = do
         Nothing -> pure False
         Just wh -> cancel wh.whAsync >> pure True
 
-{- | Whether a 'SessionEvent' matches a watch request's @events@\/@tool@
-filter. 'Nothing' for @wrEvents@ matches every kind; @wrTool@ only applies
-to the two @tool.*@ events (per §7, other events always match it).
+{- | Whether an 'Event' matches a watch request's @events@\/@tool@ filter.
+'Nothing' for @wrEvents@ matches every kind; @wrTool@ only applies to the
+two @tool.*@ events (per §7, other events always match it).
 -}
-eventMatches :: WatchRequest -> SessionEvent -> Bool
+eventMatches :: WatchRequest -> Event -> Bool
 eventMatches req event = kindMatches && toolMatches
   where
-    kindMatches = maybe True (sessionEventKind event `elem`) req.wrEvents
-    toolMatches = case (req.wrTool, event) of
+    kindMatches = maybe True (eventKind event.evBody `elem`) req.wrEvents
+    toolMatches = case (req.wrTool, event.evBody) of
         (Nothing, _) -> True
-        (Just pat, ToolCallStarted _ _ toolName) -> matchGlob pat toolName
-        (Just pat, ToolCallCompleted _ _ toolName _) -> matchGlob pat toolName
+        (Just pat, ToolCallStarted _ toolName) -> matchGlob pat toolName
+        (Just pat, ToolCallCompleted _ toolName _) -> matchGlob pat toolName
         (Just _, _) -> True
 
--- | A small JSON view of a 'SessionEvent', for 'WatchedEvent' mail.
-watchedEventPayload :: SessionEvent -> Aeson.Value
+-- | A small JSON view of an 'EventBody', for 'WatchedEvent' mail.
+watchedEventPayload :: EventBody -> Aeson.Value
 watchedEventPayload event = case event of
-    RunStarted sid mode -> Aeson.object ["session_id" .= sid, "mode" .= Text.pack (show mode)]
-    SessionUpdated sid meta _turn -> Aeson.object ["session_id" .= sid, "status" .= sessionStatusText meta.smStatus]
-    CallsDeferred sid calls -> Aeson.object ["session_id" .= sid, "deferred_count" .= length calls]
-    RunStopped sid status -> Aeson.object ["session_id" .= sid, "status" .= sessionStatusText status]
-    SessionFailed sid msg -> Aeson.object ["session_id" .= sid, "message" .= msg]
-    TextDelta sid _ -> Aeson.object ["session_id" .= sid]
-    ToolCallStarted sid callId toolName -> Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName]
-    ToolCallCompleted sid callId toolName succeeded ->
-        Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
+    RunStarted mode -> Aeson.object ["mode" .= Text.pack (show mode)]
+    SessionUpdated meta _turn -> Aeson.object ["session_id" .= meta.smSessionId, "status" .= sessionStatusText meta.smStatus]
+    CallsDeferred calls -> Aeson.object ["deferred_count" .= length calls]
+    RunStopped status -> Aeson.object ["status" .= sessionStatusText status]
+    SessionFailed msg -> Aeson.object ["message" .= msg]
+    TextDelta _ -> Aeson.object []
+    ToolCallStarted callId toolName -> Aeson.object ["tool_call_id" .= callId, "tool" .= toolName]
+    ToolCallCompleted callId toolName succeeded ->
+        Aeson.object ["tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
+    SessionCreated meta -> Aeson.object ["session_id" .= meta.smSessionId]
+    SessionDeleted sid -> Aeson.object ["session_id" .= sid]
 
 {- | Whether 'targetSid' is reachable from 'ownSid' under the given
 'MailScope', walking each session's recorded parent up from the target for
@@ -833,7 +877,7 @@ startRun runner live mode overlay sess meta =
             store runner live meta sess StatusRunning Nothing >>= \case
                 Left conflict -> pure (Left (Conflict conflict))
                 Right meta' -> do
-                    emit runner $ RunStarted live.lsSessionId mode
+                    emit runner live.lsSessionId $ RunStarted mode
                     -- The run's first step waits for this lock, so lsRun is set
                     -- before the run can finish and clear it.
                     handle <- async $ runLoop runner live mode agent
@@ -894,9 +938,9 @@ runLoop runner live mode agent0 = do
                     _ <- storeOrThrow runner live meta sess status
                     atomically $ writeTVar live.lsRun Nothing
                     when (status == StatusWaitingExternal) $
-                        emit runner $
-                            CallsDeferred sid (pendingDeferredCalls sess)
-                    emit runner $ RunStopped sid status
+                        emit runner sid $
+                            CallsDeferred (pendingDeferredCalls sess)
+                    emit runner sid $ RunStopped status
                     pure Nothing
                 else pure (Just sess)
         for_ next $ \sess -> do
@@ -957,15 +1001,15 @@ emitToolCallEvents :: SessionRunner -> SessionId -> Session -> Session -> IO ()
 emitToolCallEvents runner sid before after = do
     forM_ (Map.toList afterCalls) $ \(callId, (toolName, state)) ->
         when (state == Running && not (wasRunning callId)) $
-            emit runner (ToolCallStarted sid callId toolName)
+            emit runner sid (ToolCallStarted callId toolName)
     forM_ (Map.toList beforeCalls) $ \(callId, (toolName, state)) ->
         when (state == Running) $ case Map.lookup callId afterCalls of
-            Just (_, Completed) -> emit runner (ToolCallCompleted sid callId toolName True)
-            Just (_, Failed) -> emit runner (ToolCallCompleted sid callId toolName False)
+            Just (_, Completed) -> emit runner sid (ToolCallCompleted callId toolName True)
+            Just (_, Failed) -> emit runner sid (ToolCallCompleted callId toolName False)
             Just (_, Running) -> pure ()
             Just (_, Ready) -> pure ()
             Just (_, Deferred) -> pure ()
-            Nothing -> emit runner (ToolCallCompleted sid callId toolName True)
+            Nothing -> emit runner sid (ToolCallCompleted callId toolName True)
   where
     beforeCalls = headTrackedCalls before
     afterCalls = headTrackedCalls after
@@ -1039,8 +1083,8 @@ failRun runner live reason = withMVar live.lsLock $ \_ -> do
     for_ loaded $ \(sess, meta) ->
         void $ store runner live meta sess StatusFailed (Just reason)
     atomically $ writeTVar live.lsRun Nothing
-    emit runner $ SessionFailed live.lsSessionId reason
-    emit runner $ RunStopped live.lsSessionId StatusFailed
+    emit runner live.lsSessionId $ SessionFailed reason
+    emit runner live.lsSessionId $ RunStopped StatusFailed
 
 -------------------------------------------------------------------------------
 -- Operations
@@ -1083,7 +1127,9 @@ createSessionAsWithParent runner parent owner slug message mode supplied =
                                     sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery message.nmText message.nmMedia)
                                     store runner live meta0 sess StatusReady Nothing >>= \case
                                         Left conflict -> pure (Left (Conflict conflict))
-                                        Right meta -> maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
+                                        Right meta -> do
+                                            emit runner sid (SessionCreated meta)
+                                            maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
 
 {- | @spawn-session@ (§5): start a new, durable, detached child session
 running a caller's helper agent, recorded with 'parentSid' as parent in
@@ -1352,7 +1398,7 @@ cancelRun runner sid = do
                 atomically $ writeTVar live.lsRun Nothing
                 let status = sessionStatusOf sess2
                 result <- store runner live meta1 sess2 status Nothing
-                emit runner $ RunStopped sid status
+                emit runner sid $ RunStopped status
                 pure $ either (Left . Conflict) Right result
 
     noRun =
@@ -1501,9 +1547,11 @@ deleteSession runner sid mode =
             if isJust active
                 then pure $ Left $ RunInProgress s
                 else do
+                    mOwner <- ownerOfLive runner s
                     n <- host.hostContinuations.csDeleteSession s
                     host.hostBackend.sbDelete s
                     dropLive runner live
+                    emitOwned runner s mOwner (SessionDeleted s)
                     pure $ Right n
         case deleted of
             Left err -> pure (Left err)
