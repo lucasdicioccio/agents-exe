@@ -140,7 +140,7 @@ import qualified System.Agents.Host.Client as Client
 import System.Agents.Host.Runner (ReplayUnavailable (..))
 import qualified System.Agents.Protocol as Protocol
 import System.Agents.Session.Base (SessionId)
-import System.Agents.SessionStore (SessionStore, sessionIdToConversationId)
+import System.Agents.SessionStore (sessionIdToConversationId)
 import System.Agents.Tools.Params.Types (ParamName)
 
 -- Import from submodules
@@ -189,12 +189,10 @@ import System.Agents.TUI.Types
 -- Session Configuration
 -------------------------------------------------------------------------------
 
-{- | Create a session configuration from a user config: the legacy file
-store (a read fallback for history), plus the keymap and input config.
--}
-fileSessionConfig :: SessionStore -> TUIUserConfig -> SessionConfig
-fileSessionConfig store userConfig =
-    mkSessionConfig store userConfig.userConfigKeymap userConfig.userConfigInput
+-- | Create a session configuration from a user config: keymap and input config.
+fileSessionConfig :: TUIUserConfig -> SessionConfig
+fileSessionConfig userConfig =
+    mkSessionConfig userConfig.userConfigKeymap userConfig.userConfigInput
 
 -------------------------------------------------------------------------------
 -- Application Setup
@@ -222,9 +220,9 @@ process started itself ('System.Agents.CLI.TUI.handleTUI'); a future
 @--attach@ mode (Phase 4) hands in an @httpClient@\/@socketClient@
 instead. Neither this function nor anything it calls can tell which.
 -}
-runTUIWithUserConfig :: Tracer IO Trace -> RunnerClient -> SessionStore -> TUIUserConfig -> Map ParamName Aeson.Value -> IO ()
-runTUIWithUserConfig tracer client store userConfig params = do
-    let config = fileSessionConfig store userConfig
+runTUIWithUserConfig :: Tracer IO Trace -> RunnerClient -> TUIUserConfig -> Map ParamName Aeson.Value -> IO ()
+runTUIWithUserConfig tracer client userConfig params = do
+    let config = fileSessionConfig userConfig
     runTUIInternal tracer client config params
 
 {- | Fetch the agent roster from the client (G6: 'Client.listAgents', which

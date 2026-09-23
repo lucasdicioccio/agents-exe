@@ -145,6 +145,7 @@ import System.Agents.TUI.Types (
     Conversation (..),
     ConversationStatus (..),
     Core (..),
+    HistorySessionEntry (..),
     N,
     StatusMessage (..),
     StatusSeverity (..),
@@ -453,7 +454,7 @@ handleNormalEvent tracer ev = do
                 Just ConversationViewWidget -> handleConversationViewEvent tracer vtyEv keymap
                 Just SessionViewWidget -> handleSessionViewEvent tracer vtyEv keymap
                 Just AgentInfoWidget -> handleAgentInfoEvent vtyEv
-                Just QueuedMessageListWidget -> pure ()
+                Just DraftPanelWidget -> pure ()
                 Just AttachmentListWidget -> handleAttachmentListEvent vtyEv keymap
                 Just BufferListWidget -> handleBufferListEvent vtyEv keymap
                 _ -> pure ()
@@ -531,17 +532,23 @@ handleSessionsListEvent ev = do
         Just (_, meta) -> ensureHistorySessionCached meta
         Nothing -> pure ()
 
--- | Fetch and cache a history session if it is not already cached.
+{- | Fetch and cache a history session if it is not already cached. Marks
+the entry 'HistoryLoading' before the fetch so 'render_sessionView' has a
+placeholder to show while it is in flight, and 'HistoryFailed' with the
+runner's error text (as 'reportRunnerResult' shows it elsewhere) if it
+errors, instead of silently leaving the session unrenderable.
+-}
 ensureHistorySessionCached :: SessionMeta -> EventM N TuiState ()
 ensureHistorySessionCached meta = do
     cache <- use (tuiUI . historySessionCache)
     unless (Map.member meta.smSessionId cache) $ do
+        tuiUI . historySessionCache %= Map.insert meta.smSessionId HistoryLoading
         coreRef <- use tuiCore
         core <- liftIO $ readTVarIO coreRef
         result <- liftIO $ Client.getSession (core ^. coreClient) meta.smSessionId
         case result of
-            Right (sess, _) -> tuiUI . historySessionCache %= Map.insert meta.smSessionId sess
-            Left _ -> pure ()
+            Right (sess, _) -> tuiUI . historySessionCache %= Map.insert meta.smSessionId (HistoryLoaded sess)
+            Left err -> tuiUI . historySessionCache %= Map.insert meta.smSessionId (HistoryFailed (runnerErrorMessage err))
 
 {- | Cache a fresh 'Session' pushed by @session.updated@, keyed by its own
 id (D4: the same UUID as its 'ConversationId', so the caller's convId is
@@ -549,7 +556,7 @@ redundant here).
 -}
 cacheHistorySession :: ConversationId -> Session -> EventM N TuiState ()
 cacheHistorySession _convId sess =
-    tuiUI . historySessionCache %= Map.insert sess.sessionId sess
+    tuiUI . historySessionCache %= Map.insert sess.sessionId (HistoryLoaded sess)
 
 -- | Mark the History tab's session list as needing a refresh on the next heartbeat.
 markHistoryDirty :: EventM N TuiState ()
@@ -644,7 +651,7 @@ handleSessionViewEvent _tracer ev keymap =
                     Just (_, meta) -> do
                         cache <- use (tuiUI . historySessionCache)
                         case Map.lookup meta.smSessionId cache of
-                            Just session | not (null session.turns) -> do
+                            Just (HistoryLoaded session) | not (null session.turns) -> do
                                 let navState =
                                         TurnNavigationState
                                             { _navSession = session

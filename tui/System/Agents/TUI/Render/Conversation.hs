@@ -210,9 +210,13 @@ render_sessionView st =
         case listSelectedElement (st ^. tuiUI . sessionList) of
             Nothing -> txt "No session selected"
             Just (_, meta) ->
-                let mSess = Map.lookup meta.smSessionId (st ^. tuiUI . historySessionCache)
-                    mNavState = st ^. tuiUI . turnNavigation
-                 in render_session st SessionViewWidget mSess mNavState
+                case Map.lookup meta.smSessionId (st ^. tuiUI . historySessionCache) of
+                    Nothing -> txt "session not started yet"
+                    Just HistoryLoading -> txt "Loading…"
+                    Just (HistoryFailed err) -> withAttr statusErrorAttr $ txt ("Failed to load: " <> err)
+                    Just (HistoryLoaded sess) ->
+                        let mNavState = st ^. tuiUI . turnNavigation
+                         in render_session st SessionViewWidget (Just sess) mNavState
 
 -- | Render a session's turns.
 render_session :: TuiState -> WidgetName -> Maybe Session -> Maybe TurnNavigationState -> Widget N

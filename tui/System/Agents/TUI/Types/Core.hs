@@ -38,6 +38,9 @@ module System.Agents.TUI.Types.Core (
     -- * Application Events
     AppEvent (..),
 
+    -- * History tab session cache
+    HistorySessionEntry (..),
+
     -- * Agent Types
     TuiAgent (..),
     tuiSlug,
@@ -73,7 +76,7 @@ import System.Agents.Session.Base (
     SessionId,
     SessionStatus,
  )
-import System.Agents.SessionStore (SessionMeta, SessionStore)
+import System.Agents.SessionStore (SessionMeta)
 import System.Agents.TUI.KeyMapping (KeyMapping)
 import System.Agents.TUI.MessageComposer (InputConfig)
 
@@ -99,8 +102,8 @@ data WidgetName
       SessionViewWidget
     | -- | For viewport scrolling during turn navigation
       TurnNavigationWidget
-    | -- | For focusing the queued messages list
-      QueuedMessageListWidget
+    | -- | For focusing the draft panel
+      DraftPanelWidget
     | -- | For the attachment list below the message editor
       AttachmentListWidget
     | -- | For the file path input dialog
@@ -232,6 +235,19 @@ data AppEvent
       AppEvent_SessionsRefreshed [SessionMeta]
     deriving (Show)
 
+{- | What the History tab knows about one selected session's full 'Session'
+(@todos/os-as-standalone-server.md@ §4, Phase 3b-iv): 'ensureHistorySessionCached'
+in "System.Agents.TUI.Event" inserts 'HistoryLoading' before issuing the
+'Client.getSession' fetch, so the view has something to render while it is
+in flight, and replaces it with 'HistoryLoaded' or 'HistoryFailed' when the
+fetch settles -- a failed fetch is no longer silently dropped.
+-}
+data HistorySessionEntry
+    = HistoryLoading
+    | HistoryLoaded Session
+    | HistoryFailed Text
+    deriving (Show)
+
 -------------------------------------------------------------------------------
 -- Agent Types
 -------------------------------------------------------------------------------
@@ -307,22 +323,24 @@ data AuxiliaryTask
 -------------------------------------------------------------------------------
 
 -- | Configuration for TUI sessions.
+{- | The legacy file-store fallback used to be threaded through here so the
+TUI could composite it into its own backend by hand; since
+@todos/os-as-standalone-server.md@ §6 (Phase 3b-iv), 'Host.hcLegacySessionDirs'
+does that compositing once, inside the 'System.Agents.Host.Host' the TUI's
+runner is built over, so this config carries only what the TUI itself
+still needs.
+-}
 data SessionConfig = SessionConfig
-    { sessionStore :: SessionStore
-    -- ^ Legacy file store, composited in as a read fallback for history
-    -- (@todos/os-as-standalone-server.md@ §6); the runner's SQLite backend
-    -- is the primary store.
-    , sessionKeyMapping :: KeyMapping
+    { sessionKeyMapping :: KeyMapping
     -- ^ Key mapping for keyboard shortcuts
     , sessionInputConfig :: InputConfig
     -- ^ Input configuration for message editor
     }
 
 -- | Create a session config with all required fields.
-mkSessionConfig :: SessionStore -> KeyMapping -> InputConfig -> SessionConfig
-mkSessionConfig store keymap inputConfig =
+mkSessionConfig :: KeyMapping -> InputConfig -> SessionConfig
+mkSessionConfig keymap inputConfig =
     SessionConfig
-        { sessionStore = store
-        , sessionKeyMapping = keymap
+        { sessionKeyMapping = keymap
         , sessionInputConfig = inputConfig
         }

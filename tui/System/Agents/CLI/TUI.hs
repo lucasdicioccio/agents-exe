@@ -94,4 +94,4 @@ handleTUI tracer rc apiKeysFile mKeymapPath agentFiles mDbPath params = do
         Runner.withSessionRunner host $ \runner -> do
             _ <- Runner.recoverOnStartup runner
             let client = Client.inProcessClient Nothing runner
-            TUI.runTUIWithUserConfig (Prod.contramap TUITrace tracer) client rc.rcSessionStore userConfig rawParams
+            TUI.runTUIWithUserConfig (Prod.contramap TUITrace tracer) client userConfig rawParams

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Widget rendering functions for agents, sessions, message editor, attachments, queued messages, and buffers.
+-- | Widget rendering functions for agents, sessions, message editor, attachments, the draft panel, and buffers.
 module System.Agents.TUI.Render.Widgets where
 
 import Brick
@@ -275,12 +275,12 @@ render_draft_panel :: TuiState -> Draft -> Widget N
 render_draft_panel st draft =
     borderWithFocus
         st
-        QueuedMessageListWidget
+        DraftPanelWidget
         (" Draft (" <> sizeText <> ") ")
         $ vBox
             [ txt "Ctrl+A: edit draft | Ctrl+G: send now | Ctrl+D: clear"
             , txt ""
-            , withAttr queuedMessageAttr $ txt (draftFirstLine draft)
+            , withAttr draftAttr $ txt (draftFirstLine draft)
             ]
   where
     chars = Text.length (draftText draft)

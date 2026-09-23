@@ -76,7 +76,7 @@ import qualified Data.Vector as Vector
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Host.Client (RunnerClient)
 import System.Agents.Media.Types (MediaAttachment)
-import System.Agents.Session.Base (Session, SessionId)
+import System.Agents.Session.Base (SessionId)
 import System.Agents.SessionStore (SessionMeta)
 import System.Agents.Tools.Params.Types (ParamName)
 import System.Agents.TUI.Buffer (Buffer)
@@ -87,6 +87,7 @@ import System.Agents.TUI.Types.Core (
     AppEvent,
     AttachmentDialogState (..),
     AuxiliaryTask,
+    HistorySessionEntry (..),
     SessionConfig (..),
     StatusMessage,
     Tab (..),
@@ -191,10 +192,12 @@ data UIState = UIState
     -- ^ Index of selected buffer in the widget
     , _toolCallViews :: ToolCallViews
     -- ^ Live status of background tool calls, per session
-    , _historySessionCache :: Map SessionId Session
+    , _historySessionCache :: Map SessionId HistorySessionEntry
     -- ^ Full 'Session's fetched for the History tab ('Client.getSession'),
     -- keyed by id; overwritten (never merged) on @session.updated@ for that
     -- id, so a cached entry is always the freshest one this TUI has seen.
+    -- 'HistoryLoading' while a fetch is in flight, 'HistoryFailed' if it
+    -- errored -- see 'System.Agents.TUI.Event.ensureHistorySessionCached'.
     , _historyDirty :: Bool
     -- ^ Set by any @session.created@\/@session.updated@\/@session.deleted@
     -- since the last refresh; the heartbeat refreshes 'sessionList' via
@@ -217,7 +220,7 @@ buildFocusRingForTab tab =
         AgentsTab ->
             focusRing [AgentListWidget, AgentInfoWidget, ConversationListWidget, SessionsListWidget]
         ChatsTab ->
-            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, BufferListWidget, QueuedMessageListWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
+            focusRing [ConversationListWidget, MessageEditorWidget, AttachmentListWidget, BufferListWidget, DraftPanelWidget, ConversationViewWidget, SessionsListWidget, AgentListWidget]
         HistoryTab ->
             focusRing [SessionsListWidget, SessionViewWidget, AgentListWidget, ConversationListWidget]
         HelpTab ->
