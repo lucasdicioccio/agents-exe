@@ -257,6 +257,67 @@ the run applies it either way.
 
 ---
 
+## Mail
+
+`POST /v1/sessions/:id/mail` generalizes the `interrupt` flag on
+`POST .../messages`: any piece of mail, from a control instruction to a
+message from another session, to a session that may not even be live in
+this process (a stored, idle session still has its durable mailbox, and
+gets one opened for it). Unlike `messages`, this never refuses on a
+session's status: the mail just queues, folded into the session's next
+turn (or the current one, if a run is already going) the same way every
+other mail is (see [Following a session live](#following-a-session-live)
+for the events a run produces along the way). A `paused` session may wake
+on it if the agent's `resumeOnAnyMail` option is set and the mail's sender
+is in its `wakeOn` list (the same rule an ordinary message follows against
+a paused session).
+
+The request body is `{body, priority?}`. `priority` is `"normal"` (the
+default) or `"interrupt"`. `body` is a `MailBody`, tagged JSON:
+
+```json
+{"tag": "userMessage", "query": "are you there?"}
+{"tag": "userMessage", "query": {"text": "look at this", "media": [{"mimeType": "image/png", "base64Data": "…"}]}}
+{"tag": "agentMessage", "text": "status update", "inReplyTo": null, "expectsReply": false}
+{"tag": "control", "message": {"tag": "pause"}}
+{"tag": "control", "message": {"tag": "resume"}}
+{"tag": "control", "message": {"tag": "stopRun"}}
+{"tag": "control", "message": {"tag": "cancelAllAttached"}}
+{"tag": "control", "message": {"tag": "cancelCalls", "toolCallIds": ["017bb633-…"]}}
+```
+
+`toolCallFinished`, `continuationResult` and `watchedEvent` are also valid
+`MailBody` tags (the async engine, `completeCall`, and `watch-session`
+produce them respectively), but there is no reason to post one by hand over
+this endpoint. `POST /v1/sessions/:id/mail` answers `202` with the mail's
+`Receipt`: `{"id": "<message id>", "seq": <int>, "duplicate": false}`.
+
+`GET /v1/sessions/:id/mail?unread=true|false` lists the session's mail,
+oldest first, as `{"mail": [Envelope, …]}`. `unread=true` (default `false`)
+limits it to what is still unread past the session's stored cursor -- what
+its next turn, or a run already going, has not folded in yet. An `Envelope`
+is:
+
+```json
+{
+  "id": "2cdb9b15-…",
+  "seq": 4,
+  "from": {"tag": "user", "owner": "alice"},
+  "priority": "normal",
+  "hops": 0,
+  "sentAt": "2026-09-23T19:08:06Z",
+  "body": {"tag": "agentMessage", "text": "status update", "inReplyTo": null, "expectsReply": false}
+}
+```
+
+`from` (a `Sender`) is one of `{"tag": "user", "owner"?}` (a client's own
+mail, `owner` set when the server authenticates callers -- this is what
+`POST .../mail` always sends as), `{"tag": "session", "sessionId", "agent"?}`
+(another session, e.g. `send-message`), `{"tag": "toolCall", "toolCallId"}`,
+or `{"tag": "system", "source"}` (the runner itself, e.g. `watch-session`).
+
+---
+
 ## Parameters
 
 An agent's declared `parameters` (see
@@ -440,7 +501,7 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `GET /v1/agents/:slug` | | `200` agent | 404 `unknown_agent` |
 | `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
 | `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` |
-| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?, run?, params?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request`, see [Parameters](#parameters) |
+| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt?, media?, run?, params?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request`, see [Parameters](#parameters) |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
 | `GET /v1/sessions/:id` | | `200` session | 404 `unknown_session` |
 | `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?, params?, interrupt?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages`, see [Parameters](#parameters) |
@@ -448,11 +509,28 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `POST /v1/sessions/:id/cancel` | | `200` session metadata | 404, 409 `no_active_run` |
 | `POST /v1/sessions/:id/cancel-attached` | | `200` session metadata | 404 |
 | `POST /v1/sessions/:id/pause` | | `200` session metadata | 404 |
+| `POST /v1/sessions/:id/mail` | `{body, priority?}` | `202` mail `Receipt`: `{id, seq, duplicate}` | 404, see [Mail](#mail) |
+| `GET /v1/sessions/:id/mail?unread=` | | `200 {mail: [Envelope]}` | 404 |
+| `POST /v1/sessions/:id/fork` | `{at_turn?, agent?}` | `201` new session, with a `Location` header | 404 `unknown_session` / `unknown_turn` / `unknown_agent` |
 | `GET /v1/sessions/:id/pending` | | `200 {calls}` | 404 |
 | `GET /v1/sessions/:id/events?after=` | | `200 text/event-stream` | 404 |
 | `GET /v1/events?scope=&after=` | | `200 text/event-stream` | 403 `forbidden` (`scope=all` without authentication off or an admin owner) |
 | `POST /v1/continuations/:token?wait=&timeout=` | `{result, resume?, params?}` | `202` or `200` session | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict`, see [Parameters](#parameters) |
 | `DELETE /v1/sessions/:id?dry_run=` | | `200 {sessions, continuations, dry_run}` | 404, 409 `run_in_progress` |
+
+`prompt` on create may be omitted (with no `media` either): this stores an
+idle session with no turn at all, `status: "ready"`, ready for a later
+message, mail, or `resume` -- nothing runs. A `prompt` behaves as before.
+
+`at_turn` on fork is a 0-based index into the session's `turns`, **newest
+first** (`turns[0]` is the most recent turn): the fork keeps that turn and
+every older one, dropping anything newer. Absent, the whole session is
+copied. `agent` rebinds the fork to another agent's slug (also how to
+"continue with another agent": fork with no `at_turn`, or `at_turn: 0`, and
+an `agent`). The fork gets a fresh `session_id`, `forkedFromSessionId` set
+to the source, the source's parent link and non-secret parameters, and
+`status` derived from the turns it kept -- never the source's own status,
+and it starts no run, so it never picks up a later change to the source.
 
 Any endpoint that reads a body or a query parameter can answer
 `400 bad_request`; the table names it only where it is the usual outcome.

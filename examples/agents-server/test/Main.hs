@@ -337,7 +337,8 @@ errorsTest = withServer "{}" mockCompletion $ \srv -> do
             (s, v) <- call srv method path body
             (path, s, field "error" v) @?= (path, status, code)
     expect "/v1/sessions" "POST" (Just (Aeson.object ["agent" .= ("nobody" :: Text), "prompt" .= ("hi" :: Text)])) (404, "unknown_agent")
-    expect "/v1/sessions" "POST" (Just (Aeson.object ["agent" .= ("server-test" :: Text)])) (400, "bad_request")
+    -- No prompt is valid (G2: an idle session with no turn); no agent is not.
+    expect "/v1/sessions" "POST" (Just (Aeson.object [])) (400, "bad_request")
     expect "/v1/sessions" "POST" (Just (createBody [("run", "forever")])) (400, "bad_request")
     expect "/v1/sessions?wait=maybe" "POST" (Just (createBody [])) (400, "bad_request")
     expect "/v1/sessions/not-a-uuid" "GET" Nothing (404, "unknown_session")
