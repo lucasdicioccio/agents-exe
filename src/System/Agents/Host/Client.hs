@@ -4,13 +4,14 @@
 
 {- | 'RunnerClient': one interface over a 'SessionRunner', for anything
 that only wants to send 'Command's and get back 'Reply's -- the TUI
-(Phase 3b), a future @httpClient@/@socketClient@ over
+(Phase 3b), "System.Agents.Host.Client.Http"'s @httpClient@ over
 "System.Agents.Protocol"'s wire types, and this module's own typed
 helpers.
 
 @todos/os-as-standalone-server.md@ Design §3 sketches 'RunnerClient' with
-two implementations, in-process and over HTTP; only 'inProcessClient'
-exists yet (Phase 3a). Nothing here depends on @wai@\/@warp@\/@http-client@:
+two implementations: 'inProcessClient' here (Phase 3a), and
+"System.Agents.Host.Client.Http"'s @httpClient@ over HTTP or a Unix
+socket (Phase 4). Nothing here depends on @wai@\/@warp@\/@http-client@:
 'inProcessClient' only ever calls "System.Agents.Host.Runner" functions
 directly.
 -}

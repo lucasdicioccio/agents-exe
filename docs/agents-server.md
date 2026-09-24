@@ -477,6 +477,12 @@ cases:
 The ring is in-memory only: it does not survive a restart, and does not
 replace `session_mail`/the stored session as the durable record.
 
+Every event stream answers with an `Agents-Replay` header saying which case
+applies before any frame arrives: `live` (no `Last-Event-ID`/`after` was
+given), `replayed`, or `unavailable`. A client that must know whether it
+missed events (the attached TUI's `httpClient`) reads it rather than
+waiting for a first frame, which on a quiet stream could take a while.
+
 ### Following every session
 
 `GET /v1/events?scope=&after=` is the same stream, server-wide instead of
@@ -506,9 +512,9 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `GET /v1/agents/:slug` | | `200` agent (same shape) | 404 `unknown_agent` |
 | `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
 | `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` |
-| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt?, media?, run?, params?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request`, see [Parameters](#parameters) |
+| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt?, media?, run?, params?, parent?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 404 `unknown_session` (parent), 400 `bad_request`, see [Parameters](#parameters) |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
-| `GET /v1/sessions/:id` | | `200` session | 404 `unknown_session` |
+| `GET /v1/sessions/:id?wait=&timeout=` | | `200` session, or `202` when `wait` expired with a run still active | 404 `unknown_session` |
 | `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?, params?, interrupt?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages`, see [Parameters](#parameters) |
 | `POST /v1/sessions/:id/resume?wait=&timeout=` | `{mode?, params?}` or no body | `202` or `200` session | 404, 409 `run_in_progress`, see [Parameters](#parameters) |
 | `POST /v1/sessions/:id/cancel` | | `200` session metadata | 404, 409 `no_active_run` |
@@ -526,6 +532,18 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 `prompt` on create may be omitted (with no `media` either): this stores an
 idle session with no turn at all, `status: "ready"`, ready for a later
 message, mail, or `resume` -- nothing runs. A `prompt` behaves as before.
+
+`parent` on create (a session id) records the new session as a child of
+that one, for lineage only: it is listed through `?parent=`, deleted with
+its parent, and is never told anything by its parent or vice versa. The
+caller must be able to see the parent (another owner's answers
+`404 unknown_session`). This is what an attached TUI sends for
+`createSessionAsChild` and `spawnSession`.
+
+`wait=true` on `GET /v1/sessions/:id` first waits (up to `timeout` seconds,
+default 120, at most 600) for the session's active run to stop, then
+answers the session with `200`, or `202` if a run is still active once the
+time is up. Without `wait`, it answers at once, always `200`.
 
 `at_turn` on fork is a 0-based index into the session's `turns`, **newest
 first** (`turns[0]` is the most recent turn): the fork keeps that turn and
@@ -955,6 +973,38 @@ main = withHost cfg silent $ \host -> withSessionRunner host $ \runner -> do
     Right (stopped, _) <- awaitRun client meta.smSessionId 120
     print stopped.smStatus
 ```
+
+`System.Agents.Host.Client.Http.httpClient` is the second implementation:
+the same `RunnerClient` over this server's HTTP API, so the program above
+runs unchanged against a server started elsewhere:
+
+```haskell
+import System.Agents.Host.Client.Http
+
+main :: IO ()
+main = do
+    endpoint <- either fail pure (parseEndpoint "http://127.0.0.1:8080")  -- or "unix:///run/agents.sock"
+    client <- httpClient (defaultHttpClientConfig endpoint){hccToken = Just "alice-token"}
+    Right meta <- createSession client "weather" (Just (NewMessage "Weather in Paris?" [] False)) (Just UntilBlocked) mempty
+    Right (stopped, _) <- awaitRun client meta.smSessionId 120
+    print stopped.smStatus
+```
+
+Each `Command` maps onto one route of the table above (`SpawnSession` and
+`createSessionAsChild` onto `POST /v1/sessions` with `parent`, `AwaitRun`
+onto `GET /v1/sessions/:id?wait=true`, `Stats` onto `/healthz`,
+`ListSessions` onto as many `GET /v1/sessions` pages as its `limit` needs).
+An error answer decodes into the `RunnerError` its code names, with the
+session, token, agent or turn the command named put back; one that is not
+a runner error (`unauthorized`, `bad_request`, ...), a connection failure,
+or an undecodable answer is `TransportError` (code `transport_error`).
+`rcSubscribe` follows `GET /v1/events` (or one session's stream), answers
+`ReplayUnavailable` from the `Agents-Replay` header exactly when the
+in-process runner would, and reconnects a dropped or stalled stream on its
+own with `Last-Event-ID`, never delivering an event twice. `AllSessions`
+falls back to `scope=owner` when the server refuses `scope=all` (a
+non-admin token). The token goes in `Authorization` on commands and in
+`?access_token=` on streams.
 
 ## Not yet supported
 

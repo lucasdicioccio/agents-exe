@@ -38,6 +38,7 @@ module System.Agents.Protocol (
     RunnerError (..),
     runnerErrorCode,
     runnerErrorMessage,
+    runnerErrorFromKnownCode,
     DeleteMode (..),
     DeletionPlan (..),
     SubscribeScope (..),
@@ -61,6 +62,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import Data.Int (Int64)
 import Data.Map.Strict (Map)
+import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -391,6 +393,13 @@ data RunnerError
       something a caller can provoke.
       -}
       UnexpectedReply
+    | {- | A remote 'RunnerClient' (@System.Agents.Host.Client.Http@) could
+      not get an answer: the connection failed, the server answered
+      something that does not decode, or with an error that is not a
+      runner error (@unauthorized@, @forbidden@, @bad_request@, ...). The
+      text says which. Never produced by the runner itself.
+      -}
+      TransportError Text
     deriving (Show, Eq)
 
 -- | The @error@ code an HTTP answer gives for a 'RunnerError' (matches
@@ -412,6 +421,7 @@ runnerErrorCode = \case
     MailboxRejected _ -> "mailbox_full"
     UnknownTurn{} -> "unknown_turn"
     UnexpectedReply -> "unexpected_reply"
+    TransportError _ -> "transport_error"
 
 -- | The human-readable @message@ an HTTP answer gives for a 'RunnerError'.
 runnerErrorMessage :: RunnerError -> Text
@@ -431,6 +441,7 @@ runnerErrorMessage = \case
     MailboxRejected sid -> "session " <> showId sid <> " has too much unread mail; try again later"
     UnknownTurn sid idx -> "session " <> showId sid <> " has no turn at index " <> Text.pack (show idx)
     UnexpectedReply -> "the runner answered with a reply of the wrong shape for this command"
+    TransportError msg -> msg
   where
     showId = Text.pack . show
 
@@ -453,23 +464,31 @@ instance Aeson.FromJSON RunnerError where
 
 -- | Reconstruct a placeholder 'RunnerError' from an @{error, message}@ pair.
 runnerErrorFromCode :: Text -> Text -> RunnerError
-runnerErrorFromCode code msg = case code of
-    "unknown_agent" -> UnknownAgent msg
-    "unknown_session" -> UnknownSession placeholderSessionId
-    "unknown_token" -> UnknownToken placeholderToken
-    "token_already_completed" -> TokenAlreadyCompleted placeholderToken
-    "run_in_progress" -> RunInProgress placeholderSessionId
-    "no_active_run" -> NoActiveRun placeholderSessionId
-    "not_accepting_messages" -> NotAcceptingMessages placeholderSessionId placeholderStatus
-    "conflict" -> Conflict (VersionConflict placeholderSessionId 0 0)
-    "unknown_params" -> UnknownParams []
-    "forbidden_params" -> ForbiddenParams []
-    "invalid_params" -> InvalidParams []
-    "params_required" -> MissingRequiredParams []
-    "mailbox_full" -> MailboxRejected placeholderSessionId
-    "unknown_turn" -> UnknownTurn placeholderSessionId 0
-    "unexpected_reply" -> UnexpectedReply
-    _ -> UnknownAgent msg
+runnerErrorFromCode code msg = fromMaybe (UnknownAgent msg) (runnerErrorFromKnownCode code msg)
+
+{- | Like 'runnerErrorFromCode', but 'Nothing' for a code that is not a
+'RunnerError' code at all (@unauthorized@, @bad_request@, ...), which a
+remote client reports as 'TransportError' rather than guessing.
+-}
+runnerErrorFromKnownCode :: Text -> Text -> Maybe RunnerError
+runnerErrorFromKnownCode code msg = case code of
+    "unknown_agent" -> Just (UnknownAgent msg)
+    "unknown_session" -> Just (UnknownSession placeholderSessionId)
+    "unknown_token" -> Just (UnknownToken placeholderToken)
+    "token_already_completed" -> Just (TokenAlreadyCompleted placeholderToken)
+    "run_in_progress" -> Just (RunInProgress placeholderSessionId)
+    "no_active_run" -> Just (NoActiveRun placeholderSessionId)
+    "not_accepting_messages" -> Just (NotAcceptingMessages placeholderSessionId placeholderStatus)
+    "conflict" -> Just (Conflict (VersionConflict placeholderSessionId 0 0))
+    "unknown_params" -> Just (UnknownParams [])
+    "forbidden_params" -> Just (ForbiddenParams [])
+    "invalid_params" -> Just (InvalidParams [])
+    "params_required" -> Just (MissingRequiredParams [])
+    "mailbox_full" -> Just (MailboxRejected placeholderSessionId)
+    "unknown_turn" -> Just (UnknownTurn placeholderSessionId 0)
+    "unexpected_reply" -> Just UnexpectedReply
+    "transport_error" -> Just (TransportError msg)
+    _ -> Nothing
   where
     placeholderSessionId = SessionId UUID.nil
     placeholderToken = ContinuationToken UUID.nil

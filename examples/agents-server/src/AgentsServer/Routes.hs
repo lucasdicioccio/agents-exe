@@ -97,7 +97,11 @@ type SessionsAPI =
                     :> Get '[JSON] SessionListBody
                 :<|> Capture "id" SessionId
                     :> ( Summary "One session, with its conversation and pending calls"
-                            :> Get '[JSON] SessionBody
+                            :> Description
+                                "With `wait`, first waits (up to `timeout` seconds) for the session's \
+                                \active run to stop, then answers 202 if a run is still active, 200 \
+                                \otherwise. This is how an attached client's `awaitRun` works."
+                            :> WaitParams (Get '[JSON] SessionBody)
                             :<|> Summary "Delete a session and everything below it"
                                 :> Description
                                     "Removes the session, its sub-sessions, and their continuation \

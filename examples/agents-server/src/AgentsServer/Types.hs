@@ -210,6 +210,13 @@ data CreateSessionBody = CreateSessionBody
     , csMedia :: Maybe [MediaItem]
     , csRun :: Maybe Text
     -- ^ @none@, @step@, or @until_blocked@ (the default).
+    , csParent :: Maybe SessionId
+    {- ^ Record the new session as a child of this one (lineage only:
+    the child does not report back to it). The caller must be able to see
+    the parent; the child is then listed through it (@?parent=@). This is
+    what 'System.Agents.Host.Client.createSessionAsChild' and
+    'System.Agents.Host.Client.spawnSession' send over HTTP.
+    -}
     }
     deriving (Show, Eq, Generic)
 
@@ -225,6 +232,7 @@ instance ToSchema CreateSessionBody where
             [ ("agent", says "The slug of the agent to run; GET /v1/agents lists them.")
             , ("prompt", says "What to ask the agent. Absent: create an idle session with no turn yet.")
             , ("run", oneOfValues "How far the run should go." ["none", "step", "until_blocked"])
+            , ("parent", says "Record the new session as a child of this session (lineage only). The caller must be able to see it.")
             ]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
 

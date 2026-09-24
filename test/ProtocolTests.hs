@@ -114,6 +114,13 @@ tests =
         , testCase "RunnerError: UnexpectedReply code survives" $ do
             let decoded = Aeson.decode (Aeson.encode UnexpectedReply) :: Maybe RunnerError
             fmap runnerErrorCode decoded @?= Just (runnerErrorCode UnexpectedReply)
+        , testCase "RunnerError: TransportError round-trips with its message" $ do
+            let err = TransportError "cannot reach http://127.0.0.1:1: connection refused"
+            Aeson.decode (Aeson.encode err) @?= Just err
+            runnerErrorCode err @?= "transport_error"
+        , testCase "RunnerError: an unknown code is not a runner error" $ do
+            runnerErrorFromKnownCode "unauthorized" "no token" @?= Nothing
+            runnerErrorFromKnownCode "no_active_run" "x" @?= Just (NoActiveRun (SessionId UUID.nil))
         ]
 
 -- | A minimal 'AgentDescriptor' for a file-based agent.

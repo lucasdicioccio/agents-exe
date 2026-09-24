@@ -195,6 +195,7 @@ library agents-lib
                     , System.Agents.Host
                     , System.Agents.Host.Runner
                     , System.Agents.Host.Client
+                    , System.Agents.Host.Client.Http
                     , System.Agents.OneShot
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Client
@@ -239,6 +240,7 @@ library agents-lib
                       indexed-traversable,
                       json-rpc,
                       lens,
+                      network,
                       network-uri,
                       monad-logger,
                       mtl,
@@ -565,6 +567,7 @@ test-suite agents-tests
                     , ProtocolTests
                     , RunnerTests
                     , HostClientTests
+                    , HttpClientTests
                     , HostLegacySessionTests
                     , SessionEditTests
                     , SessionDurableTests
@@ -579,6 +582,7 @@ test-suite agents-tests
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
                       agents-lib,
+                      agents-server-internal,
                       agents-tui,
                       base64-bytestring,
                       aeson,
@@ -602,7 +606,10 @@ test-suite agents-tests
                       unix,
                       unordered-containers,
                       uuid,
-                      vector
+                      vector,
+                      network,
+                      wai,
+                      warp
 
 benchmark os-benchmarks
     type:             exitcode-stdio-1.0

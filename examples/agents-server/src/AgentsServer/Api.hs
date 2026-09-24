@@ -203,7 +203,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("DELETE", ["v1", "agents", slug]) -> requireAdmin env caller >> deleteAgentH env slug
     ("POST", ["v1", "sessions"]) -> createH env req caller
     ("GET", ["v1", "sessions"]) -> listSessionsH env req caller
-    ("GET", ["v1", "sessions", sid]) -> withSession sid (getH env)
+    ("GET", ["v1", "sessions", sid]) -> withSession sid (getH env req)
     ("DELETE", ["v1", "sessions", sid]) -> withSession sid (deleteH env req)
     ("POST", ["v1", "sessions", sid, "messages"]) -> withSession sid (messagesH env req)
     ("POST", ["v1", "sessions", sid, "resume"]) -> withSession sid (resumeH env req)
@@ -441,13 +441,18 @@ createH :: ServerEnv -> Request -> Caller -> IO Response
 createH env req (Caller owner) = do
     w <- waitParams req
     body <- jsonBody req
-    (agent, msg, mode, params) <- parseBody body $ \o -> do
+    (agent, msg, mode, params, parent) <- parseBody body $ \o -> do
         agent <- o .: "agent"
         msg <- optionalMessageFields o
         mode <- runField o
         params <- paramsField o
-        pure (agent, msg, mode, params)
-    meta <- orThrow $ createSessionAs env.envRunner owner agent msg mode params
+        parent <- o .:? "parent"
+        pure (agent, msg, mode, params, parent)
+    -- A parent must be one the caller can see (same answer as for an
+    -- unknown session otherwise, see 'authorize'). Owner-wise the child
+    -- is still the caller's: 'sessionOwner' walks up to the root anyway.
+    mapM_ (authorize env (Caller owner)) parent
+    meta <- orThrow $ createSessionAsWithParent env.envRunner parent owner agent msg mode params
     let sid = meta.smSessionId
     view <- afterRun env w sid
     pure $
@@ -485,8 +490,23 @@ listSessionsH env req caller@(Caller owner) = do
     parseTime :: Text -> IO UTCTime
     parseTime t = maybe (badRequest "before must be an ISO 8601 time") pure (iso8601ParseM (Text.unpack t))
 
-getH :: ServerEnv -> SessionId -> IO Response
-getH env sid = json status200 <$> loadView env sid
+{- | One session's view. With @?wait=true@ (and optionally @timeout=@),
+first wait for its active run to stop (or the timeout, or shutdown), then
+answer @202@ if a run is still active, @200@ otherwise: the HTTP form of
+'awaitRun', which @System.Agents.Host.Client.Http@ uses for 'AwaitRun'.
+Without @wait@, always @200@, as before.
+-}
+getH :: ServerEnv -> Request -> SessionId -> IO Response
+getH env req sid = do
+    w <- waitParams req
+    if w.wpWait
+        then do
+            waitForRun env sid w.wpTimeout
+            -- A zero timeout only reads whether a run is still active.
+            (_, active) <- orThrow $ awaitRun env.envRunner sid 0
+            view <- loadView env sid
+            pure $ json (if active then status202 else status200) view
+        else json status200 <$> loadView env sid
 
 deleteH :: ServerEnv -> Request -> SessionId -> IO Response
 deleteH env req sid = do
@@ -668,7 +688,7 @@ eventsH env req sid = do
     -- Subscribe before the snapshot, so no live event falls between the two.
     subscribed <- subscribeSTM env.envRunner (OneSession sid) after
     (_, meta) <- loadSession env sid
-    pure $ responseStream status200 headers $ \write flush -> do
+    pure $ responseStream status200 (replayHeader after subscribed : headers) $ \write flush -> do
         let send frame = write frame >> flush
         case subscribed of
             Right next -> do
@@ -694,7 +714,7 @@ allEventsH env req caller = do
     scope <- resolveScope env req caller
     after <- parseAfter req
     subscribed <- subscribeSTM env.envRunner scope after
-    pure $ responseStream status200 eventStreamHeaders $ \write flush -> do
+    pure $ responseStream status200 (replayHeader after subscribed : eventStreamHeaders) $ \write flush -> do
         let send frame = write frame >> flush
         case subscribed of
             Right next -> eventLoop env next send
@@ -724,6 +744,22 @@ parseAfter req = case asum [headerVal, param "after" (queryParams req)] of
         Nothing -> badRequest "after/Last-Event-ID must be an integer event sequence number"
   where
     headerVal = Text.decodeUtf8 <$> lookup "Last-Event-ID" (requestHeaders req)
+
+{- | @Agents-Replay@, on every event stream: @live@ when no
+@Last-Event-ID@\/@after@ was given, @replayed@ when the missed events are
+replayed from the runner's ring, @unavailable@ when they are not (too old,
+or from another server process). A client learns this from the response
+headers alone, without waiting for a first frame: @httpClient@'s initial
+subscribe answers 'ReplayUnavailable' on @unavailable@, like the in-process
+client does.
+-}
+replayHeader :: Maybe EventSeq -> Either ReplayUnavailable a -> Header
+replayHeader after subscribed = ("Agents-Replay", value)
+  where
+    value = case (after, subscribed) of
+        (Nothing, _) -> "live"
+        (Just _, Right _) -> "replayed"
+        (Just _, Left ReplayUnavailable) -> "unavailable"
 
 eventStreamHeaders :: [Header]
 eventStreamHeaders =
