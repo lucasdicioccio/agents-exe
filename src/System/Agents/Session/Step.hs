@@ -1405,6 +1405,8 @@ buildContext agent sess convId =
               -- sessions.
               Ctx.ctxMailRouter = agent.ctxMailRouter
             , Ctx.ctxSpawnSession = agent.ctxSpawnSession
+            , -- Phase 5 (@todos/os-as-standalone-server.md@ G10): copied the same way.
+              Ctx.ctxRunSubagent = agent.ctxRunSubagent
             , -- Phase 6 (@todos/session-mailbox.md@ §7): copied the same way.
               Ctx.ctxWatchSession = agent.ctxWatchSession
             , Ctx.ctxUnwatchSession = agent.ctxUnwatchSession

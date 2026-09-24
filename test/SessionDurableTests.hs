@@ -116,6 +116,7 @@ mkAsyncAgent policy =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxInterruptCompletions = False
         , ctxMailInToolResult = False
         }

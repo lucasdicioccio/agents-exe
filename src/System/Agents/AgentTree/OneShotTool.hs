@@ -304,11 +304,6 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
         let newEntry = CallStackEntry (Base.slug agent) subcallBaseConvId (length parentCallStack)
         let subcallCallStack = newEntry : parentCallStack
 
-        -- Extract OS integration fields from context
-        let mWorld = Ctx.ctxWorld ctx
-        let mEmit = Ctx.ctxEmit ctx
-        let mParentBaseConv = Ctx.ctxParentConversation ctx
-
         -- Narrowing helpers, down the call chain (§8.3, Phase 6): the
         -- caller's inherited bindings, re-rooted at this helper, plus this
         -- call's own bindings. Those addressed at the helper itself are
@@ -320,6 +315,77 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
             allScoped = ownScoped ++ inheritedHere
             hereBindings = [sb | sb <- allScoped, sbAddress sb == AgentHere]
             restBindings = [sb | sb <- allScoped, sbAddress sb /= AgentHere]
+        let parentSessionId = SessionStore.conversationIdToSessionId parentBaseConvId
+            depth = length parentCallStack
+        -- Phase 5 (@todos/os-as-standalone-server.md@ G10): when the
+        -- calling agent was built by the runner ('ctx.ctxRunSubagent' is
+        -- installed) and this call carries no narrowing at all -- neither
+        -- its own ('ownScoped'), nor inherited ('inheritedHere'), nor the
+        -- reference's own static 'with' ('mWith') -- run the child as a
+        -- real, cancellable, observable session instead of in-tool.
+        -- Reproducing a narrowed node through a fresh session build is not
+        -- yet supported, so any of those falls back to the unconditional
+        -- path below, same as when the hook is absent (@agents-exe run@,
+        -- the durable @session@ CLI, tests that build agents directly).
+        case (Ctx.ctxRunSubagent ctx, allScoped, Map.null callWith, mWith) of
+            (Just hook, [], True, Nothing) -> do
+                resolved <- hook parentSessionId (Base.slug agent) query
+                case resolved of
+                    -- The hook could not resolve this helper as a session
+                    -- (e.g. it is not declared as this node's own child in
+                    -- the tree the runner can see, only wired directly into
+                    -- this tool's closure, as some tests do): fall back to
+                    -- the in-tool path below, which already has the exact
+                    -- 'node' in hand and needs no resolution at all. Once a
+                    -- child session has actually started (the 'Right'
+                    -- case), a failure is real and reported, never retried
+                    -- in-tool (that would run the call twice).
+                    Left _resolutionErr ->
+                        runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
+                    Right (childSessionId, waiter) ->
+                        runSubAgentViaRunner (Ctx.ctxEmit ctx) parentSessionId depth childSessionId waiter
+            _ -> runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
+
+    runSubAgentViaRunner :: Maybe (OSEmission -> IO ()) -> SessionBase.SessionId -> Int -> SessionBase.SessionId -> IO (Either Text Text) -> IO CByteString.ByteString
+    runSubAgentViaRunner mEmit parentSessionId depth childSessionId waiter = do
+        traverse_
+            (\emitFn -> emitFn (EmitSubcallStarted parentSessionId childSessionId (Base.slug agent) depth))
+            mEmit
+        outcome <-
+            catch
+                waiter
+                ( \e -> do
+                    case fromException e of
+                        Just (_ :: SomeAsyncException) -> throwIO e
+                        Nothing -> pure ()
+                    pure $ Left (Text.pack $ displayException (e :: SomeException))
+                )
+        case outcome of
+            Right resultText -> do
+                traverse_ (\emitFn -> emitFn (EmitSubcallCompleted childSessionId (Just resultText))) mEmit
+                pure $ Text.encodeUtf8 resultText
+            Left errMsg -> do
+                traverse_ (\emitFn -> emitFn (EmitSubcallFailed childSessionId errMsg)) mEmit
+                error $ Text.unpack errMsg
+
+    runSubAgentInTool ::
+        ToolExecutionContext ->
+        Base.ConversationId ->
+        [CallStackEntry] ->
+        Base.ConversationId ->
+        [CallStackEntry] ->
+        Text ->
+        [ScopedBinding] ->
+        [ScopedBinding] ->
+        Map.Map ParamName BindingValue ->
+        IO CByteString.ByteString
+    runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith = do
+        -- Extract OS integration fields from context (same as before Phase
+        -- 5 split this branch out of the unconditional path).
+        let mWorld = Ctx.ctxWorld ctx
+        let mEmit = Ctx.ctxEmit ctx
+        let mParentBaseConv = Ctx.ctxParentConversation ctx
+
         nodeForCall <-
             if null hereBindings
                 then pure node
@@ -357,6 +423,11 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                       -- spawn-session.
                       SessionBase.ctxMailRouter = Ctx.ctxMailRouter ctx
                     , SessionBase.ctxSpawnSession = Ctx.ctxSpawnSession ctx
+                    , -- Phase 5 (@todos/os-as-standalone-server.md@ G10): handed
+                      -- down the same way, so a nested helper's own
+                      -- prompt_agent_* calls also run as real sessions when
+                      -- the whole tree is under the runner.
+                      SessionBase.ctxRunSubagent = Ctx.ctxRunSubagent ctx
                     , -- Phase 6 (@todos/session-mailbox.md@ §7): handed down the same way.
                       SessionBase.ctxWatchSession = Ctx.ctxWatchSession ctx
                     , SessionBase.ctxUnwatchSession = Ctx.ctxUnwatchSession ctx

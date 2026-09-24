@@ -92,7 +92,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, async, cancel, waitCatch)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
-import Control.Exception (Exception, SomeAsyncException, SomeException, bracket, displayException, fromException, throwIO, try)
+import Control.Exception (Exception, SomeAsyncException, SomeException, bracket, displayException, fromException, onException, throwIO, try)
 import Control.Monad (filterM, forM, forM_, forever, unless, void, when)
 import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=))
@@ -569,9 +569,10 @@ newAgent runner live node = do
         withEmit (emit runner sid . toEventBody) $
             withWatchSession (serverWatchSession runner sid) (serverUnwatchSession runner) $
                 withSpawnSession (serverSpawnSession runner sid) $
-                    withMailRouter (serverMailRouter runner) $
-                        withMailbox mailbox $
-                            withExecutionMode Asynchronous agent
+                    withRunSubagent (serverRunSubagent runner node) $
+                        withMailRouter (serverMailRouter runner) $
+                            withMailbox mailbox $
+                                withExecutionMode Asynchronous agent
 
 {- | Turn a Phase 2c 'OSEmission' (subcall lifecycle, tool-call activity)
 into the matching 'EventBody', for 'newAgent''s 'ctxEmit' hook. See
@@ -599,6 +600,83 @@ serverSpawnSession runner sid slug text = do
 -- | Render a 'RunnerError' as text, for hooks that report to the LLM rather than the HTTP API.
 runnerErrorText :: RunnerError -> Text
 runnerErrorText = Text.pack . show
+
+{- | The server's @prompt_agent_\<slug\>@-as-a-session hook (Phase 5,
+@todos/os-as-standalone-server.md@ G10). 'rootNode' is the calling
+session's own root agent (fixed at 'newAgent' time and forwarded unchanged
+to nested sub-calls, the same as every other per-session hook); the target
+helper is resolved against its whole declared tree, at any depth, by slug.
+'parentSid' is the *immediate* caller's session (the root for a top-level
+call, an already-real child session for a nested one), so lineage
+('smParent') is correct at every depth.
+
+Reports the same failures an in-tool call would: an unknown helper, or the
+child's own run failing. A caller that has no such helper reachable (e.g.
+this call actually needs 'bindings'\/'with'\/'as' narrowing, which this path
+does not support -- see 'System.Agents.AgentTree.OneShotTool') is never
+offered this hook for that specific call in the first place; 'OneShotTool'
+falls back to running it in-tool.
+-}
+serverRunSubagent :: SessionRunner -> OSAgentNode -> SessionId -> Text -> Text -> IO (Either Text (SessionId, IO (Either Text Text)))
+serverRunSubagent runner rootNode parentSid slug prompt =
+    case findHelperNode rootNode slug of
+        Nothing -> pure $ Left ("no such helper: " <> slug)
+        Just node -> do
+            mParent <- runner.srHost.hostBackend.sbLoadMeta parentSid
+            let mOwner = mParent >>= (.smOwner) . snd
+            result <-
+                createSessionForNode
+                    runner
+                    (Just parentSid)
+                    mOwner
+                    slug
+                    node
+                    (Just (NewMessage prompt [] False))
+                    (Just UntilBlocked)
+                    Map.empty
+            case result of
+                Left err -> pure $ Left (runnerErrorText err)
+                Right meta -> pure $ Right (meta.smSessionId, waitForChild runner meta.smSessionId)
+
+-- | Find a helper reachable from 'node''s own declared children, at any depth, by slug.
+findHelperNode :: OSAgentNode -> Text -> Maybe OSAgentNode
+findHelperNode node slug = go node.osNodeChildren
+  where
+    go :: [OSAgentNode] -> Maybe OSAgentNode
+    go [] = Nothing
+    go (c : cs)
+        | Base.slug c.osNodeConfig == slug = Just c
+        | otherwise = case go c.osNodeChildren of
+            Just found -> Just found
+            Nothing -> go cs
+
+{- | Wait for a sub-agent's own child session to stop running, and report
+its final answer the same way an in-tool call would: the last 'LlmTurn''s
+text, or an error if the run ended 'StatusFailed'. Cancels the child (the
+same 'cancelRun' a client could call on it directly) if this wait is itself
+interrupted -- the parent tool call's own timeout\/cancellation.
+-}
+waitForChild :: SessionRunner -> SessionId -> IO (Either Text Text)
+waitForChild runner sid = go `onException` void (cancelRun runner sid)
+  where
+    go = do
+        result <- awaitRun runner sid 5
+        case result of
+            Left err -> pure $ Left (runnerErrorText err)
+            Right (meta, active)
+                | active -> go
+                | meta.smStatus == StatusFailed -> pure $ Left (fromMaybe "sub-agent failed" meta.smStatusDetail)
+                | otherwise -> Right <$> finalText runner sid
+
+-- | The text of a session's most recent 'LlmTurn', or empty if it has none yet.
+finalText :: SessionRunner -> SessionId -> IO Text
+finalText runner sid = do
+    mSess <- getSession runner sid
+    pure $ case mSess of
+        Just (sess, _) -> case sess.turns of
+            (LlmTurn llm _ : _) -> fromMaybe "" llm.llmResponse.responseText
+            _ -> ""
+        Nothing -> ""
 
 {- | The server's 'MailRouter' (@todos/session-mailbox.md@, Phase 4, §5,
 D12). Every session on the server is durable, so unlike the TUI or @run@
@@ -1162,41 +1240,51 @@ createSessionAsWithParent :: SessionRunner -> Maybe SessionId -> Maybe Text -> T
 createSessionAsWithParent runner parent owner slug message mode supplied =
     lookupAgent runner.srHost slug >>= \case
         Nothing -> pure $ Left $ UnknownAgent slug
-        Just node -> do
-            sid <- newSessionId
-            withLive runner sid $ \live ->
-                prepareParams runner live node supplied >>= \case
+        Just node -> createSessionForNode runner parent owner slug node message mode supplied
+
+{- | Like 'createSessionAsWithParent', given an already-resolved
+'OSAgentNode' instead of a slug to look up on the host's root registry.
+Factored out for Phase 5 (@todos/os-as-standalone-server.md@ G10): a
+@prompt_agent_\<slug\>@ call already has the exact (possibly narrowed) node
+it wants to run in hand, and must not go through 'lookupAgent', which only
+knows about root-registered agents, not a caller's own declared helpers.
+-}
+createSessionForNode :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> OSAgentNode -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+createSessionForNode runner parent owner slug node message mode supplied = do
+    sid <- newSessionId
+    withLive runner sid $ \live ->
+        prepareParams runner live node supplied >>= \case
+            Left err -> pure (Left err)
+            Right overlay -> do
+                now <- getCurrentTime
+                let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner, smParent = parent}
+                sessionAgent runner live meta0 >>= \case
                     Left err -> pure (Left err)
-                    Right overlay -> do
-                        now <- getCurrentTime
-                        let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner, smParent = parent}
-                        sessionAgent runner live meta0 >>= \case
-                            Left err -> pure (Left err)
-                            Right agent -> case missingRequiredParams node agent overlay of
-                                missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
-                                [] -> case message of
-                                    Nothing -> do
-                                        -- G2: no first message, no turn, no run --
-                                        -- regardless of 'mode'. 'sessionStatusOf'
-                                        -- would already say 'StatusReady' for an
-                                        -- empty turn list; 'store' is given it
-                                        -- explicitly like every other branch here.
-                                        tid <- newTurnId
-                                        let sess = Session [] sid Nothing tid (Just 2) (Just Asynchronous) 0
-                                        store runner live meta0 sess StatusReady Nothing >>= \case
-                                            Left conflict -> pure (Left (Conflict conflict))
-                                            Right meta -> do
-                                                emit runner sid (SessionCreated meta)
-                                                pure (Right meta)
-                                    Just msg -> do
-                                        sPrompt <- agent.sysPrompt
-                                        sTools <- agent.sysTools
-                                        sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery msg.nmText msg.nmMedia)
-                                        store runner live meta0 sess StatusReady Nothing >>= \case
-                                            Left conflict -> pure (Left (Conflict conflict))
-                                            Right meta -> do
-                                                emit runner sid (SessionCreated meta)
-                                                maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
+                    Right agent -> case missingRequiredParams node agent overlay of
+                        missing@(_ : _) -> pure $ Left $ MissingRequiredParams missing
+                        [] -> case message of
+                            Nothing -> do
+                                -- G2: no first message, no turn, no run --
+                                -- regardless of 'mode'. 'sessionStatusOf'
+                                -- would already say 'StatusReady' for an
+                                -- empty turn list; 'store' is given it
+                                -- explicitly like every other branch here.
+                                tid <- newTurnId
+                                let sess = Session [] sid Nothing tid (Just 2) (Just Asynchronous) 0
+                                store runner live meta0 sess StatusReady Nothing >>= \case
+                                    Left conflict -> pure (Left (Conflict conflict))
+                                    Right meta -> do
+                                        emit runner sid (SessionCreated meta)
+                                        pure (Right meta)
+                            Just msg -> do
+                                sPrompt <- agent.sysPrompt
+                                sTools <- agent.sysTools
+                                sess <- newSessionFromPrompt sid sPrompt sTools (UserQuery msg.nmText msg.nmMedia)
+                                store runner live meta0 sess StatusReady Nothing >>= \case
+                                    Left conflict -> pure (Left (Conflict conflict))
+                                    Right meta -> do
+                                        emit runner sid (SessionCreated meta)
+                                        maybe (pure (Right meta)) (\m -> startRun runner live m overlay sess meta) mode
 
 {- | @spawn-session@ (§5): start a new, durable, detached child session
 running a caller's helper agent, recorded with 'parentSid' as parent in

@@ -187,11 +187,13 @@ module System.Agents.Session.Base (
     withMailbox,
     withMailRouter,
     withSpawnSession,
+    withRunSubagent,
     withWatchSession,
     withInterruptCompletions,
     withMailInToolResult,
     withEmit,
     SpawnSession,
+    RunSubagent,
 ) where
 
 import System.Agents.Base (ConversationId)
@@ -205,6 +207,7 @@ import System.Agents.Session.Mailbox (
     MailboxInfo (..),
     MailRouter (..),
     SpawnSession,
+    RunSubagent,
     UnwatchSession,
     WatchRequest (..),
     WatchSession,
@@ -452,6 +455,15 @@ data Agent r = Agent
     'ctxCancelToolCall' on 'ToolExecutionContext'. Handed down to sub-agents
     the same way 'ctxMailRouter' is.
     -}
+    , ctxRunSubagent :: Maybe RunSubagent
+    {- ^ Optional @prompt_agent_\<slug\>@-as-a-session hook
+    (@todos/os-as-standalone-server.md@, Phase 5, G10). When present (the
+    server installs it; @agents-exe run@, the durable @session@ CLI and
+    tests that build agents directly do not), 'System.Agents.AgentTree.OneShotTool'
+    runs a sub-agent call that has no per-call narrowing as a real, durable,
+    cancellable child session instead of in-tool. Handed down to sub-agents
+    the same way 'ctxSpawnSession' is.
+    -}
     , ctxWatchSession :: Maybe WatchSession
     -- ^ Optional @watch-session@ hook (@todos/session-mailbox.md@, Phase 6,
     -- §7). Front-end-specific, the same shape as 'ctxSpawnSession'; handed
@@ -519,6 +531,12 @@ Phase 4).
 -}
 withSpawnSession :: SpawnSession -> Agent r -> Agent r
 withSpawnSession spawn agent = agent{ctxSpawnSession = Just spawn}
+
+{- | Install a @prompt_agent_\<slug\>@-as-a-session hook on an agent
+(@todos/os-as-standalone-server.md@, Phase 5).
+-}
+withRunSubagent :: RunSubagent -> Agent r -> Agent r
+withRunSubagent hook agent = agent{ctxRunSubagent = Just hook}
 
 {- | Install @watch-session@\/@unwatch-session@ hooks on an agent
 (@todos/session-mailbox.md@, Phase 6).

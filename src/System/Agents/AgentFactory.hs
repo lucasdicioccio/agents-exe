@@ -213,6 +213,7 @@ buildAgent tracer deps role convId node = do
                 , ctxMailbox = Nothing
                 , ctxMailRouter = Nothing
                 , ctxSpawnSession = Nothing
+                , ctxRunSubagent = Nothing
                 , ctxWatchSession = Nothing
                 , ctxUnwatchSession = Nothing
                 , ctxInterruptCompletions = False

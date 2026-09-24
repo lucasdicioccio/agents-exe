@@ -69,7 +69,7 @@ import qualified Data.Map.Strict as Map
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEmission)
-import System.Agents.Session.Mailbox (MailRouter, SpawnSession, UnwatchSession, WatchSession)
+import System.Agents.Session.Mailbox (MailRouter, RunSubagent, SpawnSession, UnwatchSession, WatchSession)
 import System.Agents.Session.Types (Envelope, Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
 import System.Agents.Tools.Bindings.Types (DerivedNarrowing (..), ScopedBinding (..))
 import System.Agents.Tools.Params.Types (ParamValue (..), Params)
@@ -341,6 +341,13 @@ data ToolExecutionContext = ToolExecutionContext
     hook. Copied straight from 'Agent.ctxSpawnSession'. 'Nothing' when the
     front-end has not installed one.
     -}
+    , ctxRunSubagent :: Maybe RunSubagent
+    {- ^ Phase 5 (@todos/os-as-standalone-server.md@ G10): optional
+    @prompt_agent_\<slug\>@-as-a-session hook. Copied straight from
+    'Agent.ctxRunSubagent'. 'Nothing' when the front-end has not installed
+    one (@agents-exe run@, the durable @session@ CLI, tests that build
+    agents directly), in which case a sub-agent call keeps running in-tool.
+    -}
     , ctxWatchSession :: Maybe WatchSession
     {- ^ Phase 6 (@todos/session-mailbox.md@ §7): optional @watch-session@
     hook. Copied straight from 'Agent.ctxWatchSession'.
@@ -495,6 +502,7 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> pure Nothing
             <*> pure Nothing
+            <*> pure Nothing
             <*> pure []
             <*> pure Map.empty
             <*> pure []
@@ -572,6 +580,7 @@ hydrateContextSnapshot portal mWorld snap =
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -613,6 +622,7 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -662,6 +672,7 @@ mkMinimalContext sessId convId tId portal =
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -719,6 +730,7 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -778,6 +790,7 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -826,6 +839,7 @@ mkSubcallContext baseCtx mWorld parentConvId =
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []

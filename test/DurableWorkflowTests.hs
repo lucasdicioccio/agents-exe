@@ -289,6 +289,7 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxInterruptCompletions = False
         , ctxMailInToolResult = False
         }
@@ -325,6 +326,7 @@ mkSimpleAgent =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxInterruptCompletions = False
         , ctxMailInToolResult = False
         }
