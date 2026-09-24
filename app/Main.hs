@@ -19,6 +19,8 @@ import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Functor.Contravariant.Divisible (choose)
 import Data.Map (Map)
+import Data.Maybe (isJust)
+import System.Environment (getArgs)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -345,8 +347,16 @@ initArgParserArgs = do
     let defaultConfigDir = homedir </> ".config/agents-exe"
     let secretKeysPath = defaultConfigDir </> "secret-keys"
 
-    -- Ensure config structure exists before trying to load from it
-    ensureConfigStructure defaultConfigDir secretKeysPath
+    -- Phase 5 leftover from Phase 4 (@todos/os-as-standalone-server.md@):
+    -- 'tui --attach' drives a remote server and opens nothing locally, so
+    -- it must not need (or create) a local agents-exe config directory,
+    -- example agent files or an API-keys template either -- the raw argv
+    -- is checked here, ahead of full option parsing, since the structure
+    -- is otherwise ensured before the parser (which needs its defaults)
+    -- ever sees the command.
+    args <- getArgs
+    unless ("--attach" `elem` args) $
+        ensureConfigStructure defaultConfigDir secretKeysPath
 
     rc <- ConfigLoader.loadAgentsExeConfig defaultConfigDir
     pure $
@@ -1379,15 +1389,23 @@ main = do
         let mergedParams = Map.union pargs.progParams (Map.unions fileParams)
             pargs' = pargs{progParams = mergedParams}
 
-        -- Resolve agent files based on selected slug
-        resolvedAgentFiles <- ConfigLoader.resolveAgentFiles pargs'.agentFiles pargs'.selectedAgentSlug
-
-        case resolvedAgentFiles of
-            Left err -> do
-                Text.hPutStrLn stderr err
-                exitFailure
-            Right agentFiles' ->
-                runCommand pargs' baseTracer sessionStore agentFiles'
+        -- Phase 5 leftover from Phase 4 (@todos/os-as-standalone-server.md@):
+        -- with 'tui --attach', the server owns the agents -- a '--agent
+        -- SLUG' the attached server knows but this machine has no local
+        -- file for must not fail startup here. Skip local resolution
+        -- entirely for that case; every other command keeps resolving
+        -- against local agent files as before.
+        case pargs'.mainCommand of
+            TerminalUI tuiOpts | isJust tuiOpts.tuiAttach ->
+                runCommand pargs' baseTracer sessionStore []
+            _ -> do
+                resolvedAgentFiles <- ConfigLoader.resolveAgentFiles pargs'.agentFiles pargs'.selectedAgentSlug
+                case resolvedAgentFiles of
+                    Left err -> do
+                        Text.hPutStrLn stderr err
+                        exitFailure
+                    Right agentFiles' ->
+                        runCommand pargs' baseTracer sessionStore agentFiles'
 
     readParamsFile :: FilePath -> IO ProcessParams
     readParamsFile path = do
