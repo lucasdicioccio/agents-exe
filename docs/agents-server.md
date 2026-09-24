@@ -46,8 +46,22 @@ cabal run agents-server -- \
 | `--set NAME=VALUE`, `--set-json NAME=JSON` | (none) | Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters). |
 | `--pin NAME=VALUE`, `--pin-json NAME=JSON` | (none) | Like `--set`, but sessions cannot override it. Repeatable. See [Parameters](#parameters). |
 
-Sub-agents work as they do elsewhere: their sessions are stored in the same
-database, linked to the parent session.
+Sub-agents (`prompt_agent_<slug>` calls) run as real sessions of their own:
+the child is created, stored in the same database and linked to the calling
+session as its parent (`smParent` / `GET /v1/sessions?parent=`), *before*
+the parent's tool call returns — a client watching the parent's `parent=`
+listing, or subscribing with `scope=owner`/`scope=all`, sees `session.created`
+for it right away, and the child's own `session.updated` events (its stream,
+not the parent's) show its progress live, the same as any other session.
+The parent's tool call waits for the child to stop and returns its final
+answer as the tool result, same as before; cancelling the parent's call
+cancels the child (`cancelRun`), and the child can also be cancelled,
+inspected or subscribed to directly and independently through its own id.
+`subcall.started`/`subcall.completed`/`subcall.failed` (below) still appear
+on the *parent's* stream for convenience, now carrying the child's real
+session id. A call with narrowing (`bindings`/`with`/`as`) still runs
+in-tool, inside the parent's own call, with no session of its own — the
+older behaviour, kept for that case until it is supported the same way.
 
 ### Configuration
 
@@ -401,7 +415,7 @@ sends a `snapshot` of the session's metadata (unless it is a replay -- see
 | `tool.started` | `{session_id, tool_call_id, tool}`: a tool call still attached to the session (not deferred) started running. |
 | `tool.completed` | `{session_id, tool_call_id, tool, succeeded}`: that call reached a final state. `succeeded` is `false` for a failed or cancelled call. A call that both starts and finishes within one step is not reported (informational only; the stored session remains the source of truth). |
 | `tool.progressed` | `{session_id, tool_call_id, tool, phase, payload?, error?, provider_call_id?, at}`: a background (async-engine) tool call's lifecycle -- `phase` is one of `started`, `progressed` (with a `payload`), `completed`, `failed` (with an `error`), `cancelled`. Reported for every phase, not only intermediate progress; complements `tool.started`/`tool.completed` above, which are derived separately by diffing the stored session. |
-| `subcall.started` | `{session_id, parent_session_id, child_session_id, agent, depth}`: a `prompt_agent_<slug>` call started a sub-agent run. `session_id` (the event's own, top-level field) is the *parent* -- the session actually running the call, whose stream this shows up on -- and `parent_session_id` repeats it explicitly alongside `child_session_id`, the sub-agent's own id. A sub-agent run is not yet its own subscribable session (`prompt_agent_*` runs the child inside the tool call), so `child_session_id` is only the id `OneShotTool` already generates for it, reported as is. |
+| `subcall.started` | `{session_id, parent_session_id, child_session_id, agent, depth}`: a `prompt_agent_<slug>` call started a sub-agent run. `session_id` (the event's own, top-level field) is the *parent* -- the session actually running the call, whose stream this shows up on -- and `parent_session_id` repeats it explicitly alongside `child_session_id`, the sub-agent's own id. When the call runs as a real session (the common case), `child_session_id` is a session a client can `GetSession`/subscribe to on its own, already created (`session.created` fired) by the time this event is reported; a still-narrowed call (`bindings`/`with`/`as`) runs in-tool instead, and `child_session_id` there is just the id generated for it, not a session of its own. |
 | `subcall.completed` | `{session_id, child_session_id, result?}`: that sub-agent run finished, with its result text when it produced one. |
 | `subcall.failed` | `{session_id, child_session_id, message}`: that sub-agent run failed. |
 | `session.created` | `{session_id, …}` (full session metadata): a new session was created. Only seen on `GET /v1/events` (below); a single session's own stream never reports its own creation. |
@@ -446,8 +460,10 @@ With `--stream-tokens`, the server asks the LLM for a streamed answer
 (`"stream": true`) and forwards each piece of text as a `text.delta` event,
 before the answer is stored. Concatenating a step's deltas gives the text of
 the LLM turn that the following `session.updated` carries. Tool calls
-are not streamed: they appear in the stored turn as usual. Sub-agents do not
-stream.
+are not streamed: they appear in the stored turn as usual. A sub-agent that
+runs as its own session streams like any other session, on its own id (its
+own `text.delta`s, not the parent's); a still-narrowed sub-agent call
+running in-tool does not (see "Sub-agents" above).
 
 The option applies to every agent of the server. It needs an endpoint that
 supports streaming: OpenAI and most OpenAI-compatible APIs do. For the

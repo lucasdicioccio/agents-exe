@@ -153,12 +153,18 @@ the config's `sessions` read locations) stay readable: the host composites
 them in as a read-only fallback (`Host.hcLegacySessionDirs`) behind the
 SQLite backend.
 
-Sub-agent calls (`prompt_agent_*`) are not yet sessions of their own (see
-`todos/os-as-standalone-server.md`, Phase 5), so the runner has no
-per-step "subcall progress" event carrying a whole child session. The
-Subcall Conversation Visibility section below therefore only ever sees a
-subcall **start**, **complete**, or **fail** — no live token-by-token or
-tool-by-tool progress for the child, unlike the parent conversation.
+Sub-agent calls (`prompt_agent_*`) run as real sessions of their own
+(`todos/os-as-standalone-server.md`, Phase 5), so live progress for a
+child is its own `session.updated`/`text.delta`/`tool.*` stream, exactly
+like the parent conversation — not a separate "subcall progress" event.
+The TUI still gets `subcall.started`/`subcall.completed`/`subcall.failed`
+for the start/complete/fail transitions themselves (used to show the child
+in the conversation list and its hierarchy), but token-by-token and
+tool-by-tool progress in between now comes from subscribing to the child
+session directly, the same as any other session. A sub-agent call made
+with per-call narrowing (`bindings`/`with`/`as`) still runs in-tool, with
+no session and no live progress of its own, until that case is supported
+the same way.
 
 ### Component Structure
 
