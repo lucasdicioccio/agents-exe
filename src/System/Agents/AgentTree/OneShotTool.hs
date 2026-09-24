@@ -21,7 +21,7 @@ module System.Agents.AgentTree.OneShotTool (
     turnAgentRuntimeIntoIOTool,
 ) where
 
-import Control.Concurrent.STM (TQueue, atomically, newTVarIO, readTVarIO, writeTQueue)
+import Control.Concurrent.STM (atomically, newTVarIO, readTVarIO)
 import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
@@ -56,7 +56,7 @@ import System.Agents.OS.Core.Types (
  )
 import System.Agents.OS.Core.World (World, setComponent)
 import qualified System.Agents.OS.Core.World as OSWorld
-import System.Agents.OS.Events (OSEvent (..))
+import System.Agents.OS.Events (OSEmission (..))
 import System.Agents.Session.Base (
     Agent (..),
     LlmResponse (..),
@@ -175,18 +175,16 @@ newBaseConversationId = Base.newConversationId
 This version uses the LLM session calls from OneShot.hs. It creates an Agent from
 the OSAgentNode, runs it with a session, and returns the result.
 
-When the ToolExecutionContext includes a World and EventQueue, this function:
+When the ToolExecutionContext includes a World and 'ctxEmit', this function:
 1. Inserts the subcall conversation into the OS World as a first-class entity
-2. Emits OSEvent_SubcallStarted at the beginning
-3. Emits OSEvent_SubcallProgress during execution (after each step)
-4. Emits OSEvent_SubcallCompleted or OSEvent_SubcallFailed at the end
+2. Emits 'EmitSubcallStarted' at the beginning
+3. Emits 'EmitSubcallCompleted' or 'EmitSubcallFailed' at the end
 
-This enables TUI visibility for subcall conversations, showing parent/child
-relationships and tracking subcall lifecycle.
+This enables TUI\/runner visibility for subcall conversations, showing
+parent/child relationships and tracking subcall lifecycle.
 
 Type handling:
 - ctx.ctxConversationId is Base.ConversationId (from Tools.Context)
-- OSEvent types use Base.ConversationId (from OS.Events)
 - OS World operations use OS.Core.Types.ConversationId/EntityId
 - Session.run uses Base.ConversationId
 -}
@@ -306,11 +304,6 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
         let newEntry = CallStackEntry (Base.slug agent) subcallBaseConvId (length parentCallStack)
         let subcallCallStack = newEntry : parentCallStack
 
-        -- Extract OS integration fields from context
-        let mWorld = Ctx.ctxWorld ctx
-        let mEventQueue = Ctx.ctxEventQueue ctx
-        let mParentBaseConv = Ctx.ctxParentConversation ctx
-
         -- Narrowing helpers, down the call chain (§8.3, Phase 6): the
         -- caller's inherited bindings, re-rooted at this helper, plus this
         -- call's own bindings. Those addressed at the helper itself are
@@ -322,6 +315,77 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
             allScoped = ownScoped ++ inheritedHere
             hereBindings = [sb | sb <- allScoped, sbAddress sb == AgentHere]
             restBindings = [sb | sb <- allScoped, sbAddress sb /= AgentHere]
+        let parentSessionId = SessionStore.conversationIdToSessionId parentBaseConvId
+            depth = length parentCallStack
+        -- Phase 5 (@todos/os-as-standalone-server.md@ G10): when the
+        -- calling agent was built by the runner ('ctx.ctxRunSubagent' is
+        -- installed) and this call carries no narrowing at all -- neither
+        -- its own ('ownScoped'), nor inherited ('inheritedHere'), nor the
+        -- reference's own static 'with' ('mWith') -- run the child as a
+        -- real, cancellable, observable session instead of in-tool.
+        -- Reproducing a narrowed node through a fresh session build is not
+        -- yet supported, so any of those falls back to the unconditional
+        -- path below, same as when the hook is absent (@agents-exe run@,
+        -- the durable @session@ CLI, tests that build agents directly).
+        case (Ctx.ctxRunSubagent ctx, allScoped, Map.null callWith, mWith) of
+            (Just hook, [], True, Nothing) -> do
+                resolved <- hook parentSessionId (Base.slug agent) query
+                case resolved of
+                    -- The hook could not resolve this helper as a session
+                    -- (e.g. it is not declared as this node's own child in
+                    -- the tree the runner can see, only wired directly into
+                    -- this tool's closure, as some tests do): fall back to
+                    -- the in-tool path below, which already has the exact
+                    -- 'node' in hand and needs no resolution at all. Once a
+                    -- child session has actually started (the 'Right'
+                    -- case), a failure is real and reported, never retried
+                    -- in-tool (that would run the call twice).
+                    Left _resolutionErr ->
+                        runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
+                    Right (childSessionId, waiter) ->
+                        runSubAgentViaRunner (Ctx.ctxEmit ctx) parentSessionId depth childSessionId waiter
+            _ -> runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
+
+    runSubAgentViaRunner :: Maybe (OSEmission -> IO ()) -> SessionBase.SessionId -> Int -> SessionBase.SessionId -> IO (Either Text Text) -> IO CByteString.ByteString
+    runSubAgentViaRunner mEmit parentSessionId depth childSessionId waiter = do
+        traverse_
+            (\emitFn -> emitFn (EmitSubcallStarted parentSessionId childSessionId (Base.slug agent) depth))
+            mEmit
+        outcome <-
+            catch
+                waiter
+                ( \e -> do
+                    case fromException e of
+                        Just (_ :: SomeAsyncException) -> throwIO e
+                        Nothing -> pure ()
+                    pure $ Left (Text.pack $ displayException (e :: SomeException))
+                )
+        case outcome of
+            Right resultText -> do
+                traverse_ (\emitFn -> emitFn (EmitSubcallCompleted childSessionId (Just resultText))) mEmit
+                pure $ Text.encodeUtf8 resultText
+            Left errMsg -> do
+                traverse_ (\emitFn -> emitFn (EmitSubcallFailed childSessionId errMsg)) mEmit
+                error $ Text.unpack errMsg
+
+    runSubAgentInTool ::
+        ToolExecutionContext ->
+        Base.ConversationId ->
+        [CallStackEntry] ->
+        Base.ConversationId ->
+        [CallStackEntry] ->
+        Text ->
+        [ScopedBinding] ->
+        [ScopedBinding] ->
+        Map.Map ParamName BindingValue ->
+        IO CByteString.ByteString
+    runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith = do
+        -- Extract OS integration fields from context (same as before Phase
+        -- 5 split this branch out of the unconditional path).
+        let mWorld = Ctx.ctxWorld ctx
+        let mEmit = Ctx.ctxEmit ctx
+        let mParentBaseConv = Ctx.ctxParentConversation ctx
+
         nodeForCall <-
             if null hereBindings
                 then pure node
@@ -333,7 +397,7 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                     pure node{osNodeTools = wrappedToolsTVar}
 
         -- Build the sub-agent with the caller's dependencies, then attach the
-        -- OS integration fields: the World and EventQueue are essential for
+        -- OS integration fields: the World and 'ctxEmit' are essential for
         -- nested subcalls to be visible in the TUI
         sessionAgent0 <-
             buildAgent
@@ -350,15 +414,20 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
         let sessionAgent =
                 sessionAgent0
                     { SessionBase.ctxWorld = mWorld
-                    , SessionBase.ctxEventQueue = mEventQueue
+                    , SessionBase.ctxEmit = mEmit
                     , SessionBase.ctxParams = Map.union withOverlay sessionAgent0.ctxParams
                     , SessionBase.ctxInheritedBindings = restBindings
                     , -- Phase 4 (@todos/session-mailbox.md@ §5, D12): handed
-                      -- down the same way as ctxWorld/ctxEventQueue, so a
+                      -- down the same way as ctxWorld/ctxEmit, so a
                       -- deeply-nested helper can still send-message /
                       -- spawn-session.
                       SessionBase.ctxMailRouter = Ctx.ctxMailRouter ctx
                     , SessionBase.ctxSpawnSession = Ctx.ctxSpawnSession ctx
+                    , -- Phase 5 (@todos/os-as-standalone-server.md@ G10): handed
+                      -- down the same way, so a nested helper's own
+                      -- prompt_agent_* calls also run as real sessions when
+                      -- the whole tree is under the runner.
+                      SessionBase.ctxRunSubagent = Ctx.ctxRunSubagent ctx
                     , -- Phase 6 (@todos/session-mailbox.md@ §7): handed down the same way.
                       SessionBase.ctxWatchSession = Ctx.ctxWatchSession ctx
                     , SessionBase.ctxUnwatchSession = Ctx.ctxUnwatchSession ctx
@@ -370,6 +439,7 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
         -- Create a fresh session with media support (version 1), identified
         -- like its conversation so that its own sub-agents can name it as parent
         let subcallSessionId = SessionStore.conversationIdToSessionId subcallBaseConvId
+        let parentSessionId = SessionStore.conversationIdToSessionId parentBaseConvId
         session0 <- Session [] subcallSessionId Nothing <$> newTurnId <*> pure (Just 1) <*> pure Nothing <*> pure 0
 
         -- Phase 4 (@todos/session-mailbox.md@ §5): report this call's own
@@ -435,19 +505,14 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                     setComponent world subcallEntityId (Lineage $ OSConv.lineageStack lineage)
             Nothing -> pure ()
 
-        -- Emit SubcallStarted event if event queue is available
-        -- OSEvent uses Base.ConversationId directly
-        case mEventQueue of
-            Just eventQueue -> do
-                let event =
-                        OSEvent_SubcallStarted
-                            { subcallParentConversationId = parentBaseConvId
-                            , subcallConversationId = subcallBaseConvId
-                            , subcallAgentSlug = Base.slug agent
-                            , subcallDepth = depth
-                            }
-                atomically $ writeTQueue eventQueue event
-            Nothing -> pure ()
+        -- Phase 2c/3c (@todos/os-as-standalone-server.md@ G3/G10): report
+        -- the subcall start to the runner's stream through 'ctxEmit', the
+        -- one emission mechanism. The child is not (yet) a runner session,
+        -- so its 'SessionId' is just the id 'OneShotTool' already generates
+        -- for it (the session-shaped view of 'subcallBaseConvId').
+        traverse_
+            (\emitFn -> emitFn (EmitSubcallStarted parentSessionId subcallSessionId (Base.slug agent) depth))
+            mEmit
 
         -- Run the agent and handle result
         -- Session.run uses Base.ConversationId
@@ -457,7 +522,7 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                 session0
                 agentWithQuery
                 mWorld
-                mEventQueue
+                mEmit
                 (Ctx.ctxProgressCallback ctx)
 
         -- Return the result
@@ -476,23 +541,19 @@ runSubAgentWithEventEmission ::
     Session ->
     Agent (LlmTurnContent, Session) ->
     Maybe World ->
-    Maybe (TQueue OSEvent) ->
+    -- | Phase 2c/3c: subcall lifecycle, reported to the runner's stream.
+    Maybe (OSEmission -> IO ()) ->
     -- | Progress callback of the calling tool call, if it runs in the background
     Maybe (Aeson.Value -> IO ()) ->
     IO Text
-runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue mReportProgress = do
-    -- Create a progress emitter function that sends SubcallProgress events
-    let emitProgress sess = do
-            forM_ mReportProgress ($ subAgentProgress sess)
-            case mEventQueue of
-                Just eventQueue -> do
-                    let event =
-                            OSEvent_SubcallProgress
-                                { subcallProgressConversationId = baseConvId
-                                , subcallProgressSession = sess
-                                }
-                    atomically $ writeTQueue eventQueue event
-                Nothing -> pure ()
+runSubAgentWithEventEmission baseConvId session0 agent mWorld mEmit mReportProgress = do
+    let childSessionId = SessionStore.conversationIdToSessionId baseConvId
+    -- Report progress to the calling tool call, if it runs in the
+    -- background. There is no runner event for a sub-agent's step-by-step
+    -- progress (Phase 3c retires 'OSEvent_SubcallProgress', which used to
+    -- carry a whole 'Session'; Phase 5 gives a real sub-agent session its
+    -- own 'SessionUpdated' events instead).
+    let emitProgress sess = forM_ mReportProgress ($ subAgentProgress sess)
 
     -- Wrap the agent's step function to emit progress after each step
     let agentWithProgress = wrapAgentWithProgress emitProgress agent
@@ -517,40 +578,27 @@ runSubAgentWithEventEmission baseConvId session0 agent mWorld mEventQueue mRepor
                 pure $ Left errMsg
             )
 
-    -- Emit completion or failure event
-    -- OSEvent types use Base.ConversationId
-    case mEventQueue of
-        Just eventQueue -> do
-            case result of
-                Right resultText -> do
-                    let event =
-                            OSEvent_SubcallCompleted
-                                { subcallCompletedConversationId = baseConvId
-                                , subcallCompletedResult = resultText
-                                }
-                    atomically $ writeTQueue eventQueue event
-                    -- Update OS World status if available
-                    -- Convert Base.ConversationId to OS types for World update
-                    case mWorld of
-                        Just world -> do
-                            let osConvId = baseConversationIdToOS baseConvId
-                            updateConversationStatus world osConvId ConversationArchived
-                        Nothing -> pure ()
-                Left errMsg -> do
-                    let event =
-                            OSEvent_SubcallFailed
-                                { subcallFailedConversationId = baseConvId
-                                , subcallFailedError = errMsg
-                                }
-                    atomically $ writeTQueue eventQueue event
-                    -- Update OS World status if available
-                    -- Convert Base.ConversationId to OS types for World update
-                    case mWorld of
-                        Just world -> do
-                            let osConvId = baseConversationIdToOS baseConvId
-                            updateConversationStatus world osConvId (ConversationError errMsg)
-                        Nothing -> pure ()
-        Nothing -> pure ()
+    -- Emit completion or failure through 'ctxEmit', and update the OS
+    -- World status if any.
+    case result of
+        Right resultText -> do
+            traverse_ (\emitFn -> emitFn (EmitSubcallCompleted childSessionId (Just resultText))) mEmit
+            -- Update OS World status if available
+            -- Convert Base.ConversationId to OS types for World update
+            case mWorld of
+                Just world -> do
+                    let osConvId = baseConversationIdToOS baseConvId
+                    updateConversationStatus world osConvId ConversationArchived
+                Nothing -> pure ()
+        Left errMsg -> do
+            traverse_ (\emitFn -> emitFn (EmitSubcallFailed childSessionId errMsg)) mEmit
+            -- Update OS World status if available
+            -- Convert Base.ConversationId to OS types for World update
+            case mWorld of
+                Just world -> do
+                    let osConvId = baseConversationIdToOS baseConvId
+                    updateConversationStatus world osConvId (ConversationError errMsg)
+                Nothing -> pure ()
 
     -- Return result or re-throw error
     case result of

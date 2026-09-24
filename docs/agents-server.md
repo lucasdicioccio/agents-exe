@@ -41,11 +41,51 @@ cabal run agents-server -- \
 | `--admin-owners OWNER,…` | (none) | Owners allowed to store and delete agents over the API. Needs `--auth-tokens`. See [Storing agents](#storing-agents). |
 | `--stream-tokens` | off | Stream LLM answers: the events stream gets `text.delta` events as the text arrives. See [Streaming answers](#streaming-answers). |
 | `--no-ui` | off | Do not serve the chat page at `/`. See [Finding your way around](#finding-your-way-around). |
+| `--cors-origin ORIGIN` | (none) | Allow this origin to call the server cross-origin (a browser page on another host or port). Repeatable, or `*` for any origin — refused at startup together with `--auth-tokens`. See [Authentication](#authentication). |
+| `--socket PATH` | (none) | Also listen on this Unix domain socket, in addition to `--bind`/`--port`. A stale file at the path is removed at start; the socket is created with mode `0600`. Requests over it carry no `Origin` header and need no bearer token beyond what `--auth-tokens` imposes elsewhere: the socket, and who can reach it on the filesystem, is the trust boundary. Closed and unlinked on shutdown. |
 | `--set NAME=VALUE`, `--set-json NAME=JSON` | (none) | Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters). |
 | `--pin NAME=VALUE`, `--pin-json NAME=JSON` | (none) | Like `--set`, but sessions cannot override it. Repeatable. See [Parameters](#parameters). |
 
-Sub-agents work as they do elsewhere: their sessions are stored in the same
-database, linked to the parent session.
+Sub-agents (`prompt_agent_<slug>` calls) run as real sessions of their own:
+the child is created, stored in the same database and linked to the calling
+session as its parent (`smParent` / `GET /v1/sessions?parent=`), *before*
+the parent's tool call returns — a client watching the parent's `parent=`
+listing, or subscribing with `scope=owner`/`scope=all`, sees `session.created`
+for it right away, and the child's own `session.updated` events (its stream,
+not the parent's) show its progress live, the same as any other session.
+The parent's tool call waits for the child to stop and returns its final
+answer as the tool result, same as before; cancelling the parent's call
+cancels the child (`cancelRun`), and the child can also be cancelled,
+inspected or subscribed to directly and independently through its own id.
+`subcall.started`/`subcall.completed`/`subcall.failed` (below) still appear
+on the *parent's* stream for convenience, now carrying the child's real
+session id. A call with narrowing (`bindings`/`with`/`as`) still runs
+in-tool, inside the parent's own call, with no session of its own — the
+older behaviour, kept for that case until it is supported the same way.
+
+### Configuration
+
+`agents-server` itself only ever takes agent files from `--agent-file`: it has
+no config file of its own. `agents-exe serve` is the same code (see
+[Embedding the runner in your own program](#embedding-the-runner-in-your-own-program))
+behind agents-exe's own config loading: it reads `agents-exe.cfg.json` and
+resolves agent files the way the TUI and every other `agents-exe` command do
+(`agentsFiles`, `agentsDirectories`, the `~/.config/agents-exe/default`
+fallback, `--agent-file`, `--agent SLUG` to pick one agent by name), and
+shares agents-exe's global `--api-keys`, `--set`/`--pin`/`--set-json`/
+`--pin-json` and `--params-file`. Its own flags are the rest of this table
+(`--db`, `--bind`, `--port`, `--live-session-ttl`, `--shutdown-grace`,
+`--auth-tokens`, `--stream-tokens`, `--admin-owners`, `--no-ui`,
+`--cors-origin`, `--socket`); `--db` defaults next to the resolved sessions
+directory instead of `./agents-server.db`:
+
+```bash
+agents-exe --agent-file ./weather.json serve --port 8080
+# or, from a directory with an agents-exe.cfg.json:
+agents-exe serve --port 8080
+```
+
+See [cli-commands.md](cli-commands.md#serve) for the full flag list.
 
 ### Finding your way around
 
@@ -74,7 +114,10 @@ the server. An agents-exe agent can use it directly as a toolbox:
 The chat page is one self-contained HTML document with no build step and no
 assets. It starts sessions, follows their event streams, offers a box to
 complete deferred tool calls, and attaches files, so it doubles as a worked
-example of the API.
+example of the API. Its session list follows `GET /v1/events` (see
+[Following every session](#following-every-session)), so sessions created,
+deleted or changed by any other client (another tab, an attached TUI, a
+script) show up without a reload.
 
 **Attachments.** *Attach* adds files to the next message, up to 20 MB in
 total (the body limit is 32 MiB and base64 adds a third). They are sent as
@@ -193,6 +236,7 @@ Each session has a `status`:
 | `running` | A run is active. | Wait for it, or `cancel` it. |
 | `waiting_external` | Only deferred calls remain. | Post their results to `/v1/continuations/:token`. |
 | `idle` | The LLM answered. | Post a new message. |
+| `paused` | Stopped by `pause`. | `resume`, or any mail if the agent's `resumeOnAnyMail` option is set. |
 | `failed` | The last run failed; `status_detail` says why. | `resume` retries from the last stored version. |
 
 Every stored change increments the session's `version`.
@@ -227,6 +271,67 @@ progress, a run about to stop keeps going instead. Posting with
 `"resume": false` stores the result without starting a run; `resume` later.
 While a run is active the result is queued for it, and `resume` is ignored:
 the run applies it either way.
+
+---
+
+## Mail
+
+`POST /v1/sessions/:id/mail` generalizes the `interrupt` flag on
+`POST .../messages`: any piece of mail, from a control instruction to a
+message from another session, to a session that may not even be live in
+this process (a stored, idle session still has its durable mailbox, and
+gets one opened for it). Unlike `messages`, this never refuses on a
+session's status: the mail just queues, folded into the session's next
+turn (or the current one, if a run is already going) the same way every
+other mail is (see [Following a session live](#following-a-session-live)
+for the events a run produces along the way). A `paused` session may wake
+on it if the agent's `resumeOnAnyMail` option is set and the mail's sender
+is in its `wakeOn` list (the same rule an ordinary message follows against
+a paused session).
+
+The request body is `{body, priority?}`. `priority` is `"normal"` (the
+default) or `"interrupt"`. `body` is a `MailBody`, tagged JSON:
+
+```json
+{"tag": "userMessage", "query": "are you there?"}
+{"tag": "userMessage", "query": {"text": "look at this", "media": [{"mimeType": "image/png", "base64Data": "…"}]}}
+{"tag": "agentMessage", "text": "status update", "inReplyTo": null, "expectsReply": false}
+{"tag": "control", "message": {"tag": "pause"}}
+{"tag": "control", "message": {"tag": "resume"}}
+{"tag": "control", "message": {"tag": "stopRun"}}
+{"tag": "control", "message": {"tag": "cancelAllAttached"}}
+{"tag": "control", "message": {"tag": "cancelCalls", "toolCallIds": ["017bb633-…"]}}
+```
+
+`toolCallFinished`, `continuationResult` and `watchedEvent` are also valid
+`MailBody` tags (the async engine, `completeCall`, and `watch-session`
+produce them respectively), but there is no reason to post one by hand over
+this endpoint. `POST /v1/sessions/:id/mail` answers `202` with the mail's
+`Receipt`: `{"id": "<message id>", "seq": <int>, "duplicate": false}`.
+
+`GET /v1/sessions/:id/mail?unread=true|false` lists the session's mail,
+oldest first, as `{"mail": [Envelope, …]}`. `unread=true` (default `false`)
+limits it to what is still unread past the session's stored cursor -- what
+its next turn, or a run already going, has not folded in yet. An `Envelope`
+is:
+
+```json
+{
+  "id": "2cdb9b15-…",
+  "seq": 4,
+  "from": {"tag": "user", "owner": "alice"},
+  "priority": "normal",
+  "hops": 0,
+  "sentAt": "2026-09-23T19:08:06Z",
+  "body": {"tag": "agentMessage", "text": "status update", "inReplyTo": null, "expectsReply": false}
+}
+```
+
+`from` (a `Sender`) is one of `{"tag": "user", "owner"?}` (a client's own
+mail, `owner` set when the server authenticates callers -- this is what
+`POST .../mail` always sends as), `{"tag": "session", "sessionId", "agent"?}`
+(another session, e.g. `send-message`), `{"tag": "toolCall", "toolCallId"}`,
+or `{"tag": "system", "source"}` (the runner itself, e.g. `watch-session`).
 
 ---
 
@@ -293,8 +398,10 @@ validation table above.
 
 `GET /v1/sessions/:id/events` is a
 [server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html)
-stream. It first sends a `snapshot` of the session's metadata, then one event
-per change:
+stream. Each frame carries an `id:` line (the event's sequence number, unique
+and increasing per server) alongside the usual `event:`/`data:`. It first
+sends a `snapshot` of the session's metadata (unless it is a replay -- see
+[Reconnecting](#reconnecting) below), then one event per change:
 
 | Event | Data |
 |---|---|
@@ -305,28 +412,47 @@ per change:
 | `run.stopped` | `{session_id, status}` |
 | `session.failed` | `{session_id, message}`, followed by `run.stopped` with status `failed`. |
 | `text.delta` | `{session_id, text}`: the next piece of the LLM's answer, with `--stream-tokens` only. |
+| `tool.started` | `{session_id, tool_call_id, tool}`: a tool call still attached to the session (not deferred) started running. |
+| `tool.completed` | `{session_id, tool_call_id, tool, succeeded}`: that call reached a final state. `succeeded` is `false` for a failed or cancelled call. A call that both starts and finishes within one step is not reported (informational only; the stored session remains the source of truth). |
+| `tool.progressed` | `{session_id, tool_call_id, tool, phase, payload?, error?, provider_call_id?, at}`: a background (async-engine) tool call's lifecycle -- `phase` is one of `started`, `progressed` (with a `payload`), `completed`, `failed` (with an `error`), `cancelled`. Reported for every phase, not only intermediate progress; complements `tool.started`/`tool.completed` above, which are derived separately by diffing the stored session. |
+| `subcall.started` | `{session_id, parent_session_id, child_session_id, agent, depth}`: a `prompt_agent_<slug>` call started a sub-agent run. `session_id` (the event's own, top-level field) is the *parent* -- the session actually running the call, whose stream this shows up on -- and `parent_session_id` repeats it explicitly alongside `child_session_id`, the sub-agent's own id. When the call runs as a real session (the common case), `child_session_id` is a session a client can `GetSession`/subscribe to on its own, already created (`session.created` fired) by the time this event is reported; a still-narrowed call (`bindings`/`with`/`as`) runs in-tool instead, and `child_session_id` there is just the id generated for it, not a session of its own. |
+| `subcall.completed` | `{session_id, child_session_id, result?}`: that sub-agent run finished, with its result text when it produced one. |
+| `subcall.failed` | `{session_id, child_session_id, message}`: that sub-agent run failed. |
+| `session.created` | `{session_id, …}` (full session metadata): a new session was created. Only seen on `GET /v1/events` (below); a single session's own stream never reports its own creation. |
+| `session.deleted` | `{session_id}`: a session (and everything under it) was deleted. Only seen on `GET /v1/events`. |
+| `hook.failed` | `{session_id, message}`: a tool-call hook (a before/after command hook) failed outside of the normal tool-call result path. Not a session failure -- the run continues, unlike `session.failed`. |
 
 A typical run, from a `resume`:
 
 ```
+id: 101
 event: snapshot
 data: {"session_id":"4ed4…","status":"ready","version":1,…}
 
+id: 102
 event: session.updated
-data: {"session_id":"4ed4…","status":"running","version":2,"head_turn":{…},…}
+data: {"session_id":"4ed4…","status":"running","version":2,"head_turn":{…},…,"kind":"session.updated","seq":102}
 
+id: 103
 event: run.started
-data: {"mode":"until_blocked","session_id":"4ed4…"}
+data: {"mode":"until_blocked","session_id":"4ed4…","kind":"run.started","seq":103}
 
+id: 104
 event: session.updated
-data: {"session_id":"4ed4…","status":"running","version":3,"head_turn":{…},…}
+data: {"session_id":"4ed4…","status":"running","version":3,"head_turn":{…},…,"kind":"session.updated","seq":104}
 
+id: 105
 event: calls.deferred
-data: {"session_id":"4ed4…","calls":[{"continuation_token":"0dd0…",…}]}
+data: {"session_id":"4ed4…","calls":[{"continuation_token":"0dd0…",…}],"kind":"calls.deferred","seq":105}
 
+id: 106
 event: run.stopped
-data: {"session_id":"4ed4…","status":"waiting_external"}
+data: {"session_id":"4ed4…","status":"waiting_external","kind":"run.stopped","seq":106}
 ```
+
+(The `snapshot` frame has no `id:`: it is a point-in-time read, not an event
+in the sequence. `kind` and `seq` inside `data` are additive -- every field
+this doc's table names was already there.)
 
 ### Streaming answers
 
@@ -334,8 +460,10 @@ With `--stream-tokens`, the server asks the LLM for a streamed answer
 (`"stream": true`) and forwards each piece of text as a `text.delta` event,
 before the answer is stored. Concatenating a step's deltas gives the text of
 the LLM turn that the following `session.updated` carries. Tool calls
-are not streamed: they appear in the stored turn as usual. Sub-agents do not
-stream.
+are not streamed: they appear in the stored turn as usual. A sub-agent that
+runs as its own session streams like any other session, on its own id (its
+own `text.delta`s, not the parent's); a still-narrowed sub-agent call
+running in-tool does not (see "Sub-agents" above).
 
 The option applies to every agent of the server. It needs an endpoint that
 supports streaming: OpenAI and most OpenAI-compatible APIs do. For the
@@ -343,8 +471,72 @@ supports streaming: OpenAI and most OpenAI-compatible APIs do. For the
 (`stream_options.include_usage`).
 
 The stream stays open across runs. It sends a `: keepalive` comment after 15
-seconds without events. Events are not replayed: a client that reconnects
-gets a new snapshot and continues from there.
+seconds without events.
+
+### Reconnecting
+
+The server keeps a ring of the last 4096 events (across every session, not
+per session). A reconnecting client sends `Last-Event-ID` -- set
+automatically by the browser's `EventSource` on a dropped connection -- or,
+for any other client, `?after=<seq>` naming the same thing explicitly. Two
+cases:
+
+* The sequence number is still in the ring: the missed events replay first,
+  in order, with no gap and no duplicate at the point where the stream goes
+  live (the server takes the ring snapshot and subscribes to new events in
+  one atomic step). No `snapshot` frame is sent in this case -- the client
+  already has a consistent view and only needs what it missed.
+* It is older than everything still in the ring (a long disconnect, or a
+  server restart, which starts the sequence over): the stream falls back to
+  a fresh `snapshot` followed by live events, exactly like a first
+  connection. There is no way to tell "missed too much" apart from "never
+  connected before" other than this: either way, a `snapshot` means re-read
+  anything you need from it (and `GET /v1/sessions/:id` for the full turns).
+
+The ring is in-memory only: it does not survive a restart, and does not
+replace `session_mail`/the stored session as the durable record.
+
+Every event stream answers with an `Agents-Replay` header saying which case
+applies before any frame arrives: `live` (no `Last-Event-ID`/`after` was
+given), `replayed`, or `unavailable`. A client that must know whether it
+missed events (the attached TUI's `httpClient`) reads it rather than
+waiting for a first frame, which on a quiet stream could take a while.
+
+### Following every session
+
+`GET /v1/events?scope=&after=` is the same stream, server-wide instead of
+per session: every event above, plus `session.created` and
+`session.deleted`, and the same `Last-Event-ID`/`after` reconnect (no
+`snapshot` here -- there is no single session to snapshot). `scope=owner`
+(the default when the caller has an owner) is that caller's own sessions;
+`scope=all` is every session on the server, and needs authentication off or
+the caller to be one of `--admin-owners`, since it would otherwise let any
+authenticated caller watch every other owner's sessions. This is what a
+live session list, or a dashboard across sessions, follows instead of
+polling `GET /v1/sessions`.
+
+### Attaching the TUI
+
+`agents-exe tui --attach` runs the terminal UI against this server instead
+of a runner of its own:
+
+```sh
+agents-exe serve --port 8080 --socket /run/agents/agents.sock   # on the server
+agents-exe tui --attach http://127.0.0.1:8080                   # over TCP
+agents-exe tui --attach unix:///run/agents/agents.sock          # over the socket
+agents-exe tui --attach https://agents.example --token-file ~/.agents-token
+```
+
+The TUI is then one more client of this API, like the chat page: it lists
+agents from `GET /v1/agents`, drives sessions through the routes above,
+follows `GET /v1/events` (`scope=all`, or `scope=owner` when a non-admin
+token is used), and fetches `GET /v1/sessions/:id` on each
+`session.updated`. It sees the sessions of its token's owner (or every
+session, without authentication), including ones created by other clients,
+and quitting it leaves its sessions running here. Its `--params-file`
+values travel as `params` on each create and message, as the chat page's
+do. See [tui.md](tui.md#architecture) for what differs from the embedded
+TUI.
 
 ---
 
@@ -358,20 +550,52 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `GET /openapi.json` | | `200` OpenAPI 3 document | |
 | `GET /healthz` | | `200 {ok, live_sessions, active_runs}` | |
 | `POST /mcp` | JSON-RPC message or batch | `200` JSON-RPC answer, or `202` | see [MCP over HTTP](#mcp-over-http) |
-| `GET /v1/agents` | | `200 [{slug, description, tools, source, …}]` | |
-| `GET /v1/agents/:slug` | | `200` agent | 404 `unknown_agent` |
+| `GET /v1/agents` | | `200 [{slug, description, model, system_prompt, tools, parameters, helpers, source, …}]` | |
+| `GET /v1/agents/:slug` | | `200` agent (same shape) | 404 `unknown_agent` |
 | `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
 | `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` |
-| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt, media?, run?, params?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 400 `bad_request`, see [Parameters](#parameters) |
+| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt?, media?, run?, params?, parent?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 404 `unknown_session` (parent), 400 `bad_request`, see [Parameters](#parameters) |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
-| `GET /v1/sessions/:id` | | `200` session | 404 `unknown_session` |
-| `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?, params?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages`, see [Parameters](#parameters) |
+| `GET /v1/sessions/:id?wait=&timeout=` | | `200` session, or `202` when `wait` expired with a run still active | 404 `unknown_session` |
+| `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?, params?, interrupt?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages`, see [Parameters](#parameters) |
 | `POST /v1/sessions/:id/resume?wait=&timeout=` | `{mode?, params?}` or no body | `202` or `200` session | 404, 409 `run_in_progress`, see [Parameters](#parameters) |
 | `POST /v1/sessions/:id/cancel` | | `200` session metadata | 404, 409 `no_active_run` |
+| `POST /v1/sessions/:id/cancel-attached` | | `200` session metadata | 404 |
+| `POST /v1/sessions/:id/pause` | | `200` session metadata | 404 |
+| `POST /v1/sessions/:id/mail` | `{body, priority?}` | `202` mail `Receipt`: `{id, seq, duplicate}` | 404, see [Mail](#mail) |
+| `GET /v1/sessions/:id/mail?unread=` | | `200 {mail: [Envelope]}` | 404 |
+| `POST /v1/sessions/:id/fork` | `{at_turn?, agent?}` | `201` new session, with a `Location` header | 404 `unknown_session` / `unknown_turn` / `unknown_agent` |
 | `GET /v1/sessions/:id/pending` | | `200 {calls}` | 404 |
-| `GET /v1/sessions/:id/events` | | `200 text/event-stream` | 404 |
+| `GET /v1/sessions/:id/events?after=` | | `200 text/event-stream` | 404 |
+| `GET /v1/events?scope=&after=` | | `200 text/event-stream` | 403 `forbidden` (`scope=all` without authentication off or an admin owner) |
 | `POST /v1/continuations/:token?wait=&timeout=` | `{result, resume?, params?}` | `202` or `200` session | 404 `unknown_token`, 409 `token_already_completed`, 409 `conflict`, see [Parameters](#parameters) |
 | `DELETE /v1/sessions/:id?dry_run=` | | `200 {sessions, continuations, dry_run}` | 404, 409 `run_in_progress` |
+
+`prompt` on create may be omitted (with no `media` either): this stores an
+idle session with no turn at all, `status: "ready"`, ready for a later
+message, mail, or `resume` -- nothing runs. A `prompt` behaves as before.
+
+`parent` on create (a session id) records the new session as a child of
+that one, for lineage only: it is listed through `?parent=`, deleted with
+its parent, and is never told anything by its parent or vice versa. The
+caller must be able to see the parent (another owner's answers
+`404 unknown_session`). This is what an attached TUI sends for
+`createSessionAsChild` and `spawnSession`.
+
+`wait=true` on `GET /v1/sessions/:id` first waits (up to `timeout` seconds,
+default 120, at most 600) for the session's active run to stop, then
+answers the session with `200`, or `202` if a run is still active once the
+time is up. Without `wait`, it answers at once, always `200`.
+
+`at_turn` on fork is a 0-based index into the session's `turns`, **newest
+first** (`turns[0]` is the most recent turn): the fork keeps that turn and
+every older one, dropping anything newer. Absent, the whole session is
+copied. `agent` rebinds the fork to another agent's slug (also how to
+"continue with another agent": fork with no `at_turn`, or `at_turn: 0`, and
+an `agent`). The fork gets a fresh `session_id`, `forkedFromSessionId` set
+to the source, the source's parent link and non-secret parameters, and
+`status` derived from the turns it kept -- never the source's own status,
+and it starts no run, so it never picks up a later change to the source.
 
 Any endpoint that reads a body or a query parameter can answer
 `400 bad_request`; the table names it only where it is the usual outcome.
@@ -381,8 +605,25 @@ Other errors: `401 unauthorized` when authentication is on (with a
 `404 not_found` for an unknown path, `405 method_not_allowed`,
 `413 payload_too_large` for bodies over 32 MiB, and `500 internal_error`.
 
-**Messages** (`prompt`, `media`). `media` is a list of
-`{"mime": "image/png", "base64": "…", "filename": "optional"}`.
+**Messages** (`prompt`, `media`, `interrupt`). `media` is a list of
+`{"mime": "image/png", "base64": "…", "filename": "optional"}`. `interrupt`
+(default `false`) only matters against a busy session (`status: "running"`):
+instead of being refused with `409 not_accepting_messages`, the message is
+posted as interrupt-priority mail, which detaches the session's currently
+attached tool calls (and, with the agent's `interruptCompletions` on,
+cancels an in-flight LLM completion) and asks the model again with this
+message folded in. A detached call's result, if it still arrives, is
+reported on a later run rather than lost. On an idle session `interrupt` has
+no effect: there is nothing to interrupt.
+
+Mail (a message, or any other envelope R1 folds into a turn) normally
+becomes a separate user message after a round of attached tool results. For
+a provider that rejects a user message directly after tool results, set the
+agent's `mailInToolResult` (default `false`): R1 then appends the folded
+mail, with the same `[mail …]` header, as a trailing block of the *last*
+tool result of that round instead. Only applies when the round actually had
+tool calls; a plain user turn (no tool results) is unaffected, and
+detached/deferred results already arrive as mail of their own.
 
 **Results** (`result`). A JSON string is a text result. Other forms are
 `{"type": "text", "content": "…"}`, `{"type": "json", "content": <any>}`,
@@ -398,6 +639,17 @@ of a session; another owner's session answers `404 unknown_session`). `limit` is
 **Cancelling** stops the active run and its background tool calls. The
 session is stored with the status its turns imply, usually `ready`. The
 cancelled calls are reported to the LLM on the next run.
+
+**`cancel-attached`** hard-cancels every tool call currently attached to the
+session, through the async engine, *without* stopping the run itself. A
+cancelled call's result never arrives. Contrast with posting a message with
+`interrupt: true`, which only detaches attached calls and lets them finish.
+
+**`pause`** posts `Pause` control mail: the run stops at its next iteration
+and the session is stored as `status: "paused"`. Attached calls keep running
+unless the agent's config sets `pauseCancelsCalls` — cancel them explicitly
+with `cancel-attached` instead. `resume` works from `paused` regardless of
+whether the pause has taken effect yet.
 
 **Deleting** removes the session, all its sub-sessions, and their
 continuation tokens. It is refused while a run is active on any of them or on
@@ -493,12 +745,48 @@ Several tokens may share an owner. The file is read at startup.
 All owners share the agents and the API keys of the server.
 
 **Browser origins.** Without `--auth-tokens`, requests carrying an `Origin`
-header that is not `localhost`, `127.0.0.1`, or `[::1]` answer
-`403 forbidden_origin`. This stops a web page from reaching a local server
-through DNS rebinding. Clients that send no `Origin` (curl, servers, MCP
-clients) are not affected. With authentication on, origins are not checked.
-`/healthz`, `/openapi.json` and `/` are answered before the check, so a
-monitor or a documentation browser reaches them from anywhere.
+header that is not `localhost`, `127.0.0.1`, `[::1]`, or a `--cors-origin`
+answer `403 forbidden_origin`. This stops a web page from reaching a local
+server through DNS rebinding. Clients that send no `Origin` (curl, servers,
+MCP clients) are not affected. With authentication on, origins are not
+checked (a bearer token already proves the caller is authorized; there is no
+cookie to leak). `/healthz`, `/openapi.json` and `/` are answered before the
+check, so a monitor or a documentation browser reaches them from anywhere.
+
+**Cross-origin browser access (CORS).** `--cors-origin ORIGIN` (repeatable)
+lets a page served by a *different* origin — another host, port, or scheme —
+call the API and open its event stream directly, instead of proxying
+through that page's own backend. An origin must match exactly: scheme and
+port are significant, host is compared case-insensitively (so
+`http://app.example:5173` and `https://app.example` are different origins,
+and each needs its own `--cors-origin`). `--cors-origin '*'` allows any
+origin and is refused at startup together with `--auth-tokens`, since with
+tokens in play a bearer credential must not be sent to a page the operator
+never named.
+
+A listed origin:
+
+* passes the origin check above even without `--auth-tokens` — it was opted
+  in explicitly, unlike an arbitrary non-loopback origin;
+* gets `Access-Control-Allow-Origin` (echoing the request's own `Origin`,
+  never a literal `*`), `Vary: Origin`, and
+  `Access-Control-Expose-Headers: Location` on every response, including
+  errors and the event stream (`fetch` needs `Location` to read the
+  `Location` header `POST /v1/sessions` answers with; `EventSource`/`fetch`
+  need the others to read the response at all);
+* gets its `OPTIONS` preflight requests answered with `204` and
+  `Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS`,
+  `Access-Control-Allow-Headers: Authorization, Content-Type, Last-Event-ID`,
+  and `Access-Control-Max-Age: 600`. Preflight is answered on any path,
+  before authentication and before the origin check the real request would
+  otherwise get — except that a non-loopback origin not on the list still
+  gets `403 forbidden_origin` here too, when there is no `--auth-tokens`,
+  matching what the real request would get.
+
+`GET /v1/sessions/:id/events` keeps working cross-origin the same way it
+works same-origin: `EventSource` cannot set the `Authorization` header, so
+with `--auth-tokens` the token still goes as `?access_token=` (see above);
+without tokens, a listed origin needs nothing extra.
 
 ---
 
@@ -558,6 +846,80 @@ their tokens stay valid across restarts.
 
 ---
 
+## Running as a service
+
+Both `agents-server` and `agents-exe serve` are already service-ready: every
+path either needs is a flag, they log JSON lines on stderr (see
+[Logs](#logs) below), `SIGTERM`/`SIGINT` trigger the graceful shutdown
+described above (`--shutdown-grace` bounds it), and `recoverOnStartup` runs
+before the first request is accepted. A `systemd` unit only needs to point
+one at the right files and restart it on crash.
+
+Create a user and directories for its state, put the agent files, API keys
+and token file somewhere readable, and write a unit. This one uses
+`agents-exe serve`, so agents-exe.cfg.json in `WorkingDirectory` can carry
+the agent files instead of repeating `--agent-file`; `agents-server` works
+the same way with `ExecStart=/usr/local/bin/agents-server` and the agent
+files always on the command line:
+
+```ini
+# /etc/systemd/system/agents-server.service
+[Unit]
+Description=agents-server
+After=network.target
+
+[Service]
+Type=simple
+User=agents-server
+Group=agents-server
+ExecStart=/usr/local/bin/agents-exe serve \
+    --agent-file /etc/agents-server/weather.json \
+    --api-keys /etc/agents-server/keys.json \
+    --db /var/lib/agents-server/agents.db \
+    --bind 127.0.0.1 \
+    --port 8080 \
+    --auth-tokens /etc/agents-server/tokens.json \
+    --shutdown-grace 10
+Restart=on-failure
+RestartSec=2
+# The database directory must exist and be writable before the first start.
+StateDirectory=agents-server
+WorkingDirectory=/var/lib/agents-server
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now agents-server
+```
+
+* `--bind 127.0.0.1` keeps the service off the network; put a reverse proxy
+  (for TLS, or to publish it beyond this machine) in front of it, or add
+  `--cors-origin` if a browser page on another origin on this machine needs
+  to reach it directly (see [Authentication](#authentication)).
+* `--auth-tokens` is strongly recommended for anything not strictly
+  loopback-only: see the warning at the top of this document.
+* The server writes one JSON object per line to stderr, with no other output
+  on stdout; under `systemd` that means `journalctl -u agents-server -f`
+  shows the log stream directly, one JSON line per entry, without extra
+  timestamps or framing getting in the way of `jq`. `journalctl -u
+  agents-server -o cat | jq .` is a convenient way to filter it.
+* On `sudo systemctl stop agents-server` (or a redeploy), `systemd` sends
+  `SIGTERM`: the server stops accepting new connections, ends event streams,
+  answers waiting requests with their current state, and gives other open
+  requests up to `--shutdown-grace` seconds before it cancels active runs
+  (storing their sessions) and exits. Set `TimeoutStopSec` in the unit at
+  least a few seconds above `--shutdown-grace`, or `systemd` may `SIGKILL`
+  the process before the grace period elapses.
+* `Restart=on-failure` restarts the service if it exits non-zero (for
+  example, a database it cannot open); it does not restart on a clean
+  `systemctl stop`. `recoverOnStartup` then picks up sessions a crash left
+  `running`, as described above.
+
+---
+
 ## Logs
 
 The server writes one JSON object per line on stderr, with `ts`, `kind`,
@@ -567,7 +929,7 @@ and, when known, `session_id`:
 |---|---|
 | `server.started` | `bind`, `port`, `agents`, `admin_owners`, `database`, `authentication` (`bearer` or `none`), `ui`, and `warning` when authentication is off |
 | `http.request` | `method`, `path`, `status`, `ms` (when the response starts) |
-| `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed` | `session_id` |
+| `run.started`, `session.updated`, `calls.deferred`, `run.stopped`, `session.failed`, `tool.started`, `tool.completed`, `tool.progressed`, `subcall.started`, `subcall.completed`, `subcall.failed`, `session.created`, `session.deleted`, `hook.failed` | `session_id` |
 | `llm.request` / `llm.response` | `bytes`, token counts |
 | `llm.http` | `method`, `host`, `path`, `status` |
 | `sessions.recovered` | `session_ids` |
@@ -610,6 +972,81 @@ main = do
 ```
 
 The HTTP layer itself is in `examples/agents-server/src/AgentsServer/Api.hs`.
+
+### Clients
+
+`System.Agents.Host.Client` (`todos/os-as-standalone-server.md` Phase 3a)
+gives the same operations as a `RunnerClient`: one `Command` in, one
+`Reply` (or a `RunnerError`) out, plus a live event feed, instead of a
+bag of separate `SessionRunner` functions. `System.Agents.Protocol` owns
+the `Command`/`Reply` sum types and their JSON, so a future HTTP or Unix
+socket client can speak the same wire shape `inProcessClient` already
+dispatches in-process:
+
+```haskell
+data RunnerClient = RunnerClient
+    { rcCommand   :: Command -> IO (Either RunnerError Reply)
+    , rcSubscribe :: SubscribeScope -> Maybe EventSeq -> IO (Either ReplayUnavailable Subscription)
+    }
+
+inProcessClient :: Maybe Text -> SessionRunner -> RunnerClient
+```
+
+The `Maybe Text` is the client's own identity (an owner, or `Nothing`),
+used for `CreateSession`, `SpawnSession`, `SendMail` and `ForkSession` --
+a `Command` never carries a caller-asserted owner of its own to trust.
+`System.Agents.Host.Client` also has a typed helper per operation
+(`createSession`, `postMessage`, `resumeSession`, `completeCall`,
+`cancelRun`, `cancelAttachedCalls`, `pauseSession`, `sendMail`, `listMail`,
+`forkSession`, `listSessions`, `getSession`, `listAgents`, `getAgent`,
+`deleteSession`, `awaitRun`, `stats`, `subscribeAll`) that builds the
+`Command` and unwraps the expected `Reply`, failing with `UnexpectedReply`
+(code `unexpected_reply`) on a mismatch -- which only a bug in a
+`RunnerClient` implementation can provoke, `inProcessClient`'s dispatch
+being total over every `Command` constructor:
+
+```haskell
+import System.Agents.Host.Client
+
+main :: IO ()
+main = withHost cfg silent $ \host -> withSessionRunner host $ \runner -> do
+    let client = inProcessClient Nothing runner
+    Right meta <- createSession client "weather" (Just (NewMessage "Weather in Paris?" [] False)) (Just UntilBlocked) mempty
+    Right (stopped, _) <- awaitRun client meta.smSessionId 120
+    print stopped.smStatus
+```
+
+`System.Agents.Host.Client.Http.httpClient` is the second implementation:
+the same `RunnerClient` over this server's HTTP API, so the program above
+runs unchanged against a server started elsewhere:
+
+```haskell
+import System.Agents.Host.Client.Http
+
+main :: IO ()
+main = do
+    endpoint <- either fail pure (parseEndpoint "http://127.0.0.1:8080")  -- or "unix:///run/agents.sock"
+    client <- httpClient (defaultHttpClientConfig endpoint){hccToken = Just "alice-token"}
+    Right meta <- createSession client "weather" (Just (NewMessage "Weather in Paris?" [] False)) (Just UntilBlocked) mempty
+    Right (stopped, _) <- awaitRun client meta.smSessionId 120
+    print stopped.smStatus
+```
+
+Each `Command` maps onto one route of the table above (`SpawnSession` and
+`createSessionAsChild` onto `POST /v1/sessions` with `parent`, `AwaitRun`
+onto `GET /v1/sessions/:id?wait=true`, `Stats` onto `/healthz`,
+`ListSessions` onto as many `GET /v1/sessions` pages as its `limit` needs).
+An error answer decodes into the `RunnerError` its code names, with the
+session, token, agent or turn the command named put back; one that is not
+a runner error (`unauthorized`, `bad_request`, ...), a connection failure,
+or an undecodable answer is `TransportError` (code `transport_error`).
+`rcSubscribe` follows `GET /v1/events` (or one session's stream), answers
+`ReplayUnavailable` from the `Agents-Replay` header exactly when the
+in-process runner would, and reconnects a dropped or stalled stream on its
+own with `Last-Event-ID`, never delivering an event twice. `AllSessions`
+falls back to `scope=owner` when the server refuses `scope=all` (a
+non-admin token). The token goes in `Authorization` on commands and in
+`?access_token=` on streams.
 
 ## Not yet supported
 

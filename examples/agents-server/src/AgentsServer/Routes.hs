@@ -97,7 +97,11 @@ type SessionsAPI =
                     :> Get '[JSON] SessionListBody
                 :<|> Capture "id" SessionId
                     :> ( Summary "One session, with its conversation and pending calls"
-                            :> Get '[JSON] SessionBody
+                            :> Description
+                                "With `wait`, first waits (up to `timeout` seconds) for the session's \
+                                \active run to stop, then answers 202 if a run is still active, 200 \
+                                \otherwise. This is how an attached client's `awaitRun` works."
+                            :> WaitParams (Get '[JSON] SessionBody)
                             :<|> Summary "Delete a session and everything below it"
                                 :> Description
                                     "Removes the session, its sub-sessions, and their continuation \
@@ -140,6 +144,30 @@ type SessionsAPI =
                             :<|> Summary "The deferred calls this session waits on"
                                 :> "pending"
                                 :> Get '[JSON] PendingBody
+                            :<|> Summary "Send mail to this session"
+                                :> Description
+                                    "Generalizes the interrupt on POST .../messages (G6): any MailBody \
+                                    \-- a user or agent message, or a control instruction (pause, \
+                                    \resume, cancel calls, stop the run) -- from any sender. A stored, \
+                                    \not-currently-live session still accepts it (its durable mailbox), \
+                                    \and a paused session may wake on it (see the Mail section of \
+                                    \docs/agents-server.md)."
+                                :> "mail"
+                                :> ReqBody '[JSON] MailPostBody
+                                :> Post '[JSON] RawJson
+                            :<|> Summary "This session's mail"
+                                :> Description "Every envelope ever accepted, oldest first, or only the unread ones."
+                                :> "mail"
+                                :> QueryParam "unread" Bool
+                                :> Get '[JSON] MailListBody
+                            :<|> Summary "Fork this session"
+                                :> Description
+                                    "Copies the session, or a prefix of it up to and including one turn, into \
+                                    \a fresh session with its own id and forkedFromSessionId set. Starts no \
+                                    \run. The answer carries a Location header naming the new session."
+                                :> "fork"
+                                :> ReqBody '[JSON] ForkBody
+                                :> PostCreated '[JSON] SessionBody
                        )
            )
 

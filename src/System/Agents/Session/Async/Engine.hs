@@ -53,7 +53,7 @@ module System.Agents.Session.Async.Engine (
 
 import Control.Concurrent (QSem, newQSem, signalQSem, waitQSem)
 import Control.Concurrent.Async (Async, async, cancel, poll, waitAnyCatch)
-import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTQueue)
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
 import Control.Exception (SomeAsyncException, SomeException, bracket_, catch, displayException, finally, fromException, throwIO)
 import Control.Monad (forM, forM_, void, when)
 import Data.Aeson (Value, object, toJSON, (.=))
@@ -69,7 +69,7 @@ import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Conversation.Types (ProgressKind (..), ToolCallProgress (..), ToolCallState (tcStatus), ToolCallStatus (..))
 import System.Agents.OS.Core.Types (EntityId)
 import System.Agents.OS.Core.World (World, getComponent)
-import System.Agents.OS.Events (OSEvent (..), ToolCallActivity (..), ToolCallPhase (..))
+import System.Agents.OS.Events (OSEmission (..), ToolCallActivity (..), ToolCallPhase (..))
 import System.Agents.Session.Mailbox (Mailbox (..))
 import System.Agents.Session.Types (
     LlmToolCall (..),
@@ -433,23 +433,22 @@ runCall engine ctx call =
         Just (_ :: SomeAsyncException) -> throwIO e
         Nothing -> pure $ Left (Text.pack $ displayException e)
 
--- | Publish an activity event on the context's OS event queue, if any.
+-- | Publish an activity event through the context's 'ctxEmit' hook
+-- (@todos/os-as-standalone-server.md@ G3), if present.
 emitActivity :: ToolExecutionContext -> TrackedToolCall -> ToolCallPhase -> IO ()
-emitActivity ctx tc phase =
-    forM_ (ctxEventQueue ctx) $ \queue -> do
-        now <- getCurrentTime
-        atomically $
-            writeTQueue queue $
-                OSEvent_ToolCallActivity
-                    ToolCallActivity
-                        { tcaSessionId = ctxSessionId ctx
-                        , tcaConversationId = ctxConversationId ctx
-                        , tcaToolCallId = tcId tc
-                        , tcaProviderCallId = providerToolCallId (tcCall tc)
-                        , tcaToolName = llmToolCallName (tcCall tc)
-                        , tcaPhase = phase
-                        , tcaAt = now
-                        }
+emitActivity ctx tc phase = do
+    now <- getCurrentTime
+    let activity =
+            ToolCallActivity
+                { tcaSessionId = ctxSessionId ctx
+                , tcaConversationId = ctxConversationId ctx
+                , tcaToolCallId = tcId tc
+                , tcaProviderCallId = providerToolCallId (tcCall tc)
+                , tcaToolName = llmToolCallName (tcCall tc)
+                , tcaPhase = phase
+                , tcaAt = now
+                }
+    forM_ (ctxEmit ctx) $ \emitFn -> emitFn (EmitToolCallActivity activity)
 
 -- | Build a progress callback that writes structured updates to the OS entity.
 makeProgressCallback :: World -> EntityId -> Value -> IO ()

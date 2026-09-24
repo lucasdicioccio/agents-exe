@@ -273,6 +273,7 @@ buildAgentConfig catalog opts = do
                 , pauseCancelsCalls = Nothing
                 , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                 }

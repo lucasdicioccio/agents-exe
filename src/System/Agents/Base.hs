@@ -1759,6 +1759,16 @@ data Agent
     waiting for it to finish. Opt-in: default 'False' leaves an in-flight
     completion running and the mail is picked up at the next R1\/R2.
     -}
+    , mailInToolResult :: Maybe Bool
+    {- ^ @todos/os-as-standalone-server.md@ Design §5 "What the LLM sees":
+    for a provider that rejects a user message directly after tool
+    results, R1 appends the folded mail as a trailing text block of the
+    last tool result of a round of attached (sync) tool calls instead of
+    a separate user message, with the same @[mail ...]@ header. Applies
+    only when the turn being built follows tool calls; a plain user turn
+    (no tool results) is unaffected, and detached\/deferred results
+    already arrive as mail of their own. Default 'False'.
+    -}
     , mailScope :: Maybe MailScope
     {- ^ @todos/session-mailbox.md@ §5 "Permissions": how far this agent's
     mail may reach, relative to its own place in session lineage. Default

@@ -58,7 +58,7 @@ import System.Agents.Session.Async (ContinuationStore, mkSqliteContinuationStore
 import System.Agents.Session.Mailbox (MailStore)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.Session.Types (SessionId)
-import System.Agents.SessionStore (SessionBackend, backendCatalog, mkSqliteSessionStore)
+import System.Agents.SessionStore (FileSessionStore (..), SessionBackend, backendCatalog, fileSessionBackend, mkCompositeSessionStore, mkSqliteSessionStore)
 import System.Agents.Tools.Params.Types (ProcessParams)
 
 -- | Loaded agents and the stores sessions live in.
@@ -103,6 +103,17 @@ data HostConfig = HostConfig
     -- ^ Stream root agents' LLM answers (see 'hostStreamTokens').
     , hcProcessParams :: ProcessParams
     -- ^ See 'hostProcessParams'.
+    , hcLegacySessionDirs :: [FilePath]
+    {- ^ Read-only fallback locations for pre-existing @conv.<uuid>.json@
+    session history (@todos/os-as-standalone-server.md@ Design §6). When
+    non-empty, 'withHost' and 'withHostStores' composite the primary
+    backend with a file-backed read fallback over these directories
+    ('mkCompositeSessionStore'), so old file-store history stays visible
+    once the primary backend (SQLite or Postgres) is the one being written
+    to. Both the TUI and @agents-exe serve@ go through this: passing a
+    config's resolved session-store read prefixes here is what "serve gets
+    the legacy fallback for free" means.
+    -}
     }
 
 -- | A configuration with the default idle time of 15 minutes.
@@ -116,6 +127,7 @@ defaultHostConfig files keysFile dbPath =
         , hcLiveSessionTtl = 15 * 60
         , hcStreamTokens = False
         , hcProcessParams = mempty
+        , hcLegacySessionDirs = []
         }
 
 data HostTrace
@@ -167,7 +179,9 @@ withHost cfg tracer action =
 -}
 withHostStores :: HostConfig -> HostStores -> Tracer IO HostTrace -> (Host -> IO a) -> IO a
 withHostStores cfg stores tracer action = do
-    let backend = stores.hsSessions
+    let backend = case cfg.hcLegacySessionDirs of
+            [] -> stores.hsSessions
+            dirs -> mkCompositeSessionStore (stores.hsSessions : map (fileSessionBackend . FileSessionStore) dirs)
         store = stores.hsContinuations
     keys <- readOpenApiKeysFile cfg.hcApiKeysFile
     let rootDeps =

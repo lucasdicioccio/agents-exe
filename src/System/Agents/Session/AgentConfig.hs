@@ -72,6 +72,7 @@ applyAgentDurableConfig jsonAgent =
         . setMaybe (Base.toolCallPolicyConfig jsonAgent) (withToolCallPolicy . buildToolCallPolicy)
         . setMaybe (Base.executionMode jsonAgent) withExecutionMode
         . setMaybe (Base.interruptCompletions jsonAgent) withInterruptCompletions
+        . setMaybe (Base.mailInToolResult jsonAgent) withMailInToolResult
   where
     setMaybe :: Maybe a -> (a -> b -> b) -> b -> b
     setMaybe m f x = maybe x (`f` x) m

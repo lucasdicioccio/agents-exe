@@ -1,16 +1,39 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Tests for the session runner and the host.
-module RunnerTests (tests) where
+module RunnerTests (
+    tests,
+
+    -- * Fixtures, reused by "HostClientTests"
+    testHost,
+    deferAll,
+    backgroundAll,
+    firstThen,
+    onceThen,
+    remoteCall,
+    slowCall,
+    gatedTool,
+    singleToken,
+    message,
+    expectRight,
+    currentSession,
+    responseTexts,
+    sessionTexts,
+    hasBackgroundCall,
+    waitUntil,
+) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, newTVarIO, readTVarIO, writeTVar)
+import Control.Exception (bracket)
 import Control.Monad (void)
+import Data.List (group, sortOn)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
@@ -45,7 +68,7 @@ import System.Agents.Session.Async (ContinuationStore (..), mkSqliteContinuation
 import System.Agents.Session.Base hiding (SessionProgress (..))
 import System.Agents.Session.Mailbox (Mailbox (..), MailboxInfo (..), MailRouter (..), newInMemoryMailbox, newMailRouter)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
-import System.Agents.SessionStore
+import System.Agents.SessionStore hiding (listSessions)
 import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM)
 import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.Context (ToolExecutionContext (..), ToolPortal, ToolResult (..), mkMinimalContext)
@@ -91,6 +114,10 @@ tests =
         , testCase "cancelAttachedCalls cancels a call while the loop is blocked waiting on it" cancelAllAttachedDuringWaitTest
         , testCase "pauseSession stops a run and leaves calls running by default" pauseSessionTest
         , testCase "a background call reports tool.started and tool.completed events" toolCallEventsTest
+        , testCase "a background call reports tool.progressed events through ctxEmit" toolCallProgressedEventsTest
+        , testCase "a sub-agent call reports subcall.started and subcall.completed on the parent's stream" subcallEventsTest
+        , testCase "a sub-agent call to a declared helper runs it as a real session (smParent, tool result)" subcallAsSessionTest
+        , testCase "cancelling the parent's run cancels the child session it started" subcallCancelChildTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
         , testCase "unwatch-session stops forwarding" unwatchSessionTest
@@ -98,6 +125,24 @@ tests =
         , testCase "list-sessions merges live MailRouter entries with the persisted catalog" listSessionsMergeTest
         , testCase "run's spawn-session resolves a helper slug into a registered child session" oneShotSpawnSessionTest
         , testCase "run's spawn-session refuses an unknown helper slug" oneShotSpawnSessionUnknownSlugTest
+        , testCase "event sequence numbers are strictly increasing" eventSeqIncreasingTest
+        , testCase "replay after N returns exactly the events after N, from the ring" replayAfterNTest
+        , testCase "replay across the boundary into live events has no gap or duplicate" replayLiveBoundaryTest
+        , testCase "a ring smaller than the run's events reports replay unavailable" replayUnavailableTest
+        , testCase "replay after a sequence number ahead of the server's own is unavailable" replayFutureSeqTest
+        , testCase "an owner-scoped subscription only sees that owner's events" ownerScopeTest
+        , testCase "session.created and session.deleted are emitted" sessionCreatedDeletedTest
+        , testCase "createSessionAs with no message creates an idle session with no turn and starts no run" createNoMessageTest
+        , testCase "listSessions filters by owner and reflects a live session's current status" listSessionsRunnerTest
+        , testCase "sendMail with Control StopRun stops a run" sendMailStopRunTest
+        , testCase "sendMail with AgentMessage wakes a paused session when wakeOn/resumeOnAnyMail allow it" sendMailAgentMessageWakesPausedTest
+        , testCase "listMail lists all mail, or only what is still unread" listMailTest
+        , testCase "forkSession with no at_turn copies the whole session" forkWholeTest
+        , testCase "forkSession with at_turn keeps that turn and every older one" forkAtTurnTest
+        , testCase "forkSession with a new agent slug rebinds the fork" forkWithNewAgentTest
+        , testCase "forkSession refuses a turn index out of range" forkUnknownTurnTest
+        , testCase "forkSession refuses an unknown agent slug" forkUnknownAgentTest
+        , testCase "forkSession's status is derived from its own turns, not shared with the source" forkDoesNotShareStatusTest
         ]
 
 -------------------------------------------------------------------------------
@@ -114,7 +159,7 @@ deferredFlowTest = do
         (blocked, active) <- expectRight =<< awaitRun runner sid 5
         (blocked.smStatus, active) @?= (StatusWaitingExternal, False)
         token <- singleToken runner sid
-        next <- subscribe runner sid
+        next <- subscribeSession runner sid
         _ <- expectRight =<< completeCall runner token (TextResponse "42") True Map.empty
         kinds <- eventsUntilStopped next
         assertBool ("events: " <> show kinds) (take 1 kinds == ["session.updated"] && "run.started" `elem` kinds && last kinds == "run.stopped")
@@ -289,6 +334,117 @@ awaitRunTest = do
         unknown <- awaitRun runner missing 0.1
         fmap fst unknown @?= Left (UnknownSession missing)
 
+-------------------------------------------------------------------------------
+-- forkSession (G6)
+-------------------------------------------------------------------------------
+
+-- | With no @at_turn@, a fork copies every turn, records
+-- 'forkedFromSessionId', keeps the source's agent, and starts no run.
+forkWholeTest :: Assertion
+forkWholeTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        (sourceSess, _) <- maybe (assertFailure "source session missing") pure =<< getSession runner sid
+
+        forked <- expectRight =<< forkSession runner (Just "alice") sid Nothing Nothing
+        (forked.smSessionId /= sid) @? "the fork has a fresh session id"
+        forked.smAgent @?= Just "test-agent"
+        forked.smOwner @?= Just "alice"
+        (active, _) <- expectRight =<< awaitRun runner forked.smSessionId 0.2
+        active.smSessionId @?= forked.smSessionId -- no run started
+
+        (forkedSess, _) <- maybe (assertFailure "forked session missing") pure =<< getSession runner forked.smSessionId
+        forkedSess.forkedFromSessionId @?= Just sid
+        forkedSess.turns @?= sourceSess.turns
+
+-- | @at_turn@ (a 0-based index into 'turns', newest first, matching the
+-- TUI's own turn navigation) keeps that turn and every older one, the
+-- same truncation @handleForkAtTurn@ performs in the TUI.
+forkAtTurnTest :: Assertion
+forkAtTurnTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        (sourceSess, _) <- maybe (assertFailure "source session missing") pure =<< getSession runner sid
+        assertBool "at least two turns to fork a prefix of" (length sourceSess.turns >= 2)
+
+        forked <- expectRight =<< forkSession runner Nothing sid (Just 1) Nothing
+        (forkedSess, _) <- maybe (assertFailure "forked session missing") pure =<< getSession runner forked.smSessionId
+        forkedSess.turns @?= drop 1 sourceSess.turns
+
+-- | An @agent@ slug rebinds the fork to another agent instead of the
+-- source's own (also how "continue with another agent" is done: a fork at
+-- the head with a new agent).
+forkWithNewAgentTest :: Assertion
+forkWithNewAgentTest = do
+    node1 <- testNode "{}"
+    node2 <- testNode "{\"slug\": \"other-agent\"}"
+    host <- testHost [node1, node2] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+
+        forked <- expectRight =<< forkSession runner Nothing sid Nothing (Just "other-agent")
+        forked.smAgent @?= Just "other-agent"
+
+-- | A turn index outside @[0, length turns)@ is refused with 'UnknownTurn'.
+forkUnknownTurnTest :: Assertion
+forkUnknownTurnTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        result <- forkSession runner Nothing sid (Just 999) Nothing
+        result @?= Left (UnknownTurn sid 999)
+
+-- | An unknown @agent@ slug is refused with 'UnknownAgent', same as
+-- 'createSessionAs'.
+forkUnknownAgentTest :: Assertion
+forkUnknownAgentTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        result <- forkSession runner Nothing sid Nothing (Just "no-such-agent")
+        result @?= Left (UnknownAgent "no-such-agent")
+
+-- | A fork's status is derived from the turns it copied, independently of
+-- whatever happens to the source afterwards (pausing the source here does
+-- not pause its fork).
+forkDoesNotShareStatusTest :: Assertion
+forkDoesNotShareStatusTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+
+        forked <- expectRight =<< forkSession runner Nothing sid Nothing Nothing
+        forked.smStatus @?= StatusIdle
+        let forkedSid = forked.smSessionId
+
+        _ <- expectRight =<< pauseSession runner sid
+        -- The mailbox is checked before any step, so this stops at once.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, _) <- expectRight =<< awaitRun runner sid 5
+        paused.smStatus @?= StatusPaused
+
+        (_, forkedMeta) <- maybe (assertFailure "forked session missing") pure =<< getSession runner forkedSid
+        forkedMeta.smStatus @?= StatusIdle
+
 deleteTest :: Assertion
 deleteTest = do
     gate <- newEmptyMVar
@@ -304,7 +460,7 @@ deleteTest = do
     agentId <- AgentId <$> nextRandom
     atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
     withSessionRunner host $ \runner -> do
-        meta <- expectRight =<< createSessionAs runner (Just "alice") "parent" (message "delegate") (Just UntilBlocked) Map.empty
+        meta <- expectRight =<< createSessionAs runner (Just "alice") "parent" (Just (message "delegate")) (Just UntilBlocked) Map.empty
         let sid = meta.smSessionId
             children = map (.smSessionId) <$> host.hostBackend.sbQuery allSessionsQuery{sqParent = Just sid}
         waitUntil $ not . null <$> children
@@ -375,7 +531,7 @@ subscribeFilterTest = do
     withSessionRunner host $ \runner -> do
         a <- expectRight =<< createSession runner "test-agent" (message "first") Nothing
         b <- expectRight =<< createSession runner "test-agent" (message "second") Nothing
-        next <- subscribe runner b.smSessionId
+        next <- subscribeSession runner b.smSessionId
         -- Session a's events come first in the stream.
         _ <- expectRight =<< resume runner a.smSessionId UntilBlocked Map.empty
         _ <- expectRight =<< awaitRun runner a.smSessionId 5
@@ -735,6 +891,183 @@ oneShotSpawnSessionUnknownSlugTest = withSystemTempDirectory "oneshot-spawn-sess
         Left _ -> pure ()
         Right sid -> assertFailure ("expected an unknown slug to be refused, got session " <> show sid)
 
+-------------------------------------------------------------------------------
+-- Sequence numbers, ring and replay (Phase 2a, G5)
+-------------------------------------------------------------------------------
+
+-- | Every event of one run, in order, replayed from the ring from the very
+-- start (@after = EventSeq 0@, older than any real event).
+runEventsFromRing :: SessionRunner -> SessionId -> IO [Event]
+runEventsFromRing runner sid = do
+    next <- expectSubscribed runner (OneSession sid) (Just (EventSeq 0))
+    collectUntilStopped next
+
+eventSeqIncreasingTest :: Assertion
+eventSeqIncreasingTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        events <- runEventsFromRing runner sid
+        assertBool "at least a few events" (length events >= 3)
+        let seqs = map (.evSeq) events
+        assertBool ("strictly increasing: " <> show seqs) (and (zipWith (<) seqs (drop 1 seqs)))
+
+replayAfterNTest :: Assertion
+replayAfterNTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        allEvents <- runEventsFromRing runner sid
+        assertBool "at least two events to split" (length allEvents >= 2)
+        let cut = head allEvents
+        next <- expectSubscribed runner (OneSession sid) (Just cut.evSeq)
+        replayed <- collectUntilStopped next
+        replayed @?= drop 1 allEvents
+
+-- | Subscribing with an @after@ still inside the ring, then generating more
+-- events live, sees each event exactly once across the replay/live
+-- boundary -- the point of taking the ring snapshot and the channel
+-- duplicate in one STM transaction.
+replayLiveBoundaryTest :: Assertion
+replayLiveBoundaryTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        first <- expectRight =<< createSession runner "test-agent" (message "first") (Just UntilBlocked)
+        let sid = first.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        before <- runEventsFromRing runner sid
+        let cut = head before
+        -- Subscribe for the replay + live boundary: 'before's own events
+        -- past 'cut' replay first, then a second run's events come live.
+        next <- expectSubscribed runner (OneSession sid) (Just cut.evSeq)
+        got <- collectUntilStopped next
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        after <- collectUntilStopped next
+        let seqs = map (.evSeq) (got <> after)
+        assertBool "no gap or duplicate across the boundary" (and (zipWith (<) seqs (drop 1 seqs)))
+        (seqs == nubOrd seqs) @? "no duplicate sequence numbers"
+  where
+    nubOrd = map head . group . sortOn id
+
+replayUnavailableTest :: Assertion
+replayUnavailableTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner_ (newSessionRunnerWith (RunnerConfig 2) host) $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        subscribe runner (OneSession sid) (Just (EventSeq 0)) >>= \case
+            Left ReplayUnavailable -> pure ()
+            Right _ -> assertFailure "expected replay to be unavailable with a 2-event ring"
+
+-- | @after@ naming a sequence number this server never stamped (e.g. a
+-- client that remembers an id from a previous process) is unavailable,
+-- not silently treated as "go live": there is no way to tell whether
+-- events between it and now were missed.
+replayFutureSeqTest :: Assertion
+replayFutureSeqTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        allEvents <- runEventsFromRing runner sid
+        assertBool "at least one event" (not (null allEvents))
+        let EventSeq n = maximum (map (.evSeq) allEvents)
+        subscribe runner (OneSession sid) (Just (EventSeq (n + 1000))) >>= \case
+            Left ReplayUnavailable -> pure ()
+            Right _ -> assertFailure "expected replay to be unavailable for a sequence number ahead of the server's own"
+
+ownerScopeTest :: Assertion
+ownerScopeTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        alice <- expectRight =<< createSessionAs runner (Just "alice") "test-agent" (Just (message "hi")) Nothing Map.empty
+        bob <- expectRight =<< createSessionAs runner (Just "bob") "test-agent" (Just (message "hi")) Nothing Map.empty
+        next <- expectSubscribed runner (Owner (Just "alice")) Nothing
+        _ <- expectRight =<< resume runner alice.smSessionId UntilBlocked Map.empty
+        aliceEvents <- collectUntilStopped next
+        assertBool "only alice's session" (all ((== Just alice.smSessionId) . (.evSession)) aliceEvents)
+        _ <- expectRight =<< resume runner bob.smSessionId UntilBlocked Map.empty
+        _ <- expectRight =<< awaitRun runner bob.smSessionId 5
+        -- No event of bob's ever showed up on alice's subscription.
+        stray <- timeout 200_000 next
+        stray @?= Nothing
+
+sessionCreatedDeletedTest :: Assertion
+sessionCreatedDeletedTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        next <- expectSubscribed runner AllSessions Nothing
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") Nothing
+        untilKind next "session.created"
+        _ <- expectRight =<< deleteSession runner meta.smSessionId DeleteForReal
+        untilKind next "session.deleted"
+  where
+    -- 'createSession' also emits 'session.updated' (the initial store);
+    -- skip past anything that is not the kind under test.
+    untilKind :: IO Event -> Text -> IO ()
+    untilKind next kind = do
+        mEv <- timeout 5_000_000 next
+        case mEv of
+            Nothing -> assertFailure ("no " <> Text.unpack kind <> " within 5 seconds")
+            Just ev
+                | eventKind ev.evBody == kind -> pure ()
+                | otherwise -> untilKind next kind
+
+-- | G2: 'createSessionAs' with no message stores an idle session with no
+-- turn, emits 'SessionCreated', and starts no run even when a 'RunMode' is
+-- given (a run needs something to step).
+createNoMessageTest :: Assertion
+createNoMessageTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSessionAs runner (Just "alice") "test-agent" Nothing (Just UntilBlocked) Map.empty
+        meta.smStatus @?= StatusReady
+        (sess, meta') <- maybe (assertFailure "session missing") pure =<< getSession runner meta.smSessionId
+        sess.turns @?= []
+        meta'.smStatus @?= StatusReady
+        (afterWait, running) <- expectRight =<< awaitRun runner meta.smSessionId 1
+        afterWait.smStatus @?= StatusReady
+        running @?= False
+
+{- | 'listSessions' on the runner (G6): filters like 'sbQuery' (an
+owner query only sees that owner's sessions), and reflects this process's
+own live, cached status for a session it is running, rather than only what
+was last stored.
+-}
+listSessionsRunnerTest :: Assertion
+listSessionsRunnerTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        alice <- expectRight =<< createSessionAs runner (Just "alice") "test-agent" (Just (message "hi")) Nothing Map.empty
+        bob <- expectRight =<< createSessionAs runner (Just "bob") "test-agent" (Just (message "hi")) Nothing Map.empty
+        onlyAlice <- listSessions runner allSessionsQuery{sqOwner = Just "alice"}
+        map (.smSessionId) onlyAlice @?= [alice.smSessionId]
+        _ <- expectRight =<< resume runner bob.smSessionId UntilBlocked Map.empty
+        _ <- expectRight =<< awaitRun runner bob.smSessionId 5
+        got <- listSessions runner allSessionsQuery{sqParent = Nothing}
+        let bobStatus = [m.smStatus | m <- got, m.smSessionId == bob.smSessionId]
+        bobStatus @?= [StatusIdle]
+
+-- | Like 'withSessionRunner', with the runner already built (so tests can
+-- pick a config other than the default, e.g. a small event ring).
+withSessionRunner_ :: IO SessionRunner -> (SessionRunner -> IO a) -> IO a
+withSessionRunner_ mkRunner = bracket mkRunner shutdownSessionRunner
+
 {- | Get a session to the point where one call runs in the background,
 using the deterministic 'StepOnce'-driven flow 'engineKeptTest' also uses:
 first step issues the call, second step yields while it runs. Driving the
@@ -874,6 +1207,90 @@ wakeOnExcludesUserTest = do
         (final, _) <- expectRight =<< awaitRun runner sid 5
         final.smStatus @?= StatusIdle
 
+-- | 'sendMail' (G6) posting 'Control' 'StopRun' mail stops a run at its
+-- next iteration, the same as the internal 'sendControl' helper other
+-- Control tests use.
+sendMailStopRunTest :: Assertion
+sendMailStopRunTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+
+        _ <- expectRight =<< sendMail runner sid (Just "alice") Normal (Control StopRun)
+        -- A new run's very first iteration checks the mailbox before
+        -- taking any step, so this stops immediately.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (_, active) <- expectRight =<< awaitRun runner sid 5
+        active @?= False
+        putMVar gate ()
+
+-- | 'sendMail' (G6) posting 'AgentMessage' mail wakes a paused session the
+-- same way 'postMessage' does (§5 "Scheduling rule"): only when the
+-- agent's @resumeOnAnyMail@ is set and the mail's sender ('FromUser', for
+-- 'sendMail') classifies into one of its @wakeOn@ kinds ('WakeOnUser' by
+-- default).
+sendMailAgentMessageWakesPausedTest :: Assertion
+sendMailAgentMessageWakesPausedTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAllResumeOnAnyMail
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        sid <- setUpBackgroundCall runner node
+        sendControl runner sid Pause
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        (paused, _) <- expectRight =<< awaitRun runner sid 5
+        paused.smStatus @?= StatusPaused
+
+        _ <- expectRight =<< sendMail runner sid (Just "bob") Normal (AgentMessage "ping" Nothing False)
+        -- 'startRun' stores 'StatusRunning' synchronously before returning.
+        (_, afterSend) <- maybe (assertFailure "session missing") pure =<< getSession runner sid
+        afterSend.smStatus @?= StatusRunning
+
+        putMVar gate ()
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+
+        -- 'listMail' (G6): every envelope, and, filtered, only what is
+        -- still unread past the session's stored cursor. Waking the run
+        -- above collects the background call's late result at R1, the
+        -- same receive point that peeks and folds unread mail -- so the
+        -- 'AgentMessage' sent to trigger the wake is folded in by the
+        -- time the run goes idle, and no longer shows up as unread.
+        allMail <- expectRight =<< listMail runner sid False
+        let isPing :: Envelope -> Bool
+            isPing e = case e.envBody of
+                AgentMessage "ping" Nothing False -> True
+                _ -> False
+        assertBool "the AgentMessage that woke the session is in its mail" (any isPing allMail)
+        unread <- expectRight =<< listMail runner sid True
+        assertBool "the AgentMessage that woke the session was folded in, not left unread" (not (any isPing unread))
+
+-- | 'listMail' (G6) lists every envelope ever accepted, unread or not, and
+-- reports an unknown session like every other runner operation.
+listMailTest :: Assertion
+listMailTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "test-agent" (message "hi") Nothing
+        let sid = meta.smSessionId
+        _ <- expectRight =<< sendMail runner sid (Just "alice") Normal (AgentMessage "one" Nothing False)
+        _ <- expectRight =<< sendMail runner sid (Just "alice") Normal (AgentMessage "two" Nothing False)
+        allMail <- expectRight =<< listMail runner sid False
+        length allMail @?= 2
+        -- Nothing has run yet, so nothing has folded this mail in: every
+        -- envelope is still unread past the session's cursor (0).
+        unread <- expectRight =<< listMail runner sid True
+        map (.envSeq) unread @?= map (.envSeq) allMail
+
+        missing <- SessionId <$> nextRandom
+        got <- listMail runner missing False
+        got @?= Left (UnknownSession missing)
+
 -- | 'Control' ('CancelCalls' ids) cancels one specific attached call, which
 -- the run then reports as failed, without stopping the run itself.
 controlCancelCallsTest :: Assertion
@@ -1003,20 +1420,185 @@ toolCallEventsTest = do
         meta <- expectRight =<< createSession runner (Base.slug node.osNodeConfig) (message "go") (Just StepOnce)
         let sid = meta.smSessionId
         _ <- expectRight =<< awaitRun runner sid 5
-        startEvents <- subscribe runner sid
+        startEvents <- subscribeSession runner sid
         -- Second step: starts the background call, then yields while it runs.
         _ <- expectRight =<< resume runner sid StepOnce Map.empty
         _ <- expectRight =<< awaitRun runner sid 5
         startKinds <- eventsUntilStopped startEvents
         assertBool ("tool.started among " <> show startKinds) ("tool.started" `elem` startKinds)
 
-        completeEvents <- subscribe runner sid
+        completeEvents <- subscribeSession runner sid
         putMVar gate ()
         _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
         (final, _) <- expectRight =<< awaitRun runner sid 5
         final.smStatus @?= StatusIdle
         completeKinds <- eventsUntilStopped completeEvents
         assertBool ("tool.completed among " <> show completeKinds) ("tool.completed" `elem` completeKinds)
+
+{- | Phase 2c (@todos/os-as-standalone-server.md@ G3): the async engine's
+'System.Agents.Session.Async.Engine.emitActivity' reports through
+'ctxEmit' -- which 'newAgent' always installs, the one emission mechanism
+since 'OSEvent' and @ctxEventQueue@ were retired (Phase 3c) -- so
+'tool.progressed' events (started, then completed) show up on a runner
+subscription for a call that runs through the engine, independent of the
+'tool.started'\/'tool.completed' events 'emitToolCallEvents' derives by
+diffing sessions.
+-}
+toolCallProgressedEventsTest :: Assertion
+toolCallProgressedEventsTest = do
+    gate <- newEmptyMVar
+    node <- testNode backgroundAll
+    atomically $ writeTVar node.osNodeTools [gatedTool gate]
+    host <- testHost [node] (\_ c -> firstThen [slowCall] c)
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner (Base.slug node.osNodeConfig) (message "go") (Just StepOnce)
+        let sid = meta.smSessionId
+        _ <- expectRight =<< awaitRun runner sid 5
+        startEvents <- subscribeSession runner sid
+        -- Second step: starts the background call, then yields while it runs.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        _ <- expectRight =<< awaitRun runner sid 5
+        startKinds <- eventsUntilStopped startEvents
+        assertBool ("tool.progressed among " <> show startKinds) ("tool.progressed" `elem` startKinds)
+
+        completeEvents <- subscribeSession runner sid
+        putMVar gate ()
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        completeKinds <- eventsUntilStopped completeEvents
+        assertBool ("tool.progressed among " <> show completeKinds) ("tool.progressed" `elem` completeKinds)
+
+{- | Phase 2c (@todos/os-as-standalone-server.md@ G3/G10): a
+@prompt_agent_\<slug\>@ call, run attached (sync) through
+'System.Agents.AgentTree.OneShotTool', reports 'subcall.started' and
+'subcall.completed' through the parent agent's 'ctxEmit' -- inherited by
+the sub-agent's own context the same way 'ctxWorld' is -- so they show
+up on the *parent*'s own event stream (its 'SessionId' is what 'newAgent'
+closes 'ctxEmit' over; see 'toEventBody'\'s haddock on why the child is not
+'evSession'). Modeled on 'deleteTest''s parent\/child fixture.
+-}
+subcallEventsTest :: Assertion
+subcallEventsTest = do
+    child <- testNode "{\"slug\": \"child\"}"
+    parent <-
+        testNode
+            "{\"slug\": \"parent\", \"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}}"
+    host <-
+        testHost [parent] $ \node c ->
+            if Base.slug node.osNodeConfig == "child"
+                then mockCompletion c
+                else firstThen [childCall] c
+    agentId <- AgentId <$> nextRandom
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "parent" (message "delegate") Nothing
+        let sid = meta.smSessionId
+        next <- subscribeSession runner sid
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        kinds <- eventsUntilStopped next
+        assertBool ("subcall.started among " <> show kinds) ("subcall.started" `elem` kinds)
+        assertBool ("subcall.completed among " <> show kinds) ("subcall.completed" `elem` kinds)
+  where
+    childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+
+{- | Phase 5 (@todos/os-as-standalone-server.md@ G10): with the helper
+declared in the caller's own tree ('osNodeChildren', so
+'Host.Runner.findHelperNode' can resolve it -- unlike 'subcallEventsTest',
+which wires the tool without declaring the child, and so stays on the
+in-tool fallback), a @prompt_agent_child@ call runs the child as a real,
+durable session: it shows up in 'listSessions' with 'smParent' set to the
+parent's own session id, and the parent's tool result is exactly the
+child's own final answer.
+-}
+subcallAsSessionTest :: Assertion
+subcallAsSessionTest = do
+    child <- testNode "{\"slug\": \"child\"}"
+    parent0 <-
+        testNode
+            "{\"slug\": \"parent\", \"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}}"
+    let parent = parent0{osNodeChildren = [child]}
+    host <-
+        testHost [parent] $ \node c ->
+            if Base.slug node.osNodeConfig == "child"
+                then mockCompletion c
+                else firstThen [childCall] c
+    agentId <- AgentId <$> nextRandom
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "parent" (message "delegate") Nothing
+        let sid = meta.smSessionId
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        children <- listSessions runner allSessionsQuery{sqParent = Just sid}
+        case children of
+            [childMeta] -> do
+                childMeta.smParent @?= Just sid
+                childMeta.smAgent @?= Just "child"
+            other -> assertFailure ("expected exactly one child session, got " <> show other)
+        -- turns is newest-first: the head is the parent's own final LLM
+        -- answer (a mock, unrelated to the child); the tool result the
+        -- child actually produced is on the UserTurn just under it.
+        Just (parentSess, _) <- getSession runner sid
+        case parentSess.turns of
+            (_ : UserTurn content _ : _) -> case map snd content.userToolResponses of
+                [TextResponse resp] -> assertBool ("tool result is the child's own answer, got " <> show resp) ("done" `Text.isInfixOf` resp)
+                other -> assertFailure ("expected one text tool response, got " <> show other)
+            other -> assertFailure ("expected an LLM turn over a user turn, got " <> show other)
+  where
+    childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+
+{- | Phase 5 (@todos/os-as-standalone-server.md@ G10): cancelling the
+parent's run cancels the child session it started -- the same 'cancelRun'
+a client could call on the child directly.
+-}
+subcallCancelChildTest :: Assertion
+subcallCancelChildTest = do
+    gate <- newEmptyMVar
+    child <- testNode "{\"slug\": \"child\"}"
+    parent0 <-
+        testNode
+            "{\"slug\": \"parent\", \"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}}"
+    let parent = parent0{osNodeChildren = [child]}
+    host <-
+        testHost [parent] $ \node c ->
+            if Base.slug node.osNodeConfig == "child"
+                then readMVar gate >> mockCompletion c
+                else firstThen [childCall] c
+    agentId <- AgentId <$> nextRandom
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "parent" (message "delegate") Nothing
+        let sid = meta.smSessionId
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        -- Wait for the child session to exist (the child's completion is
+        -- gated, so the parent's run stays active with the child running).
+        childSid <- pollFor 50 $ do
+            children <- listSessions runner allSessionsQuery{sqParent = Just sid}
+            pure $ case children of
+                [childMeta] -> Just childMeta.smSessionId
+                _ -> Nothing
+        _ <- expectRight =<< cancelRun runner sid
+        (_parentFinal, parentActive) <- expectRight =<< awaitRun runner sid 5
+        parentActive @?= False
+        -- The child's own run was cancelled too (Runner.waitForChild's
+        -- own 'cancelRun', triggered by the parent's tool call being
+        -- interrupted while still waiting on it): no run left active on
+        -- it, regardless of what its own turns settle its status to.
+        (_childFinal, childActive) <- expectRight =<< awaitRun runner childSid 5
+        childActive @?= False
+        putMVar gate ()
+  where
+    childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+    pollFor :: Int -> IO (Maybe a) -> IO a
+    pollFor 0 _ = assertFailure "timed out waiting for the child session" >> fail "unreachable"
+    pollFor n action =
+        action >>= \case
+            Just a -> pure a
+            Nothing -> threadDelay 20_000 >> pollFor (n - 1) action
 
 {- | A watch always permits watching one's own session ('isWithinSubtree's
 own-id short-circuit), so a session watching itself is enough to exercise
@@ -1329,7 +1911,7 @@ responseTexts sess =
     render other = Text.pack (show other)
 
 -- | Event kinds until the run stops (or 5 seconds pass).
-eventsUntilStopped :: IO SessionEvent -> IO [Text]
+eventsUntilStopped :: IO Event -> IO [Text]
 eventsUntilStopped next = go []
   where
     go acc = do
@@ -1337,10 +1919,33 @@ eventsUntilStopped next = go []
         case mEvent of
             Nothing -> assertFailure ("no run.stopped after " <> show (reverse acc))
             Just event ->
-                let acc' = sessionEventKind event : acc
-                 in case event of
+                let acc' = eventKind event.evBody : acc
+                 in case event.evBody of
                         RunStopped{} -> pure (reverse acc')
                         _ -> go acc'
+
+-- | Full events (not just kinds) until the run stops (or 5 seconds pass).
+collectUntilStopped :: IO Event -> IO [Event]
+collectUntilStopped next = go []
+  where
+    go acc = do
+        mEvent <- timeout 5_000_000 next
+        case mEvent of
+            Nothing -> assertFailure ("no run.stopped after " <> show (map (eventKind . (.evBody)) (reverse acc)))
+            Just event ->
+                let acc' = event : acc
+                 in case event.evBody of
+                        RunStopped{} -> pure (reverse acc')
+                        _ -> go acc'
+
+-- | 'subscribe', asserting the replay is available (never unavailable with
+-- @after = Nothing@, or right after events the caller knows are still in
+-- the ring).
+expectSubscribed :: SessionRunner -> SubscribeScope -> Maybe EventSeq -> IO (IO Event)
+expectSubscribed runner scope after =
+    subscribe runner scope after >>= \case
+        Right next -> pure next
+        Left ReplayUnavailable -> assertFailure "replay unexpectedly unavailable"
 
 -- | Poll a condition every 20ms for up to 5 seconds.
 waitUntil :: IO Bool -> Assertion

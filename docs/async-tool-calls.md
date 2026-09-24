@@ -120,7 +120,13 @@ through `get-tool-call-status` and the TUI shows next to the running call.
 * **Bash tools** report their latest output line, at most twice a second:
   `{"stream": "stdout", "line": "compiling module 12/40", "lines": 12, "bytes": 480}`.
 * **Agents called as tools** report each step of the sub-agent:
-  `{"message": "sub-agent calling read_file", "turns": 7}`.
+  `{"message": "sub-agent calling read_file", "turns": 7}`. This applies to a
+  `prompt_agent_<slug>` call that still runs in-tool (narrowed with
+  `bindings`/`with`/`as`, or outside the runner). Under the runner, a
+  sub-agent call with no narrowing runs as its own session instead
+  (`todos/os-as-standalone-server.md`, Phase 5): its progress is that
+  session's own `session.updated`/`text.delta`/`tool.*` events, not this
+  per-step callback.
 * **Your own tools** can report anything JSON through `ctxProgressCallback` in
   the `ToolExecutionContext`.
 

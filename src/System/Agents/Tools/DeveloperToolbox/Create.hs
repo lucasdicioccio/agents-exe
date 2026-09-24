@@ -184,6 +184,7 @@ agentFromOverrides overrides =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }
@@ -218,6 +219,7 @@ mergeAgentWithOverrides ref overrides =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }

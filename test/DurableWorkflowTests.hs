@@ -51,7 +51,7 @@ for completeness:
 module DurableWorkflowTests where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.STM (atomically, flushTQueue, newTQueueIO)
+import Control.Concurrent.STM (atomically, flushTQueue)
 import Control.Exception (ErrorCall (..), throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
@@ -76,7 +76,7 @@ import System.Agents.Combinators.StoreSessionProgress (
     agentWithSessionProgress,
     backendStoreCallback,
  )
-import System.Agents.OS.Events (OSEvent (..))
+import System.Agents.OS.Events (OSEmission (..), newQueueEmitter)
 import System.Agents.Session.Async (
     ContinuationStore,
     ToolContinuationSnapshot (..),
@@ -270,7 +270,7 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , complete = \_ -> pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [])
         , contextConfig = defaultContextConfig
         , ctxWorld = Nothing
-        , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Asynchronous
@@ -289,7 +289,9 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxInterruptCompletions = False
+        , ctxMailInToolResult = False
         }
 
 -- | Build a minimal synchronous agent for progress-callback tests.
@@ -305,7 +307,7 @@ mkSimpleAgent =
         , complete = \_ -> pure (LlmResponse (Just "hello") Nothing Aeson.Null Nothing, [])
         , contextConfig = defaultContextConfig
         , ctxWorld = Nothing
-        , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Synchronous
@@ -324,7 +326,9 @@ mkSimpleAgent =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxInterruptCompletions = False
+        , ctxMailInToolResult = False
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.
@@ -546,7 +550,7 @@ snapshotSerializationTest =
                 tcsContextSnapshot decoded @?= ctxSnap
                 -- Re-hydration should restore the serialisable fields and use
                 -- the supplied runtime fields.
-                let hydrated = Ctx.hydrateContextSnapshot dummyPortal Nothing Nothing (tcsContextSnapshot decoded)
+                let hydrated = Ctx.hydrateContextSnapshot dummyPortal Nothing (tcsContextSnapshot decoded)
                 Ctx.ctxSessionId hydrated @?= testSessionId
                 Ctx.ctxConversationId hydrated @?= testConvId
                 Ctx.ctxTurnId hydrated @?= TurnId nil
@@ -1078,8 +1082,8 @@ beforeHookCommandFailureDeniesAndTracesTest :: TestTree
 beforeHookCommandFailureDeniesAndTracesTest =
     testCase "a before hook returning unparseable JSON denies (fail closed) and traces" $
         withHookScript "#!/usr/bin/env bash\ncat >/dev/null\necho 'not json at all'\n" $ \path -> do
-            queue <- newTQueueIO
-            let ctx = testCtx{Ctx.ctxEventQueue = Just queue}
+            (queue, emitter) <- newQueueEmitter
+            let ctx = testCtx{Ctx.ctxEmit = Just emitter}
             calls <- newIORef (0 :: Int)
             response <-
                 interpretDecorator defaultWrapperEnv (WithBeforeHook (HookCommand path)) (countingExec calls) ctx (mkCall "deploy")
@@ -1091,7 +1095,7 @@ beforeHookCommandFailureDeniesAndTracesTest =
             any isTracedError traced @?= True
   where
     isTracedError e = case e of
-        OSEvent_Error _ -> True
+        EmitError _ -> True
         _ -> False
 
 beforeHookToolContinuesTest :: TestTree
@@ -1143,8 +1147,8 @@ afterHookCommandFailurePassesThroughAndTracesTest :: TestTree
 afterHookCommandFailurePassesThroughAndTracesTest =
     testCase "an after hook failure passes the original result through and traces" $
         withHookScript "#!/usr/bin/env bash\nset -e\ncat >/dev/null\nexit 5\n" $ \path -> do
-            queue <- newTQueueIO
-            let ctx = testCtx{Ctx.ctxEventQueue = Just queue}
+            (queue, emitter) <- newQueueEmitter
+            let ctx = testCtx{Ctx.ctxEmit = Just emitter}
             let exec _ctx _call = pure $ ToolComplete $ TextResponse "original"
             response <- interpretDecorator defaultWrapperEnv (WithAfterHook (HookCommand path)) exec ctx (mkCall "deploy")
             response @?= ToolComplete (TextResponse "original")
@@ -1152,7 +1156,7 @@ afterHookCommandFailurePassesThroughAndTracesTest =
             any isTracedError traced @?= True
   where
     isTracedError e = case e of
-        OSEvent_Error _ -> True
+        EmitError _ -> True
         _ -> False
 
 -- | An after hook never runs on a yielded response: there is no result yet.

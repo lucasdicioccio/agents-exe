@@ -191,8 +191,25 @@ agents-exe run \
 Start the interactive Terminal UI.
 
 ```bash
-agents-exe tui [--agent-file FILE...]
+agents-exe tui [--agent-file FILE...] [--keymap FILE] [--db PATH]
+agents-exe tui --attach URL|PATH [--token TOKEN | --token-file FILE] [--keymap FILE]
 ```
+
+The TUI is a client of an in-process `SessionRunner` it starts over the
+same `Host` config `agents-exe serve` uses, or, with `--attach`, of a
+running `agents-exe serve`/`agents-server` (see
+[tui.md](tui.md#architecture) and
+[agents-server.md](agents-server.md#attaching-the-tui)).
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|--------------|
+| `--keymap FILE`, `-k FILE` | none | Path to a keymap configuration JSON file |
+| `--db PATH` | next to the resolved sessions directory | SQLite database for the TUI's embedded session runner. Old `conv.<uuid>.json` history under the resolved sessions directories stays readable as a read-only fallback. Not with `--attach`. |
+| `--attach URL\|PATH` | none | Drive a running server instead of an embedded runner. `http://HOST:PORT` (or `https://`, optionally with a path prefix), `unix:///path/to.sock` for `serve --socket`, or a bare socket path (anything containing a `/` or ending in `.sock`). Nothing is loaded locally: agents, API keys and sessions are the server's. |
+| `--token TOKEN` | none | Bearer token for `--attach`, when the server runs with `--auth-tokens`. |
+| `--token-file FILE` | none | The same, read from a file (surrounding whitespace ignored); keeps the token out of the process list. |
 
 **Features:**
 - Real-time streaming responses
@@ -227,6 +244,11 @@ agents-exe tui \
   --agent-file coder.json \
   --agent-file reviewer.json \
   --agent-file tester.json
+
+# Attach to a server started elsewhere with `agents-exe serve`
+agents-exe tui --attach http://127.0.0.1:8080
+agents-exe tui --attach unix:///run/agents/agents.sock
+agents-exe tui --attach https://agents.example --token-file ~/.agents-token
 ```
 
 ### mcp-server
@@ -657,6 +679,60 @@ echo '{"filepath": "./README.md"}' | \
 # Call with logging
 echo '{"command": "ls -la"}' | \
     agents-exe tool-call bash --log-file ./tool-debug.log
+```
+
+### serve
+
+Run agents over HTTP, like `agents-server`, loading agents-exe.cfg.json like the TUI does.
+
+```bash
+agents-exe serve [--agent-file FILE...] [--agent SLUG] [OPTIONS]
+```
+
+**Description:**
+
+`agents-exe serve` is `agents-server`'s code (sessions in SQLite or Postgres,
+the HTTP API and SSE stream, MCP over HTTP, the chat page) run behind
+agents-exe's own config loading, so it resolves agent files the same way
+every other `agents-exe` command does: `--agent-file` (repeatable), else
+`agents-exe.cfg.json`'s `agentsFiles` plus every `.json` file under
+`agentsDirectories`, else `~/.config/agents-exe/default`; `--agent SLUG`
+narrows to one agent by slug, failing with the list of available slugs if it
+does not match. It shares agents-exe's global `--api-keys`,
+`--set`/`--set-json`/`--pin`/`--pin-json` and `--params-file`, so those are
+not repeated below.
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--db FILE\|URL` | next to the resolved sessions directory | SQLite file, or `postgresql://` URL, for sessions and continuations |
+| `--bind HOST` | `127.0.0.1` | Address to listen on |
+| `--port PORT` | `8080` | Port to listen on |
+| `--live-session-ttl SECONDS` | `900` | Idle time before a session's in-memory state is dropped |
+| `--shutdown-grace SECONDS` | `10` | Time open requests get to finish on shutdown |
+| `--auth-tokens FILE` | (none) | Bearer tokens and their owners; without, no authentication |
+| `--stream-tokens` | off | Stream LLM answers as `text.delta` events |
+| `--admin-owners OWNER,…` | (none) | Owners allowed to store and delete agents over the API (needs `--auth-tokens`) |
+| `--no-ui` | off | Do not serve the chat page at `/` |
+| `--cors-origin ORIGIN` | (none) | Allow this origin to call the server cross-origin; repeatable, or `*` for any (needs no `--auth-tokens`) |
+| `--socket PATH` | (none) | Also listen on this Unix domain socket, in addition to `--bind`/`--port`; created `0600`, a stale file removed at start, closed and unlinked on shutdown. The socket is the local trust boundary: no `Origin`, no bearer token beyond `--auth-tokens`. |
+
+See [agents-server.md](agents-server.md) for everything the running server
+does (the HTTP API, sessions, deferred calls, CORS, authentication, running
+it as a service).
+
+**Examples:**
+
+```bash
+# Explicit agent files, like agents-server
+agents-exe serve --agent-file ./weather.json --api-keys ./keys.json --port 8080
+
+# From a directory with an agents-exe.cfg.json
+agents-exe serve --port 8080
+
+# One agent from a multi-agent config, over a local socket only auth-tokens gate
+agents-exe serve --agent architect --socket /run/agents-exe/agents.sock --auth-tokens ./tokens.json
 ```
 
 ### check-tool-call

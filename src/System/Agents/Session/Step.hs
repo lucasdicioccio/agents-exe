@@ -89,12 +89,23 @@ runStepMSync convId agent sess =
                 (sessLate, late) <- collectLateResults ctx agent0'.ctxAsyncYieldStrategy blockForLate sess0
                 let shouldBlockForMail = blockForLate && null late && null missing.missingToolCalls
                 (sessMail, mailEnvelopes) <- receiveMailForTurn agent0' shouldBlockForMail sessLate
-                let uQuery = mergeUserQueries (mergeUserQueries uQuery0 (lateResultsQuery late)) (mailQuery mailEnvelopes)
+                let uQueryBase = mergeUserQueries uQuery0 (lateResultsQuery late)
+                let mMailBlock = mailQuery mailEnvelopes
                 -- Execute tool calls with optional OS entity tracking
                 tracked <- traverse (mkReadyTrackedCall ctx agent0') missing.missingToolCalls
                 trackedWithEntities <- ensureTrackedCallEntities ctx tracked
                 resultsWithTracked <- traverse (executeTrackedCallWithEntity agent0' ctx) trackedWithEntities
-                let toolResponses = map fst resultsWithTracked
+                let toolResponses0 = map fst resultsWithTracked
+                -- Design §5 "What the LLM sees" (@todos/os-as-standalone-
+                -- server.md@): a provider that rejects a user message right
+                -- after tool results opts in with 'ctxMailInToolResult'; R1
+                -- then appends the folded mail to the last tool result of
+                -- this round instead of a separate user message. Only
+                -- applies when this round actually had (attached, sync)
+                -- tool calls -- a plain user turn is unaffected.
+                let (uQuery, toolResponses) = case (agent0'.ctxMailInToolResult && not (null toolResponses0), mMailBlock) of
+                        (True, Just mailBlock) -> (uQueryBase, appendMailToLastToolResult mailBlock toolResponses0)
+                        _ -> (mergeUserQueries uQueryBase mMailBlock, toolResponses0)
                 let uToolResponses = zip missing.missingToolCalls toolResponses
                 -- Calculate byte usage for this user turn
                 let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery toolResponses
@@ -228,8 +239,14 @@ startNewAsyncTurn convId agent sess sPrompt sTools uQuery blockForLate calls = d
     (sessMail, mailEnvelopes) <- receiveMailForTurn agent shouldBlockForMail sessLate
     tracked <- traverse (mkReadyTrackedCall ctx agent) calls
     trackedWithEntities <- ensureTrackedCallEntities ctx tracked
-    let uQuery' = mergeUserQueries (mergeUserQueries uQuery (lateResultsQuery late)) (mailQuery mailEnvelopes)
-    executeTrackedCalls ctx agent sessMail False sPrompt sTools uQuery' mailEnvelopes trackedWithEntities
+    -- Design §5 "What the LLM sees" (@todos/os-as-standalone-server.md@):
+    -- mail is deliberately *not* merged into 'uQuery' here. Whether it
+    -- ends up as a separate user-visible block or folded into the last
+    -- tool result of this round is decided once, in 'executeTrackedCalls',
+    -- at the point the round actually finalizes into a full 'UserTurn'
+    -- (a still-partial round has no "last tool result" yet to fold into).
+    let uQueryBase = mergeUserQueries uQuery (lateResultsQuery late)
+    executeTrackedCalls ctx agent sessMail False sPrompt sTools uQueryBase mailEnvelopes trackedWithEntities
 
 {- | Continue execution of a partial turn.
 
@@ -342,13 +359,28 @@ executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery mailEnvelop
     let content = PartialUserTurnContent sPrompt sTools uQuery' processedOrdered mailEnvelopes'
     if all (isFinalToolCallState . tcState) processedOrdered
         then do
-            let responses = partialToolMessages content
-            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery' (map snd responses)
-            sess'' <- pushTurn sess' (UserTurn (UserTurnContent sPrompt sTools uQuery' responses mailEnvelopes') (Just byteUsage))
+            let responses0 = partialToolMessages content
+            -- Design §5 "What the LLM sees" (@todos/os-as-standalone-
+            -- server.md@, Phase 5): the same folding 'runStepMSync'
+            -- implements at R1, now also on the async path (the server
+            -- always runs asynchronously, so this is what makes
+            -- 'ctxMailInToolResult' take effect for server sessions). Mail
+            -- was deliberately left out of 'uQuery'' by every caller of
+            -- 'executeTrackedCalls'; it is merged in here, or folded into
+            -- the last tool result of this round, exactly once.
+            let mMailBlock = mailQuery mailEnvelopes'
+                (uQueryFinal, responses) = case (agent.ctxMailInToolResult && not (null responses0), mMailBlock) of
+                    (True, Just mailBlock) ->
+                        (uQuery', zip (map fst responses0) (appendMailToLastToolResult mailBlock (map snd responses0)))
+                    _ -> (mergeUserQueries uQuery' mMailBlock, responses0)
+            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQueryFinal (map snd responses)
+            sess'' <- pushTurn sess' (UserTurn (UserTurnContent sPrompt sTools uQueryFinal responses mailEnvelopes') (Just byteUsage))
             pure (agent, Right sess'')
         else do
-            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery' processedOrdered
-            sess'' <- pushTurn sess' (PartialUserTurn content (Just byteUsage))
+            let uQueryPartial = mergeUserQueries uQuery' (mailQuery mailEnvelopes')
+                contentMerged = content{pUserQuery = uQueryPartial}
+            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQueryPartial processedOrdered
+            sess'' <- pushTurn sess' (PartialUserTurn contentMerged (Just byteUsage))
             pure (agent, Right sess'')
   where
     pushTurn s t = do
@@ -1020,6 +1052,33 @@ mailQuery envelopes =
         Control _ -> True
         _ -> False
 
+{- | @todos/os-as-standalone-server.md@ Design §5: append a folded-mail
+'UserQuery' (its text, with the same @[mail ...]@ headers, and any media
+it carries) to the last of a round's tool results, instead of it becoming
+a separate user message. Empty lists pass through unchanged (nothing to
+append to).
+-}
+appendMailToLastToolResult :: UserQuery -> [UserToolResponse] -> [UserToolResponse]
+appendMailToLastToolResult _ [] = []
+appendMailToLastToolResult (UserQuery mailText mailAttachments) responses =
+    initRs ++ [appendMailBlock lastR]
+  where
+    initRs = init responses
+    lastR = last responses
+    appendMailBlock resp
+        | null mailAttachments = case resp of
+            TextResponse txt -> TextResponse (txt <> "\n\n" <> mailText)
+            JsonResponse val -> MixedResponse [TextPart (renderJsonAsText val), TextPart mailText]
+            MediaResponse m -> MixedResponse [MediaPart m, TextPart mailText]
+            MixedResponse parts -> MixedResponse (parts ++ [TextPart mailText])
+        | otherwise = case resp of
+            TextResponse txt -> MixedResponse (TextPart txt : mailParts)
+            JsonResponse val -> MixedResponse (TextPart (renderJsonAsText val) : mailParts)
+            MediaResponse m -> MixedResponse (MediaPart m : mailParts)
+            MixedResponse parts -> MixedResponse (parts ++ mailParts)
+    mailParts = TextPart mailText : map MediaPart mailAttachments
+    renderJsonAsText val = Text.decodeUtf8 (LByteString.toStrict (Aeson.encode val))
+
 -- | Render one non-'Control' envelope as a block of text.
 renderMailEnvelope :: Envelope -> Text.Text
 renderMailEnvelope e =
@@ -1337,7 +1396,7 @@ The context is populated according to 'ContextConfig' settings:
 This uses the agent's 'ctxCallStack' to maintain the call chain for nested
 agent invocations, supporting arbitrarily deep nesting of sub-conversations.
 
-The context also includes the agent's 'ctxWorld' and 'ctxEventQueue' if present,
+The context also includes the agent's 'ctxWorld' and 'ctxEmit' if present,
 which enables subcall conversations to be visible in the TUI, and a cancel
 hook backed by the agent's async engine.
 -}
@@ -1356,7 +1415,7 @@ buildContext agent sess convId =
                 Nothing -- No max recursion depth by default
      in baseCtx
             { Ctx.ctxWorld = agent.ctxWorld
-            , Ctx.ctxEventQueue = agent.ctxEventQueue
+            , Ctx.ctxEmit = agent.ctxEmit
             , Ctx.ctxCancelToolCall = fmap Engine.cancelToolCall agent.ctxAsyncEngine
             , -- Phase 2 (@todos/session-mailbox.md@ §3): built once per turn
               -- from this session's current cursor, so every tool call in
@@ -1367,6 +1426,8 @@ buildContext agent sess convId =
               -- sessions.
               Ctx.ctxMailRouter = agent.ctxMailRouter
             , Ctx.ctxSpawnSession = agent.ctxSpawnSession
+            , -- Phase 5 (@todos/os-as-standalone-server.md@ G10): copied the same way.
+              Ctx.ctxRunSubagent = agent.ctxRunSubagent
             , -- Phase 6 (@todos/session-mailbox.md@ §7): copied the same way.
               Ctx.ctxWatchSession = agent.ctxWatchSession
             , Ctx.ctxUnwatchSession = agent.ctxUnwatchSession

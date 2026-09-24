@@ -12,6 +12,9 @@ The framework is built around a layered architecture that separates concerns bet
 ┌────────────────────────────────────────────────────────────────┐
 │                    Interface Layer                              │
 │  (CLI commands, TUI, MCP server, HTTP endpoints)                │
+│  The TUI and the HTTP server (agents-server) are both clients   │
+│  of an in-process SessionRunner (Host.Runner), driven through   │
+│  the same RunnerClient interface -- see tui.md#architecture.    │
 ├────────────────────────────────────────────────────────────────┤
 │                    OS Model Layer                               │
 │  (Entity-Component-System, Resource Management,                 │
@@ -453,8 +456,8 @@ Main
   ├── CLI.*
   │     └── AgentTree
   ├── TUI
-  │     ├── AgentTree
-  │     └── Session
+  │     ├── Host, Host.Runner, Host.Client (RunnerClient)
+  │     └── Session (pure views only: usage, signals, trajectory)
   ├── MCP.Server
   │     └── AgentTree
   └── ExportImport.*

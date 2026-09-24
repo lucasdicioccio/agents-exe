@@ -28,6 +28,7 @@ module System.Agents.Session.Mailbox (
     MailRouter (..),
     newMailRouter,
     SpawnSession,
+    RunSubagent,
     WatchRequest (..),
     WatchSession,
     UnwatchSession,
@@ -288,6 +289,30 @@ error to report to the LLM. Defined here (rather than next to 'Agent' in
 import "System.Agents.Session.Base" without a cycle.
 -}
 type SpawnSession = Text -> Text -> IO (Either Text SessionId)
+
+{- | A @prompt_agent_\<slug\>@ hook (@todos/os-as-standalone-server.md@ Phase
+5, G10): when the calling agent was built by 'System.Agents.Host.Runner',
+this hook lets a sub-agent call run as a real, durable, cancellable child
+session instead of executing in-tool. Defined here for the same reason as
+'SpawnSession': it is also a field of 'ToolExecutionContext', and that
+module cannot import "System.Agents.Session.Base" (or the agent tree)
+without a cycle.
+
+Given the calling session ('SessionId', so nested sub-calls parent onto the
+session actually making the call, not the root), the sub-agent's own slug
+and the prompt: either an error to report to the calling LLM, or the new
+child's 'SessionId' (already visible through 'SessionCreated'\/'smParent')
+paired with an action that waits for the child's run to stop and reports
+its final text, exactly as an in-tool call would, and cancels the child
+(the runner's own @cancelRun@) if interrupted while waiting.
+
+Only installed for a helper reachable from the calling agent's own
+declared tree with no per-call narrowing ('bindings'\/'with'\/'as'):
+'System.Agents.AgentTree.OneShotTool' falls back to in-tool execution
+otherwise, since reproducing a narrowed node through a fresh session build
+is not yet supported.
+-}
+type RunSubagent = SessionId -> Text -> Text -> IO (Either Text (SessionId, IO (Either Text Text)))
 
 {- | A @watch-session@ request (@todos/session-mailbox.md@, Phase 6, §7): the
 target session, an optional filter on 'SessionEvent' kinds (as their

@@ -93,7 +93,7 @@ mkAsyncAgent policy =
         , complete = \_ -> pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [])
         , contextConfig = defaultContextConfig
         , ctxWorld = Nothing
-        , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxCallStack = []
         , ctxParentConversation = Nothing
         , ctxExecutionMode = Asynchronous
@@ -112,7 +112,9 @@ mkAsyncAgent policy =
         , ctxMailbox = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxInterruptCompletions = False
+        , ctxMailInToolResult = False
         }
 
 -- | Build a session whose latest turn is an LLM turn with the given calls.

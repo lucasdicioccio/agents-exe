@@ -8,6 +8,11 @@ Description : Core type definitions for the TUI system
 
 This module contains the fundamental type definitions used throughout the TUI system,
 including widget names, tabs, status messages, events, agent types, and configuration.
+
+Phase 3b-i (@todos/os-as-standalone-server.md@): the TUI is a client of
+'System.Agents.Host.Client.RunnerClient'. 'TuiAgent' wraps a serializable
+'AgentDescriptor' instead of an OS-native 'System.Agents.OS.AgentHandle.AgentHandle',
+and 'AppEvent' carries runner-shaped payloads instead of raw 'OSEvent's.
 -}
 module System.Agents.TUI.Types.Core (
     -- * Widget Names
@@ -33,11 +38,11 @@ module System.Agents.TUI.Types.Core (
     -- * Application Events
     AppEvent (..),
 
+    -- * History tab session cache
+    HistorySessionEntry (..),
+
     -- * Agent Types
     TuiAgent (..),
-    tuiAgentId,
-    tuiTree,
-    tuiNode,
     tuiSlug,
 
     -- * Layout and Configuration
@@ -61,14 +66,17 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 
-import System.Agents.AgentTree (LoadedApiKeys, OSAgentNode, OSAgentTree)
-import System.Agents.Base (AgentId (..), ConversationId (..))
-import System.Agents.OS.AgentHandle (AgentHandle (..), getAgentId, getAgentSlug)
-import System.Agents.OS.Core.World (World)
+import System.Agents.Base (ConversationId (..))
 import System.Agents.OS.Events (ToolCallActivity)
+import System.Agents.Protocol (AgentDescriptor (..), RunMode)
 import System.Agents.Runtime.Trace (Trace)
-import System.Agents.Session.Base (Session, SessionId)
-import System.Agents.SessionStore (SessionStore)
+import System.Agents.Session.Base (
+    DeferredCallView,
+    Session,
+    SessionId,
+    SessionStatus,
+ )
+import System.Agents.SessionStore (SessionMeta)
 import System.Agents.TUI.KeyMapping (KeyMapping)
 import System.Agents.TUI.MessageComposer (InputConfig)
 
@@ -94,8 +102,10 @@ data WidgetName
       SessionViewWidget
     | -- | For viewport scrolling during turn navigation
       TurnNavigationWidget
-    | -- | For focusing the queued messages list
-      QueuedMessageListWidget
+    | -- | For focusing the draft panel
+      DraftPanelWidget
+    | -- | For focusing the pending-calls panel (Phase 3c)
+      PendingPanelWidget
     | -- | For the attachment list below the message editor
       AttachmentListWidget
     | -- | For the file path input dialog
@@ -173,11 +183,36 @@ data AttachmentDialogState
 -- Application Events
 -------------------------------------------------------------------------------
 
--- | Events that can be sent to the TUI application.
+{- | Events that can be sent to the TUI application.
+
+Phase 3b-i: these carry 'RunnerClient'-shaped payloads
+("System.Agents.Protocol"'s 'EventBody', once 3b-ii wires
+@Client.subscribeAll@ to this channel) instead of raw OS events. Known
+regression, accepted until Phase 5 (see the spec's Phase 3b note):
+there is no per-step "subcall progress" event carrying a whole child
+'Session' any more, only started\/completed\/failed.
+-}
 data AppEvent
     = AppEvent_Heartbeat
-    | AppEvent_AgentStepProgrress ConversationId Session
-    | AppEvent_AgentNeedsInput ConversationId
+    | -- | A session got a new stored version: its id, the fresh 'Session'
+      -- and 'SessionMeta' (@session.updated@; bridged from
+      -- 'System.Agents.Host.Client.subscribeAll' in
+      -- 'System.Agents.TUI.Core.bridgeRunnerEvents').
+      AppEvent_SessionUpdated ConversationId Session SessionMeta
+    | -- | A run started on a session (@run.started@).
+      AppEvent_RunStarted ConversationId RunMode
+    | -- | A run stopped; the resulting status tells whether the session
+      -- now accepts input, is paused, or blocked on deferred calls
+      -- (@run.stopped@; replaces the old @AppEvent_AgentNeedsInput@).
+      AppEvent_RunStopped ConversationId SessionStatus
+    | -- | A session's run failed (@session.failed@).
+      AppEvent_SessionFailed ConversationId Text
+    | -- | Calls are now deferred, awaiting an external result (@calls.deferred@).
+      AppEvent_CallsDeferred ConversationId [DeferredCallView]
+    | -- | A new session was created, anywhere in this owner's tree (@session.created@).
+      AppEvent_SessionCreated SessionMeta
+    | -- | A session was deleted (@session.deleted@).
+      AppEvent_SessionDeleted ConversationId
     | AppEvent_AgentTrace Trace
     | AppEvent_ShowStatus StatusSeverity Text
     | AppEvent_ClearStatus
@@ -190,57 +225,49 @@ data AppEvent
         , appSubcallAgentSlug :: Text
         , appSubcallDepth :: Int
         }
-    | -- | A subcall has made progress
-      AppEvent_SubcallProgress ConversationId Session
     | -- | A subcall has completed successfully
       AppEvent_SubcallCompleted ConversationId Text
     | -- | A subcall has failed
       AppEvent_SubcallFailed ConversationId Text
     | -- | A background tool call started, progressed, or finished
       AppEvent_ToolCallActivity ToolCallActivity
+    | -- | The agent roster changed (@agents.changed@ / @ListAgents@ refresh).
+      AppEvent_AgentsRefreshed [AgentDescriptor]
+    | -- | The History tab's session list was refreshed ('Client.listSessions').
+      AppEvent_SessionsRefreshed [SessionMeta]
+    deriving (Show)
+
+{- | What the History tab knows about one selected session's full 'Session'
+(@todos/os-as-standalone-server.md@ §4, Phase 3b-iv): 'ensureHistorySessionCached'
+in "System.Agents.TUI.Event" inserts 'HistoryLoading' before issuing the
+'Client.getSession' fetch, so the view has something to render while it is
+in flight, and replaces it with 'HistoryLoaded' or 'HistoryFailed' when the
+fetch settles -- a failed fetch is no longer silently dropped.
+-}
+data HistorySessionEntry
+    = HistoryLoading
+    | HistoryLoaded Session
+    | HistoryFailed Text
     deriving (Show)
 
 -------------------------------------------------------------------------------
--- Agent Types (OS-Native)
+-- Agent Types
 -------------------------------------------------------------------------------
 
-{- | TUI Agent using OS-native structures.
-
-This structure wraps an 'AgentHandle' for use in the TUI. The handle
-provides direct access to OS-native structures and is shared with the
-OneShot interface.
+{- | TUI Agent, a thin wrapper over the runner's serializable
+'AgentDescriptor' (Phase 3a). No live handle, no OS-native tree: every
+detail the TUI shows about an agent (model, prompt, tools with their
+'System.Agents.Tools.Activation.Activation', helpers) is already on the
+descriptor 'ListAgents'\/'GetAgent' returns.
 -}
-data TuiAgent = TuiAgent
-    { tuaHandle :: AgentHandle
-    -- ^ Shared OS-native agent handle
-    , tuaWorld :: Maybe World
-    -- ^ Optional OS World for ECS operations (TUI-specific)
+newtype TuiAgent = TuiAgent
+    { tuiAgentDescriptor :: AgentDescriptor
     }
+    deriving (Show, Eq)
 
--- | Get the agent ID from a TUI agent.
-tuiAgentId :: TuiAgent -> AgentId
-tuiAgentId = getAgentId . tuaHandle
-
--- | Get the agent tree from a TUI agent.
-tuiTree :: TuiAgent -> OSAgentTree
-tuiTree = ahTree . tuaHandle
-
--- | Get the agent node from a TUI agent.
-tuiNode :: TuiAgent -> OSAgentNode
-tuiNode = ahNode . tuaHandle
-
--- | Get the agent slug from a TUI agent.
+-- | The agent's slug.
 tuiSlug :: TuiAgent -> Text
-tuiSlug = getAgentSlug . tuaHandle
-
--- | Manual Show instance for TuiAgent.
-instance Show TuiAgent where
-    show agent =
-        "TuiAgent {tuiAgentId = "
-            ++ show (tuiAgentId agent)
-            ++ ", tuiSlug = "
-            ++ show (tuiSlug agent)
-            ++ ", tuaHandle = <AgentHandle>, tuaWorld = <World>}"
+tuiSlug = adSlug . tuiAgentDescriptor
 
 -------------------------------------------------------------------------------
 -- Layout Configuration
@@ -298,24 +325,24 @@ data AuxiliaryTask
 -------------------------------------------------------------------------------
 
 -- | Configuration for TUI sessions.
+{- | The legacy file-store fallback used to be threaded through here so the
+TUI could composite it into its own backend by hand; since
+@todos/os-as-standalone-server.md@ §6 (Phase 3b-iv), 'Host.hcLegacySessionDirs'
+does that compositing once, inside the 'System.Agents.Host.Host' the TUI's
+runner is built over, so this config carries only what the TUI itself
+still needs.
+-}
 data SessionConfig = SessionConfig
-    { sessionStore :: SessionStore
-    -- ^ Storage for sessions
-    , sessionApiKeys :: LoadedApiKeys
-    -- ^ API keys for agents
-    , sessionKeyMapping :: KeyMapping
+    { sessionKeyMapping :: KeyMapping
     -- ^ Key mapping for keyboard shortcuts
     , sessionInputConfig :: InputConfig
     -- ^ Input configuration for message editor
     }
 
 -- | Create a session config with all required fields.
-mkSessionConfig :: SessionStore -> LoadedApiKeys -> KeyMapping -> InputConfig -> SessionConfig
-mkSessionConfig store apiKeys keymap inputConfig =
+mkSessionConfig :: KeyMapping -> InputConfig -> SessionConfig
+mkSessionConfig keymap inputConfig =
     SessionConfig
-        { sessionStore = store
-        , sessionApiKeys = apiKeys
-        , sessionKeyMapping = keymap
+        { sessionKeyMapping = keymap
         , sessionInputConfig = inputConfig
         }
-

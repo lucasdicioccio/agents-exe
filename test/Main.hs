@@ -90,10 +90,17 @@ import qualified SessionMetadataTests
 import qualified ContinuationConsistencyTests
 import qualified MediaContentPartTests
 import qualified OpenAIStreamTests
+import qualified ProtocolTests
 import qualified RunnerTests
+import qualified HostClientTests
+import qualified HttpClientTests
+import qualified HostLegacySessionTests
 import qualified DurableWorkflowTests
 import qualified NarrowingTests
 import qualified MailboxTests
+import qualified ConfigLoaderTests
+import qualified TuiDraftTests
+import qualified TuiPendingTests
 
 main :: IO ()
 main = defaultMain tests
@@ -145,8 +152,15 @@ tests =
         , ContinuationConsistencyTests.tests
         , MediaContentPartTests.tests
         , OpenAIStreamTests.tests
+        , ProtocolTests.tests
         , RunnerTests.tests
+        , HostClientTests.tests
+        , HttpClientTests.tests
+        , HostLegacySessionTests.tests
         , MailboxTests.tests
+        , ConfigLoaderTests.tests
+        , TuiDraftTests.tests
+        , TuiPendingTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
@@ -296,6 +310,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -330,6 +345,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -366,6 +382,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -408,6 +425,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -455,6 +473,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -499,6 +518,7 @@ agentSerializationTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     , Base.extraAgents = Nothing
@@ -627,6 +647,7 @@ bashToolboxTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }
@@ -662,6 +683,7 @@ bashToolboxTests =
                     , pauseCancelsCalls = Nothing
                     , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
                     }

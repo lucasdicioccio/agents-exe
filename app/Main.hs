@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Main entry point for the agents-exe executable.
 
@@ -10,42 +11,37 @@ in separate modules under 'System.Agents.CLI'.
 -}
 module Main where
 
+import Control.Exception (SomeException, displayException, try)
 import Control.Monad (unless, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
-import qualified Data.Aeson.Key as Aeson.Key
-import qualified Data.Aeson.KeyMap as Aeson.KeyMap
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Functor.Contravariant.Divisible (choose)
-import Data.List (find)
 import Data.Map (Map)
+import Data.Maybe (isJust)
+import System.Environment (getArgs)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
 import qualified Data.Text.IO as Text
 import Data.Time (UTCTime, defaultTimeLocale, parseTimeM)
-import GHC.Generics (Generic)
 import Options.Applicative
 import qualified Prod.Tracer as Prod
-import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, getHomeDirectory)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory)
 import System.Exit (exitFailure)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath ((</>))
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
 import System.Agents.Base (Agent (..), AgentDescription (..), ExtraAgentRef (..))
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
-import System.Agents.CLI.Aliases (
-    AliasDefinition,
-    defaultAliases,
-    resolveAliases,
- )
+import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.Base (makeFileJsonTracer, makeShowLogFileTracer)
 import qualified System.Agents.CLI.Check as CheckCmd
 import qualified System.Agents.CLI.CheckToolCall as CheckToolCallCmd
 import qualified System.Agents.CLI.Config as ConfigCmd
+import qualified System.Agents.CLI.ConfigLoader as ConfigLoader
 import qualified System.Agents.CLI.Cowsay as CowsayCmd
 import qualified System.Agents.CLI.DescribeTool as DescribeToolCmd
 import qualified System.Agents.CLI.EchoPrompt as EchoPromptCmd
@@ -64,6 +60,8 @@ import qualified System.Agents.CLI.Spec as SpecCmd
 import qualified System.Agents.CLI.TUI as TUICmd
 import qualified System.Agents.CLI.ToolCall as ToolCallCmd
 import qualified System.Agents.FileLoader as FileLoader
+import qualified AgentsServer.Log as SrvLog
+import qualified AgentsServer.Server as Srv
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.HttpLogger as HttpLogger
 import System.Agents.Session.Search.Types (DateFilter (..), IndexOperation (..))
@@ -138,6 +136,7 @@ defaultOpenAIAgent =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }
@@ -176,6 +175,7 @@ mistralAgent =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }
@@ -214,6 +214,7 @@ ollamaAgent =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }
@@ -261,6 +262,7 @@ orchestratorAgent =
         , pauseCancelsCalls = Nothing
         , resumeOnAnyMail = Nothing
                 , interruptCompletions = Nothing
+                , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing, wakeOn = Nothing
         }
@@ -311,74 +313,6 @@ createExampleAgents agentsDir = do
     createDirectoryIfMissing True (agentsDir </> "tools")
 
 -------------------------------------------------------------------------------
--- Sessions Configuration
--------------------------------------------------------------------------------
-
-{- | Sessions configuration for multi-location session storage.
-
-This allows configuring separate read and write locations for sessions,
-enabling unified views of sessions scattered across multiple directories.
-
-Example configuration in agents-exe.cfg.json:
-
-> {
->   "sessions": {
->     "writeLocation": "./sessions/",
->     "readLocations": [
->       "./sessions/",
->       "~/.config/agents-exe/sessions/"
->     ]
->   }
-> }
--}
-data SessionsConfig = SessionsConfig
-    { sessionsWriteLocation :: FilePath
-    -- ^ Directory where new sessions are written
-    , sessionsReadLocations :: [FilePath]
-    -- ^ Directories to search for existing sessions
-    }
-    deriving (Show, Generic)
-
-instance Aeson.FromJSON SessionsConfig where
-    parseJSON = Aeson.withObject "SessionsConfig" $ \v ->
-        SessionsConfig
-            <$> v Aeson..: "writeLocation"
-            <*> v Aeson..:? "readLocations" Aeson..!= []
-
--- | Default sessions directory name within config
-defaultSessionsDirName :: FilePath
-defaultSessionsDirName = "sessions"
-
-{- | Build a SessionStore from SessionsConfig.
-
-Resolves tilde (~) paths and creates the SessionStore.
--}
-buildSessionStoreFromConfig :: SessionsConfig -> IO SessionStore.SessionStore
-buildSessionStoreFromConfig cfg = do
-    writePath <- SessionStore.resolveSessionPath cfg.sessionsWriteLocation
-    readPaths <- mapM SessionStore.resolveSessionPath cfg.sessionsReadLocations
-    pure $ SessionStore.mkSessionStore writePath readPaths
-
-{- | Build a simple SessionStore from a single prefix (backwards compatibility).
-
-This is used when the 'sessions' config is not present but
-'agentsLogs.logSessionsJsonPrefix' is set.
--}
-buildSimpleSessionStore :: FilePath -> IO SessionStore.SessionStore
-buildSimpleSessionStore prefix = do
-    resolvedPath <- SessionStore.resolveSessionPath prefix
-    pure $ SessionStore.mkSimpleSessionStore resolvedPath
-
-{- | Create a default SessionStore in the config directory.
-
-This is used when no session configuration is provided at all.
--}
-buildDefaultSessionStore :: FilePath -> IO SessionStore.SessionStore
-buildDefaultSessionStore cfgDir = do
-    let sessionsDir = cfgDir </> defaultSessionsDirName
-    pure $ SessionStore.mkSimpleSessionStore sessionsDir
-
--------------------------------------------------------------------------------
 -- CLI Argument Parsing
 -------------------------------------------------------------------------------
 
@@ -398,130 +332,45 @@ data ArgParserArgs = ArgParserArgs
 
 -- | Get the path to the secrets key file
 secretsKeyFile :: ArgParserArgs -> FilePath
-secretsKeyFile pargs = pargs.configdir </> "secret-keys"
+secretsKeyFile pargs = ConfigLoader.secretKeysFileIn pargs.configdir
 
 -- | Helper to make agent-file entirely optional whilst using the 'many' combinator
 addDefaultAgentFiles :: ArgParserArgs -> [FilePath] -> [FilePath]
 addDefaultAgentFiles pargs [] = pargs.defaultAgentFiles
 addDefaultAgentFiles _ xs = xs
 
--- | Logging configuration from config file
-data AgentsExeLogConfig = AgentsExeLogConfig
-    { logJsonHttpEndpoint :: Maybe String
-    , logJsonPath :: Maybe FilePath
-    , logRawPath :: Maybe FilePath
-    , logSessionsJsonPrefix :: Maybe FilePath
-    }
-    deriving (Show, Generic)
-
-instance Aeson.FromJSON AgentsExeLogConfig
-
--- | Main configuration file format
-data AgentsExeConfig = AgentsExeConfig
-    { agentsConfigDir :: Maybe FilePath
-    , agentsDirectories :: [FilePath]
-    , agentsFiles :: [FilePath]
-    , agentsLogs :: Maybe AgentsExeLogConfig
-    , cfgPromptAliases :: Maybe (Map Text AliasDefinition)
-    , cfgSelfDescribeSlug :: Maybe String
-    , cfgSelfDescribeDescription :: Maybe String
-    , cfgKeymapPath :: Maybe FilePath
-    , cfgSessions :: Maybe SessionsConfig
-    }
-    deriving (Show, Generic)
-
-instance Aeson.FromJSON AgentsExeConfig where
-    parseJSON = Aeson.withObject "AgentsExeConfig" $ \v ->
-        AgentsExeConfig
-            <$> v Aeson..:? "agentsConfigDir"
-            <*> v Aeson..:? "agentsDirectories" Aeson..!= []
-            <*> v Aeson..:? "agentsFiles" Aeson..!= []
-            <*> v Aeson..:? "agentsLogs"
-            <*> v Aeson..:? "promptAliases"
-            <*> v Aeson..:? "selfDescribeSlug"
-            <*> v Aeson..:? "selfDescribeDescription"
-            <*> v Aeson..:? "keymap"
-            <*> v Aeson..:? "sessions"
-
--- | Locate the agents-exe.cfg.json by traversing up the directory tree
-locateAgentsExeConfig :: IO (Maybe FilePath)
-locateAgentsExeConfig = do
-    go =<< getCurrentDirectory
-  where
-    go :: FilePath -> IO (Maybe FilePath)
-    go "" = pure Nothing
-    go "/" = pure Nothing
-    go path = do
-        let temptative = path </> "agents-exe.cfg.json"
-        exists <- doesFileExist temptative
-        if exists
-            then pure (Just temptative)
-            else go (takeDirectory path)
-
 -- | Initialize the argument parser with configuration
 initArgParserArgs :: IO ArgParserArgs
 initArgParserArgs = do
     homedir <- getHomeDirectory
-    agentsExecConfig <- locateAgentsExeConfig
 
     let defaultConfigDir = homedir </> ".config/agents-exe"
     let secretKeysPath = defaultConfigDir </> "secret-keys"
 
-    -- Ensure config structure exists before trying to load from it
-    ensureConfigStructure defaultConfigDir secretKeysPath
+    -- Phase 5 leftover from Phase 4 (@todos/os-as-standalone-server.md@):
+    -- 'tui --attach' drives a remote server and opens nothing locally, so
+    -- it must not need (or create) a local agents-exe config directory,
+    -- example agent files or an API-keys template either -- the raw argv
+    -- is checked here, ahead of full option parsing, since the structure
+    -- is otherwise ensured before the parser (which needs its defaults)
+    -- ever sees the command.
+    args <- getArgs
+    unless ("--attach" `elem` args) $
+        ensureConfigStructure defaultConfigDir secretKeysPath
 
-    maybe (initWithoutAgentsExeConfig defaultConfigDir) (initFromAgentsExeConfig defaultConfigDir) agentsExecConfig
-  where
-    initFromAgentsExeConfig :: FilePath -> FilePath -> IO ArgParserArgs
-    initFromAgentsExeConfig defaultCfgDir agentsexecfgpath = do
-        zeconfig <- Aeson.eitherDecodeFileStrict' agentsexecfgpath :: IO (Either String AgentsExeConfig)
-        case zeconfig of
-            Left err -> error ("failed to load agents-exe config at " <> agentsexecfgpath <> " " <> err)
-            Right obj -> do
-                -- Build session store from configuration
-                -- Priority: 1) cfgSessions, 2) agentsLogs.logSessionsJsonPrefix, 3) default
-                sessionStore <- case obj.cfgSessions of
-                    Just sessionsCfg -> buildSessionStoreFromConfig sessionsCfg
-                    Nothing -> case obj.agentsLogs >>= logSessionsJsonPrefix of
-                        Just prefix -> buildSimpleSessionStore prefix
-                        Nothing -> buildDefaultSessionStore defaultCfgDir
-
-                jsonPathss <- traverse FileLoader.listJsonDirectory obj.agentsDirectories
-                pure $
-                    ArgParserArgs
-                        (fromMaybe defaultCfgDir obj.agentsConfigDir)
-                        (obj.agentsFiles <> mconcat jsonPathss)
-                        (logJsonHttpEndpoint =<< obj.agentsLogs)
-                        (logJsonPath =<< obj.agentsLogs)
-                        (logRawPath =<< obj.agentsLogs)
-                        sessionStore
-                        (resolveAliases obj.cfgPromptAliases)
-                        obj.cfgSelfDescribeSlug
-                        obj.cfgSelfDescribeDescription
-                        obj.cfgKeymapPath
-
-    initWithoutAgentsExeConfig :: FilePath -> IO ArgParserArgs
-    initWithoutAgentsExeConfig pconfigdir = do
-        jsonPaths <- FileLoader.listJsonDirectory (pconfigdir </> "default")
-
-        -- Create sessions directory for storing conversations when outside projects
-        -- This ensures session files are properly persisted instead of being written
-        -- to the current working directory with an empty prefix
-        let sessionsDir = pconfigdir </> "sessions"
-        createDirectoryIfMissing True sessionsDir
-
-        pure $
-            ArgParserArgs
-                pconfigdir
-                jsonPaths
-                Nothing
-                Nothing
-                Nothing
-                (SessionStore.mkSimpleSessionStore sessionsDir)
-                defaultAliases
-                Nothing
-                Nothing
-                Nothing
+    rc <- ConfigLoader.loadAgentsExeConfig defaultConfigDir
+    pure $
+        ArgParserArgs
+            rc.rcConfigDir
+            rc.rcAgentFiles
+            rc.rcLogJsonHttpEndpoint
+            rc.rcLogJsonFilepath
+            rc.rcLogRawFilepath
+            rc.rcSessionStore
+            rc.rcPromptAliases
+            rc.rcSelfDescribeSlug
+            rc.rcSelfDescribeDescription
+            rc.rcKeymapPath
 
 -- | Main program configuration
 data Prog = Prog
@@ -567,6 +416,7 @@ data Command
     | New NewCmd.NewOptions
     | ToolCall ToolCallCmd.ToolCallOptions
     | SessionDurable SessionDurableCmd.SessionDurableOptions
+    | Serve ServeOptions
 
 instance Show Command where
     show (Check _) = "Check"
@@ -591,6 +441,7 @@ instance Show Command where
     show (New _) = "New"
     show (ToolCall _) = "ToolCall"
     show (SessionDurable _) = "SessionDurable"
+    show (Serve _) = "Serve"
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -796,6 +647,34 @@ parseTuiOptions argArgs =
                     <> metavar "KEYMAPFILE"
                     <> help "Path to keymap configuration JSON file"
                     <> maybe mempty value argArgs.defaultKeymapPath
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "db"
+                    <> metavar "PATH"
+                    <> help "SQLite database for the TUI's embedded session runner (default: next to the resolved sessions directory); not with --attach"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "attach"
+                    <> metavar "URL|PATH"
+                    <> help "Drive a running `agents-exe serve`/agents-server instead of an embedded runner: http://HOST:PORT, https://..., unix:///PATH/TO.sock, or a socket path"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "token"
+                    <> metavar "TOKEN"
+                    <> help "Bearer token for --attach (a server started with --auth-tokens)"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "token-file"
+                    <> metavar "FILE"
+                    <> help "Read the --attach bearer token from FILE"
                 )
             )
 
@@ -1254,6 +1133,30 @@ parseSessionRunIsolatedCommand :: Parser SessionDurableCmd.SessionDurableCommand
 parseSessionRunIsolatedCommand =
     SessionDurableCmd.SessionRunIsolated <$> parseSessionIdArgument
 
+-------------------------------------------------------------------------------
+-- serve: agents-server over the agents-exe config (§6, G7)
+-------------------------------------------------------------------------------
+
+{- | @agents-exe serve@'s own options: the server flags 'AgentsServer.Server'
+does not already share with agents-exe's global @--agent-file@\/@--agent@,
+@--api-keys@, @--set@\/@--pin@ and @--params-file@ (see 'Prog' and 'runCommand').
+-}
+newtype ServeOptions = ServeOptions
+    { serveFlags :: Srv.ServerFlags
+    }
+
+parseServeCommand :: ArgParserArgs -> Parser Command
+parseServeCommand argArgs = Serve <$> parseServeOptions argArgs
+
+parseServeOptions :: ArgParserArgs -> Parser ServeOptions
+parseServeOptions argArgs =
+    ServeOptions
+        <$> Srv.serverFlags defaultDb
+  where
+    -- Next to the resolved sessions directory, not ./agents-server.db as
+    -- plain `agents-server` defaults to (todos/os-as-standalone-server.md, §6).
+    defaultDb = argArgs.defaultSessionStore.sessionWritePrefix </> "agents-server.db"
+
 -- | Parse a session id argument (UUID).
 parseSessionIdArgument :: Parser SessionId
 parseSessionIdArgument =
@@ -1338,7 +1241,7 @@ parseProgOptions argparserargs =
                 <> command "config" (info (parseConfigCommand argparserargs) (progDesc "Configure agents-exe (git-config style)"))
                 <> command "list-tool-calls" (info parseListToolCallsCommand (progDesc "List all tool calls from a session file"))
                 <> command "replay-tool-call" (info parseReplayToolCallCommand (progDesc "Replay a tool call from a session file, validating and optionally executing"))
-                <> command "tui" (info (parseTuiChatCommand argparserargs) (idm))
+                <> command "tui" (info (parseTuiChatCommand argparserargs) (progDesc "Interactive terminal UI, over an embedded runner or, with --attach, a running server"))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
                 <> command "describe" (info (parseSelfDescribeCommand argparserargs) (idm))
@@ -1384,6 +1287,12 @@ parseProgOptions argparserargs =
                     ( info
                         parseToolCallCommand
                         (progDesc "Call a tool from the first loaded agent with JSON payload from stdin")
+                    )
+                <> command
+                    "serve"
+                    ( info
+                        (parseServeCommand argparserargs)
+                        (progDesc "Run agents over HTTP (like agents-server), loading agents-exe.cfg.json like the TUI does")
                     )
             )
         <*> pure argparserargs.defaultSessionStore
@@ -1433,21 +1342,6 @@ parseProcessParamsOptions =
         Left err -> Left ("invalid JSON: " <> err)
         Right v -> Right v
 
--- | Read a @--params-file@'s @{"name": value, ...}@ object into 'ProcessParams'.
--- An entry may also be @{"value": ..., "pinned": true}@ to pin it.
-parseParamsFileValue :: Aeson.Value -> Either String ProcessParams
-parseParamsFileValue (Aeson.Object o) =
-    Map.fromList <$> mapM entry (Aeson.KeyMap.toList o)
-  where
-    entry (k, Aeson.Object fields)
-        | Just v <- Aeson.KeyMap.lookup "value" fields =
-            let pinned = case Aeson.KeyMap.lookup "pinned" fields of
-                    Just (Aeson.Bool b) -> b
-                    _ -> False
-             in Right (Aeson.Key.toText k, ProcessValue v pinned)
-    entry (k, v) = Right (Aeson.Key.toText k, ProcessValue v False)
-parseParamsFileValue _ = Left "expected a JSON object of {\"name\": value, ...}"
-
 -------------------------------------------------------------------------------
 -- Main Entry Point
 -------------------------------------------------------------------------------
@@ -1495,53 +1389,32 @@ main = do
         let mergedParams = Map.union pargs.progParams (Map.unions fileParams)
             pargs' = pargs{progParams = mergedParams}
 
-        -- Resolve agent files based on selected slug
-        resolvedAgentFiles <- resolveAgentFiles pargs'.agentFiles pargs'.selectedAgentSlug
-
-        case resolvedAgentFiles of
-            Left err -> do
-                Text.hPutStrLn stderr err
-                exitFailure
-            Right agentFiles' ->
-                runCommand pargs' baseTracer sessionStore agentFiles'
+        -- Phase 5 leftover from Phase 4 (@todos/os-as-standalone-server.md@):
+        -- with 'tui --attach', the server owns the agents -- a '--agent
+        -- SLUG' the attached server knows but this machine has no local
+        -- file for must not fail startup here. Skip local resolution
+        -- entirely for that case; every other command keeps resolving
+        -- against local agent files as before.
+        case pargs'.mainCommand of
+            TerminalUI tuiOpts | isJust tuiOpts.tuiAttach ->
+                runCommand pargs' baseTracer sessionStore []
+            _ -> do
+                resolvedAgentFiles <- ConfigLoader.resolveAgentFiles pargs'.agentFiles pargs'.selectedAgentSlug
+                case resolvedAgentFiles of
+                    Left err -> do
+                        Text.hPutStrLn stderr err
+                        exitFailure
+                    Right agentFiles' ->
+                        runCommand pargs' baseTracer sessionStore agentFiles'
 
     readParamsFile :: FilePath -> IO ProcessParams
     readParamsFile path = do
-        raw <- LByteString.readFile path
-        case Aeson.eitherDecode raw >>= parseParamsFileValue of
+        result <- ConfigLoader.loadParamsFile path
+        case result of
             Left err -> do
-                Text.hPutStrLn stderr (Text.pack ("--params-file " <> path <> ": " <> err))
+                Text.hPutStrLn stderr err
                 exitFailure
             Right params -> pure params
-
--- | Resolve agent files based on optional slug selection
-resolveAgentFiles :: [FilePath] -> Maybe Text -> IO (Either Text [FilePath])
-resolveAgentFiles files Nothing = pure $ Right files
-resolveAgentFiles files (Just agentSlug) = do
-    -- Load all agents to find matching slug
-    agentsWithFiles <- mapM loadAgentWithFile files
-    case find (\(_, agent) -> agentSlug == agent.slug) agentsWithFiles of
-        Just (file, _) -> pure $ Right [file]
-        Nothing -> do
-            -- Build error message with available slugs
-            let availableSlugs = map (\(f, a) -> (a.slug, f)) agentsWithFiles
-            pure $ Left $ formatSlugNotFoundError agentSlug availableSlugs
-  where
-    loadAgentWithFile :: FilePath -> IO (FilePath, Agent)
-    loadAgentWithFile file = do
-        result <- Aeson.eitherDecodeFileStrict' file
-        case result of
-            Left err -> error $ "Failed to parse agent file " ++ file ++ ": " ++ err
-            Right (AgentDescription agent) -> pure (file, agent)
-
-    formatSlugNotFoundError :: Text -> [(Text, FilePath)] -> Text
-    formatSlugNotFoundError targetSlug available =
-        Text.unlines $
-            [ "Error: Agent '" <> targetSlug <> "' not found."
-            , ""
-            , "Available agents:"
-            ]
-                ++ map (\(s, f) -> "  - " <> s <> " (" <> Text.pack f <> ")") available
 
 -- | Run the selected command
 runCommand :: Prog -> Prod.Tracer IO Trace -> SessionStore.SessionStore -> [FilePath] -> IO ()
@@ -1558,7 +1431,26 @@ runCommand pargs baseTracer sessionStore files =
         ReplayToolCall opts ->
             ReplayToolCallCmd.handleReplayToolCall Prod.silent opts
         TerminalUI tuiOpts ->
-            TUICmd.handleTUI (Prod.contramap TUICmdTrace baseTracer) sessionStore pargs.apiKeysFile (TUICmd.tuiKeymapPath tuiOpts) files
+            let rc =
+                    ConfigLoader.ResolvedConfig
+                        { ConfigLoader.rcConfigDir = pargs.configDir
+                        , ConfigLoader.rcAgentFiles = files
+                        , ConfigLoader.rcLogJsonHttpEndpoint = Nothing
+                        , ConfigLoader.rcLogJsonFilepath = pargs.logJsonFile
+                        , ConfigLoader.rcLogRawFilepath = Nothing
+                        , ConfigLoader.rcSessionStore = sessionStore
+                        , ConfigLoader.rcPromptAliases = pargs.progPromptAliases
+                        , ConfigLoader.rcSelfDescribeSlug = Nothing
+                        , ConfigLoader.rcSelfDescribeDescription = Nothing
+                        , ConfigLoader.rcKeymapPath = Nothing
+                        }
+             in TUICmd.handleTUI
+                    (Prod.contramap TUICmdTrace baseTracer)
+                    rc
+                    pargs.apiKeysFile
+                    tuiOpts
+                    files
+                    pargs.progParams
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
@@ -1591,6 +1483,27 @@ runCommand pargs baseTracer sessionStore files =
             ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
         SessionDurable opts ->
             SessionDurableCmd.handleSessionDurable sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
+        Serve opts ->
+            handleServe pargs sessionStore files opts
+
+{- | @agents-exe serve@: like @agents-server@, but with the agent files,
+API keys and process parameters agents-exe already resolved from
+@agents-exe.cfg.json@, @--agent-file@\/@--agent@, @--api-keys@,
+@--set@\/@--pin@ and @--params-file@.
+-}
+handleServe :: Prog -> SessionStore.SessionStore -> [FilePath] -> ServeOptions -> IO ()
+handleServe pargs sessionStore files opts = do
+    logger <- SrvLog.newHandleLogger stderr
+    let serverOpts =
+            (Srv.serverOptionsFromFlags files pargs.apiKeysFile opts.serveFlags pargs.progParams)
+                { Srv.soLegacySessionDirs = sessionStore.sessionReadPrefixes
+                }
+    result <- try (Srv.runServer serverOpts logger)
+    case result of
+        Right () -> pure ()
+        Left (e :: SomeException) -> do
+            SrvLog.logLine logger "server.failed" ["message" .= displayException e]
+            exitFailure
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)

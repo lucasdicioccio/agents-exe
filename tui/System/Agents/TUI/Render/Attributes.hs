@@ -86,13 +86,13 @@ activeTabAttr = attrName "activeTab"
 inactiveTabAttr :: AttrName
 inactiveTabAttr = attrName "inactiveTab"
 
--- | Attribute for queued messages.
-queuedMessageAttr :: AttrName
-queuedMessageAttr = attrName "queuedMessage"
+-- | Attribute for the draft panel.
+draftAttr :: AttrName
+draftAttr = attrName "draftMessage"
 
--- | Attribute for selected queued messages.
-queuedMessageSelectedAttr :: AttrName
-queuedMessageSelectedAttr = attrName "queuedMessageSelected"
+-- | Attribute for the selected draft panel.
+draftSelectedAttr :: AttrName
+draftSelectedAttr = attrName "draftMessageSelected"
 
 -- | Attribute for selected turn in navigation mode.
 selectedTurnAttr :: AttrName
@@ -169,8 +169,8 @@ tui_appAttrMap _ =
         , (activationDefaultAttr, BrickUtil.fg Vty.white `Vty.withStyle` Vty.dim)
         , (activeTabAttr, Vty.defAttr `Vty.withForeColor` Vty.black `Vty.withBackColor` Vty.brightWhite `Vty.withStyle` Vty.bold)
         , (inactiveTabAttr, Vty.defAttr `Vty.withForeColor` Vty.white `Vty.withBackColor` Vty.blue)
-        , (queuedMessageAttr, BrickUtil.fg Vty.yellow)
-        , (queuedMessageSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
+        , (draftAttr, BrickUtil.fg Vty.yellow)
+        , (draftSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (selectedTurnAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)
         , (attachmentAttr, BrickUtil.fg Vty.cyan)
         , (attachmentSelectedAttr, BrickUtil.bg Vty.blue `Vty.withStyle` Vty.bold)

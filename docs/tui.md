@@ -66,19 +66,105 @@ The Chats tab is for active conversations:
   - `●` - Waiting for input (unread)
   - `⏸` - Paused
   - `📎` - Has file attachments
-- **Main area**: Message editor, attachment list, queued messages (when paused), and conversation history
+- **Main area**: Message editor, attachment list, the draft panel (when the conversation has unsent draft text), and conversation history
+
+#### Draft (unsent text while the session is busy)
+
+Typing a message while a conversation is active, paused, or blocked on
+deferred calls does not post it right away: it is appended to that
+conversation's **draft**, one editable, unsent buffer per conversation
+(`todos/os-as-standalone-server.md` §5, D3). Three messages sent in a row
+while the model is thinking are almost always one message being
+elaborated, so each send appends a new paragraph to the draft instead of
+queuing a discrete message.
+
+- **Collapsed view** (default, shown below the message editor whenever the
+  focused conversation has a non-empty draft): the draft's first line plus
+  a size indicator (`N chars, M paragraphs`).
+- **Edit** (`Ctrl+A`): loads the draft into the message editor (its
+  attachments join the composer's) and clears it -- the editor is a full
+  text editor over the whole draft text; further sends fold right back
+  into a draft, or post, the normal way.
+- **Send now** (`Ctrl+G`): posts the draft immediately, as one message,
+  and clears it.
+- **Clear** (`Ctrl+D`): discards the draft.
+- **Ships automatically**: once the session's run stops with a status that
+  accepts input (idle or ready -- not paused, not blocked on deferred
+  calls, not failed), the TUI posts the whole draft as a single message
+  and clears it. A paused conversation keeps its draft until it is resumed
+  and stops again.
+
+The kernel never sees a draft: it only ever receives real messages and
+interrupts. An interrupt (`Ctrl+U`) always bypasses the draft and posts
+straight through.
 
 ### History Tab
 
-The History tab shows saved sessions:
-- **Left sidebar**: List of saved sessions from the session store
-- **Main area**: Session content viewer with search functionality
+The History tab shows saved sessions, across every backend the runner is
+configured with:
+- **Left sidebar**: List of sessions (`Client.listSessions`, newest
+  updated first), refreshed live as sessions are created, updated, or
+  deleted elsewhere -- a burst of updates during a run coalesces into at
+  most one refresh per heartbeat, and the current selection is kept by
+  session id across a refresh.
+- **Main area**: the selected session's full turn history (fetched once
+  via `Client.getSession` and cached by id), with the same usage summary,
+  signal metrics, and turn navigation/forking as the Chats tab.
 
 ### Help Tab
 
 The Help tab displays keyboard shortcuts and command reference for quick access to all TUI functionality.
 
 ## Architecture
+
+The TUI is a client of the in-process runner (`System.Agents.Host.Runner.SessionRunner`),
+not a second agent runtime: `agents-exe tui` opens a `System.Agents.Host.Host`
+the same way `agents-exe serve` does and drives it through an in-process
+`System.Agents.Host.Client.RunnerClient` — every conversation action (new
+message, pause, fork, cancel, ...) is a `Command` sent to the runner, and
+every screen update comes from `Event`s the runner emits.
+
+**Embedded and attached.** `agents-exe tui` (embedded) builds that client
+over a runner in its own process. `agents-exe tui --attach URL|PATH`
+(attached) opens nothing locally and builds
+`System.Agents.Host.Client.Http.httpClient` instead: the same
+`RunnerClient`, over a running `agents-exe serve`'s HTTP API and SSE event
+feed, on TCP or its `--socket`. Everything above the client is the same
+code, so an attached TUI loses nothing: agents, chats, drafts, pause,
+interrupt, hard cancel, fork, History, pending calls. What it shows
+depends on the server version, though: `hook.failed` and the subcall
+events only reach it from a server that emits them. Differences that
+follow from where the runner lives: the agents, API keys and database are
+the server's (`--db` is refused with `--attach`, and `--agent-file` or
+`--agent` select nothing); `--params-file`/`--set` values are still sent
+with every create and message (secrets are resupplied by the client, D7);
+with `--auth-tokens` on the server, pass `--token`/`--token-file`, and the
+TUI then sees only that owner's sessions. Quitting an embedded TUI stops
+the runs it started (`StopRun` mail) since its runner dies with it;
+quitting an attached TUI leaves them running on the server. A dropped
+event stream reconnects on its own with `Last-Event-ID`, so nothing is
+missed across a short network hiccup.
+
+Sessions live in the SQLite database at
+`System.Agents.CLI.ConfigLoader.defaultServerDatabasePath` (next to the
+resolved sessions directory) unless overridden with `tui --db PATH`. Old
+sessions written by the pre-runner file store (`conv.<uuid>.json`, under
+the config's `sessions` read locations) stay readable: the host composites
+them in as a read-only fallback (`Host.hcLegacySessionDirs`) behind the
+SQLite backend.
+
+Sub-agent calls (`prompt_agent_*`) run as real sessions of their own
+(`todos/os-as-standalone-server.md`, Phase 5), so live progress for a
+child is its own `session.updated`/`text.delta`/`tool.*` stream, exactly
+like the parent conversation — not a separate "subcall progress" event.
+The TUI still gets `subcall.started`/`subcall.completed`/`subcall.failed`
+for the start/complete/fail transitions themselves (used to show the child
+in the conversation list and its hierarchy), but token-by-token and
+tool-by-tool progress in between now comes from subscribing to the child
+session directly, the same as any other session. A sub-agent call made
+with per-call narrowing (`bindings`/`with`/`as`) still runs in-tool, with
+no session and no live progress of its own, until that case is supported
+the same way.
 
 ### Component Structure
 
@@ -115,8 +201,6 @@ data UIState = UIState
     , _helpContent :: [Text]       -- Help text lines
     , _turnNavigation :: Maybe TurnNavigationState
     -- ^ When Just, we are in turn navigation mode
-    , _queuedMessagesFocus :: Maybe Int
-    -- ^ Index of currently selected queued message
     , _attachedFiles :: Map ConversationId [MediaAttachment]
     -- ^ Media attachments per conversation
     , _attachmentDialogState :: AttachmentDialogState
@@ -160,8 +244,35 @@ conversation still accepts input: whichever comes first — your message or the
 results — is sent to the model.
 
 A conversation that waits on *deferred* calls (completed by an external
-worker) stops with a status message instead of waiting; use the `session`
-commands to complete those calls.
+worker) stops with a status message instead of waiting; see "Pending calls"
+below to answer them from the TUI itself.
+
+## Pending calls
+
+When a run stops on deferred calls (`calls.deferred`), the conversation's
+status becomes "blocked on deferred" and a Pending panel appears below the
+Draft panel, listing each call's tool name, a prefix of its continuation
+token, and its arguments:
+
+```
+┌ Pending (1) ──────────────────────────────────────┐
+│ Ctrl+Y: answer oldest pending call, then send      │
+│                                                     │
+│ - bash_command (token a1b2c3d4): {"cmd": "ls"}     │
+└─────────────────────────────────────────────────────┘
+```
+
+`Ctrl+Y` (`answer-pending`) puts the message editor into "answer mode" for
+the oldest pending call with a continuation token; type the result and
+send it (`Ctrl+Enter`/the usual send trigger) the way you would any other
+message. That calls `completeCall` with `autoResume = true`, the same
+mechanism the server's own `GET /v1/sessions/:id/pending` workers use, so
+the run resumes on its own — a fresh `run.started`/`run.stopped` pair
+follows. The panel clears once the run starts again.
+
+There is no separate "fail this call" binding: `UserToolResponse` has no
+dedicated error form, so a call is always answered with a text (or JSON)
+result; report a failure as an ordinary text result that says so.
 
 ## Subcall Conversation Visibility
 

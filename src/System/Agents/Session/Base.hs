@@ -187,17 +187,19 @@ module System.Agents.Session.Base (
     withMailbox,
     withMailRouter,
     withSpawnSession,
+    withRunSubagent,
     withWatchSession,
     withInterruptCompletions,
+    withMailInToolResult,
+    withEmit,
     SpawnSession,
+    RunSubagent,
 ) where
-
-import Control.Concurrent.STM (TQueue)
 
 import System.Agents.Base (ConversationId)
 import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Core.World (World)
-import System.Agents.OS.Events (OSEvent)
+import System.Agents.OS.Events (OSEmission)
 import System.Agents.Session.Async (ContinuationStore (..))
 import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
 import System.Agents.Session.Mailbox (
@@ -205,6 +207,7 @@ import System.Agents.Session.Mailbox (
     MailboxInfo (..),
     MailRouter (..),
     SpawnSession,
+    RunSubagent,
     UnwatchSession,
     WatchRequest (..),
     WatchSession,
@@ -349,10 +352,14 @@ data Agent r = Agent
     insert entities and components into the OS. This enables subcall
     conversations to be visible in the TUI.
     -}
-    , ctxEventQueue :: Maybe (TQueue OSEvent)
-    {- ^ Optional event queue for OS event emission. When present, tools
-    can emit events to notify the TUI of subcall lifecycle (start,
-    progress, completion, failure).
+    , ctxEmit :: Maybe (OSEmission -> IO ())
+    {- ^ Optional hook (@todos/os-as-standalone-server.md@, Phase 2c\/3c,
+    G3\/G10): the single mechanism for subcall lifecycle and tool-call
+    activity, so they reach a runner's event stream. Threaded down to
+    sub-agents the same way 'ctxWorld' is. 'Runner.newAgent' sets it;
+    every other builder leaves it 'Nothing', or installs
+    'System.Agents.OS.Events.queueEmitter' for a local (non-runner)
+    consumer.
     -}
     , ctxCallStack :: [CallStackEntry]
     {- ^ Call stack for tracking nested agent invocations. Root entry
@@ -435,7 +442,7 @@ data Agent r = Agent
     {- ^ Optional process-wide table of live mailboxes (@todos/session-mailbox.md@,
     Phase 4, D12). When present, 'System.Agents.Tools.SystemToolbox' capabilities
     like @send-message@ can address another session by id. Handed down to
-    sub-agents the same way 'ctxWorld' \/ 'ctxEventQueue' are.
+    sub-agents the same way 'ctxWorld' \/ 'ctxEmit' are.
     -}
     , ctxSpawnSession :: Maybe SpawnSession
     {- ^ Optional @spawn-session@ hook (@todos/session-mailbox.md@, Phase 4,
@@ -447,6 +454,15 @@ data Agent r = Agent
     is a hook rather than a shared implementation, the same shape as
     'ctxCancelToolCall' on 'ToolExecutionContext'. Handed down to sub-agents
     the same way 'ctxMailRouter' is.
+    -}
+    , ctxRunSubagent :: Maybe RunSubagent
+    {- ^ Optional @prompt_agent_\<slug\>@-as-a-session hook
+    (@todos/os-as-standalone-server.md@, Phase 5, G10). When present (the
+    server installs it; @agents-exe run@, the durable @session@ CLI and
+    tests that build agents directly do not), 'System.Agents.AgentTree.OneShotTool'
+    runs a sub-agent call that has no per-call narrowing as a real, durable,
+    cancellable child session instead of in-tool. Handed down to sub-agents
+    the same way 'ctxSpawnSession' is.
     -}
     , ctxWatchSession :: Maybe WatchSession
     -- ^ Optional @watch-session@ hook (@todos/session-mailbox.md@, Phase 6,
@@ -460,6 +476,13 @@ data Agent r = Agent
     the head turn with the mail instead of leaving it for the next R1\/R2.
     Opt-in; 'False' (the default every existing 'Agent' gets) leaves R4
     unused and every other receive point's behaviour unaffected.
+    -}
+    , ctxMailInToolResult :: Bool
+    {- ^ @todos/os-as-standalone-server.md@ Design §5 "What the LLM sees":
+    whether R1 folds mail into a trailing text block of the last tool
+    result of a round of attached tool calls, instead of a separate user
+    message. Opt-in; 'False' (the default) leaves R1's mail folding
+    unchanged.
     -}
     }
     deriving (Functor)
@@ -509,6 +532,12 @@ Phase 4).
 withSpawnSession :: SpawnSession -> Agent r -> Agent r
 withSpawnSession spawn agent = agent{ctxSpawnSession = Just spawn}
 
+{- | Install a @prompt_agent_\<slug\>@-as-a-session hook on an agent
+(@todos/os-as-standalone-server.md@, Phase 5).
+-}
+withRunSubagent :: RunSubagent -> Agent r -> Agent r
+withRunSubagent hook agent = agent{ctxRunSubagent = Just hook}
+
 {- | Install @watch-session@\/@unwatch-session@ hooks on an agent
 (@todos/session-mailbox.md@, Phase 6).
 -}
@@ -520,6 +549,19 @@ LLM completion (@todos/session-mailbox.md@, R4/D5).
 -}
 withInterruptCompletions :: Bool -> Agent r -> Agent r
 withInterruptCompletions enabled agent = agent{ctxInterruptCompletions = enabled}
+
+{- | Set whether R1 folds mail into the last tool result of a round of
+attached tool calls instead of a separate user message
+(@todos/os-as-standalone-server.md@ Design §5).
+-}
+withMailInToolResult :: Bool -> Agent r -> Agent r
+withMailInToolResult enabled agent = agent{ctxMailInToolResult = enabled}
+
+{- | Install the runner's event-emission hook on an agent
+(@todos/os-as-standalone-server.md@, Phase 2c).
+-}
+withEmit :: (OSEmission -> IO ()) -> Agent r -> Agent r
+withEmit emitFn agent = agent{ctxEmit = Just emitFn}
 
 {- | Set the execution mode for an agent.
 

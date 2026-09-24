@@ -64,8 +64,8 @@ module System.Agents.Session.Durable (
     functionRunner,
 ) where
 
-import Control.Concurrent.STM (atomically, writeTQueue)
 import Control.Exception (SomeException, evaluate, try)
+import Control.Monad (forM_)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson.Types
@@ -82,7 +82,7 @@ import System.IO (hClose, hSetBinaryMode)
 import System.Process (StdStream (..), createProcess, proc, std_err, std_in, std_out, waitForProcess)
 import System.Timeout (timeout)
 
-import System.Agents.OS.Events (OSEvent (..))
+import System.Agents.OS.Events (OSEmission (..))
 import System.Agents.Session.Async (AsyncToolResponse (..), newContinuationToken)
 import System.Agents.Session.Isolation (
     DeploymentRunner (..),
@@ -220,7 +220,7 @@ mkToolInvoker dispatch ctx toolName args =
   'defer' (@'ToolYield'@, the usual external-completion path), or 'answer'
   (short-circuit with a given result). Per D7, any hook failure (a crashing
   command, a non-zero exit, an unparseable response) denies, "fail closed",
-  and is traced as an 'OSEvent_Error' on 'ctxEventQueue' when one exists.
+  and is traced as an 'EmitError' through 'ctxEmit' when one exists.
 * 'WithAfterHook' (Phase 5) runs a hook once the call completes (never for
   a 'ToolYield', since there is no result yet): 'continue' (optionally
   rewriting the result) or 'annotate' (append a note to it). Per D7, a
@@ -486,11 +486,9 @@ withRewrittenArguments newArgs (LlmToolCall val) = LlmToolCall $ case val of
         _ -> Aeson.Object (KeyMap.insert "arguments" newArgs obj)
     other -> other
 
--- | Report a hook failure through the context's event queue, if any.
+-- | Report a hook failure through the context's 'ctxEmit' hook, if any.
 traceHookFailure :: ToolExecutionContext -> Text -> IO ()
-traceHookFailure ctx msg = case ctx.ctxEventQueue of
-    Nothing -> pure ()
-    Just q -> atomically $ writeTQueue q (OSEvent_Error msg)
+traceHookFailure ctx msg = forM_ ctx.ctxEmit $ \emitFn -> emitFn (EmitError msg)
 
 {- | Compose the given decorators, outermost first, around an 'Exec'.
 

@@ -12,6 +12,7 @@ module Main (main) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait)
+import qualified Control.Concurrent.Async as Async
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -30,9 +31,12 @@ import qualified Data.Text.Encoding as Text
 import qualified Data.Vector as Vector
 import qualified Network.HTTP.Client as Http
 import Network.HTTP.Types (Header, Method, status200, statusCode, urlEncode)
+import qualified Network.Socket as NS
+import qualified Network.Socket.ByteString as NSB
 import qualified Network.Wai as Wai
 import Network.Wai.Handler.Warp (testWithApplication)
 import Prod.Tracer (silent)
+import System.Directory (doesFileExist)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Timeout (timeout)
@@ -41,6 +45,8 @@ import Test.Tasty.HUnit
 
 import AgentsServer.Api
 import AgentsServer.Auth (authTokensFromList, authenticate, bearerToken, loadAuthTokens, tokenDigest)
+import AgentsServer.Log (silentLogger)
+import AgentsServer.Server (ServerOptions (..), runServer)
 import Control.Exception (IOException, try)
 import System.Agents.AgentFactory (Completion)
 import System.Agents.Host
@@ -65,6 +71,8 @@ main =
             , testCase "MCP over HTTP: a call stopping on deferred calls reports the tokens" mcpDeferredTest
             , testCase "MCP over HTTP: Agents-Param- headers and _meta set session params" mcpParamsTest
             , testCase "without authentication, non-local browser origins are refused" originTest
+            , testCase "CORS: preflight, matching origins, refused origins, SSE" corsTest
+            , testCase "CORS: --cors-origin '*' is refused at startup with --auth-tokens" corsWildcardStartupTest
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
             , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
             , testCase "without admin owners, storing agents is disabled" agentEditsDisabledTest
@@ -72,6 +80,13 @@ main =
             , testCase "the chat page is served only when it is enabled" uiPageTest
             , testCase "EventSource may carry its token as a query parameter" accessTokenTest
             , testCase "an attached file is stored on the turn that carried it" mediaRoundTripTest
+            , testCase "--socket: /healthz answers over a Unix domain socket" socketHealthzTest
+            , testCase "reconnecting with Last-Event-ID replays exactly the missed events" reconnectLastEventIdTest
+            , testCase "GET /v1/events sees session.created and session.deleted" crossSessionEventsTest
+            , testCase "GET /v1/events is owner-scoped when auth is on" ownerScopedEventsTest
+            , testCase "POST /v1/sessions with no prompt creates an idle session with no turn" createNoPromptTest
+            , testCase "POST and GET /v1/sessions/:id/mail send and list mail" mailRouteTest
+            , testCase "POST /v1/sessions/:id/fork forks whole, at a turn, with a new agent, and refuses bad input" forkRouteTest
             ]
 
 -------------------------------------------------------------------------------
@@ -102,6 +117,70 @@ eventsFlowTest = withServer deferAll (firstThen [remoteCall "call_1"]) $ \srv ->
         secondRun <- untilStopped next
         assertBool ("second run: " <> show (map fst secondRun)) ("run.started" `elem` map fst secondRun)
         field "status" (snd (last secondRun)) @?= "idle"
+
+{- | A client that disconnects mid-run and reconnects with @Last-Event-ID@
+(G5) gets exactly the events it missed, replayed from the runner's ring,
+and nothing it already saw.
+-}
+reconnectLastEventIdTest :: Assertion
+reconnectLastEventIdTest = withServer deferAll (firstThen [remoteCall "call_1"]) $ \srv -> do
+    (created, view) <- call srv "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+    created @?= 201
+    let sid = textField "session_id" view
+    firstBatch <- withIdEvents srv ("/v1/sessions/" <> sid <> "/events") $ \next -> do
+        (kind0, _, _) <- next
+        kind0 @?= "snapshot"
+        (resumed, _) <- call srv "POST" ("/v1/sessions/" <> sid <> "/resume") Nothing
+        assertBool ("resume answers 200 or 202, got " <> show resumed) (resumed `elem` [200, 202])
+        untilStoppedWithId next
+    (_, cutId, _) <- case firstBatch of
+        (e : _) -> pure e
+        [] -> assertFailure "expected at least one event"
+    let srv2 = srv{srvHeaders = [("Last-Event-ID", Text.encodeUtf8 cutId)]}
+    replayed <- withIdEvents srv2 ("/v1/sessions/" <> sid <> "/events") untilStoppedWithId
+    -- No "snapshot": the reconnect replays from the ring instead.
+    map (\(k, _, _) -> k) replayed @?= drop 1 (map (\(k, _, _) -> k) firstBatch)
+    replayed @?= drop 1 firstBatch
+
+-- | 'GET \/v1\/events' (no auth) sees a session being created and deleted,
+-- across sessions -- the server-wide feed (G5).
+crossSessionEventsTest :: Assertion
+crossSessionEventsTest = withServer "{}" mockCompletion $ \srv ->
+    withEventsAt srv "/v1/events" $ \next -> do
+        (created, view) <- call srv "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+        created @?= 201
+        let sid = textField "session_id" view
+        untilKind next "session.created"
+        (deleted, _) <- call srv "DELETE" ("/v1/sessions/" <> sid) Nothing
+        deleted @?= 200
+        untilKind next "session.deleted"
+  where
+    untilKind next kind = do
+        (k, _) <- next
+        if k == kind then pure () else untilKind next kind
+
+-- | With authentication on, @scope=all@ needs an admin owner, the default
+-- scope is the caller's own, and one owner never sees another's events.
+ownerScopedEventsTest :: Assertion
+ownerScopedEventsTest = do
+    let tokens = authTokensFromList [("alice-token", "alice"), ("bob-token", "bob")]
+    withServerAuth (Just tokens) "{}" mockCompletion $ \anonymous -> do
+        let alice = anonymous{srvToken = Just "alice-token"}
+            bob = anonymous{srvToken = Just "bob-token"}
+        (refused, err) <- call alice "GET" "/v1/events?scope=all" Nothing
+        (refused, field "error" err) @?= (403, "forbidden")
+        withEventsAt alice "/v1/events" $ \nextAlice -> do
+            (createdA, _) <- call alice "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+            createdA @?= 201
+            untilKind nextAlice "session.created"
+            (createdB, _) <- call bob "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+            createdB @?= 201
+            stray <- timeout 300_000 nextAlice
+            stray @?= Nothing
+  where
+    untilKind next kind = do
+        (k, _) <- next
+        if k == kind then pure () else untilKind next kind
 
 waitFlowTest :: Assertion
 waitFlowTest = withServer deferAll (firstThen [remoteCall "call_1"]) $ \srv -> do
@@ -169,6 +248,77 @@ listDeleteTest = withServer "{}" mockCompletion $ \srv -> do
     (gone, err) <- call srv "GET" ("/v1/sessions/" <> target) Nothing
     (gone, field "error" err) @?= (404, "unknown_session")
 
+-- | G2: no `prompt` (and no `media`) creates an idle session with no turn
+-- and no run, unlike `prompt` present which behaves as today.
+createNoPromptTest :: Assertion
+createNoPromptTest = withServer "{}" mockCompletion $ \srv -> do
+    (status, body) <- call srv "POST" "/v1/sessions" (Just (Aeson.object ["agent" .= ("server-test" :: Text)]))
+    status @?= 201
+    field "status" body @?= Aeson.String "ready"
+    arrayField "session" body @?= []
+    let sid = textField "session_id" body
+    (getStatus, got) <- call srv "GET" ("/v1/sessions/" <> sid) Nothing
+    getStatus @?= 200
+    field "status" got @?= Aeson.String "ready"
+    arrayField "session" got @?= []
+
+-- | POST posts a MailBody and answers a Receipt; GET lists it back, and
+-- filters to only what is unread (which, with nothing ever run against
+-- this session, is everything).
+mailRouteTest :: Assertion
+mailRouteTest = withServer "{}" mockCompletion $ \srv -> do
+    (created, view) <- call srv "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+    created @?= 201
+    let sid = textField "session_id" view
+        mailBody =
+            Aeson.object
+                [ "body" .= Aeson.object ["tag" .= ("agentMessage" :: Text), "text" .= ("hi there" :: Text), "expectsReply" .= False]
+                , "priority" .= ("normal" :: Text)
+                ]
+    (posted, receipt) <- call srv "POST" ("/v1/sessions/" <> sid <> "/mail") (Just mailBody)
+    posted @?= 202
+    case field "id" receipt of
+        Aeson.String _ -> pure ()
+        other -> assertFailure ("expected a receipt id, got " <> show other)
+    field "duplicate" receipt @?= Aeson.Bool False
+
+    (listed, page) <- call srv "GET" ("/v1/sessions/" <> sid <> "/mail") Nothing
+    listed @?= 200
+    length (arrayField "mail" page) @?= 1
+
+    (listedUnread, unreadPage) <- call srv "GET" ("/v1/sessions/" <> sid <> "/mail?unread=true") Nothing
+    listedUnread @?= 200
+    length (arrayField "mail" unreadPage) @?= 1
+
+    (missing, err) <- call srv "GET" "/v1/sessions/00000000-0000-0000-0000-000000000000/mail" Nothing
+    (missing, field "error" err) @?= (404, "unknown_session")
+
+{- | Fork whole (default), fork at a turn (a prefix), an unknown turn index
+(404 unknown_turn), and an unknown agent slug (404 unknown_agent).
+-}
+forkRouteTest :: Assertion
+forkRouteTest = withServer "{}" mockCompletion $ \srv -> do
+    (created, view) <- call srv "POST" "/v1/sessions?wait=true" (Just (createBody []))
+    created @?= 201
+    let sid = textField "session_id" view
+        sourceTurns = arrayField "turns" (field "session" view)
+    assertBool "at least two turns" (length sourceTurns >= 2)
+
+    (forkedStatus, forked) <- call srv "POST" ("/v1/sessions/" <> sid <> "/fork") (Just (Aeson.object []))
+    forkedStatus @?= 201
+    field "forkedFromSessionId" (field "session" forked) @?= Aeson.String sid
+    arrayField "turns" (field "session" forked) @?= sourceTurns
+
+    (atTurnStatus, atTurnForked) <- call srv "POST" ("/v1/sessions/" <> sid <> "/fork") (Just (Aeson.object ["at_turn" .= (1 :: Int)]))
+    atTurnStatus @?= 201
+    arrayField "turns" (field "session" atTurnForked) @?= drop 1 sourceTurns
+
+    (badTurn, badTurnErr) <- call srv "POST" ("/v1/sessions/" <> sid <> "/fork") (Just (Aeson.object ["at_turn" .= (999 :: Int)]))
+    (badTurn, field "error" badTurnErr) @?= (404, "unknown_turn")
+
+    (badAgent, badAgentErr) <- call srv "POST" ("/v1/sessions/" <> sid <> "/fork") (Just (Aeson.object ["agent" .= ("no-such-agent" :: Text)]))
+    (badAgent, field "error" badAgentErr) @?= (404, "unknown_agent")
+
 agentsHealthTest :: Assertion
 agentsHealthTest = withServer "{}" mockCompletion $ \srv -> do
     (status, agents) <- call srv "GET" "/v1/agents" Nothing
@@ -177,6 +327,12 @@ agentsHealthTest = withServer "{}" mockCompletion $ \srv -> do
         Aeson.Array xs | [a] <- Vector.toList xs -> do
             field "slug" a @?= "server-test"
             field "description" a @?= "a test agent"
+            -- G6 (@todos/os-as-standalone-server.md@ Phase 3a): the agent
+            -- descriptor carries model, system prompt and tools (now
+            -- objects, not bare names), not just slug/description.
+            field "model" a @?= "mock"
+            field "system_prompt" a @?= Aeson.Array (Vector.fromList ["You are a test"])
+            arrayField "tools" a @?= []
         other -> assertFailure ("expected one agent, got " <> show other)
     (healthStatus, health) <- call srv "GET" "/healthz" Nothing
     (healthStatus, field "ok" health) @?= (200, Aeson.Bool True)
@@ -187,7 +343,8 @@ errorsTest = withServer "{}" mockCompletion $ \srv -> do
             (s, v) <- call srv method path body
             (path, s, field "error" v) @?= (path, status, code)
     expect "/v1/sessions" "POST" (Just (Aeson.object ["agent" .= ("nobody" :: Text), "prompt" .= ("hi" :: Text)])) (404, "unknown_agent")
-    expect "/v1/sessions" "POST" (Just (Aeson.object ["agent" .= ("server-test" :: Text)])) (400, "bad_request")
+    -- No prompt is valid (G2: an idle session with no turn); no agent is not.
+    expect "/v1/sessions" "POST" (Just (Aeson.object [])) (400, "bad_request")
     expect "/v1/sessions" "POST" (Just (createBody [("run", "forever")])) (400, "bad_request")
     expect "/v1/sessions?wait=maybe" "POST" (Just (createBody [])) (400, "bad_request")
     expect "/v1/sessions/not-a-uuid" "GET" Nothing (404, "unknown_session")
@@ -357,6 +514,75 @@ originTest = do
         (withToken, _) <- call srv{srvHeaders = [("Origin", "http://evil.example")], srvToken = Just "alice-token"} "GET" "/v1/agents" Nothing
         withToken @?= 200
 
+{- | @--cors-origin@: a listed origin gets preflight and response headers and
+passes 'checkOrigin' even without authentication; a non-listed, non-loopback
+origin is still refused; the event stream carries the headers too.
+-}
+corsTest :: Assertion
+corsTest = do
+    let allowed = "http://allowed.example" :: ByteString.ByteString
+    withServerConfig Nothing "{}" id (\env -> env{envCorsOrigins = ["http://allowed.example"]}) $ \srv -> do
+        -- Preflight from the allowed origin: 204, the CORS headers, no auth needed.
+        preflightReq <- request srv{srvHeaders = [("Origin", allowed)]} "OPTIONS" "/v1/sessions" Nothing
+        preflightRsp <- Http.httpLbs preflightReq srv.srvManager
+        statusCode (Http.responseStatus preflightRsp) @?= 204
+        let preflightHeaders = Http.responseHeaders preflightRsp
+        lookup "Access-Control-Allow-Origin" preflightHeaders @?= Just allowed
+        lookup "Access-Control-Allow-Methods" preflightHeaders @?= Just "GET, POST, PUT, DELETE, OPTIONS"
+        lookup "Access-Control-Allow-Headers" preflightHeaders @?= Just "Authorization, Content-Type, Last-Event-ID"
+        lookup "Access-Control-Max-Age" preflightHeaders @?= Just "600"
+        lookup "Vary" preflightHeaders @?= Just "Origin"
+        -- A real POST from the allowed origin carries the header and succeeds
+        -- (an allowed origin passes checkOrigin even without --auth-tokens).
+        createReq <- request srv{srvHeaders = [("Origin", allowed)]} "POST" "/v1/sessions" (Just (createBody [("run", "none")]))
+        createRsp <- Http.httpLbs createReq srv.srvManager
+        statusCode (Http.responseStatus createRsp) @?= 201
+        lookup "Access-Control-Allow-Origin" (Http.responseHeaders createRsp) @?= Just allowed
+        lookup "Access-Control-Expose-Headers" (Http.responseHeaders createRsp) @?= Just "Location"
+        -- A non-listed, non-loopback origin is still refused without authentication.
+        (refused, err) <- call srv{srvHeaders = [("Origin", "http://evil.example")]} "GET" "/v1/agents" Nothing
+        (refused, field "error" err) @?= (403, "forbidden_origin")
+        -- The event stream, opened cross-origin, carries the same header.
+        view <- Aeson.decode (Http.responseBody createRsp) `orFail` "the create response was not JSON"
+        let sid = textField "session_id" view
+        eventsReq <- request srv{srvHeaders = [("Origin", allowed)]} "GET" ("/v1/sessions/" <> sid <> "/events") Nothing
+        Http.withResponse eventsReq srv.srvManager $ \rsp -> do
+            statusCode (Http.responseStatus rsp) @?= 200
+            lookup "Access-Control-Allow-Origin" (Http.responseHeaders rsp) @?= Just allowed
+            chunk <- Http.brRead (Http.responseBody rsp)
+            assertBool "the stream sent a snapshot" ("event: snapshot" `ByteString.isInfixOf` chunk)
+  where
+    orFail (Just v) _ = pure v
+    orFail Nothing msg = assertFailure msg
+
+-- | The startup check runs before any file is touched, so bogus paths are fine.
+corsWildcardStartupTest :: Assertion
+corsWildcardStartupTest = withSystemTempDirectory "agents-server-cors" $ \dir -> do
+    let tokensFile = dir </> "tokens.json"
+    writeFile tokensFile "{\"tokens\": [{\"owner\": \"alice\", \"token\": \"alice-token\"}]}"
+    let opts =
+            ServerOptions
+                { soAgentFiles = ["/nonexistent/agent.json"]
+                , soApiKeysFile = "/nonexistent/keys.json"
+                , soDatabase = dir </> "agents.db"
+                , soBind = "127.0.0.1"
+                , soPort = 0
+                , soLiveSessionTtl = 900
+                , soShutdownGrace = 1
+                , soAuthTokens = Just tokensFile
+                , soStreamTokens = False
+                , soAdminOwners = []
+                , soNoUI = True
+                , soCorsOrigins = ["*"]
+                , soSocket = Nothing
+                , soLegacySessionDirs = []
+                , soProcessParams = mempty
+                }
+    result <- try (runServer opts silentLogger)
+    case result of
+        Left (_ :: IOException) -> pure ()
+        Right () -> assertFailure "expected --cors-origin '*' with --auth-tokens to be refused at startup"
+
 streamingTest :: Assertion
 streamingTest = do
     requests <- newIORef []
@@ -482,11 +708,14 @@ openApiTest = do
                 , "/v1/agents"
                 , "/v1/agents/{slug}"
                 , "/v1/continuations/{token}"
+                , "/v1/events"
                 , "/v1/sessions"
                 , "/v1/sessions/{id}"
                 , "/v1/sessions/{id}/cancel"
                 , "/v1/sessions/{id}/cancel-attached"
                 , "/v1/sessions/{id}/events"
+                , "/v1/sessions/{id}/fork"
+                , "/v1/sessions/{id}/mail"
                 , "/v1/sessions/{id}/messages"
                 , "/v1/sessions/{id}/pause"
                 , "/v1/sessions/{id}/pending"
@@ -532,6 +761,9 @@ uiPageTest = do
             , "/v1/sessions"
             , "/v1/continuations/"
             , "EventSource"
+            , -- the session list follows the server-wide feed
+              "/v1/events"
+            , "session.created"
             , "openapi.json"
             , -- attachments: the picker, and the key the API wants
               "type='file'"
@@ -740,8 +972,12 @@ call srv method path body = do
 (without its trailing blank line), or @""@ once the stream has ended.
 -}
 withRawEvents :: Srv -> Text -> (IO ByteString.ByteString -> IO a) -> IO a
-withRawEvents srv sid k = do
-    req <- request srv "GET" ("/v1/sessions/" <> sid <> "/events") Nothing
+withRawEvents srv sid = withRawEventsAt srv ("/v1/sessions/" <> sid <> "/events")
+
+-- | Like 'withRawEvents', at any path (e.g. @\/v1\/events?scope=all@).
+withRawEventsAt :: Srv -> Text -> (IO ByteString.ByteString -> IO a) -> IO a
+withRawEventsAt srv path k = do
+    req <- request srv "GET" path Nothing
     Http.withResponse req srv.srvManager $ \rsp -> do
         buffer <- newIORef ByteString.empty
         let nextFrame = do
@@ -760,21 +996,42 @@ withRawEvents srv sid k = do
 
 -- | Like 'withRawEvents', parsed, skipping keepalives; 5 seconds per event.
 withEvents :: Srv -> Text -> (IO (Text, Aeson.Value) -> IO a) -> IO a
-withEvents srv sid k = withRawEvents srv sid $ \nextFrame ->
-    let next =
-            timeout 5_000_000 nextFrame >>= \case
-                Nothing -> assertFailure "no event within 5 seconds"
-                Just frame
-                    | ":" `ByteString.isPrefixOf` frame -> next
-                    | otherwise -> parseFrame frame
-     in k next
+withEvents srv sid k = withRawEvents srv sid (k . parsedNext)
+
+-- | Like 'withEvents', at any path.
+withEventsAt :: Srv -> Text -> (IO (Text, Aeson.Value) -> IO a) -> IO a
+withEventsAt srv path k = withRawEventsAt srv path (k . parsedNext)
+
+-- | Like 'withEvents', also giving each event's @id:@ (its 'EventSeq').
+withIdEvents :: Srv -> Text -> (IO (Text, Text, Aeson.Value) -> IO a) -> IO a
+withIdEvents srv path k = withRawEventsAt srv path (k . parsedNextWithId)
+
+parsedNext :: IO ByteString.ByteString -> IO (Text, Aeson.Value)
+parsedNext nextFrame = do
+    (kind, _, value) <- parsedNextWithId nextFrame
+    pure (kind, value)
+
+parsedNextWithId :: IO ByteString.ByteString -> IO (Text, Text, Aeson.Value)
+parsedNextWithId nextFrame = next
   where
+    next =
+        timeout 5_000_000 nextFrame >>= \case
+            Nothing -> assertFailure "no event within 5 seconds"
+            Just frame
+                | ":" `ByteString.isPrefixOf` frame -> next
+                | otherwise -> parseFrame frame
     parseFrame frame = do
         let lines' = Char8.lines frame
             value prefix = [ByteString.drop (ByteString.length prefix) l | l <- lines', prefix `ByteString.isPrefixOf` l]
+            eid = case value "id: " of
+                (i : _) -> Text.decodeUtf8 i
+                [] -> "" -- e.g. the "snapshot" frame, which carries no id.
         case (value "event: ", value "data: ") of
             ([kind], [payload]) ->
-                either (\e -> assertFailure ("bad event data: " <> e)) (pure . (Text.decodeUtf8 kind,)) (Aeson.eitherDecodeStrict payload)
+                either
+                    (\e -> assertFailure ("bad event data: " <> e))
+                    (pure . (Text.decodeUtf8 kind,eid,))
+                    (Aeson.eitherDecodeStrict payload)
             _ -> assertFailure ("bad frame: " <> show frame)
 
 -- | Events up to and including the next @run.stopped@.
@@ -785,6 +1042,15 @@ untilStopped next = go []
         event <- next
         let acc' = event : acc
         if fst event == "run.stopped" then pure (reverse acc') else go acc'
+
+-- | Like 'untilStopped', keeping each event's @id:@.
+untilStoppedWithId :: IO (Text, Text, Aeson.Value) -> IO [(Text, Text, Aeson.Value)]
+untilStoppedWithId next = go []
+  where
+    go acc = do
+        event@(kind, _, _) <- next
+        let acc' = event : acc
+        if kind == "run.stopped" then pure (reverse acc') else go acc'
 
 -------------------------------------------------------------------------------
 -- JSON helpers
@@ -807,3 +1073,114 @@ arrayField name v = case field name v of
 
 encode :: Text -> Text
 encode = Text.decodeUtf8 . urlEncode True . Text.encodeUtf8
+
+-------------------------------------------------------------------------------
+-- --socket
+-------------------------------------------------------------------------------
+
+{- | @runServer@ with @--socket@ set, on a real (if throwaway) TCP port
+alongside it. Confirms the socket file appears, is reachable with a plain
+HTTP/1.1 request, and is gone once the server stops.
+-}
+socketHealthzTest :: Assertion
+socketHealthzTest = withSystemTempDirectory "agents-server-socket" $ \dir -> do
+    let agentFile = dir </> "agent.json"
+        keysFile = dir </> "keys.json"
+        sockPath = dir </> "agents-server.sock"
+    LByteString.writeFile agentFile $
+        Aeson.encode $
+            Aeson.object
+                [ "tag" .= ("OpenAIAgentDescription" :: Text)
+                , "contents"
+                    .= Aeson.object
+                        [ "slug" .= ("server-test" :: Text)
+                        , "apiKeyId" .= ("none" :: Text)
+                        , "flavor" .= ("OpenAIv1" :: Text)
+                        , "modelUrl" .= ("http://127.0.0.1:1" :: Text)
+                        , "modelName" .= ("mock" :: Text)
+                        , "announce" .= ("a test agent" :: Text)
+                        , "systemPrompt" .= ["You are a test" :: Text]
+                        , "builtinToolboxes" .= ([] :: [Text])
+                        , "mcpServers" .= ([] :: [Text])
+                        ]
+                ]
+    writeFile keysFile "{}"
+    port <- getFreePort
+    let opts =
+            ServerOptions
+                { soAgentFiles = [agentFile]
+                , soApiKeysFile = keysFile
+                , soDatabase = dir </> "agents.db"
+                , soBind = "127.0.0.1"
+                , soPort = port
+                , soLiveSessionTtl = 900
+                , soShutdownGrace = 1
+                , soAuthTokens = Nothing
+                , soStreamTokens = False
+                , soAdminOwners = []
+                , soNoUI = True
+                , soCorsOrigins = []
+                , soSocket = Just sockPath
+                , soLegacySessionDirs = []
+                , soProcessParams = mempty
+                }
+    serverAsync <- async (runServer opts silentLogger)
+    waitForFile sockPath
+    response <- httpOverUnixSocket sockPath "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    Async.cancel serverAsync
+    assertBool ("expected 200 OK, got: " <> Char8.unpack response) ("200 OK" `ByteString.isInfixOf` response)
+    assertBool ("expected the healthz body, got: " <> Char8.unpack response) ("\"ok\":true" `ByteString.isInfixOf` response)
+    waitForFileGone sockPath
+
+-- | A free TCP port on loopback, picked by asking the kernel for one (a
+-- small, accepted race: nothing stops another process taking it before
+-- 'runServer' binds).
+getFreePort :: IO Int
+getFreePort = do
+    sock <- NS.socket NS.AF_INET NS.Stream NS.defaultProtocol
+    NS.bind sock (NS.SockAddrInet 0 (NS.tupleToHostAddress (127, 0, 0, 1)))
+    addr <- NS.getSocketName sock
+    NS.close sock
+    case addr of
+        NS.SockAddrInet p _ -> pure (fromIntegral p)
+        other -> assertFailure ("expected an IPv4 address, got: " <> show other) >> pure 0
+
+waitForFile :: FilePath -> IO ()
+waitForFile path = do
+    got <- timeout 5_000_000 poll
+    case got of
+        Just () -> pure ()
+        Nothing -> assertFailure ("expected " <> path <> " to appear in time")
+  where
+    poll = do
+        exists <- doesFileExist path
+        if exists then pure () else threadDelay 20_000 >> poll
+
+waitForFileGone :: FilePath -> IO ()
+waitForFileGone path = do
+    got <- timeout 5_000_000 poll
+    case got of
+        Just () -> pure ()
+        Nothing -> assertFailure ("expected " <> path <> " to be removed on shutdown")
+  where
+    poll = do
+        exists <- doesFileExist path
+        if exists then threadDelay 20_000 >> poll else pure ()
+
+-- | A minimal HTTP/1.1 request over a Unix domain socket: sends the raw
+-- request bytes, then reads until the peer closes the connection (the
+-- request above sends @Connection: close@).
+httpOverUnixSocket :: FilePath -> ByteString.ByteString -> IO ByteString.ByteString
+httpOverUnixSocket path rawRequest = do
+    sock <- NS.socket NS.AF_UNIX NS.Stream NS.defaultProtocol
+    NS.connect sock (NS.SockAddrUnix path)
+    NSB.sendAll sock rawRequest
+    chunks <- readAll sock
+    NS.close sock
+    pure (ByteString.concat chunks)
+  where
+    readAll sock = do
+        chunk <- NSB.recv sock 4096
+        if ByteString.null chunk
+            then pure []
+            else (chunk :) <$> readAll sock

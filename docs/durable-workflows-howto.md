@@ -199,6 +199,14 @@ it stops, stores the session, and prints a JSON report with the session id
 and continuation tokens.  Continue it with `session complete` and
 `session resume`.
 
+The TUI (`agents-exe tui`) can also answer deferred calls directly, without
+the `session` CLI: a run that stops on deferred calls shows a Pending panel
+listing each call, and `Ctrl+Y` (`answer-pending`) puts the message editor
+into "answer mode" for the oldest one — type the result and send it, which
+calls the same `completeCall` mechanism (with `autoResume` set) the server's
+own `GET /v1/sessions/:id/pending` workers use, so the run resumes on its
+own. See `docs/tui.md`'s "Pending calls" section.
+
 ### Start a new session
 
 ```bash

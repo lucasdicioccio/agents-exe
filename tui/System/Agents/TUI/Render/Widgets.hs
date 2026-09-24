@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Widget rendering functions for agents, sessions, message editor, attachments, queued messages, and buffers.
+-- | Widget rendering functions for agents, sessions, message editor, attachments, the draft panel, and buffers.
 module System.Agents.TUI.Render.Widgets where
 
 import Brick
@@ -14,10 +14,15 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 
-import System.Agents.AgentTree (OSAgentNode (..))
-import System.Agents.Base (Agent (..))
+import qualified Data.Aeson.Encode.Pretty as AesonPretty
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Text.Encoding as TextEncoding
+
 import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.Session.Base (Session (..))
+import System.Agents.Protocol (AgentDescriptor (..), ToolDescriptor (..))
+import System.Agents.Session.Base (DeferredCallView (..), LlmToolCall (..))
+import System.Agents.SessionStore (SessionMeta (..))
+import System.Agents.Tools.Cache (extractToolInfo)
 import System.Agents.TUI.Buffer (Buffer, bufferContent)
 import System.Agents.TUI.MessageComposer (
     InputConfig (..),
@@ -28,8 +33,6 @@ import System.Agents.TUI.Render.Attributes
 import System.Agents.TUI.Render.Conversation (formatBytes, getAttachmentCount)
 import System.Agents.TUI.Render.Utils (borderWithFocus)
 import System.Agents.TUI.Types
-import System.Agents.ToolRegistration (ToolRegistration, declareTool, toolActivation)
-import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
 import System.Agents.Tools.Activation (Activation (..))
 
 -------------------------------------------------------------------------------
@@ -50,9 +53,7 @@ render_agentList st =
 -- | Render a single agent item.
 render_agentItem :: Bool -> TuiAgent -> Widget N
 render_agentItem _ agent =
-    txt $ " " <> agentSlug0
-  where
-    agentSlug0 = slug (osNodeConfig (tuiNode agent))
+    txt $ " " <> (tuiAgentDescriptor agent).adSlug
 
 -- | Render agent information panel.
 render_agentInfo :: TuiState -> Widget N
@@ -64,45 +65,42 @@ render_agentInfo st =
         ( case st ^. tuiUI . selectedAgentInfo of
             Nothing -> txt "No agent selected"
             Just agent ->
-                let node = tuiNode agent
-                    agentCfg = osNodeConfig node
-                    mtools = lookup (tuiAgentId agent) (st ^. tuiUI . uiAgentTools)
+                let d = tuiAgentDescriptor agent
                  in viewport AgentInfoWidget Both $
                         vBox $
-                            mconcat [agentHeader agentCfg, renderToolsSection mtools, agentPrompt agentCfg]
+                            mconcat [agentHeader d, renderToolsSection d.adTools, agentPrompt d]
         )
   where
-    agentHeader :: Agent -> [Widget N]
-    agentHeader agentCfg =
-        [ txt $ "# Slug: " <> slug agentCfg
-        , txt $ "# Announce: " <> announce agentCfg
+    agentHeader :: AgentDescriptor -> [Widget N]
+    agentHeader d =
+        [ txt $ "# Slug: " <> d.adSlug
+        , txt $ "# Announce: " <> d.adDescription
         , txt ""
-        , txt $ "# Model: " <> modelName agentCfg
+        , txt $ "# Model: " <> d.adModel
         , txt ""
         ]
-    renderToolsSection :: Maybe [ToolRegistration] -> [Widget N]
-    renderToolsSection Nothing =
-        [ txt "# Tools: not loaded"
+    renderToolsSection :: [ToolDescriptor] -> [Widget N]
+    renderToolsSection [] =
+        [ txt "# Tools: none"
         ]
-    renderToolsSection (Just toolz) =
+    renderToolsSection toolz =
         [ txt "# Tools:"
         , vBox $ map renderToolItem toolz
         ]
-    renderToolItem :: ToolRegistration -> Widget N
+    renderToolItem :: ToolDescriptor -> Widget N
     renderToolItem tool =
-        let toolName = tool.declareTool.toolDescriptionName.getToolName
-            activation = toolActivation tool
-            activationMarker = renderActivationMarker activation
+        let toolName = tool.tdName
+            activationMarker = renderActivationMarker tool.tdActivation
          in hBox [txt "- ", activationMarker, txt $ " " <> toolName]
     renderActivationMarker :: Maybe Activation -> Widget N
     renderActivationMarker Nothing = withAttr activationDefaultAttr $ txt "[a]"
     renderActivationMarker (Just activation) = case activation of
         AlwaysActivated -> withAttr activationAlwaysAttr $ txt "[A]"
         OnDemandActivated group -> withAttr activationOnDemandAttr $ txt $ "[D:" <> group <> "]"
-    agentPrompt :: Agent -> [Widget N]
-    agentPrompt agentCfg =
+    agentPrompt :: AgentDescriptor -> [Widget N]
+    agentPrompt d =
         [ txt "# System Prompt:"
-        , txt $ Text.unlines $ systemPrompt agentCfg
+        , txt $ Text.unlines d.adSystemPrompt
         ]
 
 -------------------------------------------------------------------------------
@@ -132,9 +130,9 @@ render_sessionList st =
     hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just SessionsListWidget
 
 -- | Render a single session item.
-render_sessionItem :: TuiState -> Bool -> Session -> Widget N
-render_sessionItem _st _isSelected sess =
-    txt $ Text.pack $ " " <> show sess.sessionId
+render_sessionItem :: TuiState -> Bool -> SessionMeta -> Widget N
+render_sessionItem _st _isSelected meta =
+    txt $ Text.pack $ " " <> show meta.smSessionId
 
 -------------------------------------------------------------------------------
 -- Message Editor Rendering
@@ -263,57 +261,89 @@ formatAttachmentSize base64Data =
      in formatBytes originalBytes
 
 -------------------------------------------------------------------------------
--- Queued Messages Management Rendering
+-- Draft Management Rendering (§5, D3: the Draft tab)
 -------------------------------------------------------------------------------
 
--- | Render the queued messages management panel.
-render_queued_messages_manager :: TuiState -> Conversation -> Widget N
-render_queued_messages_manager st conv =
-    if conversationStatus conv /= ConversationStatus_Paused
+{- | Render the draft panel for a conversation: collapsed, it shows the
+draft's first line and a size indicator (chars, paragraphs)
+(@todos/os-as-standalone-server.md@ §5). Hidden when the draft is empty.
+-}
+render_draft_manager :: TuiState -> Conversation -> Widget N
+render_draft_manager st conv =
+    if draftIsEmpty draft
         then emptyWidget
-        else
-            let queuedMsgs = getQueuedMessages st conv
-                count = length queuedMsgs
-             in if count == 0
-                    then emptyWidget
-                    else render_queue_panel st count queuedMsgs
+        else render_draft_panel st draft
+  where
+    draft = conversationDraft conv
 
--- | Get the list of queued messages for a conversation.
-getQueuedMessages :: TuiState -> Conversation -> [Text]
-getQueuedMessages st conv =
-    let buffered = st ^. tuiUI . uiBufferedMessages
-     in case Map.lookup (conversationId conv) buffered of
-            Nothing -> []
-            Just msgs -> reverse msgs
-
--- | Render the queue management UI panel.
-render_queue_panel :: TuiState -> Int -> [Text] -> Widget N
-render_queue_panel st count msgs =
+-- | Render the collapsed draft summary panel.
+render_draft_panel :: TuiState -> Draft -> Widget N
+render_draft_panel st draft =
     borderWithFocus
         st
-        QueuedMessageListWidget
-        (" Queued Messages (" <> Text.pack (show count) <> ") ")
+        DraftPanelWidget
+        (" Draft (" <> sizeText <> ") ")
         $ vBox
-            [ txt "Ctrl+D: clear all | Del/Backspace: delete selected | Up/Down: select"
+            [ txt "Ctrl+A: edit draft | Ctrl+G: send now | Ctrl+D: clear"
             , txt ""
-            , render_queued_message_list selectedIdx msgs
+            , withAttr draftAttr $ txt (draftFirstLine draft)
             ]
   where
-    selectedIdx = st ^. tuiUI . queuedMessagesFocus
+    chars = Text.length (draftText draft)
+    paras = draftParagraphCount draft
+    sizeText =
+        Text.pack (show chars)
+            <> " chars, "
+            <> Text.pack (show paras)
+            <> if paras == 1 then " paragraph" else " paragraphs"
 
--- | Render the list of queued messages with selection.
-render_queued_message_list :: Maybe Int -> [Text] -> Widget N
-render_queued_message_list selectedIdx msgs =
-    vBox $ zipWith (render_queued_item selectedIdx) [0 ..] msgs
+-------------------------------------------------------------------------------
+-- Pending Calls Rendering (Phase 3c, @todos/os-as-standalone-server.md@ Design §4)
+-------------------------------------------------------------------------------
 
--- | Render a single queued message item.
-render_queued_item :: Maybe Int -> Int -> Text -> Widget N
-render_queued_item selectedIdx idx msg =
-    let isSelected = selectedIdx == Just idx
-        marker = if isSelected then "▶ " else "  "
-        truncated = Text.take 60 msg <> if Text.length msg > 60 then "..." else ""
-        attr = if isSelected then queuedMessageSelectedAttr else queuedMessageAttr
-     in withAttr attr $ txt $ marker <> truncated
+{- | Render the Pending panel for a conversation: one line per deferred
+call (tool name, a short prefix of its continuation token, and its
+arguments) and the keybinding hint. Hidden when there is nothing pending,
+like the Draft panel.
+-}
+render_pending_manager :: TuiState -> Conversation -> Widget N
+render_pending_manager st conv =
+    if null pending
+        then emptyWidget
+        else render_pending_panel st pending
+  where
+    pending = conv.conversationPending
+
+-- | Render the pending-calls summary panel.
+render_pending_panel :: TuiState -> [DeferredCallView] -> Widget N
+render_pending_panel st pending =
+    borderWithFocus
+        st
+        PendingPanelWidget
+        (" Pending (" <> Text.pack (show (length pending)) <> ") ")
+        $ vBox
+            [ txt "Ctrl+Y: answer oldest pending call, then send"
+            , txt ""
+            , vBox (map render_pending_call pending)
+            ]
+
+-- | Render one deferred call: tool name, token prefix, arguments.
+render_pending_call :: DeferredCallView -> Widget N
+render_pending_call call =
+    txt $
+        "- "
+            <> call.dcvToolName
+            <> " (token "
+            <> tokenPrefix
+            <> "): "
+            <> argsText
+  where
+    tokenPrefix = case call.dcvToken of
+        Nothing -> "none"
+        Just tok -> Text.take 8 (Text.pack (show tok))
+    (LlmToolCall callVal) = call.dcvCall
+    (_, args) = extractToolInfo callVal
+    argsText = TextEncoding.decodeUtf8 (LBS.toStrict (AesonPretty.encodePretty args))
 
 -------------------------------------------------------------------------------
 -- Buffer Rendering

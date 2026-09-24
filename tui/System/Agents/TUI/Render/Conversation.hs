@@ -20,6 +20,7 @@ import System.Agents.Base (ConversationId (..))
 import System.Agents.OS.Events (ToolCallActivity (..))
 import System.Agents.Session.Base hiding (Agent)
 import System.Agents.Session.Signals (calculateTrajectorySignals)
+import System.Agents.SessionStore (SessionMeta (..))
 import System.Agents.TUI.Render.Attributes
 import System.Agents.TUI.Render.Utils (borderWithFocus)
 import System.Agents.TUI.ToolCallActivity (ToolCallView (..), describeToolCallView, runningToolCallViews, sessionToolCallViews)
@@ -136,6 +137,7 @@ renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv 
             ConversationStatus_WaitingForInput ->
                 if isUnread then "● " else "○ "
             ConversationStatus_Paused -> "⏸ "
+            ConversationStatus_BlockedOnDeferred -> "⧗ "
         -- Tree branch prefix based on ancestor status
         branchPrefix = makePrefix ancestorIsLasts isLast
         -- Selection marker
@@ -149,10 +151,12 @@ renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv 
         -- Add attachment count
         attachmentCount = getAttachmentCount st conv
         attachmentSuffix = if attachmentCount > 0 then " [📎" <> Text.pack (show attachmentCount) <> "]" else ""
-        -- Add queued message count
-        queueCount = getQueuedMessageCount st conv
-        queueSuffix = if queueCount > 0 then " [" <> Text.pack (show queueCount) <> " queued]" else ""
-        fullText = baseText <> turnSuffix <> attachmentSuffix <> queueSuffix
+        -- Draft indicator (§5): a conversation with unsent draft text
+        draftSuffix =
+            if draftIsEmpty (conversationDraft conv)
+                then ""
+                else " [draft " <> Text.pack (show (draftParagraphCount (conversationDraft conv))) <> "p]"
+        fullText = baseText <> turnSuffix <> attachmentSuffix <> draftSuffix
         -- Determine the appropriate attribute
         attr =
             if isSelected && hasFocus
@@ -167,14 +171,6 @@ renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv 
      in withAttr attr $ txt $ selectionMarker <> fullText
   where
     isUnread = Set.member (conversationId conv) (st ^. tuiUI . unreadConversations)
-
--- | Get the number of queued messages for a conversation.
-getQueuedMessageCount :: TuiState -> Conversation -> Int
-getQueuedMessageCount st conv =
-    let buffered = st ^. tuiUI . uiBufferedMessages
-     in case Map.lookup (conversationId conv) buffered of
-            Nothing -> 0
-            Just msgs -> length msgs
 
 -- | Get the number of attachments for a conversation.
 getAttachmentCount :: TuiState -> Conversation -> Int
@@ -200,7 +196,12 @@ render_conversationView st =
                         (conversationSession conv)
                         mNavState
 
--- | Render the session history view.
+{- | Render the session history view: the selected 'SessionMeta's full
+'Session', fetched once and cached by
+'System.Agents.TUI.Event.ensureHistorySessionCached'
+(@todos/os-as-standalone-server.md@ §4, 'System.Agents.Host.Client.getSession'),
+so this renders exactly like 'render_conversationView' once it lands.
+-}
 render_sessionView :: TuiState -> Widget N
 render_sessionView st =
     content
@@ -208,9 +209,14 @@ render_sessionView st =
     content =
         case listSelectedElement (st ^. tuiUI . sessionList) of
             Nothing -> txt "No session selected"
-            Just (_, session) ->
-                let mNavState = st ^. tuiUI . turnNavigation
-                 in render_session st SessionViewWidget (Just session) mNavState
+            Just (_, meta) ->
+                case Map.lookup meta.smSessionId (st ^. tuiUI . historySessionCache) of
+                    Nothing -> txt "session not started yet"
+                    Just HistoryLoading -> txt "Loading…"
+                    Just (HistoryFailed err) -> withAttr statusErrorAttr $ txt ("Failed to load: " <> err)
+                    Just (HistoryLoaded sess) ->
+                        let mNavState = st ^. tuiUI . turnNavigation
+                         in render_session st SessionViewWidget (Just sess) mNavState
 
 -- | Render a session's turns.
 render_session :: TuiState -> WidgetName -> Maybe Session -> Maybe TurnNavigationState -> Widget N

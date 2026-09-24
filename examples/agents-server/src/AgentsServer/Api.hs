@@ -35,7 +35,6 @@ import Data.Foldable (asum)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -50,18 +49,18 @@ import AgentsServer.Auth (AuthTokens, authenticate, bearerToken)
 import AgentsServer.Mcp (McpContext (..), handleMcp)
 import AgentsServer.OpenApi (apiDocument)
 import AgentsServer.UI (uiPage)
-import System.Agents.AgentStore (StoredAgent (..))
-import System.Agents.AgentTree (OSAgentNode (..))
-import qualified System.Agents.Base as Base
-import System.Agents.Host (AgentEditError (..), AgentSource (..), Host (..), deleteStoredAgent, hostAllAgents, putStoredAgent)
-import System.Agents.Host.Runner
-import System.Agents.Media.Types (MediaAttachment (..))
-import System.Agents.Session.Base (ContinuationToken (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls, sessionStatusText)
+import System.Agents.Host (AgentEditError (..), Host (..), deleteStoredAgent, hostAllAgents, putStoredAgent)
+import System.Agents.Host.Runner hiding (getAgent, listAgents)
+import qualified System.Agents.Host.Runner as Runner
+import System.Agents.Protocol (
+    runModeFromText,
+    runnerErrorCode,
+    runnerErrorMessage,
+ )
+import System.Agents.Session.Base (ContinuationToken (..), Priority (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls)
 import System.Agents.Session.Wake (findSessionForToken)
-import System.Agents.SessionStore (SessionBackend (..), SessionMeta (..), SessionQuery (..), allSessionsQuery)
-import System.Agents.ToolRegistration (ToolRegistration (..))
-import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
-import System.Agents.Tools.Params.Types (ParamName, ParamScope (..), ParameterDecl (..), ProcessValue (..))
+import System.Agents.SessionStore (SessionMeta (..), SessionQuery (..), allSessionsQuery)
+import System.Agents.Tools.Params.Types (ParamName)
 
 data ServerEnv = ServerEnv
     { envHost :: Host
@@ -85,12 +84,20 @@ data ServerEnv = ServerEnv
     {- ^ The OpenAPI document, built once: it is the same for every
     request, and deriving it again per request would be wasted work.
     -}
+    , envCorsOrigins :: [Text]
+    {- ^ Origins allowed to call this server cross-origin (@--cors-origin@,
+    repeatable). @"*"@ matches any origin and is only ever set when
+    'envAuth' is 'Nothing' (checked at startup in "AgentsServer.Server").
+    An origin here passes 'checkOrigin' even without authentication, and
+    every response to a matching request carries @Access-Control-*@
+    headers; see 'corsHeadersFor'.
+    -}
     }
 
 newServerEnv :: Host -> SessionRunner -> Maybe AuthTokens -> IO ServerEnv
 newServerEnv host runner auth = do
     shutdown <- newTVarIO False
-    pure $ ServerEnv host runner shutdown 15_000_000 auth [] False (Aeson.toJSON (apiDocument Nothing))
+    pure $ ServerEnv host runner shutdown 15_000_000 auth [] False (Aeson.toJSON (apiDocument Nothing)) []
 
 -- | Who is calling: an owner when authentication is on, 'Nothing' when off.
 newtype Caller = Caller (Maybe Text)
@@ -117,23 +124,29 @@ errorResponse (ApiError status code msg) =
         (hContentType, jsonType)
             : [("WWW-Authenticate", "Bearer") | status == status401]
 
+{- | The HTTP status for a 'RunnerError', by its Protocol 'runnerErrorCode'
+(the @{error, message}@ body itself comes straight from
+"System.Agents.Protocol", so the two cannot drift).
+-}
 fromRunnerError :: RunnerError -> ApiError
-fromRunnerError = \case
-    UnknownAgent slug -> ApiError status404 "unknown_agent" ("no agent named " <> slug)
-    UnknownSession sid -> ApiError status404 "unknown_session" ("no session " <> showId sid)
-    UnknownToken _ -> ApiError status404 "unknown_token" "no pending call has this continuation token"
-    TokenAlreadyCompleted _ -> ApiError status409 "token_already_completed" "this call already has a result"
-    RunInProgress sid -> ApiError status409 "run_in_progress" ("a run is active on session " <> showId sid)
-    NoActiveRun sid -> ApiError status409 "no_active_run" ("no run is active on session " <> showId sid)
-    NotAcceptingMessages _ status ->
-        ApiError status409 "not_accepting_messages" ("the session is " <> sessionStatusText status <> ", not idle")
-    Conflict _ -> ApiError status409 "conflict" "the session was modified by another writer; retry"
-    UnknownParams names -> ApiError status422 "unknown_params" ("unknown parameter(s): " <> Text.intercalate ", " names)
-    ForbiddenParams names ->
-        ApiError status403 "forbidden_params" ("process-scope or pinned parameter(s) cannot be set here: " <> Text.intercalate ", " names)
-    InvalidParams names -> ApiError status422 "invalid_params" ("secret parameter(s) must be given as strings: " <> Text.intercalate ", " names)
-    MissingRequiredParams names -> ApiError status422 "params_required" ("required parameter(s) not bound: " <> Text.intercalate ", " names)
-    MailboxRejected sid -> ApiError status429 "mailbox_full" ("session " <> showId sid <> " has too much unread mail; try again later")
+fromRunnerError e = ApiError (statusFor (runnerErrorCode e)) (runnerErrorCode e) (runnerErrorMessage e)
+  where
+    statusFor = \case
+        "unknown_agent" -> status404
+        "unknown_session" -> status404
+        "unknown_token" -> status404
+        "unknown_turn" -> status404
+        "token_already_completed" -> status409
+        "run_in_progress" -> status409
+        "no_active_run" -> status409
+        "not_accepting_messages" -> status409
+        "conflict" -> status409
+        "unknown_params" -> status422
+        "forbidden_params" -> status403
+        "invalid_params" -> status422
+        "params_required" -> status422
+        "mailbox_full" -> status429
+        _ -> status500
 
 orThrow :: IO (Either RunnerError a) -> IO a
 orThrow action = action >>= either (throwIO . fromRunnerError) pure
@@ -147,19 +160,24 @@ badRequest = throwIO . ApiError status400 "bad_request"
 
 application :: ServerEnv -> Application
 application env req respond = do
+    let corsHdrs = corsHeadersFor env req
+        respond' rsp = respond (addHeaders corsHdrs rsp)
     result <- try (route env req)
     case result of
-        Right rsp -> respond rsp
+        Right rsp -> respond' rsp
         Left (e :: SomeException)
             | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
-            | Just apiError <- fromException e -> respond (errorResponse apiError)
-            | otherwise -> respond $ errorResponse $ ApiError status500 "internal_error" (Text.pack (displayException e))
+            | Just apiError <- fromException e -> respond' (errorResponse apiError)
+            | otherwise -> respond' $ errorResponse $ ApiError status500 "internal_error" (Text.pack (displayException e))
 
 {- | The three endpoints a client can reach before it has a token describe
 the server itself; everything else needs one, when tokens are in use.
+@OPTIONS@ (a CORS preflight) is answered on any path, before both auth and
+'checkOrigin': see 'preflightResponse'.
 -}
 route :: ServerEnv -> Request -> IO Response
 route env req = case (requestMethod req, path) of
+    ("OPTIONS", _) -> preflightResponse env req
     ("GET", ["healthz"]) -> healthz env
     ("GET", ["openapi.json"]) -> pure $ json status200 env.envDocument
     ("GET", []) | env.envUI -> pure uiResponse
@@ -184,8 +202,8 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("PUT", ["v1", "agents", slug]) -> requireAdmin env caller >>= \by -> putAgentH env req by slug
     ("DELETE", ["v1", "agents", slug]) -> requireAdmin env caller >> deleteAgentH env slug
     ("POST", ["v1", "sessions"]) -> createH env req caller
-    ("GET", ["v1", "sessions"]) -> listSessions env req caller
-    ("GET", ["v1", "sessions", sid]) -> withSession sid (getH env)
+    ("GET", ["v1", "sessions"]) -> listSessionsH env req caller
+    ("GET", ["v1", "sessions", sid]) -> withSession sid (getH env req)
     ("DELETE", ["v1", "sessions", sid]) -> withSession sid (deleteH env req)
     ("POST", ["v1", "sessions", sid, "messages"]) -> withSession sid (messagesH env req)
     ("POST", ["v1", "sessions", sid, "resume"]) -> withSession sid (resumeH env req)
@@ -193,7 +211,11 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("POST", ["v1", "sessions", sid, "cancel-attached"]) -> withSession sid (cancelAttachedH env)
     ("POST", ["v1", "sessions", sid, "pause"]) -> withSession sid (pauseH env)
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
-    ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env)
+    ("POST", ["v1", "sessions", sid, "mail"]) -> withSession sid (mailPostH env req caller)
+    ("GET", ["v1", "sessions", sid, "mail"]) -> withSession sid (mailListH env req)
+    ("POST", ["v1", "sessions", sid, "fork"]) -> withSession sid (forkH env req caller)
+    ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env req)
+    ("GET", ["v1", "events"]) -> allEventsH env req caller
     ("POST", ["v1", "continuations", token]) -> continuationH env req caller token
     ("POST", ["mcp"]) -> mcpH env req caller
     _
@@ -213,7 +235,8 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
-        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "events"]
+        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "mail", "fork", "events"]
+        ["v1", "events"] -> True
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
         _ -> False
@@ -224,14 +247,18 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
 
 {- | Without authentication, refuse requests that a browser sends from a
 page that is not on this machine. This blocks DNS-rebinding attacks, where a
-remote page reaches the server through a name that resolves to 127.0.0.1.
-Requests without an @Origin@ header (curl, servers, MCP clients) pass.
+remote page reaches the server through a name that resolves to 127.0.0.1. An
+origin named by @--cors-origin@ is allowed too, even without authentication:
+the operator opted it in explicitly. Requests without an @Origin@ header
+(curl, servers, MCP clients) pass.
 -}
 checkOrigin :: ServerEnv -> Request -> IO ()
 checkOrigin env req = case (env.envAuth, lookup "Origin" (requestHeaders req)) of
     (Nothing, Just origin)
-        | not (isLoopbackOrigin origin) ->
-            throwIO $ ApiError status403 "forbidden_origin" "cross-origin requests need authentication (--auth-tokens)"
+        | isLoopbackOrigin origin -> pure ()
+        | Just _ <- matchOrigin env.envCorsOrigins origin -> pure ()
+        | otherwise ->
+            throwIO $ ApiError status403 "forbidden_origin" "cross-origin requests need authentication (--auth-tokens), or list the origin with --cors-origin"
     _ -> pure ()
 
 -- | @http(s)://localhost@, @127.0.0.1@, or @[::1]@, with any port.
@@ -246,6 +273,79 @@ isLoopbackOrigin origin = case Text.breakOn "://" (Text.decodeUtf8Lenient origin
     hostOf hp
         | "[" `Text.isPrefixOf` hp = Text.takeWhile (/= ']') hp <> "]"
         | otherwise = Text.takeWhile (/= ':') hp
+
+-------------------------------------------------------------------------------
+-- CORS
+-------------------------------------------------------------------------------
+
+{- | Whether a request's @Origin@ is allowed by @--cors-origin@, and what to
+echo back in @Access-Control-Allow-Origin@ if so: the request's own origin,
+verbatim, never a literal @"*"@ (so the header is meaningful even when a
+browser sends credentials). Matching is exact on scheme and port; the host
+is compared case-insensitively. A configured @"*"@ matches any origin.
+-}
+matchOrigin :: [Text] -> ByteString.ByteString -> Maybe Text
+matchOrigin allowed originBytes
+    | "*" `elem` allowed = Just originText
+    | any ((== normalizeOrigin originText) . normalizeOrigin) allowed = Just originText
+    | otherwise = Nothing
+  where
+    originText = Text.decodeUtf8Lenient originBytes
+
+-- | Lower-cases the scheme and host of an origin; the port is left as-is.
+normalizeOrigin :: Text -> Text
+normalizeOrigin o = case Text.breakOn "://" o of
+    (scheme, rest)
+        | Just hostPort <- Text.stripPrefix "://" rest ->
+            Text.toLower scheme <> "://" <> Text.toLower hostPort
+    _ -> Text.toLower o
+
+{- | @Access-Control-*@ headers to add to every response to a request whose
+@Origin@ matches @--cors-origin@: the origin echoed back, @Vary: Origin@ (a
+cache must not serve this response to a different origin), and
+@Access-Control-Expose-Headers: Location@, which a fetch client needs to
+read the @Location@ header @POST \/v1\/sessions@ answers with. Applied in
+'application' to every response, success or error, so it also covers the
+SSE stream and CORS-refused answers alike.
+-}
+corsHeadersFor :: ServerEnv -> Request -> [Header]
+corsHeadersFor env req = case lookup "Origin" (requestHeaders req) of
+    Nothing -> []
+    Just origin -> case matchOrigin env.envCorsOrigins origin of
+        Nothing -> []
+        Just matched ->
+            [ ("Access-Control-Allow-Origin", Text.encodeUtf8 matched)
+            , ("Vary", "Origin")
+            , ("Access-Control-Expose-Headers", "Location")
+            ]
+
+addHeaders :: [Header] -> Response -> Response
+addHeaders hdrs = mapResponseHeaders (hdrs <>)
+
+{- | A CORS preflight: answered on any path, before authentication and
+before 'checkOrigin' rejects a request outright. It still runs the same
+origin check 'checkOrigin' would (so a non-loopback, non-listed origin
+without authentication gets @403 forbidden_origin@ here too, rather than a
+misleading 204 that the real request would then refuse), then answers with
+no body and:
+
+* @204@ (no content);
+* the 'corsHeadersFor' headers, when the origin matches @--cors-origin@;
+* @Access-Control-Allow-Methods@, @Access-Control-Allow-Headers@ (the ones
+  every route reads: @Authorization@, @Content-Type@, and @Last-Event-ID@
+  for a reconnecting event stream), and @Access-Control-Max-Age@, always.
+-}
+preflightResponse :: ServerEnv -> Request -> IO Response
+preflightResponse env req = do
+    checkOrigin env req
+    pure $ responseLBS status204 (corsHeadersFor env req <> preflightHeaders) ""
+
+preflightHeaders :: [Header]
+preflightHeaders =
+    [ ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    , ("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID")
+    , ("Access-Control-Max-Age", "600")
+    ]
 
 {- | The bearer token of a request. The event stream also accepts it as an
 @access_token@ query parameter, because @EventSource@ cannot set headers;
@@ -262,6 +362,7 @@ authenticateRequest env req path = case env.envAuth of
     headerToken = lookup hAuthorization (requestHeaders req) >>= bearerToken
     queryToken = case path of
         ["v1", "sessions", _, "events"] -> Text.encodeUtf8 <$> param "access_token" (queryParams req)
+        ["v1", "events"] -> Text.encodeUtf8 <$> param "access_token" (queryParams req)
         _ -> Nothing
 
 {- | Refuse access to another owner's session. It answers as if the session
@@ -283,55 +384,21 @@ healthz env = do
     stats <- runnerStats env.envRunner
     pure $ json status200 $ Aeson.object ["ok" .= True, "live_sessions" .= stats.rsLiveSessions, "active_runs" .= stats.rsActiveRuns]
 
-listAgents :: ServerEnv -> IO Response
-listAgents env = do
-    agents <- hostAllAgents env.envHost
-    json status200 <$> mapM (uncurry (agentView env.envHost)) (Map.toList agents)
-
-{- | An agent: its description, tools, where it comes from, and its
-declared parameters (@todos/tool-partial-application.md@, Phase 4). A
+{- | Every root agent, as an 'AgentDescriptor' (G6, @todos/os-as-standalone-server.md@
+Phase 3a): its description, model, system prompt, tools (name, description,
+activation), declared parameters, helpers, and where it comes from. A
 parameter's value is never included, only whether the process already
 supplies one (@bound@) and whether it can be overridden (@pinned@: false
 when the operator locked it down with @--pin@, or when it is process-scope).
 -}
-agentView :: Host -> Text -> (AgentSource, OSAgentNode) -> IO Aeson.Value
-agentView host slug (source, node) = do
-    tools <- readTVarIO node.osNodeTools
-    resolved <- readTVarIO node.osNodeParams
-    let pinnedNames = Set.fromList [n | (n, pv) <- Map.toList host.hostProcessParams, pv.pvPinned]
-        decls = fromMaybe [] (Base.parameters node.osNodeConfig) :: [ParameterDecl]
-        paramView :: ParameterDecl -> Aeson.Value
-        paramView d =
-            Aeson.object $
-                [ "name" .= d.paramName
-                , "secret" .= d.paramSecret
-                , "scope" .= d.paramScope
-                , "required" .= d.paramRequired
-                , "bound" .= Map.member d.paramName resolved
-                , "pinned" .= (d.paramScope == ScopeProcess || d.paramName `Set.member` pinnedNames)
-                ]
-                    <> maybe [] (\desc -> ["description" .= desc]) d.paramDescription
-    pure $
-        Aeson.object $
-            [ "slug" .= slug
-            , "description" .= Base.announce node.osNodeConfig
-            , "tools" .= [t.declareTool.toolDescriptionName.getToolName | t <- tools]
-            , "parameters" .= map paramView decls
-            ]
-                <> case source of
-                    FromFile -> ["source" .= ("file" :: Text)]
-                    FromDatabase sa ->
-                        [ "source" .= ("database" :: Text)
-                        , "updated_at" .= sa.saUpdatedAt
-                        , "updated_by" .= sa.saUpdatedBy
-                        , "config" .= sa.saConfig
-                        ]
+listAgents :: ServerEnv -> IO Response
+listAgents env = json status200 <$> Runner.listAgents env.envRunner
 
 getAgentH :: ServerEnv -> Text -> IO Response
 getAgentH env slug =
-    Map.lookup slug <$> hostAllAgents env.envHost >>= \case
+    Runner.getAgent env.envRunner slug >>= \case
         Nothing -> throwIO $ fromRunnerError (UnknownAgent slug)
-        Just entry -> json status200 <$> agentView env.envHost slug entry
+        Just descriptor -> pure $ json status200 descriptor
 
 {- | Store an agent. The body is the @contents@ of an agent file; its slug
 is the one in the path.
@@ -374,13 +441,18 @@ createH :: ServerEnv -> Request -> Caller -> IO Response
 createH env req (Caller owner) = do
     w <- waitParams req
     body <- jsonBody req
-    (agent, msg, mode, params) <- parseBody body $ \o -> do
+    (agent, msg, mode, params, parent) <- parseBody body $ \o -> do
         agent <- o .: "agent"
-        msg <- messageFields o
+        msg <- optionalMessageFields o
         mode <- runField o
         params <- paramsField o
-        pure (agent, msg, mode, params)
-    meta <- orThrow $ createSessionAs env.envRunner owner agent msg mode params
+        parent <- o .:? "parent"
+        pure (agent, msg, mode, params, parent)
+    -- A parent must be one the caller can see (same answer as for an
+    -- unknown session otherwise, see 'authorize'). Owner-wise the child
+    -- is still the caller's: 'sessionOwner' walks up to the root anyway.
+    mapM_ (authorize env (Caller owner)) parent
+    meta <- orThrow $ createSessionAsWithParent env.envRunner parent owner agent msg mode params
     let sid = meta.smSessionId
     view <- afterRun env w sid
     pure $
@@ -389,8 +461,8 @@ createH env req (Caller owner) = do
             [(hContentType, jsonType), ("Location", "/v1/sessions/" <> Text.encodeUtf8 (showId sid))]
             (Aeson.encode view)
 
-listSessions :: ServerEnv -> Request -> Caller -> IO Response
-listSessions env req caller@(Caller owner) = do
+listSessionsH :: ServerEnv -> Request -> Caller -> IO Response
+listSessionsH env req caller@(Caller owner) = do
     let params = queryParams req
     statuses <- traverse (mapM parseStatus . Text.splitOn ",") (param "status" params)
     parent <- traverse (maybe (badRequest "parent must be a session id") (pure . SessionId) . UUID.fromText) (param "parent" params)
@@ -408,7 +480,7 @@ listSessions env req caller@(Caller owner) = do
                 , sqUpdatedBefore = before
                 , sqLimit = Just limit
                 }
-    metas <- env.envHost.hostBackend.sbQuery query
+    metas <- listSessions env.envRunner query
     let nextBefore
             | length metas == limit, (m : _) <- reverse metas = Just m.smUpdatedAt
             | otherwise = Nothing
@@ -418,16 +490,29 @@ listSessions env req caller@(Caller owner) = do
     parseTime :: Text -> IO UTCTime
     parseTime t = maybe (badRequest "before must be an ISO 8601 time") pure (iso8601ParseM (Text.unpack t))
 
-getH :: ServerEnv -> SessionId -> IO Response
-getH env sid = json status200 <$> loadView env sid
+{- | One session's view. With @?wait=true@ (and optionally @timeout=@),
+first wait for its active run to stop (or the timeout, or shutdown), then
+answer @202@ if a run is still active, @200@ otherwise: the HTTP form of
+'awaitRun', which @System.Agents.Host.Client.Http@ uses for 'AwaitRun'.
+Without @wait@, always @200@, as before.
+-}
+getH :: ServerEnv -> Request -> SessionId -> IO Response
+getH env req sid = do
+    w <- waitParams req
+    if w.wpWait
+        then do
+            waitForRun env sid w.wpTimeout
+            -- A zero timeout only reads whether a run is still active.
+            (_, active) <- orThrow $ awaitRun env.envRunner sid 0
+            view <- loadView env sid
+            pure $ json (if active then status202 else status200) view
+        else json status200 <$> loadView env sid
 
 deleteH :: ServerEnv -> Request -> SessionId -> IO Response
 deleteH env req sid = do
     dryRun <- boolParam "dry_run" False req
     plan <- orThrow $ deleteSession env.envRunner sid (if dryRun then DryRun else DeleteForReal)
-    pure $
-        json status200 $
-            Aeson.object ["sessions" .= plan.dpSessions, "continuations" .= plan.dpContinuations, "dry_run" .= plan.dpDryRun]
+    pure $ json status200 (Aeson.toJSON plan)
 
 messagesH :: ServerEnv -> Request -> SessionId -> IO Response
 messagesH env req sid = do
@@ -471,10 +556,58 @@ whether this mail was ever read.
 pauseH :: ServerEnv -> SessionId -> IO Response
 pauseH env sid = json status200 <$> orThrow (pauseSession env.envRunner sid)
 
+{- | Fork a session (G6): @{at_turn?, agent?}@. @at_turn@ is a 0-based
+turn index, newest first (as the TUI's own turn navigation counts them);
+absent, the whole session is copied. @agent@ rebinds the fork to another
+agent (also covers "continue with another agent": a fork with no
+@at_turn@, or @at_turn: 0@, and an @agent@). Starts no run.
+-}
+forkH :: ServerEnv -> Request -> Caller -> SessionId -> IO Response
+forkH env req (Caller owner) sid = do
+    body <- jsonBodyOrEmpty req
+    (atTurn, agentSlug) <- parseBody body $ \o -> (,) <$> o .:? "at_turn" <*> o .:? "agent"
+    meta <- orThrow $ forkSession env.envRunner owner sid atTurn agentSlug
+    let newSid = meta.smSessionId
+    view <- loadView env newSid
+    pure $
+        responseLBS
+            status201
+            [(hContentType, jsonType), ("Location", "/v1/sessions/" <> Text.encodeUtf8 (showId newSid))]
+            (Aeson.encode view)
+
 pendingH :: ServerEnv -> SessionId -> IO Response
 pendingH env sid = do
     (sess, _) <- loadSession env sid
     pure $ json status200 $ Aeson.object ["calls" .= pendingDeferredCalls sess]
+
+{- | Generic mail to a session (G6): @{body, priority?}@, where @body@ is any
+tagged 'MailBody' JSON. The sender is this caller's own owner (or none when
+authentication is off), mirroring how 'createH' attributes a new session
+rather than trusting a claim in the body. Answers the mailbox's 'Receipt'.
+-}
+mailPostH :: ServerEnv -> Request -> Caller -> SessionId -> IO Response
+mailPostH env req (Caller owner) sid = do
+    body <- jsonBody req
+    (mailBody, priority) <- parseBody body $ \o -> do
+        raw <- o .: "body"
+        mailBody <- Aeson.parseJSON raw
+        priority <-
+            o .:? "priority" >>= \case
+                Nothing -> pure Normal
+                Just ("normal" :: Text) -> pure Normal
+                Just "interrupt" -> pure Interrupt
+                Just other -> fail ("priority must be \"normal\" or \"interrupt\": " <> Text.unpack other)
+        pure (mailBody, priority)
+    receipt <- orThrow $ sendMail env.envRunner sid owner priority mailBody
+    pure $ json status202 receipt
+
+-- | This session's mail, oldest first (G6); @?unread=true@ for only what
+-- has not yet been folded into a turn.
+mailListH :: ServerEnv -> Request -> SessionId -> IO Response
+mailListH env req sid = do
+    unreadOnly <- boolParam "unread" False req
+    mail <- orThrow $ listMail env.envRunner sid unreadOnly
+    pure $ json status200 $ Aeson.object ["mail" .= mail]
 
 continuationH :: ServerEnv -> Request -> Caller -> Text -> IO Response
 continuationH env req caller tokenText = do
@@ -541,53 +674,142 @@ headerParams req =
 -- Events
 -------------------------------------------------------------------------------
 
-data Wake = ShuttingDown | Delivered (Maybe SessionEvent) | KeepAlive
+data Wake = ShuttingDown | Delivered (Maybe Event) | KeepAlive
 
-eventsH :: ServerEnv -> SessionId -> IO Response
-eventsH env sid = do
-    -- Subscribe before the snapshot, so no event falls between the two.
-    next <- subscribeSTM env.envRunner sid
+{- | Follow one session. Honours @Last-Event-ID@\/@?after=@ (G5): when the
+requested sequence number is still in the runner's ring, the missed events
+replay before the stream goes live, with no gap or duplicate at the
+boundary ('subscribeSTM'). When it is not (or none was given, a plain
+fresh connect), a @snapshot@ of the session opens the stream as before.
+-}
+eventsH :: ServerEnv -> Request -> SessionId -> IO Response
+eventsH env req sid = do
+    after <- parseAfter req
+    -- Subscribe before the snapshot, so no live event falls between the two.
+    subscribed <- subscribeSTM env.envRunner (OneSession sid) after
     (_, meta) <- loadSession env sid
-    pure $ responseStream status200 headers $ \write flush -> do
+    pure $ responseStream status200 (replayHeader after subscribed : headers) $ \write flush -> do
         let send frame = write frame >> flush
-            loop = do
-                timer <- registerDelay env.envKeepAlive
-                let wake =
-                        asum
-                            [ ShuttingDown <$ (readTVar env.envShutdown >>= check)
-                            , Delivered <$> next
-                            , KeepAlive <$ (readTVar timer >>= check)
-                            ]
-                    -- Skip other sessions' events without resetting the timer.
-                    await =
-                        atomically wake >>= \case
-                            Delivered Nothing -> await
-                            other -> pure other
-                await >>= \case
-                    ShuttingDown -> pure ()
-                    KeepAlive -> send ": keepalive\n\n" >> loop
-                    Delivered (Just event) -> send (eventFrame event) >> loop
-                    Delivered Nothing -> loop
-        send (sseFrame "snapshot" (Aeson.toJSON meta))
-        loop
+        -- Send the status line and headers now: warp holds them back until
+        -- the first flush, and a replayed stream may have nothing to say
+        -- for a while (see 'allEventsH').
+        flush
+        case subscribed of
+            Right next -> do
+                when (after == Nothing) $ send (sseFrame "snapshot" (Aeson.toJSON meta))
+                eventLoop env next send
+            Left ReplayUnavailable -> do
+                send (sseFrame "snapshot" (Aeson.toJSON meta))
+                subscribeSTM env.envRunner (OneSession sid) Nothing >>= \case
+                    Right next -> eventLoop env next send
+                    -- Unreachable: after = Nothing never reports unavailable.
+                    Left ReplayUnavailable -> pure ()
   where
-    headers =
-        [ (hContentType, "text/event-stream")
-        , (hCacheControl, "no-cache")
-        , ("X-Accel-Buffering", "no")
-        ]
+    headers = eventStreamHeaders
 
-eventFrame :: SessionEvent -> Builder
-eventFrame event = sseFrame (sessionEventKind event) $ case event of
-    RunStarted sid mode -> Aeson.object ["session_id" .= sid, "mode" .= runModeText mode]
-    SessionUpdated _ meta turn -> withFields (Aeson.toJSON meta) ["head_turn" .= turn]
-    CallsDeferred sid calls -> Aeson.object ["session_id" .= sid, "calls" .= calls]
-    RunStopped sid status -> Aeson.object ["session_id" .= sid, "status" .= status]
-    SessionFailed sid msg -> Aeson.object ["session_id" .= sid, "message" .= msg]
-    TextDelta sid text -> Aeson.object ["session_id" .= sid, "text" .= text]
-    ToolCallStarted sid callId toolName -> Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName]
-    ToolCallCompleted sid callId toolName succeeded ->
-        Aeson.object ["session_id" .= sid, "tool_call_id" .= callId, "tool" .= toolName, "succeeded" .= succeeded]
+{- | Every session's events, or one owner's (G5's cross-session feed).
+@?scope=all@ needs authentication off, or an admin owner; @?scope=owner@
+(the default when a caller has an owner) is that caller's own events. No
+single snapshot makes sense across sessions, so a stream that cannot
+replay just resumes live, same as a first connection.
+-}
+allEventsH :: ServerEnv -> Request -> Caller -> IO Response
+allEventsH env req caller = do
+    scope <- resolveScope env req caller
+    after <- parseAfter req
+    subscribed <- subscribeSTM env.envRunner scope after
+    pure $ responseStream status200 (replayHeader after subscribed : eventStreamHeaders) $ \write flush -> do
+        let send frame = write frame >> flush
+        -- Send the status line and headers now: warp holds them back until
+        -- the first flush, and with no snapshot on this stream a quiet
+        -- server would otherwise leave a client waiting for them (and for
+        -- the @Agents-Replay@ header) until the first event or keepalive.
+        flush
+        case subscribed of
+            Right next -> eventLoop env next send
+            Left ReplayUnavailable ->
+                subscribeSTM env.envRunner scope Nothing >>= \case
+                    Right next -> eventLoop env next send
+                    Left ReplayUnavailable -> pure ()
+
+-- | Which sessions' events a caller of @GET \/v1\/events@ may see.
+resolveScope :: ServerEnv -> Request -> Caller -> IO SubscribeScope
+resolveScope env req (Caller owner) = case (param "scope" (queryParams req), owner) of
+    (Just "all", Nothing) -> pure AllSessions
+    (Just "all", Just o)
+        | o `elem` env.envAdmins -> pure AllSessions
+        | otherwise -> throwIO $ ApiError status403 "forbidden" "scope=all needs an admin owner (--admin-owners)"
+    (Just "owner", o) -> pure (Owner o)
+    (Nothing, Just o) -> pure (Owner (Just o))
+    (Nothing, Nothing) -> pure AllSessions
+    (Just other, _) -> throwIO $ ApiError status400 "bad_request" ("unknown scope: " <> other)
+
+-- | @Last-Event-ID@ (the SSE reconnect header) or @?after=@, whichever is given.
+parseAfter :: Request -> IO (Maybe EventSeq)
+parseAfter req = case asum [headerVal, param "after" (queryParams req)] of
+    Nothing -> pure Nothing
+    Just txt -> case readMaybe (Text.unpack txt) of
+        Just n -> pure (Just (EventSeq n))
+        Nothing -> badRequest "after/Last-Event-ID must be an integer event sequence number"
+  where
+    headerVal = Text.decodeUtf8 <$> lookup "Last-Event-ID" (requestHeaders req)
+
+{- | @Agents-Replay@, on every event stream: @live@ when no
+@Last-Event-ID@\/@after@ was given, @replayed@ when the missed events are
+replayed from the runner's ring, @unavailable@ when they are not (too old,
+or from another server process). A client learns this from the response
+headers alone, without waiting for a first frame: @httpClient@'s initial
+subscribe answers 'ReplayUnavailable' on @unavailable@, like the in-process
+client does.
+-}
+replayHeader :: Maybe EventSeq -> Either ReplayUnavailable a -> Header
+replayHeader after subscribed = ("Agents-Replay", value)
+  where
+    value = case (after, subscribed) of
+        (Nothing, _) -> "live"
+        (Just _, Right _) -> "replayed"
+        (Just _, Left ReplayUnavailable) -> "unavailable"
+
+eventStreamHeaders :: [Header]
+eventStreamHeaders =
+    [ (hContentType, "text/event-stream")
+    , (hCacheControl, "no-cache")
+    , ("X-Accel-Buffering", "no")
+    ]
+
+-- | The shutdown\/keepalive\/deliver loop shared by every event stream.
+eventLoop :: ServerEnv -> STM (Maybe Event) -> (Builder -> IO ()) -> IO ()
+eventLoop env next send = loop
+  where
+    loop = do
+        timer <- registerDelay env.envKeepAlive
+        let wake =
+                asum
+                    [ ShuttingDown <$ (readTVar env.envShutdown >>= check)
+                    , Delivered <$> next
+                    , KeepAlive <$ (readTVar timer >>= check)
+                    ]
+            -- Skip non-matching events without resetting the timer.
+            await =
+                atomically wake >>= \case
+                    Delivered Nothing -> await
+                    other -> pure other
+        await >>= \case
+            ShuttingDown -> pure ()
+            KeepAlive -> send ": keepalive\n\n" >> loop
+            Delivered (Just event) -> send (eventFrame event) >> loop
+            Delivered Nothing -> loop
+
+-- | An 'Event' as an SSE frame: @id@ is the sequence number ('EventSeq'),
+-- so a reconnecting client's @Last-Event-ID@ is exactly what to pass back.
+eventFrame :: Event -> Builder
+eventFrame ev =
+    "id: "
+        <> byteString (Text.encodeUtf8 (Text.pack (show seqInt)))
+        <> "\n"
+        <> sseFrame (eventKind ev.evBody) (Aeson.toJSON ev)
+  where
+    EventSeq seqInt = ev.evSeq
 
 -- | One event; JSON encoding has no raw newlines, so @data@ is one line.
 sseFrame :: Text -> Aeson.Value -> Builder
@@ -696,14 +918,17 @@ against a busy session, where it detaches attached tool calls -- and, with
 waiting behind them).
 -}
 messageFields :: Aeson.Object -> Aeson.Parser NewMessage
-messageFields o = do
-    prompt <- o .: "prompt"
-    media <- fromMaybe [] <$> o .:? "media"
-    interrupt <- fromMaybe False <$> o .:? "interrupt"
-    NewMessage prompt <$> mapM mediaItem media <*> pure interrupt
-  where
-    mediaItem = Aeson.withObject "media" $ \m ->
-        MediaAttachment <$> m .: "mime" <*> m .: "base64" <*> m .:? "filename"
+messageFields o = Aeson.parseJSON (Aeson.Object o)
+
+{- | Like 'messageFields', for @POST \/v1\/sessions@ (G2): absent or @null@
+@prompt@ means no first message at all (an idle session with no turn),
+rather than a parse failure over a missing required field.
+-}
+optionalMessageFields :: Aeson.Object -> Aeson.Parser (Maybe NewMessage)
+optionalMessageFields o =
+    o .:? "prompt" >>= \case
+        Nothing -> pure Nothing
+        Just (_ :: Text) -> Just <$> messageFields o
 
 -- | @run@: @none@, @step@, or @until_blocked@ (the default).
 runField :: Aeson.Object -> Aeson.Parser (Maybe RunMode)
@@ -723,17 +948,6 @@ paramsField o =
         Nothing -> pure Map.empty
         Just (Aeson.Object obj) -> pure $ Map.fromList [(Key.toText k, v) | (k, v) <- KeyMap.toList obj]
         Just _ -> fail "params must be an object"
-
-runModeFromText :: Text -> Maybe RunMode
-runModeFromText = \case
-    "step" -> Just StepOnce
-    "until_blocked" -> Just UntilBlocked
-    _ -> Nothing
-
-runModeText :: RunMode -> Text
-runModeText = \case
-    StepOnce -> "step"
-    UntilBlocked -> "until_blocked"
 
 param :: Text -> QueryText -> Maybe Text
 param name params = case lookup name params of

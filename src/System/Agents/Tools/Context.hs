@@ -57,7 +57,7 @@ module System.Agents.Tools.Context (
     isSubcallContext,
 ) where
 
-import Control.Concurrent.STM (STM, TQueue)
+import Control.Concurrent.STM (STM)
 import Data.Aeson (FromJSON, ToJSON, (.:), (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
@@ -68,8 +68,8 @@ import qualified Data.Map.Strict as Map
 
 import System.Agents.Base (AgentId, ConversationId)
 import System.Agents.OS.Core.World (World)
-import System.Agents.OS.Events (OSEvent)
-import System.Agents.Session.Mailbox (MailRouter, SpawnSession, UnwatchSession, WatchSession)
+import System.Agents.OS.Events (OSEmission)
+import System.Agents.Session.Mailbox (MailRouter, RunSubagent, SpawnSession, UnwatchSession, WatchSession)
 import System.Agents.Session.Types (Envelope, Session, SessionId, ToolCallId, TrackedToolCall, TurnId)
 import System.Agents.Tools.Bindings.Types (DerivedNarrowing (..), ScopedBinding (..))
 import System.Agents.Tools.Params.Types (ParamValue (..), Params)
@@ -231,8 +231,8 @@ The context is designed to be:
   Empty list means all tools are allowed (backward compatibility).
 * 'ctxWorld' - Optional OS World for ECS operations. When present, subcalls
   can insert conversations into the OS for TUI visibility.
-* 'ctxEventQueue' - Optional event queue for OS event emission. When present,
-  subcalls can emit events to notify the TUI of their lifecycle.
+* 'ctxEmit' - Optional emission hook. When present, subcalls emit events to
+  notify a runner (or other local consumer) of their lifecycle.
 * 'ctxParentConversation' - Optional parent conversation ID for subcalls.
   When present, indicates this context is for a nested agent invocation.
 * 'ctxProgressCallback' - Optional callback a tool can use to emit
@@ -289,10 +289,11 @@ data ToolExecutionContext = ToolExecutionContext
     insert entities and components into the OS. This enables subcall
     conversations to be visible in the TUI.
     -}
-    , ctxEventQueue :: Maybe (TQueue OSEvent)
-    {- ^ Optional event queue for OS event emission. When present, tools
-    can emit events to notify the TUI of subcall lifecycle (start,
-    progress, completion, failure).
+    , ctxEmit :: Maybe (OSEmission -> IO ())
+    {- ^ Optional hook (@todos/os-as-standalone-server.md@, Phase 2c\/3c):
+    subcall lifecycle \/ tool-call activity \/ hook-failure events, reported
+    so a runner can broadcast them on its event stream. Copied straight
+    from 'System.Agents.Session.Base.Agent.ctxEmit'.
     -}
     , ctxParentConversation :: Maybe ConversationId
     {- ^ Optional parent conversation ID for subcalls. When present,
@@ -339,6 +340,13 @@ data ToolExecutionContext = ToolExecutionContext
     {- ^ Phase 4 (@todos/session-mailbox.md@ §5): optional @spawn-session@
     hook. Copied straight from 'Agent.ctxSpawnSession'. 'Nothing' when the
     front-end has not installed one.
+    -}
+    , ctxRunSubagent :: Maybe RunSubagent
+    {- ^ Phase 5 (@todos/os-as-standalone-server.md@ G10): optional
+    @prompt_agent_\<slug\>@-as-a-session hook. Copied straight from
+    'Agent.ctxRunSubagent'. 'Nothing' when the front-end has not installed
+    one (@agents-exe run@, the durable @session@ CLI, tests that build
+    agents directly), in which case a sub-agent call keeps running in-tool.
     -}
     , ctxWatchSession :: Maybe WatchSession
     {- ^ Phase 6 (@todos/session-mailbox.md@ §7): optional @watch-session@
@@ -392,10 +400,8 @@ instance Eq ToolExecutionContext where
             && ctxInheritedBindings a == ctxInheritedBindings b
             && ctxDerivedNarrowings a == ctxDerivedNarrowings b
 
--- Note: ctxToolPortal, ctxWorld, ctxEventQueue, and ctxProgressCallback are not compared
--- (functions, TVars, and TQueue can't be compared)
--- Note: ctxToolPortal, ctxWorld, and ctxEventQueue are not compared
--- (functions, TVars, and TQueue can't be compared)
+-- Note: ctxToolPortal, ctxWorld, ctxEmit, and ctxProgressCallback are not compared
+-- (functions and TVars can't be compared)
 
 -- | Custom Show instance for ToolExecutionContext that handles non-showable fields
 instance Show ToolExecutionContext where
@@ -421,8 +427,8 @@ instance Show ToolExecutionContext where
             ++ show (ctxAllowedTools ctx)
             ++ ", ctxWorld = "
             ++ worldStr
-            ++ ", ctxEventQueue = "
-            ++ eventQueueStr
+            ++ ", ctxEmit = "
+            ++ emitStr
             ++ ", ctxParentConversation = "
             ++ show (ctxParentConversation ctx)
             ++ ", ctxProgressCallback = "
@@ -443,7 +449,7 @@ instance Show ToolExecutionContext where
       where
         portalStr = "<portal>"
         worldStr = "<world>"
-        eventQueueStr = "<eventQueue>"
+        emitStr = "<emit>"
         progressCallbackStr = "<progressCallback>"
         cancelHookStr = "<cancelToolCall>"
         recordChildSessionStr = "<recordChildSession>"
@@ -466,7 +472,7 @@ instance ToJSON ToolExecutionContext where
             , "params" .= ctxParams ctx
             , "inheritedBindings" .= filter (not . sbSecret) (ctxInheritedBindings ctx)
             , "derivedNarrowings" .= Map.toList (ctxDerivedNarrowings ctx)
-            -- Note: ctxToolPortal, ctxWorld, ctxEventQueue, and
+            -- Note: ctxToolPortal, ctxWorld, ctxEmit, and
             -- ctxProgressCallback are intentionally omitted (not serializable).
             -- ctxParams serializes through ParamValue's redacting ToJSON, and
             -- a secret-valued inherited binding is dropped outright, so
@@ -496,6 +502,7 @@ instance FromJSON ToolExecutionContext where
             <*> pure Nothing
             <*> pure Nothing
             <*> pure Nothing
+            <*> pure Nothing
             <*> pure []
             <*> pure Map.empty
             <*> pure []
@@ -506,8 +513,8 @@ instance FromJSON ToolExecutionContext where
 continuation snapshots.
 
 Omits the non-serializable runtime fields ('ctxToolPortal', 'ctxWorld',
-'ctxEventQueue') so that a paused call can be persisted and later
-re-hydrated in a different process.
+'ctxEmit') so that a paused call can be persisted and later re-hydrated in
+a different process.
 -}
 data ToolExecutionContextSnapshot = ToolExecutionContextSnapshot
     { tecsSessionId :: SessionId
@@ -545,17 +552,15 @@ contextSnapshot ctx =
 
 {- | Re-hydrate a full execution context from a snapshot.
 
-The runtime fields ('ctxToolPortal', 'ctxWorld', 'ctxEventQueue') are
-supplied by the caller; the remaining fields are restored from the
-snapshot.
+The runtime fields ('ctxToolPortal', 'ctxWorld', 'ctxEmit') are supplied by
+the caller; the remaining fields are restored from the snapshot.
 -}
 hydrateContextSnapshot ::
     ToolPortal ->
     Maybe World ->
-    Maybe (TQueue OSEvent) ->
     ToolExecutionContextSnapshot ->
     ToolExecutionContext
-hydrateContextSnapshot portal mWorld mEventQueue snap =
+hydrateContextSnapshot portal mWorld snap =
     ToolExecutionContext
         { ctxSessionId = tecsSessionId snap
         , ctxConversationId = tecsConversationId snap
@@ -567,7 +572,7 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxToolPortal = portal
         , ctxAllowedTools = tecsAllowedTools snap
         , ctxWorld = mWorld
-        , ctxEventQueue = mEventQueue
+        , ctxEmit = Nothing
         , ctxParentConversation = tecsParentConversation snap
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -575,6 +580,7 @@ hydrateContextSnapshot portal mWorld mEventQueue snap =
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -608,7 +614,7 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxToolPortal = portal
         , ctxAllowedTools = []
         , ctxWorld = Nothing
-        , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -616,6 +622,7 @@ mkToolExecutionContext sessId convId tId mAgentId mSession portal stack maxDepth
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -657,7 +664,7 @@ mkMinimalContext sessId convId tId portal =
         , ctxToolPortal = portal
         , ctxAllowedTools = []
         , ctxWorld = Nothing
-        , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -665,6 +672,7 @@ mkMinimalContext sessId convId tId portal =
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -714,7 +722,7 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxToolPortal = portal
         , ctxAllowedTools = []
         , ctxWorld = Nothing
-        , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -722,6 +730,7 @@ mkRootContext sessId convId tId mAgentId mSession portal maxDepth =
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -773,7 +782,7 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxToolPortal = portal
         , ctxAllowedTools = allowed
         , ctxWorld = Nothing
-        , ctxEventQueue = Nothing
+        , ctxEmit = Nothing
         , ctxParentConversation = Nothing
         , ctxProgressCallback = Nothing
         , ctxCancelToolCall = Nothing
@@ -781,6 +790,7 @@ mkPortalContext sessId convId tId mAgentId mSession stack maxDepth portal allowe
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []
@@ -805,7 +815,6 @@ case pushAgentContext "helper-agent" newConvId parentCtx of
         let subcallCtx = mkSubcallContext
                 baseCtx
                 (Just world)        -- OS World
-                (Just eventQueue)   -- Event queue
                 parentConvId        -- Parent conversation
         runSubAgent subcallCtx query
 @
@@ -815,15 +824,12 @@ mkSubcallContext ::
     ToolExecutionContext ->
     -- | Optional OS World for ECS operations
     Maybe World ->
-    -- | Optional event queue for OS events
-    Maybe (TQueue OSEvent) ->
     -- | Parent conversation ID (required for subcalls)
     ConversationId ->
     ToolExecutionContext
-mkSubcallContext baseCtx mWorld mEventQueue parentConvId =
+mkSubcallContext baseCtx mWorld parentConvId =
     baseCtx
         { ctxWorld = mWorld
-        , ctxEventQueue = mEventQueue
         , ctxParentConversation = Just parentConvId
         , -- The parent's hooks target the parent's tool call and engine; the
           -- sub-agent's own steps install hooks for its calls.
@@ -833,6 +839,7 @@ mkSubcallContext baseCtx mWorld mEventQueue parentConvId =
         , ctxAwaitMail = Nothing
         , ctxMailRouter = Nothing
         , ctxSpawnSession = Nothing
+        , ctxRunSubagent = Nothing
         , ctxWatchSession = Nothing
         , ctxUnwatchSession = Nothing
         , ctxSessionToolCalls = []

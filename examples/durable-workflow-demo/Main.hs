@@ -148,7 +148,7 @@ mkDemoAgent convId = do
             , complete = mockComplete
             , contextConfig = defaultContextConfig
             , ctxWorld = Nothing
-            , ctxEventQueue = Nothing
+            , ctxEmit = Nothing
             , ctxCallStack = [CallStackEntry "durable-demo" convId 0]
             , ctxParentConversation = Nothing
             , ctxExecutionMode = Asynchronous
@@ -167,9 +167,11 @@ mkDemoAgent convId = do
             , ctxMailbox = Nothing
             , ctxMailRouter = Nothing
             , ctxSpawnSession = Nothing
+            , ctxRunSubagent = Nothing
             , ctxWatchSession = Nothing
             , ctxUnwatchSession = Nothing
             , ctxInterruptCompletions = False
+            , ctxMailInToolResult = False
             }
 
 -------------------------------------------------------------------------------
