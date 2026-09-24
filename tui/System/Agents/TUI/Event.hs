@@ -149,6 +149,7 @@ import System.Agents.TUI.Types (
     ConversationStatus (..),
     Core (..),
     HistorySessionEntry (..),
+    RunnerMode (..),
     N,
     StatusMessage (..),
     StatusSeverity (..),
@@ -169,6 +170,7 @@ import System.Agents.TUI.Types (
     coreClient,
     coreConversations,
     coreOwnedSessions,
+    coreRunnerMode,
     eventChan,
     historyDirty,
     historySessionCache,
@@ -227,9 +229,9 @@ every owned session that is still 'StatusRunning' (G1: quit used to be
 loop now, so quitting the TUI asks it to stop instead). Bounded in time
 (as the old thread-teardown was) so a runner call stuck in a foreign call
 cannot keep the TUI from quitting; no thread is killed here, only the
-runner is asked to stop. An attached TUI (Phase 4, @--attach@) would skip
-this entirely, per the spec's Design §4 -- not reachable yet, since only
-embedded mode exists.
+runner is asked to stop. An attached TUI (Phase 4, @--attach@,
+'AttachedRunner') skips this entirely, per the spec's Design §4: the
+server keeps running its sessions after the TUI detaches.
 -}
 stopConversations :: EventM N TuiState ()
 stopConversations = do
@@ -237,7 +239,8 @@ stopConversations = do
     core <- liftIO $ readTVarIO coreRef
     let client = core ^. coreClient
         owned = Set.toList (core ^. coreOwnedSessions)
-    liftIO $ void $ timeout conversationShutdownMicros $ mapM_ (stopSession client) owned
+    when (core ^. coreRunnerMode == EmbeddedRunner) $
+        liftIO $ void $ timeout conversationShutdownMicros $ mapM_ (stopSession client) owned
   where
     stopSession client sid = do
         result <- Client.getSession client sid

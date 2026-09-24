@@ -15,6 +15,8 @@ module System.Agents.TUI.Types.State (
     coreClient,
     coreParams,
     coreOwnedSessions,
+    coreRunnerMode,
+    RunnerMode (..),
     initCore,
 
     -- * Focus Ring
@@ -122,21 +124,33 @@ data Core = Core
     -- 'CreateSession'\/'PostMessage' (D7): the TUI's own
     -- @--params-file@, since the runner never stores secrets.
     , _coreOwnedSessions :: Set SessionId
-    -- ^ Sessions this TUI process started (embedded mode): on quit, a
-    -- 'SendMail' 'StopRun' is due to each of them (-- TODO(3b-ii)).
+    -- ^ Sessions this TUI process started: in 'EmbeddedRunner' mode, on
+    -- quit, a 'SendMail' 'StopRun' is due to each still running one.
+    , _coreRunnerMode :: RunnerMode
     }
+
+{- | Whether the runner lives in this process (@agents-exe tui@) or in a
+server this TUI attached to (@agents-exe tui --attach@, Phase 4). The TUI
+talks to both through the same 'RunnerClient' (D6); the only difference
+is what quitting means: an embedded runner dies with the process, so its
+runs are stopped cleanly first, while an attached server keeps running the
+sessions after the TUI detaches (Design §4).
+-}
+data RunnerMode = EmbeddedRunner | AttachedRunner
+    deriving (Show, Eq)
 
 makeLenses ''Core
 
 -- | Initialize core state with the client this TUI drives its sessions through.
-initCore :: RunnerClient -> Map ParamName Aeson.Value -> IO Core
-initCore client params =
+initCore :: RunnerMode -> RunnerClient -> Map ParamName Aeson.Value -> IO Core
+initCore mode client params =
     pure
         Core
             { _coreConversations = []
             , _coreClient = client
             , _coreParams = params
             , _coreOwnedSessions = Set.empty
+            , _coreRunnerMode = mode
             }
 
 -------------------------------------------------------------------------------

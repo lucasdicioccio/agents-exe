@@ -61,6 +61,8 @@ module System.Agents.TUI.Core (
     coreClient,
     coreParams,
     coreOwnedSessions,
+    coreRunnerMode,
+    RunnerMode (..),
     tuiCore,
     tuiUI,
     eventChan,
@@ -220,10 +222,10 @@ process started itself ('System.Agents.CLI.TUI.handleTUI'); a future
 @--attach@ mode (Phase 4) hands in an @httpClient@\/@socketClient@
 instead. Neither this function nor anything it calls can tell which.
 -}
-runTUIWithUserConfig :: Tracer IO Trace -> RunnerClient -> TUIUserConfig -> Map ParamName Aeson.Value -> IO ()
-runTUIWithUserConfig tracer client userConfig params = do
+runTUIWithUserConfig :: Tracer IO Trace -> RunnerMode -> RunnerClient -> TUIUserConfig -> Map ParamName Aeson.Value -> IO ()
+runTUIWithUserConfig tracer mode client userConfig params = do
     let config = fileSessionConfig userConfig
-    runTUIInternal tracer client config params
+    runTUIInternal tracer mode client config params
 
 {- | Fetch the agent roster from the client (G6: 'Client.listAgents', which
 already carries model, prompt and tool activation -- no live OS-native
@@ -232,12 +234,12 @@ handle needed) and start Brick.
 The History tab's session list starts empty: it is only populated
 starting 3b-iii, via 'Client.listSessions'.
 -}
-runTUIInternal :: Tracer IO Trace -> RunnerClient -> SessionConfig -> Map ParamName Aeson.Value -> IO ()
-runTUIInternal tracer client config params = do
+runTUIInternal :: Tracer IO Trace -> RunnerMode -> RunnerClient -> SessionConfig -> Map ParamName Aeson.Value -> IO ()
+runTUIInternal tracer mode client config params = do
     descriptors <- either (const []) id <$> Client.listAgents client
     let tuiAgents = map TuiAgent descriptors :: [TuiAgent]
 
-    core0 <- initCore client params
+    core0 <- initCore mode client params
     coreTVar <- newTVarIO core0
 
     let helpText = generateHelpContent (sessionKeyMapping config)

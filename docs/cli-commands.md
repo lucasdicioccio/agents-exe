@@ -192,18 +192,24 @@ Start the interactive Terminal UI.
 
 ```bash
 agents-exe tui [--agent-file FILE...] [--keymap FILE] [--db PATH]
+agents-exe tui --attach URL|PATH [--token TOKEN | --token-file FILE] [--keymap FILE]
 ```
 
 The TUI is a client of an in-process `SessionRunner` it starts over the
-same `Host` config `agents-exe serve` uses (see
-[tui.md](tui.md#architecture)).
+same `Host` config `agents-exe serve` uses, or, with `--attach`, of a
+running `agents-exe serve`/`agents-server` (see
+[tui.md](tui.md#architecture) and
+[agents-server.md](agents-server.md#attaching-the-tui)).
 
 **Options:**
 
 | Option | Default | Description |
 |--------|---------|--------------|
 | `--keymap FILE`, `-k FILE` | none | Path to a keymap configuration JSON file |
-| `--db PATH` | next to the resolved sessions directory | SQLite database for the TUI's embedded session runner. Old `conv.<uuid>.json` history under the resolved sessions directories stays readable as a read-only fallback. |
+| `--db PATH` | next to the resolved sessions directory | SQLite database for the TUI's embedded session runner. Old `conv.<uuid>.json` history under the resolved sessions directories stays readable as a read-only fallback. Not with `--attach`. |
+| `--attach URL\|PATH` | none | Drive a running server instead of an embedded runner. `http://HOST:PORT` (or `https://`, optionally with a path prefix), `unix:///path/to.sock` for `serve --socket`, or a bare socket path (anything containing a `/` or ending in `.sock`). Nothing is loaded locally: agents, API keys and sessions are the server's. |
+| `--token TOKEN` | none | Bearer token for `--attach`, when the server runs with `--auth-tokens`. |
+| `--token-file FILE` | none | The same, read from a file (surrounding whitespace ignored); keeps the token out of the process list. |
 
 **Features:**
 - Real-time streaming responses
@@ -238,6 +244,11 @@ agents-exe tui \
   --agent-file coder.json \
   --agent-file reviewer.json \
   --agent-file tester.json
+
+# Attach to a server started elsewhere with `agents-exe serve`
+agents-exe tui --attach http://127.0.0.1:8080
+agents-exe tui --attach unix:///run/agents/agents.sock
+agents-exe tui --attach https://agents.example --token-file ~/.agents-token
 ```
 
 ### mcp-server

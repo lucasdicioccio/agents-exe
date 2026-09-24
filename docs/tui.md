@@ -122,10 +122,28 @@ not a second agent runtime: `agents-exe tui` opens a `System.Agents.Host.Host`
 the same way `agents-exe serve` does and drives it through an in-process
 `System.Agents.Host.Client.RunnerClient` — every conversation action (new
 message, pause, fork, cancel, ...) is a `Command` sent to the runner, and
-every screen update comes from `Event`s the runner emits. This is the
-groundwork for `agents-exe tui --attach URL|PATH` (not yet implemented):
-the same client interface, backed by an HTTP+SSE or Unix-socket
-implementation instead, would drive the identical TUI code unchanged.
+every screen update comes from `Event`s the runner emits.
+
+**Embedded and attached.** `agents-exe tui` (embedded) builds that client
+over a runner in its own process. `agents-exe tui --attach URL|PATH`
+(attached) opens nothing locally and builds
+`System.Agents.Host.Client.Http.httpClient` instead: the same
+`RunnerClient`, over a running `agents-exe serve`'s HTTP API and SSE event
+feed, on TCP or its `--socket`. Everything above the client is the same
+code, so an attached TUI loses nothing: agents, chats, drafts, pause,
+interrupt, hard cancel, fork, History, pending calls. What it shows
+depends on the server version, though: `hook.failed` and the subcall
+events only reach it from a server that emits them. Differences that
+follow from where the runner lives: the agents, API keys and database are
+the server's (`--db` is refused with `--attach`, and `--agent-file` or
+`--agent` select nothing); `--params-file`/`--set` values are still sent
+with every create and message (secrets are resupplied by the client, D7);
+with `--auth-tokens` on the server, pass `--token`/`--token-file`, and the
+TUI then sees only that owner's sessions. Quitting an embedded TUI stops
+the runs it started (`StopRun` mail) since its runner dies with it;
+quitting an attached TUI leaves them running on the server. A dropped
+event stream reconnects on its own with `Last-Event-ID`, so nothing is
+missed across a short network hiccup.
 
 Sessions live in the SQLite database at
 `System.Agents.CLI.ConfigLoader.defaultServerDatabasePath` (next to the

@@ -643,7 +643,28 @@ parseTuiOptions argArgs =
             ( strOption
                 ( long "db"
                     <> metavar "PATH"
-                    <> help "SQLite database for the TUI's embedded session runner (default: next to the resolved sessions directory)"
+                    <> help "SQLite database for the TUI's embedded session runner (default: next to the resolved sessions directory); not with --attach"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "attach"
+                    <> metavar "URL|PATH"
+                    <> help "Drive a running `agents-exe serve`/agents-server instead of an embedded runner: http://HOST:PORT, https://..., unix:///PATH/TO.sock, or a socket path"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "token"
+                    <> metavar "TOKEN"
+                    <> help "Bearer token for --attach (a server started with --auth-tokens)"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "token-file"
+                    <> metavar "FILE"
+                    <> help "Read the --attach bearer token from FILE"
                 )
             )
 
@@ -1210,7 +1231,7 @@ parseProgOptions argparserargs =
                 <> command "config" (info (parseConfigCommand argparserargs) (progDesc "Configure agents-exe (git-config style)"))
                 <> command "list-tool-calls" (info parseListToolCallsCommand (progDesc "List all tool calls from a session file"))
                 <> command "replay-tool-call" (info parseReplayToolCallCommand (progDesc "Replay a tool call from a session file, validating and optionally executing"))
-                <> command "tui" (info (parseTuiChatCommand argparserargs) (idm))
+                <> command "tui" (info (parseTuiChatCommand argparserargs) (progDesc "Interactive terminal UI, over an embedded runner or, with --attach, a running server"))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
                 <> command "describe" (info (parseSelfDescribeCommand argparserargs) (idm))
@@ -1409,9 +1430,8 @@ runCommand pargs baseTracer sessionStore files =
                     (Prod.contramap TUICmdTrace baseTracer)
                     rc
                     pargs.apiKeysFile
-                    (TUICmd.tuiKeymapPath tuiOpts)
+                    tuiOpts
                     files
-                    (TUICmd.tuiDatabasePath tuiOpts)
                     pargs.progParams
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts

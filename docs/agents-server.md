@@ -496,6 +496,29 @@ authenticated caller watch every other owner's sessions. This is what a
 live session list, or a dashboard across sessions, follows instead of
 polling `GET /v1/sessions`.
 
+### Attaching the TUI
+
+`agents-exe tui --attach` runs the terminal UI against this server instead
+of a runner of its own:
+
+```sh
+agents-exe serve --port 8080 --socket /run/agents/agents.sock   # on the server
+agents-exe tui --attach http://127.0.0.1:8080                   # over TCP
+agents-exe tui --attach unix:///run/agents/agents.sock          # over the socket
+agents-exe tui --attach https://agents.example --token-file ~/.agents-token
+```
+
+The TUI is then one more client of this API, like the chat page: it lists
+agents from `GET /v1/agents`, drives sessions through the routes above,
+follows `GET /v1/events` (`scope=all`, or `scope=owner` when a non-admin
+token is used), and fetches `GET /v1/sessions/:id` on each
+`session.updated`. It sees the sessions of its token's owner (or every
+session, without authentication), including ones created by other clients,
+and quitting it leaves its sessions running here. Its `--params-file`
+values travel as `params` on each create and message, as the chat page's
+do. See [tui.md](tui.md#architecture) for what differs from the embedded
+TUI.
+
 ---
 
 ## API reference
