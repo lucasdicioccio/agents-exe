@@ -50,7 +50,7 @@ module System.Agents.Host.Client.Http (
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (asyncWithUnmask, cancel)
 import Control.Concurrent.STM
-import Control.Exception (Exception, bracket, bracketOnError, finally, mask_, throwIO)
+import Control.Exception (Exception, SomeException, bracket, bracketOnError, displayException, finally, fromException, mask_, throwIO)
 import Control.Monad (unless)
 import Data.Aeson ((.:), (.:?), (.=))
 import Data.Bifunctor (first)
@@ -232,7 +232,7 @@ delayMicros d = max 0 (round (realToFrac d * 1_000_000 :: Double))
 perform :: Transport -> Http.Request -> IO (Either RunnerError (Int, LByteString.ByteString))
 perform t req =
     tryAny (Http.httpLbs req t.tManager) >>= \case
-        Left e -> pure $ Left $ TransportError ("cannot reach " <> Text.pack (renderEndpoint t.tConfig.hccEndpoint) <> ": " <> Text.pack (show e))
+        Left e -> pure $ Left $ TransportError ("cannot reach " <> Text.pack (renderEndpoint t.tConfig.hccEndpoint) <> ": " <> describeException e)
         Right rsp -> pure $ Right (statusCode (Http.responseStatus rsp), Http.responseBody rsp)
 
 {- | One command round trip: a 2xx answer decodes with @parser@ (given the
@@ -251,6 +251,15 @@ roundTrip t req parser =
         Right value -> case Aeson.parseEither p value of
             Left err -> Left $ TransportError ("unexpected answer: " <> Text.pack err)
             Right reply -> Right reply
+
+{- | What went wrong, without http-client's dump of the whole request
+(long, and not what a user needs to read).
+-}
+describeException :: SomeException -> Text
+describeException e = case fromException e of
+    Just (Http.HttpExceptionRequest _ content) -> Text.pack (show content)
+    Just (Http.InvalidUrlException url reason) -> Text.pack ("invalid URL " <> url <> ": " <> reason)
+    Nothing -> Text.pack (displayException e)
 
 -- | An error answer: the 'RunnerError' its code names, or a 'TransportError'.
 decodeError :: Int -> LByteString.ByteString -> RunnerError
@@ -470,7 +479,7 @@ subscribeHttp t requested after = do
   where
     openInitial =
         tryAny (openStream t requested after) >>= \case
-            Left e -> throwIO $ HttpClientError ("cannot open the event stream at " <> Text.pack (renderEndpoint t.tConfig.hccEndpoint) <> ": " <> Text.pack (show e))
+            Left e -> throwIO $ HttpClientError ("cannot open the event stream at " <> Text.pack (renderEndpoint t.tConfig.hccEndpoint) <> ": " <> describeException e)
             Right (Right (rsp, replay)) -> pure (requested, rsp, replay)
             Right (Left (403, _))
                 | requested == AllSessions ->

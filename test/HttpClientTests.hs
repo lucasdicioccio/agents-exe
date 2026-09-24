@@ -88,6 +88,7 @@ tests =
         , testCase "the TUI's pending-call sequence" tuiPendingCallSequenceTest
         , testCase "rcSubscribe: replay from a seen seq; ReplayUnavailable past the ring" replayTest
         , testCase "OneSession subscription skips the snapshot" oneSessionTest
+        , testCase "subscribing to a quiet server answers at once (headers are flushed)" quietSubscribeTest
         , testCase "a dropped stream reconnects with Last-Event-ID and loses no event" reconnectTest
         , testCase "bearer tokens: refused without, own sessions with, owner-scoped feed" bearerTokenTest
         , testCase "over a Unix socket: Stats, a session, and its events" unixSocketTest
@@ -116,8 +117,9 @@ withFixtureAuth :: Maybe AuthTokens -> Maybe Text -> [OSAgentNode] -> Completion
 withFixtureAuth auth token nodes complete k = do
     host <- testHost nodes (const complete)
     withSessionRunner host $ \runner -> do
-        env0 <- newServerEnv host runner auth
-        let env = env0{envKeepAlive = 300_000}
+        -- The default keepalive (15s), so that nothing in these tests relies
+        -- on a keepalive to get a stream's headers or frames through.
+        env <- newServerEnv host runner auth
         generation <- newTVarIO (0 :: Int)
         opens <- newIORef (0 :: Int)
         let app = killableStreams generation opens (application env)
@@ -485,6 +487,32 @@ oneSessionTest = do
         evs <- untilStopped sub
         assertBool "only this session's events" (all ((== Just meta.smSessionId) . (.evSession)) evs)
         subClose sub
+
+{- | With nothing happening on the server, 'rcSubscribe' still returns at
+once: the server flushes a stream's headers before its first frame (warp
+otherwise holds them until the first write, i.e. the first event or the
+15-second keepalive), for every scope and with or without replay.
+-}
+quietSubscribeTest :: Assertion
+quietSubscribeTest = do
+    node <- testNode "{}"
+    withFixture [node] mockCompletion $ \fx -> do
+        let client = fx.fxClient
+        sub0 <- expectRight =<< subscribeAll client
+        meta <- expectRight =<< createSession client "test-agent" Nothing Nothing Map.empty
+        created <- nextEvent sub0
+        subClose sub0
+        let quick scope after = do
+                got <- timeout 2_000_000 (client.rcSubscribe scope after)
+                case got of
+                    Nothing -> assertFailure ("subscribing to " <> show scope <> " took more than 2 seconds")
+                    Just (Left ReplayUnavailable) -> assertFailure "unexpected ReplayUnavailable"
+                    Just (Right sub) -> subClose sub
+        quick AllSessions Nothing
+        quick (Owner Nothing) Nothing
+        quick AllSessions (Just created.evSeq)
+        quick (OneSession meta.smSessionId) Nothing
+        quick (OneSession meta.smSessionId) (Just created.evSeq)
 
 {- | Kill every open event stream server-side while a run is producing
 events (gated on the mock LLM), then let the run finish: the client

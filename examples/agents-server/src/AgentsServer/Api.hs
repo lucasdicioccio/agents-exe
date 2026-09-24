@@ -690,6 +690,10 @@ eventsH env req sid = do
     (_, meta) <- loadSession env sid
     pure $ responseStream status200 (replayHeader after subscribed : headers) $ \write flush -> do
         let send frame = write frame >> flush
+        -- Send the status line and headers now: warp holds them back until
+        -- the first flush, and a replayed stream may have nothing to say
+        -- for a while (see 'allEventsH').
+        flush
         case subscribed of
             Right next -> do
                 when (after == Nothing) $ send (sseFrame "snapshot" (Aeson.toJSON meta))
@@ -716,6 +720,11 @@ allEventsH env req caller = do
     subscribed <- subscribeSTM env.envRunner scope after
     pure $ responseStream status200 (replayHeader after subscribed : eventStreamHeaders) $ \write flush -> do
         let send frame = write frame >> flush
+        -- Send the status line and headers now: warp holds them back until
+        -- the first flush, and with no snapshot on this stream a quiet
+        -- server would otherwise leave a client waiting for them (and for
+        -- the @Agents-Replay@ header) until the first event or keepalive.
+        flush
         case subscribed of
             Right next -> eventLoop env next send
             Left ReplayUnavailable ->
