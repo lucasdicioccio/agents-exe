@@ -2,8 +2,8 @@
 
 Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
-(commits 8de2a64..dc01dc8); Phases 2 to 4 done (0390c9f..4e03ec9); Phase 5 in
-progress. Builds on
+(commits 8de2a64..dc01dc8); All phases landed (8de2a64..771c988), with the open items listed
+under "Remaining after Phase 5". Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
 
 ## Goal
@@ -535,13 +535,43 @@ Original scope:
 for its session list. Tests: a TUI-less client test that runs the server,
 attaches, creates, interrupts, forks and replays after a dropped stream.
 
-### Phase 5: sub-agents as sessions
+### Phase 5: sub-agents as sessions — done, with two documented gaps
+
+Landed (d7850d0..771c988): `ctxRunSubagent` hook, installed by
+`Runner.newAgent`, runs `prompt_agent_*` as a real child session
+(`createSessionForNode`, `parent` = the calling session, helper resolved
+by slug anywhere under the calling root) and awaits it; cancelling the
+parent's call cancels the child; `subcall.started` carries the real
+child id, so live progress is the child's own `session.updated`.
+`mailInToolResult` now folds on the async path too. `tui --attach` no
+longer resolves local agent files or creates the default config.
+Gaps: (1) a `prompt_agent_*` call with any narrowing (`bindings`,
+`with`, `as`, own or inherited) or whose helper is not declared under
+the root still runs in-tool, because `ToolExecutionContext` cannot name
+a narrowed `OSAgentNode` without a module cycle; (2) a `PartialUserTurn`
+shown mid-round does not yet carry that round's mail in its placeholder
+when `mailInToolResult` is on. The fake endpoint in `checks/` is a fixed
+responder, so no end-to-end test exercises a sub-agent through the TUI.
+
+Original scope:
 
 `prompt_agent_*` spawns through `spawnSession` and waits on the child's
 `RunStopped` (or its mail), so children are cancellable and observable on
 their own and `SubcallProgress` with an embedded `Session` disappears. This
 touches `OneShotTool` and the async engine; it is the riskiest phase and is
 why it is last.
+
+## Remaining after Phase 5
+
+* G10 residue: narrowed or undeclared `prompt_agent_*` calls run in-tool.
+* `mailInToolResult`: partial-turn placeholders lack the round's mail.
+* G11: secret params, watches and the run handle are volatile (D7 stands).
+* TUI: no selection among several pending calls; no view for `hook.failed`.
+* Service packaging: docs only, no unit file shipped, no `bundling/` entry.
+* `checks/` fake endpoint cannot script multi-turn answers, so sub-agent
+  and tool-call flows have no pty end-to-end test.
+* D8's out-of-scope items: multi-server Postgres, mid-`RunAsync` durability,
+  per-owner API keys.
 
 ## Decisions (proposed)
 
