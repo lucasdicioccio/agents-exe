@@ -239,8 +239,14 @@ startNewAsyncTurn convId agent sess sPrompt sTools uQuery blockForLate calls = d
     (sessMail, mailEnvelopes) <- receiveMailForTurn agent shouldBlockForMail sessLate
     tracked <- traverse (mkReadyTrackedCall ctx agent) calls
     trackedWithEntities <- ensureTrackedCallEntities ctx tracked
-    let uQuery' = mergeUserQueries (mergeUserQueries uQuery (lateResultsQuery late)) (mailQuery mailEnvelopes)
-    executeTrackedCalls ctx agent sessMail False sPrompt sTools uQuery' mailEnvelopes trackedWithEntities
+    -- Design §5 "What the LLM sees" (@todos/os-as-standalone-server.md@):
+    -- mail is deliberately *not* merged into 'uQuery' here. Whether it
+    -- ends up as a separate user-visible block or folded into the last
+    -- tool result of this round is decided once, in 'executeTrackedCalls',
+    -- at the point the round actually finalizes into a full 'UserTurn'
+    -- (a still-partial round has no "last tool result" yet to fold into).
+    let uQueryBase = mergeUserQueries uQuery (lateResultsQuery late)
+    executeTrackedCalls ctx agent sessMail False sPrompt sTools uQueryBase mailEnvelopes trackedWithEntities
 
 {- | Continue execution of a partial turn.
 
@@ -353,13 +359,28 @@ executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery mailEnvelop
     let content = PartialUserTurnContent sPrompt sTools uQuery' processedOrdered mailEnvelopes'
     if all (isFinalToolCallState . tcState) processedOrdered
         then do
-            let responses = partialToolMessages content
-            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQuery' (map snd responses)
-            sess'' <- pushTurn sess' (UserTurn (UserTurnContent sPrompt sTools uQuery' responses mailEnvelopes') (Just byteUsage))
+            let responses0 = partialToolMessages content
+            -- Design §5 "What the LLM sees" (@todos/os-as-standalone-
+            -- server.md@, Phase 5): the same folding 'runStepMSync'
+            -- implements at R1, now also on the async path (the server
+            -- always runs asynchronously, so this is what makes
+            -- 'ctxMailInToolResult' take effect for server sessions). Mail
+            -- was deliberately left out of 'uQuery'' by every caller of
+            -- 'executeTrackedCalls'; it is merged in here, or folded into
+            -- the last tool result of this round, exactly once.
+            let mMailBlock = mailQuery mailEnvelopes'
+                (uQueryFinal, responses) = case (agent.ctxMailInToolResult && not (null responses0), mMailBlock) of
+                    (True, Just mailBlock) ->
+                        (uQuery', zip (map fst responses0) (appendMailToLastToolResult mailBlock (map snd responses0)))
+                    _ -> (mergeUserQueries uQuery' mMailBlock, responses0)
+            let byteUsage = calculateUserTurnByteUsage sPrompt sTools uQueryFinal (map snd responses)
+            sess'' <- pushTurn sess' (UserTurn (UserTurnContent sPrompt sTools uQueryFinal responses mailEnvelopes') (Just byteUsage))
             pure (agent, Right sess'')
         else do
-            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQuery' processedOrdered
-            sess'' <- pushTurn sess' (PartialUserTurn content (Just byteUsage))
+            let uQueryPartial = mergeUserQueries uQuery' (mailQuery mailEnvelopes')
+                contentMerged = content{pUserQuery = uQueryPartial}
+            let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQueryPartial processedOrdered
+            sess'' <- pushTurn sess' (PartialUserTurn contentMerged (Just byteUsage))
             pure (agent, Right sess'')
   where
     pushTurn s t = do

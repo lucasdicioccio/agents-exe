@@ -121,9 +121,10 @@ mkAsyncAgent policy =
         , ctxMailInToolResult = False
         }
 
--- | Like 'mkAsyncAgent', in synchronous mode, for R1's mail folding
--- (@todos/os-as-standalone-server.md@ Design §5), which only applies to
--- 'runStepMSync'\'s attached (sync) tool calls.
+-- | Like 'mkAsyncAgent', in synchronous mode. Used for the sync-path
+-- ('runStepMSync') R1 mail-folding tests (@todos/os-as-standalone-
+-- server.md@ Design §5); Phase 5 adds the same folding to the async path
+-- ('runStepMAsync', below), which is what the server actually runs.
 mkSyncAgent :: ToolCallPolicy -> Agent (LlmTurnContent, Session)
 mkSyncAgent policy = (mkAsyncAgent policy){ctxExecutionMode = Synchronous}
 
@@ -308,6 +309,58 @@ sessionMailboxTests =
             mb <- newInMemoryMailbox
             _ <- expectRight =<< mb.mbSend (userMessageOutgoing "hello from mail")
             let agent = (mkAsyncAgent defaultToolCallPolicy){ctxMailbox = Just mb, ctxMailInToolResult = True, ctxExecutionMode = Synchronous}
+            (_agent', result) <- runStepM testConvId agent mkFreshSession
+            session <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session" >> fail "unreachable"
+            case session.turns of
+                (UserTurn content _ : _) -> do
+                    content.userToolResponses @?= []
+                    case content.userQuery of
+                        Just q -> assertBool "query includes the mail text" ("hello from mail" `Text.isInfixOf` q.queryText)
+                        Nothing -> assertFailure "expected a user query carrying the mail"
+                other -> assertFailure $ "expected a user turn, got " <> show other
+        , testCase "mailInToolResult folds mail into the last tool result of a round of async calls" $ do
+            mb <- newInMemoryMailbox
+            _ <- expectRight =<< mb.mbSend (userMessageOutgoing "hello from mail")
+            let agent = (mkAsyncAgent defaultToolCallPolicy){ctxMailbox = Just mb, ctxMailInToolResult = True}
+            (_agent', result) <- runStepM testConvId agent (mkSessionWithCalls [mkCall "t1", mkCall "t2"])
+            session <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session" >> fail "unreachable"
+            case session.turns of
+                (UserTurn content _ : _) -> do
+                    -- No separate user message: the mail went into the tool result instead.
+                    content.userQuery @?= Nothing
+                    length content.userMail @?= 1
+                    case map snd content.userToolResponses of
+                        [TextResponse first, TextResponse lastResp] -> do
+                            first @?= "done:t1"
+                            assertBool "first tool result untouched" ("hello from mail" `Text.isInfixOf` first == False)
+                            assertBool "last tool result ends with the mail block" ("hello from mail" `Text.isInfixOf` lastResp)
+                            assertBool "last tool result keeps its own text" ("done:t2" `Text.isInfixOf` lastResp)
+                        other -> assertFailure ("expected two text tool responses, got " <> show other)
+                other -> assertFailure $ "expected a user turn, got " <> show other
+        , testCase "without mailInToolResult, mail is a separate user message after async tool results (unchanged)" $ do
+            mb <- newInMemoryMailbox
+            _ <- expectRight =<< mb.mbSend (userMessageOutgoing "hello from mail")
+            let agent = (mkAsyncAgent defaultToolCallPolicy){ctxMailbox = Just mb, ctxMailInToolResult = False}
+            (_agent', result) <- runStepM testConvId agent (mkSessionWithCalls [mkCall "t1", mkCall "t2"])
+            session <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session" >> fail "unreachable"
+            case session.turns of
+                (UserTurn content _ : _) -> do
+                    length content.userMail @?= 1
+                    case content.userQuery of
+                        Just q -> assertBool "query includes the mail text" ("hello from mail" `Text.isInfixOf` q.queryText)
+                        Nothing -> assertFailure "expected a separate user query carrying the mail"
+                    map snd content.userToolResponses @?= [TextResponse "done:t1", TextResponse "done:t2"]
+                other -> assertFailure $ "expected a user turn, got " <> show other
+        , testCase "mailInToolResult does not affect a plain async user turn with no tool calls" $ do
+            mb <- newInMemoryMailbox
+            _ <- expectRight =<< mb.mbSend (userMessageOutgoing "hello from mail")
+            let agent = (mkAsyncAgent defaultToolCallPolicy){ctxMailbox = Just mb, ctxMailInToolResult = True}
             (_agent', result) <- runStepM testConvId agent mkFreshSession
             session <- case result of
                 Right s -> pure s
