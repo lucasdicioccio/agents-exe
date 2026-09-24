@@ -2,7 +2,7 @@
 
 Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
-(commits 8de2a64..dc01dc8); Phases 2 and 3 done (0390c9f..5eeb4b0); Phase 4 in
+(commits 8de2a64..dc01dc8); Phases 2 to 4 done (0390c9f..4e03ec9); Phase 5 in
 progress. Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
 
@@ -514,7 +514,21 @@ tools refresh, export, attachments, plus the new pending-calls view. Remove
 `corePausedConversations`, `Loop` usage, `OneShot.nodeToAgent` usage in the
 TUI.
 
-### Phase 4: attach
+### Phase 4: attach — done
+
+Landed (20522f2..4e03ec9): `System.Agents.Host.Client.Http.httpClient`
+over `http(s)://` and `unix://` URLs with bearer token, SSE parsing,
+transparent reconnect with `Last-Event-ID` (backoff 100 ms to 5 s, 45 s
+stall timeout, duplicates dropped), `AllSessions` falling back to the
+owner scope on 403; `agents-exe tui --attach URL|PATH` with `--token` /
+`--token-file`; `POST /v1/sessions` takes `parent`; `GET /v1/sessions/:id`
+takes `wait`/`timeout`; streams send an `Agents-Replay` header and flush
+headers at once (a warp header-buffering bug had hung the attached TUI);
+the chat page follows `GET /v1/events`. Open: with `--attach`, `app/Main.hs`
+still resolves local agent files, so `--agent SLUG` can fail when the slug
+is unknown locally.
+
+Original scope:
 
 `httpClient` (HTTP + SSE with `Last-Event-ID`) and `socketClient`;
 `agents-exe tui --attach URL|PATH`. The chat page moves to `GET /v1/events`
