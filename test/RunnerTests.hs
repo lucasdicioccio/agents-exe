@@ -116,6 +116,8 @@ tests =
         , testCase "a background call reports tool.started and tool.completed events" toolCallEventsTest
         , testCase "a background call reports tool.progressed events through ctxEmit" toolCallProgressedEventsTest
         , testCase "a sub-agent call reports subcall.started and subcall.completed on the parent's stream" subcallEventsTest
+        , testCase "a sub-agent call to a declared helper runs it as a real session (smParent, tool result)" subcallAsSessionTest
+        , testCase "cancelling the parent's run cancels the child session it started" subcallCancelChildTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
         , testCase "unwatch-session stops forwarding" unwatchSessionTest
@@ -1501,6 +1503,102 @@ subcallEventsTest = do
         assertBool ("subcall.completed among " <> show kinds) ("subcall.completed" `elem` kinds)
   where
     childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+
+{- | Phase 5 (@todos/os-as-standalone-server.md@ G10): with the helper
+declared in the caller's own tree ('osNodeChildren', so
+'Host.Runner.findHelperNode' can resolve it -- unlike 'subcallEventsTest',
+which wires the tool without declaring the child, and so stays on the
+in-tool fallback), a @prompt_agent_child@ call runs the child as a real,
+durable session: it shows up in 'listSessions' with 'smParent' set to the
+parent's own session id, and the parent's tool result is exactly the
+child's own final answer.
+-}
+subcallAsSessionTest :: Assertion
+subcallAsSessionTest = do
+    child <- testNode "{\"slug\": \"child\"}"
+    parent0 <-
+        testNode
+            "{\"slug\": \"parent\", \"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}}"
+    let parent = parent0{osNodeChildren = [child]}
+    host <-
+        testHost [parent] $ \node c ->
+            if Base.slug node.osNodeConfig == "child"
+                then mockCompletion c
+                else firstThen [childCall] c
+    agentId <- AgentId <$> nextRandom
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "parent" (message "delegate") Nothing
+        let sid = meta.smSessionId
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        children <- listSessions runner allSessionsQuery{sqParent = Just sid}
+        case children of
+            [childMeta] -> do
+                childMeta.smParent @?= Just sid
+                childMeta.smAgent @?= Just "child"
+            other -> assertFailure ("expected exactly one child session, got " <> show other)
+        -- turns is newest-first: the head is the parent's own final LLM
+        -- answer (a mock, unrelated to the child); the tool result the
+        -- child actually produced is on the UserTurn just under it.
+        Just (parentSess, _) <- getSession runner sid
+        case parentSess.turns of
+            (_ : UserTurn content _ : _) -> case map snd content.userToolResponses of
+                [TextResponse resp] -> assertBool ("tool result is the child's own answer, got " <> show resp) ("done" `Text.isInfixOf` resp)
+                other -> assertFailure ("expected one text tool response, got " <> show other)
+            other -> assertFailure ("expected an LLM turn over a user turn, got " <> show other)
+  where
+    childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+
+{- | Phase 5 (@todos/os-as-standalone-server.md@ G10): cancelling the
+parent's run cancels the child session it started -- the same 'cancelRun'
+a client could call on the child directly.
+-}
+subcallCancelChildTest :: Assertion
+subcallCancelChildTest = do
+    gate <- newEmptyMVar
+    child <- testNode "{\"slug\": \"child\"}"
+    parent0 <-
+        testNode
+            "{\"slug\": \"parent\", \"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}}"
+    let parent = parent0{osNodeChildren = [child]}
+    host <-
+        testHost [parent] $ \node c ->
+            if Base.slug node.osNodeConfig == "child"
+                then readMVar gate >> mockCompletion c
+                else firstThen [childCall] c
+    agentId <- AgentId <$> nextRandom
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "parent" (message "delegate") Nothing
+        let sid = meta.smSessionId
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        -- Wait for the child session to exist (the child's completion is
+        -- gated, so the parent's run stays active with the child running).
+        childSid <- pollFor 50 $ do
+            children <- listSessions runner allSessionsQuery{sqParent = Just sid}
+            pure $ case children of
+                [childMeta] -> Just childMeta.smSessionId
+                _ -> Nothing
+        _ <- expectRight =<< cancelRun runner sid
+        (_parentFinal, parentActive) <- expectRight =<< awaitRun runner sid 5
+        parentActive @?= False
+        -- The child's own run was cancelled too (Runner.waitForChild's
+        -- own 'cancelRun', triggered by the parent's tool call being
+        -- interrupted while still waiting on it): no run left active on
+        -- it, regardless of what its own turns settle its status to.
+        (_childFinal, childActive) <- expectRight =<< awaitRun runner childSid 5
+        childActive @?= False
+        putMVar gate ()
+  where
+    childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+    pollFor :: Int -> IO (Maybe a) -> IO a
+    pollFor 0 _ = assertFailure "timed out waiting for the child session" >> fail "unreachable"
+    pollFor n action =
+        action >>= \case
+            Just a -> pure a
+            Nothing -> threadDelay 20_000 >> pollFor (n - 1) action
 
 {- | A watch always permits watching one's own session ('isWithinSubtree's
 own-id short-circuit), so a session watching itself is enough to exercise
