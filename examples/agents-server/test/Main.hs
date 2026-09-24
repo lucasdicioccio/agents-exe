@@ -761,6 +761,9 @@ uiPageTest = do
             , "/v1/sessions"
             , "/v1/continuations/"
             , "EventSource"
+            , -- the session list follows the server-wide feed
+              "/v1/events"
+            , "session.created"
             , "openapi.json"
             , -- attachments: the picker, and the key the API wants
               "type='file'"

@@ -100,7 +100,10 @@ the server. An agents-exe agent can use it directly as a toolbox:
 The chat page is one self-contained HTML document with no build step and no
 assets. It starts sessions, follows their event streams, offers a box to
 complete deferred tool calls, and attaches files, so it doubles as a worked
-example of the API.
+example of the API. Its session list follows `GET /v1/events` (see
+[Following every session](#following-every-session)), so sessions created,
+deleted or changed by any other client (another tab, an attached TUI, a
+script) show up without a reload.
 
 **Attachments.** *Attach* adds files to the next message, up to 20 MB in
 total (the body limit is 32 MiB and base64 adds a third). They are sent as
