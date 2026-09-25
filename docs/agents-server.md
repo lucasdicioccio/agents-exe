@@ -351,10 +351,11 @@ curl -sS localhost:8080/v1/sessions \
 ```
 
 `params` is an object of parameter name to value; a `null` value clears a
-previously-set session-scope value. A `session`-scope value is kept in this
-process's memory for the life of the session — a client must resupply it
-after a restart or an idle eviction, or the next run that needs it fails
-with `params_required`. A `message`-scope value applies to that one run
+previously-set session-scope value. A `session`-scope value is kept for the
+life of the session: a non-secret one is stored with the session and comes
+back after a restart or an idle eviction; a secret one lives only in this
+process's memory, so a client must resupply it after either, or the next
+run that needs it fails with `params_required`. A `message`-scope value applies to that one run
 only and is never stored. A secret value is never returned by any endpoint:
 `GET /v1/sessions/:id`'s own `params` field only ever holds the
 non-secret session-scope values (the current, actual values); `GET
@@ -838,6 +839,16 @@ turns imply. Their interrupted step is lost, and background tool calls they
 were running are reported to the LLM as orphaned on the next run. Nothing is
 resumed automatically: `resume` them.
 
+One exception is decided at startup rather than on the next run: when such a
+session's agent has a required parameter with no value left (a secret
+`session`-scope value is memory-only, so the restart lost it), its running
+calls are failed right away with a message naming the parameters, the
+session's `status_detail` reads `params_required: <names>`, and the log
+carries a `sessions.params_required` line. A `resume` or message without
+those `params` is refused with `422 params_required`; one that carries them
+goes on, and the LLM sees why the calls failed. Non-secret session values
+are stored with the session and need no resupply.
+
 Background tool calls (`runAsync`) live in the server process. They survive
 between runs of a session, but not a restart. A session is not dropped at
 the TTL while one of its background calls is still running: it is kept until
@@ -933,6 +944,7 @@ and, when known, `session_id`:
 | `llm.request` / `llm.response` | `bytes`, token counts |
 | `llm.http` | `method`, `host`, `path`, `status` |
 | `sessions.recovered` | `session_ids` |
+| `sessions.params_required` | `session_id`, `params`: a recovered session whose running calls were failed because these required parameters are no longer bound |
 | `agents.stored_skipped` | `slug`, `reason`: a stored agent hidden by an agent file |
 | `agent_tree`, `tool`, `tool.portal` | `event`: what the agent loader and the tools reported |
 | `llm.backoff` | `attempt`, `delay_seconds` |

@@ -93,6 +93,8 @@ tests =
         , testCase "a background call started in one run is picked up by the next" engineKeptTest
         , testCase "cancelling stops the run and its background calls" cancelTest
         , testCase "sessions left running are recovered, their calls orphaned" recoveryTest
+        , testCase "recovery fails running calls that lost a secret parameter with params_required" recoveryParamsRequiredTest
+        , testCase "recovery keeps persisted non-secret session parameters" recoveryKeepsPersistedParamsTest
         , testCase "awaitRun waits for the run or the timeout" awaitRunTest
         , testCase "deleting cascades to sub-sessions and continuations; sub-sessions have their root's owner" deleteTest
         , testCase "idle sessions are evicted and come back on demand" evictionTest
@@ -293,18 +295,23 @@ cancelTest = do
         sess <- currentSession runner sid
         assertBool ("call reported cancelled: " <> show (sessionTexts sess)) (any ("cancelled" `Text.isInfixOf`) (sessionTexts sess))
 
-recoveryTest :: Assertion
-recoveryTest = do
-    node <- testNode "{}"
-    host <- testHost [node] (\_ c -> mockCompletion c)
-    sid <- newSessionId
+-- | A session a previous process left mid-turn, with one background call still 'Running'.
+sessionLeftRunning :: SessionId -> IO Session
+sessionLeftRunning sid = do
     sess0 <- newSessionFromPrompt sid (SystemPrompt "sys") [] (UserQuery "hello" [])
     callId <- newToolCallId
     let running =
             TrackedToolCall callId slowCall Running Nothing Nothing (AppliedPolicy (RunAsync Nothing) Nothing) Nothing False Nothing Nothing Nothing
         llm = LlmTurn (LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) [slowCall]) Nothing
         partial = PartialUserTurn (PartialUserTurnContent (SystemPrompt "sys") [] Nothing [running] []) Nothing
-        sess = sess0{turns = partial : llm : sess0.turns}
+    pure sess0{turns = partial : llm : sess0.turns}
+
+recoveryTest :: Assertion
+recoveryTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    sid <- newSessionId
+    sess <- sessionLeftRunning sid
     now <- getCurrentTime
     _ <- expectRight =<< host.hostBackend.sbCompareAndStore (freshSessionMeta sid now){smAgent = Just "test-agent", smStatus = StatusRunning} sess
     withSessionRunner host $ \runner -> do
@@ -316,6 +323,59 @@ recoveryTest = do
         _ <- expectRight =<< awaitRun runner sid 5
         resumed <- currentSession runner sid
         assertBool ("orphaned: " <> show (responseTexts resumed)) (any ("orphaned" `Text.isInfixOf`) (responseTexts resumed))
+
+recoveryParamsRequiredTest :: Assertion
+recoveryParamsRequiredTest = do
+    node <- testNode "{\"parameters\": [{\"name\": \"api_token\", \"secret\": true, \"scope\": \"session\"}]}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    sid <- newSessionId
+    sess <- sessionLeftRunning sid
+    now <- getCurrentTime
+    _ <- expectRight =<< host.hostBackend.sbCompareAndStore (freshSessionMeta sid now){smAgent = Just "test-agent", smStatus = StatusRunning} sess
+    withSessionRunner host $ \runner -> do
+        recovered <- recoverOnStartup runner
+        recovered @?= [sid]
+        Just (recoveredSess, meta) <- getSession runner sid
+        meta.smStatus @?= StatusReady
+        meta.smStatusDetail @?= Just "params_required: api_token"
+        let calls = [tc | PartialUserTurn p _ <- recoveredSess.turns, tc <- p.pTrackedToolCalls]
+        map (.tcState) calls @?= [Failed]
+        assertBool ("names the parameter: " <> show calls) (any (maybe False (("api_token" `Text.isInfixOf`) . renderResponse) . (.tcResult)) calls)
+        -- Resuming blind is refused; resupplying the secret lets the run go on.
+        blind <- resume runner sid StepOnce Map.empty
+        blind @?= Left (MissingRequiredParams ["api_token"])
+        _ <- expectRight =<< resume runner sid StepOnce (Map.fromList [("api_token", Aeson.String "s3cret")])
+        _ <- expectRight =<< awaitRun runner sid 5
+        -- The run went on to the LLM, which was told why the call failed.
+        Just (resumed, afterMeta) <- getSession runner sid
+        afterMeta.smStatus @?= StatusIdle
+        afterMeta.smStatusDetail @?= Nothing
+        let told = [renderResponse r | PartialUserTurn p _ <- resumed.turns, (_, r) <- partialToolMessages p]
+        assertBool ("told the LLM: " <> show told) (any ("api_token" `Text.isInfixOf`) told)
+  where
+    renderResponse (TextResponse t) = t
+    renderResponse other = Text.pack (show other)
+
+recoveryKeepsPersistedParamsTest :: Assertion
+recoveryKeepsPersistedParamsTest = do
+    node <- testNode "{\"parameters\": [{\"name\": \"tenant\", \"scope\": \"session\"}]}"
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    sid <- newSessionId
+    sess <- sessionLeftRunning sid
+    now <- getCurrentTime
+    let tenant = Map.fromList [("tenant", Aeson.String "acme")]
+    _ <- expectRight =<< host.hostBackend.sbCompareAndStore (freshSessionMeta sid now){smAgent = Just "test-agent", smStatus = StatusRunning, smParams = tenant} sess
+    withSessionRunner host $ \runner -> do
+        recovered <- recoverOnStartup runner
+        recovered @?= [sid]
+        Just (_, meta) <- getSession runner sid
+        meta.smStatusDetail @?= Nothing
+        meta.smParams @?= tenant
+        -- The persisted value is back in memory: no resupply needed, and it is kept across the store.
+        _ <- expectRight =<< resume runner sid StepOnce Map.empty
+        _ <- expectRight =<< awaitRun runner sid 5
+        Just (_, after) <- getSession runner sid
+        after.smParams @?= tenant
 
 awaitRunTest :: Assertion
 awaitRunTest = do
@@ -1762,6 +1822,7 @@ testHost nodes complete = do
             , hostMail = mail
             , hostTracer = silent
             , hostStreamTokens = False
+            , hostProcessParams = mempty
             , hostLiveSessionTtl = 15 * 60
             }
 

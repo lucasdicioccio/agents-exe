@@ -29,6 +29,7 @@ module System.Agents.Session.Types (
     isBlockedOnDeferredCalls,
     hasBackgroundCalls,
     backgroundCalls,
+    failRunningCalls,
     DeferredCallView (..),
     pendingDeferredCalls,
     Turn (..),
@@ -282,6 +283,22 @@ backgroundCalls sess =
     , tcState tc == Running
     , not (tcDeliveredLate tc)
     ]
+
+{- | Mark every 'Running' call, in every partial turn, 'Failed' with the
+given response: for a process that can tell up front that such calls can
+never be picked up again (e.g. a restart lost a parameter they needed).
+Also returns the ids of the calls it changed; none means the session came
+back unchanged.
+-}
+failRunningCalls :: UserToolResponse -> Session -> (Session, [ToolCallId])
+failRunningCalls response sess = (sess{turns = map failTurn sess.turns}, failedIds)
+  where
+    failedIds = [tc.tcId | PartialUserTurn partial _ <- sess.turns, tc <- partial.pTrackedToolCalls, tc.tcState == Running]
+    failTurn (PartialUserTurn partial p) = PartialUserTurn partial{pTrackedToolCalls = map failCall partial.pTrackedToolCalls} p
+    failTurn t = t
+    failCall tc
+        | tc.tcState == Running = tc{tcState = Failed, tcResult = Just response}
+        | otherwise = tc
 
 {- | A new asynchronous session whose only turn asks the LLM the given query.
 
