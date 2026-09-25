@@ -1,0 +1,738 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Async Tool Calls Implementation Progress</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: no status line yet"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Async Tool Calls Implementation Progress"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: no status line yet"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Async Tool Calls Implementation Progress"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html"><meta property="og:description" content="Status: no status line yet"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/specs-async-tool-calls-progress.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-async-tool-calls-progress.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"Status: no status line yet","headline":"Async Tool Calls Implementation Progress","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Async Tool Calls Implementation Progress</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 3166 words, 1 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">5/11</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-web-server-embedding.progress.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls-progress.md"><code>todos/async-tool-calls-progress.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="async-tool-calls-implementation-progress">Async Tool Calls Implementation Progress</h2>
+<h3 id="plan">Plan</h3>
+<p>See <code>todos/async-tool-calls.md</code>.</p>
+<h3 id="phase-status">Phase Status</h3>
+<ul>
+<li>[x] Phase 1: ECS Tool-Call Entities
+</li>
+<li>[x] Phase 2: Async Engine
+</li>
+<li>[x] Phase 3: System Capability (building blocks only — see review below)
+</li>
+<li>[x] Phase 3.5: End-to-End Correctness (added after review; blocks Phase 4)
+</li>
+<li>[x] Phase 4: TUI / OneShot UX (TUI rendering not yet checked by hand)
+</li>
+<li>[x] Phase 5: Cleanup &amp; Hardening (tracing not done — see notes)
+</li>
+</ul>
+<h3 id="success-criteria-status">Success Criteria Status</h3>
+<p>Revised after the 2026-09-16 review, then after Phase 3.5 and Phase 4. The
+criteria are met in the library and tests, and async execution is now enabled
+from the agent JSON in the TUI, OneShot, sub-agents, and <code>session</code> commands.
+The TUI rendering has not been checked by hand.</p>
+<table>
+<tr><th>Criterion</th><th>Status</th><th>Notes</th></tr>
+<tr><td>Two long-running tool calls issued in one LLM turn execute concurrently</td><td>Met</td><td><code>asyncEngineTests</code>; async calls now start before inline calls so they overlap.</td></tr>
+<tr><td>LLM receives a partial user turn as soon as the first call finishes (<code>YieldOnAnyProgress</code>)</td><td>Met (stepper)</td><td>Running calls get a placeholder tool message; late results are delivered in the next user turn. <code>AsyncToolCallsTests</code>.</td></tr>
+<tr><td>LLM can call <code>get_tool_call_status</code> and see structured progress or final result</td><td>Met</td><td>Accepts the provider id. Bash tools report output lines; sub-agent tools report their steps.</td></tr>
+<tr><td>LLM can call <code>cancel_tool_call</code> to stop a running call</td><td>Met</td><td>Interrupts the engine thread via <code>ctxCancelToolCall</code>; a running subprocess is terminated (<code>processKilledOnCancel</code>).</td></tr>
+<tr><td>Tool calls appear as ECS entities in the OS <code>World</code></td><td>Met</td><td>Covered by <code>sessionStepEntityTests</code> and <code>toolCallEntityTests</code>.</td></tr>
+<tr><td>Existing synchronous behavior unchanged when <code>ExecutionMode = Synchronous</code></td><td>Met</td><td>Same turns as before. Sync steps only differ when a session already holds background calls from an async run.</td></tr>
+<tr><td><code>get_tool_call_status</code> returns <code>orphaned</code> for calls referenced in history that no longer exist</td><td>Met</td><td>Capability returns <code>orphaned</code> with <code>is_final: true</code>; the stepper fails such calls. Verified across a save/reload round-trip in a fresh world (<code>orphanedAcrossRestart</code>).</td></tr>
+</table>
+<h3 id="phase-1-completion-notes">Phase 1 Completion Notes</h3>
+<p>Phase 1 is complete. The following was done:</p>
+<h4 id="ecs-tool-call-components">ECS Tool-Call Components</h4>
+<ul>
+<li><code>System.Agents.OS.Conversation.Types</code> already had <code>ToolCallConfig</code>/<code>ToolCallState</code> extended with:
+<ul>
+<li><code>tcSessionId</code>, <code>tcConversationId</code> on <code>ToolCallConfig</code>.
+</li>
+<li><code>tcProgress :: [ToolCallProgress]</code>, <code>TcCancelled</code> on <code>ToolCallState</code>.
+</li>
+<li><code>ToolCallProgress</code> / <code>ProgressKind</code> for structured progress.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="tracked-tool-calls">Tracked Tool Calls</h4>
+<ul>
+<li><code>System.Agents.Session.Types</code> already had <code>tcEntityId :: Maybe EntityId</code> added to <code>TrackedToolCall</code>.
+</li>
+</ul>
+<h4 id="tool-call-entity-helpers">Tool-Call Entity Helpers</h4>
+<ul>
+<li>Extended <code>System.Agents.OS.Conversation.ToolCalls</code>:
+<ul>
+<li>Added <code>ensureToolCallComponents</code> / <code>ensureToolCallComponentsIO</code> for idempotent component-store registration (safe to call on every step).
+</li>
+<li><code>createToolCallEntity</code>, <code>startToolCall</code>, <code>completeToolCall</code>, <code>failToolCall</code>, <code>cancelToolCall</code>, <code>addToolCallProgress</code>.
+</li>
+<li>Query helpers <code>findToolCallEntityBySessionId</code> and <code>listToolCallsBySessionAndConversation</code>.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="session-step-integration">Session Step Integration</h4>
+<ul>
+<li>Updated <code>System.Agents.Session.Step</code>:
+<ul>
+<li><code>prepareAgentWorld</code> ensures tool-call component stores are registered idempotently and threads the registered world through the agent/context.
+</li>
+<li><code>ensureTrackedCallEntities</code> promotes every <code>TrackedToolCall</code> to an OS entity when a <code>World</code> is available.
+</li>
+<li><code>executeTrackedCallWithEntity</code> updates the OS entity state to <code>TcExecuting</code> before running a call and <code>TcCompleted</code> (with the JSON result) after.
+</li>
+<li>Both <code>runStepMSync</code> and <code>runStepMAsync</code> now create/update OS entities for every tool call.
+</li>
+<li>Existing behavior is unchanged when no <code>World</code> is configured.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="tests">Tests</h4>
+<ul>
+<li>Added <code>sessionStepEntityTests</code> to <code>test/OS/ConversationTests.hs</code> covering:
+<ul>
+<li>Sync step creates completed tool-call entities.
+</li>
+<li>Async step creates entities for both sync-completed and deferred calls.
+</li>
+<li>Async step with all-sync policy completes all calls and creates entities.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="baseline">Baseline</h4>
+<ul>
+<li>Full test suite passes.
+</li>
+</ul>
+<h3 id="phase-2-completion-notes">Phase 2 Completion Notes</h3>
+<p>Phase 2 is complete. The async engine now runs <code>RunAsync</code> tool calls concurrently, keeps OS entity state in sync, and supports structured progress callbacks.</p>
+<h4 id="async-engine-systemagentssessionasyncengine">Async Engine (<code>System.Agents.Session.Async.Engine</code>)</h4>
+<ul>
+<li><code>AsyncEngine</code> manages a shared semaphore for max concurrency and a registry of active batches keyed by <code>ToolCallId</code>.
+</li>
+<li><code>startAsyncBatch</code> spawns each call in a background <code>Async</code> thread, injects a per-call progress callback into <code>ToolExecutionContext</code>, and records the call in the registry.
+</li>
+<li><code>waitForProgress</code> / <code>waitForProgressTimeout</code> block until at least one call reaches a final state.
+</li>
+<li><code>finalizeCompleted</code> collects finished calls and removes them from the running set and engine registry.
+</li>
+<li><code>cancelToolCall</code> / <code>cancelAsyncBatch</code> send async exceptions to background threads and mark OS entities as <code>TcCancelled</code>.
+</li>
+</ul>
+<h4 id="yield-strategy">Yield Strategy</h4>
+<ul>
+<li><code>AsyncYieldStrategy</code> (<code>YieldOnAnyProgress</code>, <code>YieldWhenAllDone</code>, <code>YieldOnTimeout</code>) is defined in <code>System.Agents.Session.Types</code>.
+</li>
+<li><code>waitAccordingToStrategy</code> in <code>System.Agents.Session.Step</code> implements the three strategies.
+</li>
+<li>The default strategy is <code>YieldWhenAllDone</code> (set by <code>withAsyncConfig</code>).
+</li>
+</ul>
+<h4 id="progress--lifecycle">Progress &amp; Lifecycle</h4>
+<ul>
+<li>When a background call starts, the engine emits a <code>ToolCallProgress</code> entry with <code>ProgressStarted</code> (payload <code>{&quot;started&quot;:true}</code>) alongside setting the entity status to <code>TcExecuting</code>.
+</li>
+<li>The progress callback writes <code>ProgressPartial</code> entries with arbitrary JSON payloads to the entity.
+</li>
+<li><code>completeToolCall</code> and <code>failToolCall</code> in <code>System.Agents.OS.Conversation.ToolCalls</code> now leave the state unchanged if it is already <code>TcCancelled</code>, preventing late engine completions from overwriting a cancellation.
+</li>
+</ul>
+<h4 id="helpers">Helpers</h4>
+<ul>
+<li>Added <code>isToolCallCompletedIO</code> and <code>findToolCallEntityByToolCallId</code> to <code>System.Agents.OS.Conversation.ToolCalls</code>.
+</li>
+</ul>
+<h4 id="tests-1">Tests</h4>
+<ul>
+<li>Added <code>asyncEngineTests</code> to <code>test/OS/ConversationTests.hs</code> covering:
+<ul>
+<li>Two <code>RunAsync</code> calls execute concurrently (total time &lt; 300 ms for two 200 ms sleeps).
+</li>
+<li>Progress callback emits <code>ToolCallProgress</code> entries, including <code>ProgressStarted</code>.
+</li>
+<li><code>cancelToolCall</code> marks an entity as <code>TcCancelled</code> and a later engine completion does not overwrite it; a second cancellation attempt returns <code>False</code>.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="baseline-1">Baseline</h4>
+<ul>
+<li>Full test suite passes.
+</li>
+</ul>
+<h3 id="phase-3-completion-notes">Phase 3 Completion Notes</h3>
+<p>Phase 3 is complete. Agents can now inspect and cancel async tool calls through the system toolbox.</p>
+<h4 id="capability-constructors">Capability Constructors</h4>
+<ul>
+<li>Added to <code>SystemToolCapability</code> in <code>System.Agents.Base</code>:
+<ul>
+<li><code>SystemToolGetToolCallStatus</code> serialized as <code>get-tool-call-status</code>.
+</li>
+<li><code>SystemToolListRunningToolCalls</code> serialized as <code>list-running-tool-calls</code>.
+</li>
+<li><code>SystemToolCancelToolCall</code> serialized as <code>cancel-tool-call</code>.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="types-systemagentstoolssystemtoolboxtypes">Types (<code>System.Agents.Tools.SystemToolbox.Types</code>)</h4>
+<ul>
+<li><code>GetToolCallStatusParams</code> — <code>tool_call_id</code>, <code>include_progress</code>, <code>wait_for_completion</code>, <code>timeout_seconds</code>.
+</li>
+<li><code>ToolCallStatusResult</code> — status, tool name, timing, result, progress, <code>is_final</code>.
+</li>
+<li><code>ListRunningToolCallsResult</code> / <code>RunningToolCallInfo</code>.
+</li>
+<li><code>CancelToolCallParams</code> / <code>CancelToolCallResult</code>.
+</li>
+</ul>
+<h4 id="implementation-systemagentstoolssystemtoolboxtoolcallstatus">Implementation (<code>System.Agents.Tools.SystemToolbox.ToolCallStatus</code>)</h4>
+<ul>
+<li><code>getToolCallStatus</code> looks up the OS entity by <code>ToolCallId</code> and translates <code>ToolCallStatus</code> to LLM-facing strings (<code>pending</code>, <code>running</code>, <code>completed</code>, <code>failed</code>, <code>cancelled</code>).
+<ul>
+<li>Supports <code>wait_for_completion</code> with a configurable timeout (polls every 50 ms).
+</li>
+<li>If the entity is missing, searches the session’s <code>PartialUserTurn</code> history and returns <code>orphaned</code> when the call is referenced but no longer exists.
+</li>
+</ul>
+</li>
+<li><code>listRunningToolCalls</code> returns all non-final tool-call entities for the current session/conversation.
+</li>
+<li><code>cancelToolCallById</code> marks a non-final entity as <code>TcCancelled</code> and reports the previous status; returns <code>cancelled: false</code> if already final.
+</li>
+</ul>
+<h4 id="registration-systemagentstoolregistration">Registration (<code>System.Agents.ToolRegistration</code>)</h4>
+<ul>
+<li>Updated <code>capabilityToText</code> and <code>buildSystemToolParams</code> to expose the new capabilities and their parameters (<code>tool_call_id</code>, <code>include_progress</code>, <code>wait_for_completion</code>, <code>timeout_seconds</code>, <code>reason</code>).
+</li>
+<li>Routed <code>get-tool-call-status</code>, <code>list-running-tool-calls</code>, and <code>cancel-tool-call</code> in the <code>system_info</code> tool handler.
+</li>
+</ul>
+<h4 id="exports">Exports</h4>
+<ul>
+<li><code>System.Agents.Tools.SystemToolbox</code> re-exports the new types and functions.
+</li>
+<li><code>agents.cabal</code> exposes <code>System.Agents.Tools.SystemToolbox.ToolCallStatus</code>.
+</li>
+</ul>
+<h4 id="tests-2">Tests</h4>
+<ul>
+<li>Added <code>toolCallStatusTests</code> to <code>test/OS/ConversationTests.hs</code> covering:
+<ul>
+<li><code>get-tool-call-status</code> returns <code>pending</code> then <code>running</code>.
+</li>
+<li><code>get-tool-call-status</code> returns <code>completed</code> after completion.
+</li>
+<li><code>get-tool-call-status</code> returns <code>orphaned</code> for a tracked call missing an OS entity.
+</li>
+<li><code>list-running-tool-calls</code> returns only non-final calls.
+</li>
+<li><code>cancel-tool-call</code> marks a running entity as cancelled and a second attempt reports already final.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="baseline-2">Baseline</h4>
+<ul>
+<li>Full test suite passes (870 tests).
+</li>
+</ul>
+<h3 id="review-2026-09-16">Review (2026-09-16)</h3>
+<p>State at review time: branch <code>asynctools</code>, build green, 870 tests pass.
+Phases 1–3 delivered the building blocks (entities, concurrent engine,
+status/list/cancel capabilities), but the feature does not work end-to-end
+in a real session. Findings:</p>
+<h4 id="r1-the-llm-cannot-address-its-own-tool-calls">R1. The LLM cannot address its own tool calls</h4>
+<ul>
+<li><code>get-tool-call-status</code> / <code>cancel-tool-call</code> take the internal <code>ToolCallId</code>
+UUID generated in <code>mkReadyTrackedCall</code> (<code>Session/Step.hs</code>, <code>newToolCallId</code>).
+</li>
+<li>The model only ever sees the provider’s id (e.g. <code>call_abc123</code>). There is no
+mapping between the two and the UUID is never surfaced to the model.
+</li>
+</ul>
+<h4 id="r2-partial-answers-never-reach-the-llm-correctly">R2. Partial answers never reach the LLM correctly</h4>
+<ul>
+<li><code>turnToMessages (PartialUserTurn …)</code> in <code>Session/OpenAI.hs</code> emits tool
+messages for completed calls only. A running call has no tool message, which
+OpenAI-compatible APIs reject.
+</li>
+<li><code>naiveTilNoToolCallStep</code> (<code>Session/Step.hs</code>) only treats <code>Ready</code> / <code>Deferred</code>
+as outstanding. With only <code>Running</code> calls left, it asks for an LLM completion
+with a partial set of responses, then pushes an <code>LlmTurn</code> on top. The running
+calls’ results are buried and never delivered.
+</li>
+<li><code>continuePartialTurn</code> → <code>executeTrackedCalls</code> prepends a new
+<code>PartialUserTurn</code> instead of replacing the head (unlike <code>Session/Wake.hs</code>,
+which does <code>newTurn : drop 1 turns</code>). Every resume duplicates the turn in
+history. Pre-existing bug, but running calls now trigger it on every resume.
+</li>
+</ul>
+<h4 id="r3-cancel-tool-call-does-not-stop-anything">R3. <code>cancel-tool-call</code> does not stop anything</h4>
+<ul>
+<li><code>cancelToolCallById</code> (<code>Tools/SystemToolbox/ToolCallStatus.hs</code>) only calls
+<code>TCT.cancelToolCall</code>, i.e. flips the entity to <code>TcCancelled</code>.
+</li>
+<li>The background thread keeps running. <code>Engine.cancelToolCall</code> does kill the
+thread, but the capability cannot reach the engine from
+<code>ToolExecutionContext</code>.
+</li>
+<li>The capability test only asserts the status flag.
+</li>
+</ul>
+<h4 id="r4-the-engine-does-not-survive-between-steps">R4. The engine does not survive between steps</h4>
+<ul>
+<li><code>runAsyncWithProgress</code> (<code>Session/Loop.hs</code>) returns only the <code>Session</code>; the
+agent carrying <code>ctxAsyncEngine</code> is dropped. The caller resumes with an agent
+that has no engine.
+</li>
+<li><code>ensureAsyncEngine</code> then creates a fresh engine on each step, so
+<code>defaultMaxConcurrency = 4</code> is per step rather than global, and the
+cancellation registry is lost.
+</li>
+</ul>
+<h4 id="r5-the-stepper-does-not-handle-orphaned-calls">R5. The stepper does not handle orphaned calls</h4>
+<ul>
+<li><code>pollRunningCall</code> leaves a call <code>Running</code> forever when its entity is missing
+(e.g. after a restart), so the partial turn never resolves.
+</li>
+<li>Only the capability reports <code>orphaned</code>, and it returns <code>is_final: false</code> for
+a call that can never finish.
+</li>
+</ul>
+<h4 id="r6-smaller-issues">R6. Smaller issues</h4>
+<ul>
+<li><strong>Crash on malformed calls:</strong> <code>requireEntityId</code> in
+<code>Session/Async/Engine.hs</code> calls <code>error</code> when a call has no entity id. That
+happens whenever <code>parseToolCallFromLlmToolCall</code> fails, so a malformed call
+under an async policy crashes the step instead of degrading to inline.
+</li>
+<li><strong>No real overlap:</strong> in <code>executeTrackedCalls</code>, inline calls run sequentially
+before the async batch is started.
+</li>
+<li><strong>No progress emitters:</strong> nothing calls <code>ctxProgressCallback</code>. Also,
+<code>mkSubcallContext</code> propagates the callback into sub-agent contexts, which
+would write their progress into the parent call’s entity.
+</li>
+<li><strong>Hard to enable:</strong> the agent JSON has <code>executionMode</code> and
+<code>toolCallPolicyConfig</code>, but only the durable <code>session</code> CLI applies them
+(<code>applyAgentDurableConfig</code> in <code>CLI/SessionDurable.hs</code>). The TUI and OneShot
+ignore them, and there is no config for yield strategy or concurrency.
+</li>
+</ul>
+<h3 id="phase-35-completion-notes">Phase 3.5 Completion Notes</h3>
+<p>Done 2026-09-16. Build green, 875 tests pass (5 new end-to-end tests).</p>
+<h4 id="semantics">Semantics</h4>
+<ul>
+<li><strong>Placeholders.</strong> <code>partialToolMessages</code> (<code>Session/Types.hs</code>) emits one tool
+message per call. Final calls carry their result. Non-final calls, and calls
+whose result was delivered late, get a JSON placeholder
+(<code>status</code>, <code>tool_call_id</code>, a hint to use <code>get-tool-call-status</code> /
+<code>cancel-tool-call</code>). Used by <code>OpenAI.hs</code>, both naive step functions, and
+<code>Wake.hs</code>. <code>Failed</code> calls now also get their tool message (previously
+dropped).
+</li>
+<li><strong>Late delivery.</strong> <code>collectLateResults</code> (<code>Session/Step.hs</code>) finds <code>Running</code>
+calls in partial turns below the head, polls them, marks finished ones
+<code>tcDeliveredLate = True</code> (new field on <code>TrackedToolCall</code>, optional in JSON),
+and <code>lateResultsQuery</code> renders them into the next user turn’s <code>userQuery</code>
+(media is attached). The partial turn keeps showing the placeholder, so
+history matches what the model saw. Runs in both sync and async steps.
+</li>
+<li><strong>Stopping.</strong> <code>naiveTilNoToolCallStep</code> no longer stops on an LLM turn without
+tool calls while <code>hasBackgroundCalls</code>. It asks for a user turn, and the
+stepper blocks until the results arrive (all under <code>YieldWhenAllDone</code>,
+otherwise at least one).
+</li>
+<li><strong>Refresh.</strong> <code>runStepMAsync</code> refreshes the head partial turn before each
+step (<code>refreshHeadPartialTurn</code>). Background completions are picked up, and
+the head becomes a full <code>UserTurn</code> once every call is final.
+</li>
+<li><strong>Resume.</strong> <code>executeTrackedCalls</code> takes <code>replaceHead</code>; <code>continuePartialTurn</code>
+replaces the head instead of stacking. It also waits, per yield strategy, on
+calls carried over from earlier steps together with newly started ones.
+Finalization accepts <code>Completed</code> or <code>Failed</code>.
+</li>
+<li><strong>Message order.</strong> <code>OpenAI.hs</code> now emits tool messages before the user
+message in a turn (required once a user turn carries both).
+</li>
+</ul>
+<h4 id="engine--ids--cancellation">Engine / ids / cancellation</h4>
+<ul>
+<li><code>ToolCallConfig.tcProviderCallId</code> stores the provider’s id
+(<code>createToolCallEntityWithProviderId</code>); <code>findToolCallEntityByProviderCallId</code>
+resolves it within a session and conversation, preferring in-flight then
+most recently started calls (Kimi-style ids repeat).
+</li>
+<li>Capabilities accept the provider id or the internal UUID;
+<code>list-running-tool-calls</code> returns the provider id. Session fallback reports
+final calls from history, <code>Running</code> as <code>orphaned</code> (<code>is_final: true</code>), and
+deferred as <code>pending</code>. <code>waitForFinal</code> blocks on STM instead of polling.
+</li>
+<li><code>runStepMAsync</code> installs one engine on the agent (<code>prepareAsyncEngine</code>) and
+keeps it on <code>Evolve</code>. <code>buildContext</code> exposes <code>Engine.cancelToolCall</code> as
+<code>ctxCancelToolCall</code>. <code>cancel-tool-call</code> uses it, falling back to marking the
+entity.
+</li>
+<li>Engine: asynchronous exceptions are no longer swallowed (cancel really
+interrupts the tool), each call unregisters itself when it finishes,
+<code>cancelToolCall</code> reports whether the entity actually ended up cancelled,
+and <code>TCT.cancelToolCall</code> never overwrites a final state. <code>startAsyncBatch</code>
+ignores calls without an entity; the stepper runs those inline.
+</li>
+<li>Orphans: <code>pollRunningCall</code> fails a <code>Running</code> call whose entity (or world) is
+missing.
+</li>
+<li><code>withAsyncEngine</code> registers tool-call stores first and stores the resulting
+world on the agent, so engine and agent share the same world value.
+</li>
+<li>Waits use <code>System.Timeout</code> rather than <code>registerDelay</code>, which needs the
+threaded RTS (the test suite is not threaded).
+</li>
+</ul>
+<h4 id="tests-testasynctoolcallstestshs">Tests (<code>test/AsyncToolCallsTests.hs</code>)</h4>
+<ul>
+<li>Fast and gated slow call with <code>YieldOnAnyProgress</code>: partial turn, placeholder
+seen by the LLM, stepper blocks and delivers the late result exactly once, no
+duplicated partial turn, every completion pairs each tool call with exactly
+one tool message, session stops afterwards.
+</li>
+<li><code>cancel-tool-call</code> by provider id interrupts a sleeping tool (its
+<code>onException</code> handler runs, it never finishes), entity is <code>cancelled</code>, next
+step finalizes the turn.
+</li>
+<li><code>Running</code> call with a missing entity resolves as orphaned.
+</li>
+<li>Partial turn with a deferred and a running call resumed twice stays a single
+head turn.
+</li>
+<li>Malformed <code>RunAsync</code> call runs inline instead of crashing.
+</li>
+<li><code>OS.ConversationTests</code> orphan capability test now uses a <code>Running</code> call and
+expects <code>is_final: true</code>.
+</li>
+</ul>
+<h4 id="known-gaps-carried-forward">Known gaps carried forward</h4>
+<ul>
+<li><code>runAsync</code> / <code>runAsyncWithProgress</code> still return only the session. Resuming
+in-process with a fresh agent loses the engine registry unless
+<code>withAsyncEngine</code> was installed up front (documented on both).
+</li>
+<li>Placeholders do not include progress (history is pure; the model can call
+<code>get-tool-call-status</code>).
+</li>
+<li>If the LLM fetches a result via <code>get-tool-call-status</code>, the late-delivery
+notice still repeats it once.
+</li>
+<li>A head partial turn with only <code>Deferred</code> calls still spins under <code>run</code>
+(pre-existing; <code>runAsync</code> pauses correctly).
+</li>
+<li>Cancel against a call whose engine is gone only marks the entity; the thread
+(if any) keeps running.
+</li>
+</ul>
+<h3 id="phase-4-completion-notes">Phase 4 Completion Notes</h3>
+<h4 id="enablement">Enablement</h4>
+<ul>
+<li><code>Base.Agent</code> gains <code>asyncYieldStrategy</code> and <code>maxConcurrency</code>; the runtime
+<code>Agent</code> gains <code>ctxMaxConcurrency</code> (used when the engine is created).
+</li>
+<li><code>applyAgentDurableConfig</code> / <code>buildToolCallPolicy</code> moved to
+<code>System.Agents.Session.AgentConfig</code> (re-exported by <code>CLI.SessionDurable</code>) and
+are applied in <code>OneShot.nodeToAgentWithThinking</code> (OneShot, TUI, <code>session</code>
+commands) and <code>AgentTree.OneShotTool.nodeToAgent</code> (sub-agents).
+</li>
+<li><code>prepareAgentWorld</code> gives an asynchronous agent without a <code>World</code> a private
+one; otherwise <code>RunAsync</code> calls silently ran inline.
+</li>
+<li><code>llmToolCallName</code> now lives in <code>Session.Types</code>.
+</li>
+</ul>
+<p>Example agent JSON:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;executionMode&quot;</span><span class="er">:</span> <span class="st">&quot;asynchronous&quot;</span><span class="er">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;asyncYieldStrategy&quot;</span><span class="er">:</span> <span class="st">&quot;yieldOnAnyProgress&quot;</span><span class="er">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;maxConcurrency&quot;</span><span class="er">:</span> <span class="dv">4</span><span class="er">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;toolCallPolicyConfig&quot;</span><span class="er">:</span> <span class="fu">{</span><span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runAsync&quot;</span><span class="fu">},</span> <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">}</span></span></code></pre></div></div><h4 id="progress-events">Progress events</h4>
+<ul>
+<li><code>OSEvent_ToolCallActivity ToolCallActivity</code> (<code>OS.Events</code>) with phases
+started / progressed / completed / failed / cancelled, keyed by session id,
+conversation id, tool-call id and provider id.
+</li>
+<li>The engine publishes them on the context’s <code>ctxEventQueue</code>. The TUI already
+bridges its OS event queue to the Brick channel (<code>TUI.Core.startOSEventBridge</code>),
+so <code>convertOSEvent</code> maps them to <code>AppEvent_ToolCallActivity</code>; no
+<code>RuntimeBridge</code> change was needed.
+</li>
+<li>Tool-call progress entries on the entity are capped at 50 (newest first).
+</li>
+</ul>
+<h4 id="tui">TUI</h4>
+<ul>
+<li><code>TUI.ToolCallActivity</code> keeps a <code>ToolCallViews</code> map (per session, per call)
+in <code>UIState._toolCallViews</code>: latest phase, start time, last progress. Views
+are pruned when a session update shows the call is no longer running.
+</li>
+<li>Rendering: a “Background tool calls running: …” line above the turns, and
+one line per tracked call in partial turns (pending / deferred / running with
+latest progress / completed / delivered later / failed). No spinner.
+</li>
+<li>While background calls run and the LLM has nothing to do, the TUI asks for
+user input instead of blocking: the stepper’s new <code>askUserQuery</code> races
+<code>usrQuery</code> against the background calls (per the yield strategy) and
+cancels <code>usrQuery</code> if the calls finish first. <code>usrQuery</code> must tolerate
+cancellation (the TUI reads a <code>BChan</code>, which is STM).
+</li>
+</ul>
+<h4 id="oneshot--loops">OneShot / loops</h4>
+<ul>
+<li><code>--wait-for-async</code> was not added. <code>run</code> already waits for in-process
+background calls (they cannot outlive the process). Stopping early would
+only orphan them.
+</li>
+<li>New <code>Loop.runUntilBlocked</code> / <code>isBlockedOnDeferredCalls</code>: returns the session
+when the head partial turn only waits on deferred calls instead of spinning.
+OneShot uses it, stores the session under its session id too, and prints a
+JSON report (<code>status: paused</code>, <code>session_id</code>, deferred calls with continuation
+tokens) for <code>session complete</code> / <code>session resume</code>.
+</li>
+<li>Markdown export (<code>SessionPrint</code>) lists each call’s status in partial turns
+and shows finished results. The search index includes failed results and
+names of all calls in partial turns.
+</li>
+</ul>
+<h4 id="progress-emitters">Progress emitters</h4>
+<ul>
+<li>Bash tools: when <code>ctxProgressCallback</code> is set (async calls), the script runs
+through <code>Bash.runProcessReportingOutput</code>, which reports
+<code>{stream, line, lines, bytes}</code> at most every 0.5s per stream. The process is
+terminated if the call is cancelled. Synchronous calls keep the old path.
+</li>
+<li>Sub-agent tools (<code>OneShotTool</code>) report <code>{message, turns}</code> after each
+sub-agent step, and now rethrow async exceptions so cancelling them works
+(they were caught and turned into failures).
+</li>
+<li><code>mkSubcallContext</code> no longer copies the parent’s progress callback or cancel
+hook.
+</li>
+</ul>
+<h4 id="tests-testasynctoolcallstestshs-now-17">Tests (<code>test/AsyncToolCallsTests.hs</code>, now 17)</h4>
+<ul>
+<li>Async agent without a World; <code>ctxMaxConcurrency</code> bound; engine activity
+events; background results vs user query race (both ways); TUI view
+apply/prune/summaries; markdown partial turn; <code>runUntilBlocked</code>; subprocess
+output reports; subprocess terminated on cancel.
+</li>
+<li><code>SessionDurableTests</code>: yield strategy / max concurrency application and JSON
+parsing. Full suite: 890 tests.
+</li>
+</ul>
+<h4 id="known-gaps-carried-forward-1">Known gaps carried forward</h4>
+<ul>
+<li>TUI rendering and the input race were not exercised by hand.
+</li>
+<li>Bash progress is tested on <code>runProcessReportingOutput</code> directly, not through
+a registered bash toolbox end to end.
+</li>
+<li><code>terminateProcess</code> sends SIGTERM to the script only; its children may
+survive (Phase 5: process groups).
+</li>
+<li><code>run</code> itself still spins on deferred-only partial turns; only
+<code>runUntilBlocked</code> users (OneShot) avoid it. The TUI still uses <code>run</code>.
+</li>
+<li>Earlier gaps (engine not returned by <code>runAsync</code>, repeated result after
+<code>get-tool-call-status</code>) remain.
+</li>
+</ul>
+<h3 id="phase-5-completion-notes">Phase 5 Completion Notes</h3>
+<h4 id="shutdown-and-cancellation">Shutdown and cancellation</h4>
+<ul>
+<li><code>Engine.shutdownAsyncEngine</code> cancels every batch the engine still owns.
+<code>Loop.run</code> / <code>runWithProgress</code> / <code>runUntilBlocked</code> shut the engine down when
+the run ends or throws (tracking the evolving agent in an <code>IORef</code>);
+<code>runAsync*</code> only on failure, since pausing with calls running is the point.
+</li>
+<li>Bash scripts run in their own process group and are killed with
+<code>SIGTERM</code>, then <code>SIGKILL</code> after 100ms, so cancelling kills what the script
+started. Verified: the test fails without the group kill.
+</li>
+<li>The TUI kills conversation threads when quitting (bounded to 2s), which runs
+the same cleanup.
+</li>
+<li>The TUI uses <code>runUntilBlocked</code>, so a conversation waiting only on deferred
+calls stops with a status message instead of spinning.
+</li>
+</ul>
+<h4 id="stale-calls">Stale calls</h4>
+<ul>
+<li><code>asyncCallTimeoutSeconds</code> (agent JSON) → <code>ctxAsyncCallTimeout</code> →
+<code>aeCallTimeout</code>. A call that outlives it is interrupted (killing its
+subprocess) and reported as failed: “async tool call timed out after Ns”.
+</li>
+</ul>
+<h4 id="orphans-across-a-restart">Orphans across a restart</h4>
+<ul>
+<li><code>get-tool-call-status</code> used to need <code>includeFullSession</code>, which is off by
+default (it also pushes the whole session into every bash tool’s
+environment). Contexts now carry <code>ctxSessionToolCalls</code>: the tracked calls of
+the session’s partial turns only. Without it, a reloaded session answered
+“tool call not found” instead of “orphaned”.
+</li>
+<li><code>orphanedAcrossRestart</code> writes a session with a running call to disk, reloads
+it in a fresh <code>World</code>, and checks both the capability and the stepper.
+</li>
+</ul>
+<h4 id="concurrency">Concurrency</h4>
+<ul>
+<li><code>maxConcurrency</code> stays per agent. <code>newAsyncConcurrencyLimit</code> +
+<code>mkAsyncEngineSharing</code> let a host share one limit across agents (each agent
+needs its own engine, since the executor is tied to its tools). No rate
+limiting (calls per minute) was added.
+</li>
+</ul>
+<h4 id="docs">Docs</h4>
+<ul>
+<li>New <code>documentation/async-tool-calls.md</code> covers configuration, placeholders and late
+delivery, the capabilities, progress, cancellation, the TUI, one-shot runs,
+session files and the limits. Linked from <code>documentation/README.md</code>,
+<code>documentation/durable-workflows-howto.md</code>.
+</li>
+<li><code>documentation/tools.md</code> lists the three capabilities; <code>documentation/tui.md</code> documents
+background call display and input while calls run; <code>documentation/cli-commands.md</code>
+documents the paused JSON report of <code>run</code>.
+</li>
+<li>The agent JSON in the new doc was checked by parsing it with <code>Base.Agent</code>.
+</li>
+</ul>
+<h4 id="mcp--openapi-streaming-question-from-the-plan">MCP / OpenAPI streaming (question from the plan)</h4>
+<ul>
+<li>OpenAPI tools wait for one complete HTTP response: nothing to stream.
+</li>
+<li>MCP defines progress notifications and <code>ProgressNotification</code> exists in
+<code>System.Agents.MCP.Base</code>, but <code>MCP.Client</code> ignores them. Forwarding them to
+<code>ctxProgressCallback</code> would make MCP tools report progress like bash tools.
+Not done.
+</li>
+</ul>
+<h4 id="not-done">Not done</h4>
+<ul>
+<li><strong>Tracing.</strong> <code>Agent</code> carries no tracer (tracers live in the builders’
+closures), so <code>Prod.Tracer</code> support would mean threading one through the
+agent and the engine. The activity events (<code>OSEvent_ToolCallActivity</code>) and
+the progress entries on the entity are the observability path for now.
+</li>
+<li>Rate limiting beyond a concurrency cap.
+</li>
+<li>A pre-existing docs bug found on the way, now fixed: JSON examples used key
+spellings the parsers reject. Every builtin toolbox (<code>Name</code>, <code>Description</code>,
+<code>Capabilities</code>, <code>FileSandbox</code>, …), file sandboxes (<code>fsbPredicate</code>,
+<code>fsbMaxFileSize</code>, <code>fsbName</code>), bash toolboxes (<code>Path</code>, <code>BasenameFilter</code>),
+OpenAPI/PostgREST servers (<code>SpecUrl</code>, <code>BaseUrl</code>, <code>Token</code>), the removed Lua
+<code>allowedPaths</code> field, the old SQLite <code>path</code>/<code>access</code> fields (now
+<code>Versioning</code>), and the kebab-case agent keys in
+<code>documentation/advanced-configuration.md</code> (<code>api-key-id</code> → <code>apiKeyId</code>, …). Fixed in
+<code>documentation/tools.md</code>, <code>documentation/file-loader.md</code>, <code>documentation/advanced-configuration.md</code> and
+the <code>Agent</code>/<code>bashToolboxes</code> Haddock in <code>System.Agents.Base</code>. Every JSON block
+in <code>documentation/</code> now decodes into the real types; the throwaway checker used for
+this is in the session scratchpad.
+</li>
+</ul>
+<h4 id="tests-testasynctoolcallstestshs-now-21">Tests (<code>test/AsyncToolCallsTests.hs</code>, now 21)</h4>
+<ul>
+<li>Failing run cancels background calls; call timeout; orphan across a
+save/reload; subprocess killed on cancel; process group killed on cancel.
+</li>
+<li>Full suite: 894 tests, async group stable over repeated runs.
+</li>
+</ul>
+<h3 id="completion-plan">Completion Plan</h3>
+<h4 id="phase-35-end-to-end-correctness-done--see-completion-notes-above">Phase 3.5: End-to-End Correctness (done — see completion notes above)</h4>
+<ol>
+<li><strong>Call ids (R1).</strong> Accept the provider’s tool-call id in
+<code>get-tool-call-status</code> / <code>cancel-tool-call</code> / <code>list-running-tool-calls</code>,
+either by storing it on <code>ToolCallConfig</code> or by resolving it through the
+tracked calls. Keep the internal UUID as a fallback. <code>list-running-tool-calls</code>
+should return the id the model knows.
+</li>
+<li><strong>Placeholder responses (R2).</strong> For calls still <code>Running</code> (or <code>Deferred</code>)
+when the LLM is asked for a completion, emit a tool message such as
+<code>{&quot;status&quot;:&quot;running&quot;,&quot;tool_call_id&quot;:…,&quot;progress&quot;:[…]}</code> so the request is
+valid and the model knows the call is pending.
+</li>
+<li><strong>Delivering late results (R2).</strong> A finished result cannot be attached to a
+tool message the model already answered. Inject it into the next user turn
+as a notice (e.g. “tool call X completed: …”). Update
+<code>naiveTilNoToolCallStep</code> so <code>Running</code> calls count as outstanding and so
+completed-late calls are surfaced.
+</li>
+<li><strong>Partial turns (R2).</strong> Replace the head <code>PartialUserTurn</code> on resume instead
+of prepending a new one (match <code>Session/Wake.hs</code>).
+</li>
+<li><strong>One engine (R3, R4).</strong> Either return the agent from
+<code>runAsync</code> / <code>runAsyncWithProgress</code>, or keep the engine alongside the OS
+<code>World</code> so every step shares it. Add a cancel hook to
+<code>ToolExecutionContext</code> so <code>cancel-tool-call</code> actually kills the thread via
+<code>Engine.cancelToolCall</code>.
+</li>
+<li><strong>Orphaned calls (R5).</strong> In <code>pollRunningCall</code>, mark a <code>Running</code> call whose
+entity is missing as <code>Failed</code> with an “orphaned” response. Return
+<code>is_final: true</code> for orphaned calls in the capability.
+</li>
+<li><strong>Malformed calls (R6).</strong> Replace the <code>error</code> in <code>requireEntityId</code> with a
+fallback that executes the call inline.
+</li>
+<li><strong>End-to-end tests.</strong>
+<ul>
+<li>Two slow calls with <code>YieldOnAnyProgress</code> → <code>PartialUserTurn</code> → resume →
+full <code>UserTurn</code>, with a valid OpenAI message list at every step (every
+tool call has exactly one tool message, no duplicated turns).
+</li>
+<li><code>cancel-tool-call</code> stops a real running tool (e.g. a sleeping bash
+command) and the thread is gone.
+</li>
+<li>A <code>Running</code> call whose entity is missing is resolved as orphaned.
+</li>
+</ul>
+</li>
+</ol>
+<h4 id="phase-4-tui--oneshot-ux-done--see-completion-notes-above">Phase 4: TUI / OneShot UX (done — see completion notes above)</h4>
+<ol>
+<li><strong>Enablement.</strong> <code>executionMode</code> and <code>toolCallPolicyConfig</code> already exist in
+the agent JSON; apply them in the TUI and OneShot agent builders (reuse
+<code>applyAgentDurableConfig</code>), and add <code>asyncYieldStrategy</code> and
+<code>maxConcurrency</code>. Without this nothing in the UI can be exercised.
+</li>
+<li><strong>Progress events.</strong> Add <code>AppEvent_ToolCallProgress</code> to
+<code>System.Agents.TUI.Types</code>. The engine emits through <code>ctxEventQueue</code> when
+present. Decide how the event reaches the TUI <code>BChan</code> given the TUI still
+goes through the legacy <code>RuntimeBridge</code>.
+</li>
+<li><strong>Rendering.</strong> Show running calls with a spinner and latest progress in
+<code>TUI/Render/Conversation.hs</code>; handle partial turns in <code>SessionPrint</code> /
+<code>formatSessionAsMarkdown</code>.
+</li>
+<li><strong>OneShot.</strong> Add <code>--wait-for-async</code>. Without it, exit with JSON listing the
+pending calls and the session to resume.
+</li>
+<li><strong>A real progress emitter.</strong> Make one tool call <code>ctxProgressCallback</code>
+(bash output lines are the obvious candidate). Stop propagating the
+callback into sub-agent contexts, or give sub-calls their own.
+</li>
+</ol>
+<h4 id="phase-5-cleanup--hardening-done-except-tracing--see-completion-notes-above">Phase 5: Cleanup &amp; Hardening (done except tracing — see completion notes above)</h4>
+<ol>
+<li>Cancel running batches on session abort, TUI quit, or exception; shut the
+engine down with the agent. Kill whole process groups on cancel.
+Stop <code>run</code> (and the TUI) from spinning on deferred-only partial turns.
+</li>
+<li>Expire stale calls (timeout plus a check that the thread is still alive).
+</li>
+<li>Global max concurrency / rate limiting, configurable (builds on Phase 3.5
+step 5).
+</li>
+<li>Tracing for async calls and progress in <code>Prod.Tracer</code>.
+</li>
+<li>Verify orphan handling across a real process restart + session reload.
+</li>
+<li>Update <code>documentation/tools.md</code>, <code>documentation/tui.md</code>, <code>documentation/cli-commands.md</code>, and document
+the agent JSON schema for async.
+</li>
+<li>Clarify whether MCP / OpenAPI tools can stream into the progress callback.
+</li>
+</ol>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

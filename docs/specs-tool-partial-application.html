@@ -1,0 +1,1079 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: partial application of tool arguments</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: partial application of tool arguments"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: partial application of tool arguments"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html"><meta property="og:description" content="Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/specs-tool-partial-application.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-tool-partial-application.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done","headline":"Spec: partial application of tool arguments","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: partial application of tool arguments</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 6414 words, 18 code snippets, 1 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.progress.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">10/11</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-session-mailbox.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"><code>todos/tool-partial-application.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="spec-partial-application-of-tool-arguments">Spec: partial application of tool arguments</h2>
+<p>Status: Phases 1-7 and §8.4 (<code>derive_agent</code>) done as of 2026-09-21. Phase 1 done
+(<code>97961e0</code>). Phase 2 done
+except the tool-cache key (G8) and MCP server <code>env</code> (G4) (<code>03783fb</code>,
+<code>b0c53a5</code>): parameters, <code>ctxParams</code> (now actually wired at runtime, not
+just in tests), <code>--set</code>/<code>--set-json</code>/<code>--pin</code>/<code>--pin-json</code>/<code>--params-file</code>,
+process-scope resolution, secret-argv-mode load-time guard (G7).
+Phase 3 done (<code>8a41cd8</code>): OpenAPI/PostgREST argument bindings via the
+generic combinator, <code>ParamSource</code> secrets resolved per request.</p>
+<p>Phase 4 (session-level parameters in <code>agents-server</code>) done for the core
+mechanics, live-verified end to end against a real LLM: <code>params</code> on
+<code>POST /v1/sessions</code>, <code>/messages</code>, <code>/resume</code> and <code>POST /v1/continuations/:token</code>;
+the validation table (<code>422 unknown_params</code>, <code>403 forbidden_params</code>,
+<code>422 invalid_params</code>, <code>422 params_required</code>); a <code>params</code> column and
+migration on both the SQLite and Postgres session backends (<code>SessionMeta. smParams</code>, non-secret only); secret session values kept only in the
+in-memory <code>LiveSession</code> (<code>Host/Runner.hs</code>’s new <code>lsParams</code>), never
+persisted; message-scope values applied for one run only, never stored;
+<code>agentView</code>’s <code>&quot;parameters&quot;</code> self-description (<code>bound</code>/<code>pinned</code>, never a
+value); <code>agents-server --set</code>/<code>--set-json</code>/<code>--pin</code>/<code>--pin-json</code> (mirroring
+<code>agents-exe</code>) so an operator can lock a container to one tenant. Not done
+from Phase 4: <code>seal</code>, session tokens, <code>PUT /v1/sessions/:id/params</code>,
+<code>409 params_required</code> on an already-running session whose params lapsed,
+<code>fork</code>, the chat page’s parameter form, and the generated OpenAPI
+document’s request/response schemas (<code>AgentsServer/Types.hs</code>/<code>Routes.hs</code>
+are a separate hand-maintained layer used only for <code>/openapi.json</code> and
+were not updated with the new fields — the real handlers in <code>Api.hs</code> are
+fully wired and correct; this is a documentation-only gap).
+<code>recoverOnStartup</code> also does not yet mark a running call as failed when
+it needed a secret parameter that a restart lost (§5’s documented
+recovery behaviour).</p>
+<p>Phase 5 (sub-agents and MCP over HTTP) done, checked live with <code>agents-exe check</code> against fixture agents and with an <code>agents-server</code> integration
+test: <code>ExtraAgentRef</code> gains <code>with</code> (§7), a map from the <em>child’s</em>
+parameter names to <code>BindingValue</code>s in the <em>parent’s</em> scope;
+<code>AgentConfigNode.nodeExtraWith</code> carries it from discovery through to
+<code>wireAgentTools</code>, which checks it at load time (every <code>with</code> key must be
+a declared parameter of the child; every required session-scope parameter
+of the child must be covered by <code>with</code> or by the child’s own process
+value/default) and reports failures through the existing
+<code>LoadingError</code>/<code>OtherError</code> path. <code>Props.agentToTool</code> and
+<code>turnAgentRuntimeIntoIOTool</code> gained a <code>Maybe (Map ParamName BindingValue)</code>
+argument (<code>Nothing</code> for a child reached through a toolDirectory, which has
+no reference site to hang a <code>with</code> on); <code>runSubAgent</code> resolves it against
+the caller’s <code>ctxParams</code> at call time (<code>OneShotTool.hs</code>’s new
+<code>resolveWith</code>) and overlays the result onto the child’s own resolved
+params, so the child’s own process values and defaults still apply
+underneath. A <code>Literal</code> in <code>with</code> is never secret; a <code>Param</code> inherits
+secrecy from the caller’s value. MCP over HTTP (<code>AgentsServer/Mcp.hs</code>,
+<code>Api.hs</code>) gained <code>Agents-Param-&lt;name&gt;</code> request headers (always strings)
+and <code>_meta.&quot;agents-exe/params&quot;</code> on a <code>tools/call</code> (any JSON, overrides the
+headers by name); each call is one run, so session and message scope
+coincide there, and both go through the same validation table as the REST
+API.</p>
+<p>Phase 6 (narrowing helpers down the call chain) done, checked with the
+<code>agents-tests</code> suite (<code>NarrowingTests.hs</code>: the <code>AgentAddress</code> algebra, and
+<code>describe_agent</code> end to end against a loaded three-level tree) and with
+<code>agents-exe check</code> against fixture agents: <code>Agent</code> gains a top-level
+<code>bindings</code> list (§8.1), applied in <code>loadAgentToolboxes</code> after every
+toolbox’s own bindings, matching by the LLM-visible tool name across
+toolboxes (bash tools have no toolbox name of their own to hang a
+toolbox-level binding on). <code>ExtraAgentRef</code> gains <code>narrowable</code> (default
+<code>True</code>); <code>AgentConfigNode.nodeExtraNarrowable</code> carries it alongside
+<code>nodeExtraWith</code>. <code>describe_agent</code> (§8.2) is registered by <code>wireAgentTools</code>
+next to <code>prompt_agent_&lt;slug&gt;</code> for any agent with at least one helper; it
+recurses over <code>nodeChildren</code>/<code>nodeExtraRefs</code>, cut at <code>maxDescribeDepth</code> and
+at cycles, shows each declared parameter with a <code>bound</code> flag (already
+resolved, or covered by the reference’s <code>with</code>) and each tool’s still-open
+arguments (its current, already-bound-reduced schema minus anything the
+caller’s inherited bindings already cover), and reports only <code>announce</code>
+for a <code>narrowable: false</code> reference. <code>prompt_agent_&lt;slug&gt;</code> gains optional
+<code>bindings</code> and <code>with</code> arguments (§8.3): <code>AgentBinding</code>/<code>ScopedBinding</code>/
+<code>AgentAddress</code> (<code>Bindings/Types.hs</code>) represent a binding addressed at the
+prompted helper (<code>Here</code>), one of its own helpers (a slash-separated
+<code>AgentPath</code>), or all of them (<code>&quot;**&quot;</code>/<code>Everywhere</code>); <code>descendAddress</code>/
+<code>reRootBindings</code> re-root an address (or a whole list of <code>ScopedBinding</code>s)
+one level down when a call descends into a named child. <code>runSubAgent</code>
+resolves the call’s own <code>bindings</code> against the caller’s <code>ctxParams</code>
+(<code>resolveCallBindings</code>; an unresolvable required <code>Param</code> fails the call
+with a message the calling model can act on, per D8), combines them with
+the caller’s own <code>ctxInheritedBindings</code> re-rooted at the prompted helper,
+applies whatever is addressed at the helper itself to a <em>fresh</em> copy of
+its <code>osNodeTools</code> (<code>applyBindings</code>, scoped to this call only — the shared,
+loaded toolboxes are never mutated) via a throwaway <code>OSAgentNode</code> passed to
+<code>buildAgent</code>, and carries the rest into the sub-agent’s own
+<code>SessionBase.ctxInheritedBindings</code> for it to apply, in turn, when it
+prompts its own helpers. <code>ToolExecutionContext</code>/<code>Session.Base.Agent</code> both
+gained <code>ctxInheritedBindings :: [ScopedBinding]</code>, threaded through
+<code>buildContext</code> like <code>ctxParams</code>; <code>ToolExecutionContextSnapshot</code> keeps only
+its non-secret entries, same as <code>tecsParams</code>. A call-time <code>with</code> cannot
+refill a parameter the reference’s own static <code>with</code> (§7) already fills. A
+<code>narrowable: false</code> reference refuses any <code>bindings</code>/<code>with</code> on the call
+that reaches it, and any inherited binding addressed at it or below,
+rather than applying them.</p>
+<p>Phase 7 (<code>Expose</code>) done, checked with the <code>agents-tests</code> suite
+(<code>BindingsTests.hs</code>’s new “Expose bindings (§7)” group) and live with
+<code>agents-exe check</code> against fixture agents (an <code>Expose</code>-bound bash argument
+stays in the schema when its parameter is a session-scope parameter that
+<code>check</code> never resolves; a secret parameter bound with <code>whenUnbound: &quot;expose&quot;</code> is a load-time <code>ExposedSecretParameter</code> error). A binding whose
+<code>whenUnbound</code> is <code>&quot;expose&quot;</code> is left out of <code>applyBindings</code>’s <em>static</em>
+schema reduction entirely (D3’s opt-in exception): the shared registration
+keeps the argument declared, so it is never hidden or shown by mistake for
+every session at once. <code>Bindings.narrowExposedSchema :: Params -&gt; [Binding] -&gt; ToolRegistration -&gt; ToolRegistration</code> re-hides it when the parameter
+happens to resolve in a given snapshot; <code>System.Agents.Combinators. ProgressiveDisclosure.agentEvaluateActiveTools</code> calls it fresh on every
+read of the tool list — the same “read fresh on every access” pattern it
+already used for activation — against a new <code>IO Params</code> action
+(<code>AgentFactory.AgentDeps.adLiveParams</code>) read only when the node has at
+least one <code>Expose</code> binding. Outside <code>agents-server</code>, <code>adLiveParams</code>
+defaults to <code>pure mempty</code>: an <code>Expose</code>d argument then behaves like a
+process-scope-only binding, decided once from <code>osNodeParams</code>, since there
+is no notion of a session distinct from the process. <code>agents-server</code>’s
+<code>Host/Runner.newAgent</code> overrides it with <code>readTVarIO live.lsParams</code>, so the
+tool list a session sees updates the moment <code>prepareParams</code> writes a new
+session-scope value in — no agent rebuild, no registration mutation. A
+message-scope value (this run only, never written to <code>lsParams</code>) is not
+seen by this mechanism and so is treated as unbound for schema-visibility
+purposes; the value itself is still merged correctly at call time
+regardless, since that path (<code>wrapTool</code>, unchanged) already reads
+<code>ctxParams</code> fresh per call. <code>AgentTree.loadAgentToolboxes</code> collects every
+<code>Expose</code> binding for a node (toolbox-level, returned out of
+<code>ToolLoader.loadAgentTools</code>/<code>loadBashTools</code>/<code>loadOpenAPIToolboxes</code>/
+<code>loadPostgRESToolboxes</code>; and agent-level, from <code>Agent.bindings</code>) into a new
+<code>OSAgentNode.osNodeExposeBindings</code> TVar, and rejects any of them bound to a
+declared <code>secret</code> parameter (<code>Bindings.exposedSecretBindings</code>, a new
+<code>ExposedSecretParameter</code> <code>LoadingError</code>): exposing a secret back to the
+model would just let it retype the value in plain text.</p>
+<p>§8.4 (<code>derive_agent</code>) done, checked with the <code>agents-tests</code> suite
+(<code>BindingsTests.hs</code>’s <code>deriveAgentTable</code> group; <code>NarrowingTests.hs</code>’s
+<code>derive_agent</code> group against the loaded three-level tree) and live with
+<code>agents-exe check</code>. <code>derive_agent {from, slug, bindings, with}</code> is a new
+tool, registered by <code>wireAgentTools</code> alongside <code>describe_agent</code> for any
+agent with at least one helper: it checks <code>from</code> names a known, narrowable
+direct helper and, if so, echoes back <code>{&quot;stored&quot;: true, &quot;from&quot;, &quot;slug&quot;}</code> —
+nothing else happens, and nothing is stored beyond that call landing in the
+session’s own history. <code>prompt_agent_&lt;from&gt;</code> gains an optional <code>as</code>
+argument; at call time, <code>System.Agents.Tools.Bindings.deriveAgentTable</code>
+folds the <em>current</em> session’s turns (matching successful <code>derive_agent</code>
+calls by function name and response, the same “recomputed fresh, not
+persisted” treatment as <code>ctxSessionToolCalls</code>) into a <code>Map (from, slug) DerivedNarrowing</code>, exposed on a new <code>ToolExecutionContext. ctxDerivedNarrowings</code> field set in <code>Session/Step.buildContext</code> — so this
+works for every front-end without any wiring, no <code>includeFullSession</code> op-
+in needed. <code>runSubAgent</code> looks up <code>(helper, as)</code>; an unknown name is an
+error the calling model can retry (naming <code>derive_agent</code>, per D8). When
+found, the derived <code>bindings</code> apply before the call’s own explicit ones,
+and the derived <code>with</code> fills what the call’s own <code>with</code> and the
+reference’s static <code>with</code> (§7) do not. A <code>narrowable: false</code> helper refuses
+<code>derive_agent</code> and <code>as</code> the same way it already refuses <code>bindings</code>/<code>with</code>.</p>
+<h3 id="goal">Goal</h3>
+<p>Let whoever <em>runs</em> an agent pin down some arguments of its tools, so that the
+LLM neither sees nor chooses them. The motivating case: one bundled agent
+(say, a docker image with <code>agents-server</code> and a bash toolbox) serves several
+tenants, and each session carries its own <code>tenant-id</code> and API token.</p>
+<p>The primitive is partial application, on purpose. A tool is a function from a
+JSON object to a result:</p>
+<pre><code>query-invoices : { tenant_id, token, since } -&gt; Result
+</code></pre>
+<p>Binding <code>tenant_id</code> and <code>token</code> gives a smaller function, and that smaller
+function is the tool the LLM gets:</p>
+<pre><code>query-invoices' : { since } -&gt; Result
+</code></pre>
+<p>Two things follow, and they are the whole feature:</p>
+<ol>
+<li><strong>Schema</strong>: a bound argument disappears from the tool’s JSON schema. The
+model is not told that it ever existed. That is the point: with most
+arguments already given, the model has less to reason about locally.
+</li>
+<li><strong>Call</strong>: the bound value is merged into the LLM’s argument object just
+before dispatch. The bound value always wins.
+</li>
+</ol>
+<p>The deliverable is:</p>
+<ol>
+<li>a generic combinator on <code>ToolRegistration</code> in <code>agents-lib</code>, so every kind
+of toolbox (bash, MCP, OpenAPI, PostgREST, builtin, sub-agents) gets the
+feature at once;
+</li>
+<li>a way to <em>declare</em> an agent’s parameters and to <em>bind</em> tool arguments to
+them in the agent file;
+</li>
+<li>ways to <em>supply</em> parameter values: at process start (<code>agents-exe</code>,
+<code>agents-server</code>) and transiently per session (<code>agents-server</code>);
+</li>
+<li>a changed interface for helper agents exposed as tools, so that a parent
+can <em>discover</em> the open tool arguments of a helper and <em>bind</em> some of them
+when it prompts it, all the way down a chain of sub-agents (§8).
+</li>
+</ol>
+<h3 id="scenarios">Scenarios</h3>
+<p>The design is checked against these three.</p>
+<p><strong>S1. One container, one tenant.</strong> A docker image holds <code>agents-server</code>, an
+agent file and a bash toolbox. The operator starts it with
+<code>-e BILLING_TOKEN=…</code> and <code>--pin tenant=acme</code>. Nobody who talks to the
+container can change either. (§4)</p>
+<p><strong>S2. A backend mints a credential and leads a chat.</strong> A product API
+receives “open an assistant on project 42” from a logged-in user. It mints a
+credential that is valid for project 42 only, creates a session on
+<code>agents-server</code> with <code>params: {project_id: &quot;42&quot;, callback_token: &quot;…&quot;}</code> and
+<code>seal: true</code>, and hands the browser a session token. The agent’s tools are
+callbacks into the product API, with <code>project_id</code> and the <code>Authorization</code>
+header bound. Three defences stack up:</p>
+<ul>
+<li>the model cannot hallucinate a project id: the argument is not in any
+schema, and a bound value wins over anything the model sends;
+</li>
+<li>a prompt injection cannot retarget the tools, for the same reason;
+</li>
+<li>enumeration fails even if the two above were bypassed, because the minted
+credential opens one project. The end user, who only holds the session
+token, cannot re-parameterise the session either.
+</li>
+</ul>
+<p>(§3.3, §5, §5.1)</p>
+<p><strong>S3. A parent narrows its helpers, down the chain.</strong> A root agent splits a
+job and prompts a helper with extra bindings for that part (one repository,
+one date range), routing secrets by parameter name without ever seeing them.
+The helper may have helpers of its own: the root can bind arguments of tools
+anywhere below it, each agent on the way can narrow further, and none can
+undo what an ancestor bound. (§8)</p>
+<h3 id="non-goals-for-this-spec">Non-goals (for this spec)</h3>
+<ul>
+<li>Sandboxing. A bound token still reaches a bash script that the agent
+author wrote; we do not defend the value against the tool itself.
+</li>
+<li>A general templating language in agent files (<code>${…}</code> expansion in
+prompts, paths, URLs). Parameters bind tool arguments, nothing else.
+See <a href="#decisions">Decisions</a>, D7.
+</li>
+<li>Per-tenant <em>agent definitions</em>. The agent stays one static definition; only
+parameter values change between sessions.
+</li>
+<li>Encrypting values at rest. Secret values are simply never written.
+</li>
+</ul>
+<hr />
+<h3 id="current-state">Current state</h3>
+<h4 id="what-we-can-reuse-as-is">What we can reuse as-is</h4>
+<table>
+<tr><th>Piece</th><th>Where</th><th>Notes</th></tr>
+<tr><td>One shape for all tools</td><td><code>ToolRegistration{innerTool, declareTool, findTool, toolActivation}</code> (<code>ToolRegistration.hs:154</code>)</td><td>Schema is <code>declareTool.toolDescriptionParamProperties</code>; the call receives an <code>Aeson.Value</code>. A wrapper can rewrite both without knowing the toolbox kind.</td></tr>
+<tr><td>A per-call context, already threaded everywhere</td><td><code>ToolExecutionContext</code> (<code>Tools/Context.hs:238</code>), built per step in <code>Session/Step.hs:855</code></td><td>The run function of every tool gets it.</td></tr>
+<tr><td>A serializable part of that context</td><td><code>ToolExecutionContextSnapshot</code> (<code>Tools/Context.hs:422</code>)</td><td>Persisted with deferred and async calls.</td></tr>
+<tr><td>Value sources</td><td><code>SecretSource = Given \| ApiKeySource \| FileSystem \| EnvVar \| Command</code> (<code>Tools/Secrets.hs:105</code>) and <code>resolveSecretSource</code> (<code>:343</code>)</td><td>Exactly what a parameter <em>default</em> needs.</td></tr>
+<tr><td>Header/query serializers</td><td><code>SecretSerializer</code> (<code>Secrets.hs:161</code>), <code>applySecretsToHeaders</code> (<code>:464</code>)</td><td>Applied per request already; only the <em>resolution</em> is load-time.</td></tr>
+<tr><td>Bash argument marshalling</td><td><code>translateArguments</code> (<code>ScriptTypes.hs:186</code>), <code>flattenArguments</code>/<code>flattenInput</code> (<code>Bash.hs:272</code>, <code>:284</code>)</td><td>Reads declared args from a JSON object. Merging bound values upstream needs no change here.</td></tr>
+<tr><td>Single env funnel for bash tools</td><td><code>buildToolEnvironment</code> (<code>Bash.hs:356</code>)</td><td></td></tr>
+<tr><td>Session metadata row with reserved columns</td><td><code>SessionMeta</code> (<code>SessionStore.hs:192</code>)</td><td>Home for non-secret session parameters.</td></tr>
+<tr><td>Per-session entry points</td><td><code>Runner.createSessionAs</code> (<code>Host/Runner.hs:510</code>), <code>postMessage</code> (<code>:530</code>), <code>Api.createH</code> (<code>Api.hs:340</code>)</td><td></td></tr>
+<tr><td>Server self-description</td><td><code>agentView</code> (<code>Api.hs:279</code>), <code>GET /openapi.json</code></td><td>Where clients learn which parameters an agent wants.</td></tr>
+</table>
+<h4 id="gaps">Gaps</h4>
+<p><strong>G1. Nothing flows from the caller to a tool call.</strong> <code>agents-server</code> reads
+<code>agent</code>, <code>prompt</code>, <code>media</code>, <code>run</code> and the bearer token; none of it reaches
+<code>ToolExecutionContext</code>. The CLI has no <code>--set</code>-like flag.</p>
+<p><strong>G2. Toolboxes are frozen at tree load.</strong> <code>osNodeTools :: TVar [ToolRegistration]</code> is built once per agent tree and shared by all sessions.
+Any per-session value must therefore arrive through the call context, not
+through the registration.</p>
+<p><strong>G3. HTTP toolbox secrets resolve once.</strong> <code>OpenAPIToolbox.initializeToolbox</code>
+(<code>OpenAPIToolbox.hs:323</code>) calls <code>resolveSecrets</code> at load. A per-session token
+is impossible.</p>
+<p><strong>G4. MCP servers cannot receive configuration.</strong>
+<code>McpSimpleBinaryConfiguration</code> has <code>name</code>, <code>executable</code>, <code>args</code> and no <code>env</code>.
+<code>mcpTool</code> (<code>ToolRegistration.hs:1699</code>) ignores the context entirely.</p>
+<p><strong>G5. Bash arguments are always <code>required</code>.</strong> <code>mapArg</code>
+(<code>ToolRegistration.hs:262</code>) sets <code>propertyRequired = True</code> and ignores
+<code>argTypeArity</code>. The skills toolbox already honours arity
+(<code>Skills/Toolbox.hs:333</code>). Not caused by this feature, but it makes “leave an
+optional argument out” impossible to express, so it is fixed here.</p>
+<p><strong>G6. Bash tools only take values through argv or stdin.</strong> A token in argv
+shows in <code>ps</code> and in traces. There is no calling mode that passes an argument
+as an environment variable.</p>
+<p><strong>G7. Traces record argv.</strong> <code>RunCommandStart path args</code> (<code>Bash.hs:193</code>)
+logs the full command line. A bound secret would land in log files.</p>
+<p><strong>G8. The tool cache ignores everything but the LLM’s arguments.</strong>
+<code>computeCacheKey</code> hashes tool name + LLM arguments (<code>Tools/Cache.hs:71</code>,
+<code>Session/Async.hs:335</code>). With bindings, tenant A’s cached result would answer
+tenant B’s identical call.</p>
+<p><strong>G9. Sub-agents receive nothing from their caller</strong> except the call stack
+and the OS world (<code>OneShotTool.hs:191</code>). A child agent with its own tenant-aware
+toolbox has no way to learn the tenant.</p>
+<p><strong>G10. A parent cannot narrow a helper.</strong> Helpers are the agents exposed to
+a parent as <code>prompt_agent_&lt;slug&gt;</code> tools
+(<code>OneShotTool.turnAgentRuntimeIntoIOTool</code>, wired by
+<code>AgentTree.wireAgentTools</code>, <code>AgentTree.hs:724</code>). The tool takes one argument,
+<code>what</code> (<code>OneShotTool.hs:95</code>). The parent cannot learn which tools a helper
+has or what arguments they take, and cannot fix any of them for a call. With
+a chain root → A → B, the root has even less say over B. One would expect
+narrowing to compose along the chain naturally; today there is nothing to
+compose. (The developer toolbox’s <code>create-agent</code> is unrelated: it bootstraps
+agent JSON <em>files</em> for a human and is left alone by this spec.)</p>
+<hr />
+<h3 id="design">Design</h3>
+<h4 id="overview">Overview</h4>
+<p>Three separate notions, kept apart deliberately:</p>
+<pre><code>  agent file                                  caller
+  ──────────                                  ──────
+  parameters:   declares names       ◄─────   supplies values
+     tenant, api_token                         (process start, or per session)
+        ▲
+        │ refers to
+  bindings:     tool argument := parameter | literal
+     query-*.tenant_id := tenant
+</code></pre>
+<ul>
+<li>A <strong>parameter</strong> is a named hole in the <em>agent</em>. The agent author declares
+it. An agent with parameters is a function <code>Params -&gt; Agent</code>.
+</li>
+<li>A <strong>binding</strong> ties one <em>tool argument</em> to a parameter or to a literal. The
+agent author writes it, next to the toolbox.
+</li>
+<li>A <strong>value</strong> is supplied by the caller for a <em>parameter</em>, never directly
+for a tool argument.
+</li>
+</ul>
+<p>The indirection matters for safety: a remote client can fill <code>tenant</code>, and
+only <code>tenant</code>. It cannot decide to bind the <code>path</code> argument of some other
+tool. What is bindable is the author’s decision; what it is bound <em>to</em> is the
+caller’s.</p>
+<h4 id="1-parameters">1. Parameters</h4>
+<p>New optional field on <code>Agent</code> (<code>Base.hs:1595</code>):</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;parameters&quot;</span><span class="er">:</span> <span class="ot">[</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;Tenant identifier, as in the billing system&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;scope&quot;</span><span class="fu">:</span> <span class="st">&quot;session&quot;</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;api_token&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;Bearer token for the billing API&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;secret&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;scope&quot;</span><span class="fu">:</span> <span class="st">&quot;session&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;EnvVar&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;BILLING_TOKEN&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;region&quot;</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;scope&quot;</span><span class="fu">:</span> <span class="st">&quot;process&quot;</span><span class="fu">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Given&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;eu-west-1&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span></span></code></pre></div></div><div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ParameterDecl</span> <span class="ot">=</span> <span class="dt">ParameterDecl</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> paramName ::</span> <span class="dt">ParamName</span>            <span class="co">-- [a-z][a-z0-9_]*</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> paramDescription ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> paramSecret ::</span> <span class="dt">Bool</span>               <span class="co">-- default False</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> paramScope ::</span> <span class="dt">ParamScope</span>          <span class="co">-- default ScopeProcess</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> paramRequired ::</span> <span class="dt">Bool</span>             <span class="co">-- default True</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> paramDefault ::</span> <span class="dt">Maybe</span> <span class="dt">SecretSource</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ParamScope</span> <span class="ot">=</span> <span class="dt">ScopeProcess</span> <span class="op">|</span> <span class="dt">ScopeSession</span> <span class="op">|</span> <span class="dt">ScopeMessage</span></span></code></pre></div></div><ul>
+<li><code>scope: &quot;process&quot;</code>: only the operator can set it (CLI flag, environment,
+default). An HTTP client that tries gets <code>403</code>. This is the docker case
+where the operator pins a tenant for the whole container.
+</li>
+<li><code>scope: &quot;session&quot;</code>: a client may also set it per session; the value lasts
+as long as the session. Process-level values still act as the fallback.
+</li>
+<li><code>scope: &quot;message&quot;</code>: a client may set it with a request that starts a run
+(create, message, resume, continuation); the value lasts for that run only
+and is dropped when the run blocks or completes. Meant for short-lived
+tokens. It is never persisted, secret or not (§5).
+</li>
+<li><code>secret: true</code>: the value must be a string; it is never persisted, never
+traced, never returned by the API (§6).
+</li>
+<li><code>default</code> reuses <code>SecretSource</code>, so a default can be a literal, an env var,
+a file, a command, or an entry of the API-keys file.
+</li>
+</ul>
+<p>Values are JSON (<code>Aeson.Value</code>), because MCP and OpenAPI arguments are not
+always strings. Bash arguments need strings (§3.1).</p>
+<p>Resolution order for one parameter, first hit wins:</p>
+<ol>
+<li>pinned process value (<code>--pin</code>, §4): nothing below is looked at;
+</li>
+<li>message value (only if <code>scope = message</code>);
+</li>
+<li>session value (only if <code>scope = session</code>);
+</li>
+<li>process value (<code>--set</code>, <code>--params-file</code>);
+</li>
+<li><code>default</code>, resolved once at tree load;
+</li>
+<li>unbound.
+</li>
+</ol>
+<p>An unbound <code>required</code> parameter is an error <em>before</em> any LLM call:
+at startup for a process-scope parameter, at session creation or message post
+for a session-scope or message-scope one (§5).</p>
+<h4 id="2-bindings">2. Bindings</h4>
+<p>Every toolbox description gains an optional <code>Bindings</code> list (same
+prefix-stripping convention as <code>Activation</code>). Example for a bash toolbox:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;FileSystemDirectory&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;Path&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;Bindings&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant_id&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;token&quot;</span><span class="fu">,</span>     <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;api_token&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;export-*&quot;</span><span class="fu">,</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;format&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;csv&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span> <span class="fu">}</span> <span class="fu">}</span></span></code></pre></div></div><div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Binding</span> <span class="ot">=</span> <span class="dt">Binding</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> bindTool ::</span> <span class="dt">Maybe</span> <span class="dt">ToolGlob</span>     <span class="co">-- matched against the toolbox-local name; default: all</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> bindArg ::</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> bindValue ::</span> <span class="dt">BindingValue</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> bindWhenUnbound ::</span> <span class="dt">WhenUnbound</span> <span class="co">-- default Fail</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">BindingValue</span> <span class="ot">=</span> <span class="dt">Param</span> <span class="dt">ParamName</span> <span class="op">|</span> <span class="dt">Literal</span> <span class="dt">Aeson.Value</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">WhenUnbound</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">Fail</span>     <span class="co">-- the call fails with a clear error (cannot happen for required params)</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Omit</span>     <span class="co">-- the argument is left out; only for optional arguments</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Expose</span>   <span class="co">-- (later, Phase 7) the argument goes back to the LLM</span></span></code></pre></div></div><p><code>Literal</code> is the degenerate case and is useful on its own: specialise a
+generic third-party tool without writing a wrapper script.</p>
+<p>Load-time checks, all of them errors in <code>agents-exe check</code>:</p>
+<ul>
+<li>a <code>Param</code> names an undeclared parameter;
+</li>
+<li>a binding matches no tool, or no matched tool has that argument (typo
+guard). For MCP, whose tool list arrives late and may refresh, this is a
+warning trace at each <code>ToolsRefreshed</code>;
+</li>
+<li>two bindings hit the same (tool, argument);
+</li>
+<li><code>Omit</code> on a required argument;
+</li>
+<li>a <code>secret</code> parameter bound to a bash argument whose mode is <code>positional</code>,
+<code>dashdashspace</code> or <code>dashdashequal</code> (it would show in <code>ps</code>): an error,
+pointing to the <code>env</code> mode of §3.1.
+</li>
+</ul>
+<h4 id="3-the-combinator">3. The combinator</h4>
+<p>In a new module <code>System.Agents.Tools.Bindings</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">applyBindings ::</span> [<span class="dt">ResolvedBinding</span>] <span class="ot">-&gt;</span> <span class="dt">ToolRegistration</span> <span class="ot">-&gt;</span> <span class="dt">ToolRegistration</span></span></code></pre></div></div><ul>
+<li><code>declareTool</code>: drop bound <code>ParamProperty</code>s from
+<code>toolDescriptionParamProperties</code>, and nothing else. No “pre-set” note, no
+trace of the argument: what the model gets is indistinguishable from a tool
+that never had it (D8). A tool whose prose description talks about an
+argument that the author then binds is the author’s to reword; <code>check</code>
+warns when a bound argument’s name appears in the tool description.
+</li>
+<li><code>innerTool</code> / <code>findTool</code>: wrap the run function. At call time it reads
+parameter values from the context, builds the bound object, and calls the
+original with <code>bound &lt;&gt; llmArgs</code> (left-biased: bound wins). If the LLM sends
+a bound key anyway, it is dropped and a trace is emitted.
+</li>
+</ul>
+<p>It is applied in <code>ToolLoader.loadAgentTools</code> (<code>ToolLoader.hs:127</code>), once per
+toolbox, after the toolbox produced its registrations. Because values come
+from the context at call time, the registrations stay shared across sessions
+(G2) and the schema stays static.</p>
+<p>The context gains one field:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolExecutionContext</span> <span class="ot">=</span> <span class="dt">ToolExecutionContext</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    { …</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxParams ::</span> <span class="dt">Params</span>   <span class="co">-- Map ParamName ParamValue</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ParamValue</span> <span class="ot">=</span> <span class="dt">ParamValue</span> {<span class="ot"> pvValue ::</span> <span class="dt">Aeson.Value</span>,<span class="ot"> pvSecret ::</span> <span class="dt">Bool</span> }</span></code></pre></div></div><p><code>Show</code> and <code>ToJSON</code> of <code>ParamValue</code> print <code>&quot;&lt;secret&gt;&quot;</code> when <code>pvSecret</code>.
+<code>Session/Step.buildContext</code> fills <code>ctxParams</code> from the agent runtime
+(process values and defaults) overlaid with the session’s values (§5).</p>
+<p>The session itself is unchanged: it records the call as the LLM made it, so
+bound values never enter the conversation history, never go back to the
+model, and do not show in <code>session-print</code>.</p>
+<h5 id="31-bash-tools">3.1 Bash tools</h5>
+<ul>
+<li><strong>New calling mode <code>env</code>.</strong> <code>ScriptArgCallingMode</code> gains <code>Env</code>. An argument
+<code>{&quot;name&quot;: &quot;token&quot;, &quot;mode&quot;: &quot;env&quot;}</code> is passed as the environment variable
+<code>TOKEN</code> (upper-cased, <code>-</code> to <code>_</code>), not in argv. <code>flattenArguments</code> and
+<code>flattenInput</code> ignore it; a new <code>flattenEnv</code> feeds <code>buildToolEnvironment</code>.
+Partial application stays a single concept (everything is an argument);
+the mode only picks the transport. This closes G6 and is useful without
+bindings too.
+</li>
+<li><strong>Arity (G5).</strong> <code>mapArg</code> sets <code>propertyRequired = (argTypeArity == Single)</code>.
+</li>
+<li><strong>Strings only.</strong> A value bound to a bash argument must be a JSON string;
+numbers and booleans are rendered with their JSON text; objects and arrays
+are a load-time error for <code>Literal</code>, a call-time error for <code>Param</code>.
+</li>
+<li><strong>Tracing (G7).</strong> <code>runValue</code> gets the set of secret argument names from the
+wrapper and replaces their values with <code>&lt;secret&gt;</code> in <code>RunCommandStart</code> /
+<code>RunCommandStopped</code>. With the load-time check of §2, secrets are env-only
+anyway; the redaction is the second line of defence.
+</li>
+<li><code>documentation/binary-tool.md</code> and <code>agents-exe spec bash-tools</code> document the <code>env</code>
+mode.
+</li>
+</ul>
+<h5 id="32-mcp-toolboxes">3.2 MCP toolboxes</h5>
+<ul>
+<li>Argument bindings work through the generic combinator; <code>adaptSchema</code>
+(<code>ToolRegistration.hs:2600</code>) output is filtered like any other.
+</li>
+<li>Separately, close G4: <code>McpSimpleBinaryConfiguration</code> gains
+<code>env :: Maybe (Map Text BindingValue)</code>. The server process is started once
+per tree, so only <code>Literal</code> and <strong>process-scope</strong> <code>Param</code>s are accepted
+here; a session-scope parameter is a load-time error with a message that
+says why.
+</li>
+</ul>
+<h5 id="33-openapi-and-postgrest-toolboxes">3.3 OpenAPI and PostgREST toolboxes</h5>
+<ul>
+<li>Argument bindings (path, query and body parameters) work through the
+generic combinator.
+</li>
+<li>Headers and tokens are not tool arguments, so they go through the existing
+secrets. <code>SecretSource</code> gains <code>ParamSource ParamName</code>. Secrets with that
+source are skipped by the load-time <code>resolveSecrets</code> and resolved per
+request from <code>ctxParams</code>, then serialized by the unchanged
+<code>applySecretsToHeaders</code> / <code>applySecretsToQueryString</code>. This closes G3.
+</li>
+<li>Fetching the spec at load time cannot use a session-scope secret. If the
+spec endpoint needs auth, use a process-scope parameter or a plain secret
+for it; the loader says so when it fails.
+</li>
+</ul>
+<h5 id="34-builtin-toolboxes-and-sub-agents">3.4 Builtin toolboxes and sub-agents</h5>
+<p>Builtins need nothing special. For sub-agents see §7.</p>
+<h4 id="4-supplying-values-process-level">4. Supplying values: process level</h4>
+<p>Shared by <code>agents-exe</code> (all subcommands that load a tree) and
+<code>agents-server</code>:</p>
+<pre><code>--set NAME=VALUE          string value; repeatable
+--set-json NAME=JSON      any JSON value
+--params-file FILE        {&quot;tenant&quot;: &quot;acme&quot;, &quot;api_token&quot;: &quot;…&quot;}
+--pin NAME=VALUE          like --set, and clients cannot override it
+--pin-json NAME=JSON
+</code></pre>
+<ul>
+<li>They feed a new <code>processParams :: Map ParamName ProcessValue</code> in
+<code>AgentTree.Props</code> (<code>AgentTree.hs:384</code>), where a <code>ProcessValue</code> is a value
+plus a <code>pinned</code> flag. <code>--params-file</code> entries may be written
+<code>{&quot;value&quot;: …, &quot;pinned&quot;: true}</code> to the same effect.
+</li>
+<li><code>--set</code> on a session- or message-scope parameter gives a <em>fallback</em> that a
+client may override. <code>--pin</code> gives a value that a client may not: for the
+lifetime of the process the parameter behaves as if it were declared
+<code>scope: &quot;process&quot;</code>. This is how an operator takes a multi-tenant agent
+file and locks one container to one tenant without editing the file. On a
+process-scope parameter <code>--pin</code> and <code>--set</code> mean the same.
+</li>
+<li>A name that no loaded agent declares is an error (typo guard).
+</li>
+<li>For secrets, prefer a <code>default</code> with <code>EnvVar</code> / <code>FileSystem</code>, or
+<code>--params-file</code>: <code>--set</code> shows in <code>ps</code>. The docs say so.
+</li>
+<li><code>agents-exe check</code> prints each agent’s parameters and how each one
+resolved (<code>set</code>, <code>default:EnvVar</code>, <code>unbound</code>), never the values of secret
+ones.
+</li>
+<li><code>agents-exe describe</code> and <code>describe-tool</code> show the <em>reduced</em> schema, with
+the bound arguments listed apart (this output is for the operator, not for
+the model).
+</li>
+<li><code>agents-exe tool-call</code> and <code>replay-tool-call</code> go through the wrapped
+registration, so they apply bindings too.
+</li>
+</ul>
+<p>In the docker case this is all that is needed: the image holds the agent
+file, the operator runs it with <code>-e BILLING_TOKEN=… </code> and <code>--pin tenant=acme</code>.</p>
+<h4 id="5-supplying-values-session-level-agents-server">5. Supplying values: session level (<code>agents-server</code>)</h4>
+<p><strong>Create.</strong> <code>POST /v1/sessions</code> accepts <code>params</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;agent&quot;</span><span class="fu">:</span> <span class="st">&quot;billing&quot;</span><span class="fu">,</span> <span class="dt">&quot;prompt&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;params&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tenant&quot;</span><span class="fu">:</span> <span class="st">&quot;acme&quot;</span><span class="fu">,</span> <span class="dt">&quot;api_token&quot;</span><span class="fu">:</span> <span class="st">&quot;s3cr3t&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span></code></pre></div></div><p><strong>Follow-ups.</strong> <code>POST /v1/sessions/:id/messages</code>, <code>/resume</code> and
+<code>POST /v1/continuations/:token</code> accept the same field. It is merged over the
+session’s current values; <code>null</code> removes a value.</p>
+<p><strong>Validation</strong>, before the run starts:</p>
+<table>
+<tr><th>Case</th><th>Answer</th></tr>
+<tr><td>name not declared by the agent</td><td><code>422</code>, lists the unknown names</td></tr>
+<tr><td><code>scope: "process"</code> parameter, or one pinned with <code>--pin</code></td><td><code>403</code></td></tr>
+<tr><td><code>scope: "message"</code> parameter on a request that starts no run</td><td><code>422</code></td></tr>
+<tr><td><code>secret</code> with a non-string value</td><td><code>422</code></td></tr>
+<tr><td>a required session or message parameter still unbound after merging</td><td><code>422</code>, lists the missing names</td></tr>
+</table>
+<p><strong>Storage.</strong></p>
+<ul>
+<li>Non-secret values: a new <code>params</code> JSON column on the sessions table (both
+SQLite and Postgres backends; <code>SessionMeta.smParams</code>), written through the
+same versioned store as the rest of the metadata. They survive restarts and
+live-session eviction.
+</li>
+<li>Secret values: only in the <code>LiveSession</code> (<code>Host/Runner.hs:178</code>), in memory.
+After a restart or after <code>--live-session-ttl</code> evicts the session, the next
+message must carry them again, or gets the <code>422</code> above. This is the
+“transient” in the goal, and it keeps tokens out of the database with no
+encryption story to design.
+</li>
+<li>Message-scope values, secret or not: only in the run’s state inside the
+<code>LiveSession</code>, cleared when the run ends (blocked, completed, failed or
+cancelled). A required message-scope parameter must therefore come with
+<em>every</em> request that starts a run, including <code>/resume</code> and
+<code>POST /v1/continuations/:token</code> when it resumes. They are never in
+snapshots either.
+</li>
+<li><code>ToolExecutionContextSnapshot</code> gains <code>tecsParams</code>, holding non-secret
+values only. A deferred or async call that is re-hydrated in another
+process sees non-secret parameters; if its tool needs a secret one, the
+re-hydrated call fails with <code>parameter api_token is not bound</code>.
+<code>recoverOnStartup</code> (<code>Runner.hs:700</code>) therefore marks such running calls as
+failed rather than retrying blind.
+</li>
+</ul>
+<p><strong>Self-description.</strong> <code>agentView</code> adds</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;parameters&quot;</span><span class="er">:</span> <span class="ot">[</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span><span class="fu">,</span> <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">,</span> <span class="dt">&quot;scope&quot;</span><span class="fu">:</span> <span class="st">&quot;session&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;secret&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span> <span class="dt">&quot;required&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span> <span class="dt">&quot;bound&quot;</span><span class="fu">:</span> <span class="kw">false</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;region&quot;</span><span class="fu">,</span> <span class="dt">&quot;scope&quot;</span><span class="fu">:</span> <span class="st">&quot;process&quot;</span><span class="fu">,</span> <span class="dt">&quot;bound&quot;</span><span class="fu">:</span> <span class="kw">true</span> <span class="fu">}</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span></span></code></pre></div></div><p><code>bound</code> tells a client whether the process already supplies the value;
+<code>&quot;pinned&quot;: true</code> says that it cannot be overridden (and the chat page then
+hides the field). No values are ever returned. <code>GET /v1/sessions/:id</code> returns the non-secret
+session values and the <em>names</em> of the secret ones currently held.
+<code>Routes.hs</code> and the generated OpenAPI document follow. The chat page gets a
+small plain form for session parameters, shown when the chosen agent has
+unbound ones (password inputs for secret ones).</p>
+<p><strong>Stored agents.</strong> <code>parameters</code> is a normal field for database agents
+(<code>Host.putStoredAgent</code>). <code>Bindings</code> lives inside toolbox descriptions, so it
+follows whatever <code>fileBasedFields</code> already allows.</p>
+<p><strong>MCP over HTTP</strong> (<code>POST /mcp</code>, the <code>ask_&lt;slug&gt;</code> tools). MCP clients are
+usually configured with static headers, which is exactly the pin-down case:</p>
+<ul>
+<li><code>Agents-Param-&lt;name&gt;: &lt;value&gt;</code> request headers, string values;
+</li>
+<li><code>_meta: {&quot;agents-exe/params&quot;: {…}}</code> on <code>tools/call</code>, any JSON, wins over
+headers.
+</li>
+</ul>
+<p>Same validation as above, reported as a JSON-RPC error. Each <code>tools/call</code> is
+one run, so session and message scope coincide here.</p>
+<h5 id="51-sealed-sessions-and-delegated-chat-s2">5.1 Sealed sessions and delegated chat (S2)</h5>
+<p>In S2 two different principals talk to the same session: the backend, which
+is trusted to choose <code>project_id</code>, and the end user’s browser, which is not.
+Today the server knows one kind of caller, the bearer-token owner
+(<code>AgentsServer/Auth.hs</code>), and the backend cannot give its token to a
+browser. Without more, the backend has to proxy every chat message and SSE
+stream. Three additions remove that need:</p>
+<ul>
+<li><strong><code>seal: true</code></strong> on <code>POST /v1/sessions</code>. After creation, <code>params</code> on
+<code>/messages</code>, <code>/resume</code> and continuations is refused with <code>403</code>, for every
+caller but the owner. The parameters of a sealed session are those its
+creator chose.
+</li>
+<li><strong>Session tokens.</strong> <code>POST /v1/sessions</code> with <code>&quot;session_token&quot;: true</code>
+returns a random token bound to that session. <code>Authorization: Bearer &lt;session token&gt;</code> allows exactly: post a message, read the session and its
+events, cancel a run, on that one session. It cannot set or read <code>params</code>,
+list sessions, complete continuations, or touch agents. Tokens are stored
+hashed, next to the session, and die with it; the owner can revoke one with
+<code>DELETE /v1/sessions/:id/token</code>.
+</li>
+<li><strong><code>PUT /v1/sessions/:id/params</code></strong>, owner only, sets session-scope values
+without starting a run. The backend uses it to rotate a minted credential
+before it expires, and to re-supply secrets after a restart or an eviction
+(secrets are memory-only, §5). When a message arrives on a session whose
+required parameters are no longer all bound, the answer is
+<code>409 params_required</code> with the missing names; a browser holding a session
+token relays that to its backend, which calls this endpoint.
+</li>
+</ul>
+<h5 id="52-forking-a-session-with-new-values">5.2 Forking a session with new values</h5>
+<p>A credential that expires in the middle of a long run is not handled: the
+tool calls fail, the model reports the failure, the run ends. No blocking,
+no refresh protocol (D14). The way forward is a new session that starts from
+the old one’s history with a fresh value pinned:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="er">POST</span> <span class="er">/v1/sessions</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;fork&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;session id&gt;&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;params&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;callback_token&quot;</span><span class="fu">:</span> <span class="st">&quot;…fresh…&quot;</span> <span class="fu">},</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;seal&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span> <span class="dt">&quot;session_token&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;prompt&quot;</span><span class="fu">:</span> <span class="st">&quot;The credential was renewed, please carry on.&quot;</span> <span class="fu">}</span></span></code></pre></div></div><ul>
+<li>The new session gets a copy of the turns of the source, a new session id,
+and <code>forkedFromSessionId</code> set (the field exists already,
+<code>Session/Types.hs:1385</code>). <code>agent</code> is taken from the source; <code>prompt</code> is
+optional, and without it the session is created idle.
+</li>
+<li>Parameters are <strong>not</strong> shared with the source at run time. The new
+session starts from the source’s persisted (non-secret) values, overlaid
+with the request’s <code>params</code>, and is validated like any creation; secrets
+always have to be given again. <code>seal</code> and session tokens are not inherited
+either.
+</li>
+<li>This is sound because bound values never enter the history (§3): the
+copied turns hold no trace of the old token or of any bound argument, so
+nothing in them contradicts the new values. Changing <code>project_id</code> in a
+fork is therefore <em>possible</em> and is the owner’s call; it is refused to
+session-token holders, who cannot fork at all.
+</li>
+<li>Pending deferred calls and running async calls of the source are not
+copied. The fork’s last turn is closed the way a cancelled run closes it,
+so the history stays well-formed for the LLM.
+</li>
+<li>Narrowed helper calls (§8) need nothing: their bindings are arguments of
+<code>prompt_agent_*</code> calls in the copied history, and a <code>Param</code> in a future
+call resolves against the fork’s values, which is the intent.
+</li>
+<li>Only the owner of the source (or an admin owner) may fork it.
+</li>
+<li>On the CLI the same thing is <code>agents-exe session start --fork &lt;id&gt;</code> with
+the usual <code>--set</code> / <code>--pin</code> flags.
+</li>
+</ul>
+<p>The callback tools themselves need nothing new. With an OpenAPI toolbox
+pointing at the product API:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAPIServer&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;SpecUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.example.com/agent-callbacks/openapi.json&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;BaseUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.example.com/agent-callbacks&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;Secrets&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;source&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;ParamSource&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;callback_token&quot;</span> <span class="fu">},</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;decoder&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Clear&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="kw">true</span> <span class="fu">},</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;serializer&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Header&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>                        <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;Authorization&quot;</span><span class="ot">,</span> <span class="st">&quot;Bearer {{secret}}&quot;</span><span class="ot">]</span> <span class="fu">}</span> <span class="fu">}</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;Bindings&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;project_id&quot;</span><span class="fu">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;project_id&quot;</span> <span class="fu">}</span> <span class="fu">}</span> <span class="ot">]</span> <span class="fu">}</span> <span class="fu">}</span></span></code></pre></div></div><p>Every operation that has a <code>project_id</code> path or query parameter loses it;
+the model sees <code>list_tasks {status}</code> instead of <code>list_tasks {project_id, status}</code>. The same works with bash tools that <code>curl</code> the API, with <code>token</code>
+in <code>env</code> mode.</p>
+<p>One thing stays with the product API: its error bodies go back to the model
+verbatim. An API that answers “project 43 belongs to another account” leaks
+through any amount of binding.</p>
+<h4 id="6-secrecy-rules">6. Secrecy rules</h4>
+<p>One list, because they are scattered over the sections above:</p>
+<ol>
+<li>A secret value is never written: not in the session JSON, not in the
+metadata, not in continuation snapshots, not in the tool cache.
+</li>
+<li>A secret value is never traced. <code>ParamValue</code> redacts itself; bash argv is
+redacted (§3.1); the HTTP toolboxes already keep secret headers out of
+<code>--log-http</code> and that path is reused.
+</li>
+<li>A secret value is never returned by the API nor shown by <code>check</code> /
+<code>describe</code>.
+</li>
+<li>A secret value never reaches bash argv (§2 load-time check).
+</li>
+<li>None of this protects the value from the tool that receives it. A tool
+that echoes its token sends it to the LLM. That is the tool author’s
+responsibility and the docs say so.
+</li>
+</ol>
+<p><strong>Tool cache (G8).</strong> <code>computeCacheKey</code> takes the bound values of the call:
+non-secret values are hashed into <code>ckArgumentsHash</code> together with the LLM
+arguments. A call with any secret binding is <strong>not cached at all</strong>: hashing a
+token into a persisted key is a needless oracle, and results obtained with
+one credential should not be replayed for another.</p>
+<h4 id="7-sub-agents">7. Sub-agents</h4>
+<p>Lexical, not dynamic: a child sees only what the parent passes explicitly.
+<code>ExtraAgentRef</code> (<code>Base.hs:93</code>) gains <code>with</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;extraAgents&quot;</span><span class="er">:</span> <span class="ot">[</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span> <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;invoice-expert&quot;</span><span class="fu">,</span> <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;invoice-expert.json&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;with&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tenant&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span> <span class="fu">},</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;mode&quot;</span><span class="fu">:</span>   <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;read-only&quot;</span> <span class="fu">}</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span></span></code></pre></div></div><ul>
+<li>Keys are the <em>child’s</em> parameter names; values are <code>BindingValue</code>s in the
+<em>parent’s</em> scope.
+</li>
+<li><code>runSubAgent</code> (<code>OneShotTool.hs:191</code>) evaluates <code>with</code> against the caller’s
+<code>ctxParams</code>, at call time, so a message-scope value of the parent is passed
+like any other, and hands the result to the child as its session-level values;
+the child’s own process values and defaults still apply underneath.
+Secrecy is inherited: a value that is secret in the parent is secret in
+the child, whatever the child declares.
+</li>
+<li>Children discovered through a tool directory have no reference site, so
+they get process values and defaults only. List them in <code>extraAgents</code> to
+pass something.
+</li>
+<li>The check phase verifies that <code>with</code> keys exist in the child and that the
+child’s required session parameters are covered.
+</li>
+</ul>
+<h4 id="8-narrowing-helpers-down-the-call-chain">8. Narrowing helpers, down the call chain</h4>
+<p>The scenario (S3): a parent splits a job and prompts a helper whose tools are
+already pinned to one part of it, so that the helper’s model has nothing left
+to choose. This is partial application done by a model instead of an
+operator, and it composes: the operator binds <code>tenant</code>, the root binds
+<code>repo</code>, helper A binds <code>branch</code>, helper B only picks <code>path</code>.</p>
+<p>This concerns helper agents exposed as tools, and only them. Their interface
+changes in two ways: (a) a parent can discover the open arguments below a
+helper, (b) a parent can bind some of them when it prompts the helper.</p>
+<h5 id="81-agent-level-bindings">8.1 Agent-level bindings</h5>
+<p>Toolbox-level bindings (§2) need a toolbox to hang on, and bash toolboxes
+have no name. So <code>Agent</code> also gets a top-level <code>bindings</code> list, where <code>tool</code>
+globs match the LLM-visible names (<code>bash_query-*</code>, <code>mcp_billing_*</code>). They are
+applied after the toolbox-level ones. §8.3 uses the same shape at run time.</p>
+<p>Successive application is monotone by construction: a later binding can only
+name an argument that is <em>still open</em>. There is no “unbind” and no override.</p>
+<h5 id="82-a-discovery-describe_agent">8.2 (a) Discovery: <code>describe_agent</code></h5>
+<p>One new tool next to the <code>prompt_agent_&lt;slug&gt;</code> family, registered by
+<code>wireAgentTools</code> for any agent that has helpers:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="er">describe_agent</span> <span class="fu">{</span> <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;repo-worker&quot;</span> <span class="fu">}</span></span></code></pre></div></div><div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;repo-worker&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;works on one git repository&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;parameters&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;gh_token&quot;</span><span class="fu">,</span> <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">,</span> <span class="dt">&quot;bound&quot;</span><span class="fu">:</span> <span class="kw">false</span> <span class="fu">}</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_git-log&quot;</span><span class="fu">,</span> <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;open&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;repo&quot;</span><span class="fu">,</span> <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">,</span> <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>                <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;since&quot;</span><span class="fu">,</span> <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">,</span> <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span> <span class="fu">}</span> <span class="ot">]</span> <span class="fu">}</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;helpers&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;diff-reviewer&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;tools&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_git-diff&quot;</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>                   <span class="dt">&quot;open&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;repo&quot;</span><span class="fu">,</span> <span class="er">…</span> <span class="fu">}</span><span class="ot">,</span> <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;rev&quot;</span><span class="fu">,</span> <span class="er">…</span> <span class="fu">}</span> <span class="ot">]</span> <span class="fu">}</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;helpers&quot;</span><span class="fu">:</span> <span class="ot">[]</span> <span class="fu">}</span> <span class="ot">]</span> <span class="fu">}</span></span></code></pre></div></div><ul>
+<li>It shows <strong>open</strong> arguments only, as seen from the caller’s position in
+the chain: what the agent file bound, what the operator bound, and what any
+ancestor of the caller bound for this call are all absent. A parent
+discovers exactly what is left for it to decide, in keeping with D8.
+</li>
+<li>It is recursive over <code>helpers</code>, cut at the configured max depth and at
+cycles (<code>isAgentInCallStack</code>, <code>Tools/Context.hs:767</code>).
+</li>
+<li>Parameters are listed by name and description, never by value.
+</li>
+<li>It is a read of the loaded tree, not an LLM call. The answer is the same
+for the whole run, so it caches well.
+</li>
+<li>An author can opt a helper out with <code>&quot;narrowable&quot;: false</code> on its
+<code>extraAgents</code> entry: <code>describe_agent</code> then shows only its announce, and
+bindings that target it or anything below it are refused.
+</li>
+</ul>
+<h5 id="83-b-binding-prompt_agent_slug-takes-bindings">8.3 (b) Binding: <code>prompt_agent_&lt;slug&gt;</code> takes <code>bindings</code></h5>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="er">prompt_agent_repo-worker</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;what&quot;</span><span class="fu">:</span> <span class="st">&quot;Summarise last week&#39;s changes to the session runner.&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;bindings&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_git-*&quot;</span><span class="fu">,</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;repo&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;lucasdicioccio/agents-exe&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;agent&quot;</span><span class="fu">:</span> <span class="st">&quot;diff-reviewer&quot;</span><span class="fu">,</span> <span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_git-diff&quot;</span><span class="fu">,</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;repo&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;lucasdicioccio/agents-exe&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;agent&quot;</span><span class="fu">:</span> <span class="st">&quot;**&quot;</span><span class="fu">,</span> <span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_gh-*&quot;</span><span class="fu">,</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;token&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;gh_token&quot;</span> <span class="fu">}</span> <span class="fu">}</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;with&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tenant&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span> <span class="fu">}</span> <span class="fu">}</span> <span class="fu">}</span></span></code></pre></div></div><p><code>bindings</code> and <code>with</code> are optional; the schema of the tool is static (D3)
+and a parent that ignores them sees today’s behaviour.</p>
+<ul>
+<li><strong>Addressing.</strong> <code>agent</code> is a path of slugs <em>below the prompted helper</em>:
+absent means the helper itself, <code>diff-reviewer</code> its helper of that name,
+<code>a/b</code> a grandchild, <code>**</code> the helper and everything below. <code>tool</code> and <code>arg</code>
+are as in §2.
+</li>
+<li><strong>Values are resolved at the call site.</strong> <code>Literal</code> is what the parent’s
+model wrote. <code>Param</code> names a parameter of the <em>calling</em> agent and is
+resolved against its <code>ctxParams</code> when the call is made (lexical, as in §7);
+secrecy travels with the value. The parent’s model routes a token it has
+never seen. <code>with</code> fills the helper’s parameters as in §7, and cannot
+refill one that the <code>extraAgents</code> entry already fills.
+</li>
+<li><strong>How they travel.</strong> <code>ToolExecutionContext</code> gains
+<code>ctxInheritedBindings :: [ScopedBinding]</code>, a resolved binding plus the
+remaining agent path. <code>runSubAgent</code> (<code>OneShotTool.hs:191</code>):
+<ol>
+<li>takes the caller’s inherited bindings, re-rooted at the helper, and adds
+the ones from this call;
+</li>
+<li>applies those addressed to the helper itself, wrapping the helper’s
+registrations with <code>applyBindings</code> for this call only. The loaded
+toolboxes stay shared: no script is re-described, no MCP server
+restarted;
+</li>
+<li>puts the rest in the helper’s context, from where step 1 picks them up
+when the helper prompts <em>its</em> helpers.
+The non-secret part goes in <code>ToolExecutionContextSnapshot</code>, like
+parameters.
+</li>
+</ol>
+</li>
+<li><strong>The chain composes, and only narrows.</strong> Every agent on the way may add
+bindings for what is below it. It can only name arguments that are still
+open from its position, which is all <code>describe_agent</code> shows it. If a
+model names an argument that an ancestor already bound (it cannot know
+about it, so this is a hallucination), the ancestor’s value stays, the new
+binding is dropped, and a trace is emitted; the call goes on (D8).
+</li>
+<li><strong>Errors the parent’s model can fix are told to it</strong>: unknown agent path,
+no tool matching the glob, no such open argument, wrong value type, a
+<code>narrowable: false</code> target. The call fails before the helper runs, with
+a message that names the open arguments, so one retry suffices.
+</li>
+<li><strong>Literals bound to <code>env</code>-mode arguments are allowed.</strong> Nothing makes a
+model-chosen literal secret.
+</li>
+<li><strong>Knowing parameter names is not knowing arguments.</strong> D8 is about the
+surface of the tools an agent <em>calls</em>. An agent that narrows other agents
+works one level up and sees configuration: names and descriptions, never
+values. An operator who does not want even that pre-binds the argument in
+the helper’s file: bound arguments are not shown.
+</li>
+<li><strong>Recovery.</strong> The bindings of a call are in the parent’s history, as the
+arguments of its <code>prompt_agent_*</code> call, so a resumed or forked (§5.2)
+parent re-issues them as they were; <code>Param</code> values resolve against the
+current values, which is the intent after a fork.
+</li>
+<li><strong>Tool cache.</strong> Inherited non-secret bindings enter the helper’s cache
+keys as in §6; any secret one disables caching for the calls it touches.
+</li>
+</ul>
+<h5 id="84-naming-a-narrowing-optional-convenience">8.4 Naming a narrowing (optional convenience)</h5>
+<p>Repeating the same <code>bindings</code> on ten prompts costs tokens and invites
+inconsistency. <code>derive_agent {from, slug, bindings, with}</code> stores a
+narrowing under a slug for the session, and <code>prompt_agent_&lt;from&gt;</code> accepts
+<code>&quot;as&quot;: &quot;&lt;slug&gt;&quot;</code> to use it. It is sugar over §8.3 and adds no power: the
+stored thing is the same data, the table is a fold over the session’s
+successful <code>derive_agent</code> calls (in the manner of <code>ToolboxSessionState</code>,
+<code>Tools/Activation.hs:75</code>), so nothing new is stored. To be built only if
+§8.3 proves verbose in practice.</p>
+<hr />
+<h3 id="phases">Phases</h3>
+<p>Each phase is shippable and leaves <code>agents-exe check</code> and the test suite
+green.</p>
+<h4 id="phase-1-the-combinator-literals-bash-fixes">Phase 1: the combinator, literals, bash fixes</h4>
+<ul>
+<li><code>System.Agents.Tools.Bindings</code>: <code>Binding</code>, <code>BindingValue</code>, <code>applyBindings</code>,
+schema reduction, argument merge.
+</li>
+<li><code>Bindings</code> field on all toolbox descriptions; <code>Literal</code> only.
+</li>
+<li>Bash: arity in <code>mapArg</code> (G5), <code>env</code> calling mode (G6).
+</li>
+<li>Load-time checks of §2 that do not involve parameters.
+</li>
+<li>Tests: schema reduction; bound wins over an LLM-sent key; glob matching;
+<code>env</code> mode end to end with a fixture script.
+</li>
+</ul>
+<h4 id="phase-2-parameters-at-process-level">Phase 2: parameters at process level</h4>
+<ul>
+<li><code>ParameterDecl</code>, <code>parameters</code> on <code>Agent</code>, <code>Param</code> binding values.
+</li>
+<li><code>ctxParams</code>, <code>ParamValue</code> with redaction, <code>buildContext</code> wiring.
+</li>
+<li><code>--set</code>, <code>--set-json</code>, <code>--params-file</code>, <code>--pin</code>, <code>--pin-json</code>;
+<code>Props.processParams</code>; defaults
+through <code>resolveSecretSource</code>.
+</li>
+<li><code>check</code>, <code>describe</code>, <code>describe-tool</code>, <code>tool-call</code> output.
+</li>
+<li>Bash argv redaction (G7) and the secret-in-argv check.
+</li>
+<li>Cache key (G8).
+</li>
+<li>MCP <code>env</code> (G4).
+</li>
+</ul>
+<p>After this phase the docker use case works with one tenant per container.</p>
+<h4 id="phase-3-http-toolboxes">Phase 3: HTTP toolboxes</h4>
+<ul>
+<li><code>ParamSource</code> in <code>SecretSource</code>, per-request resolution (G3).
+</li>
+<li>Same for PostgREST.
+</li>
+</ul>
+<h4 id="phase-4-session-level-parameters-in-agents-server">Phase 4: session-level parameters in <code>agents-server</code></h4>
+<ul>
+<li><code>params</code> on create / messages / resume / continuations, validation table.
+</li>
+<li><code>params</code> column and migration (SQLite and Postgres), <code>smParams</code>.
+</li>
+<li>Secrets in <code>LiveSession</code> only; <code>tecsParams</code>; recovery behaviour.
+</li>
+<li>Message scope: per-run values, cleared at run end.
+</li>
+<li><code>seal</code>, session tokens, <code>PUT /v1/sessions/:id/params</code>,
+<code>409 params_required</code> (§5.1).
+</li>
+<li><code>fork</code> on session creation and <code>session start --fork</code> (§5.2).
+</li>
+<li>Pinned parameters refused with <code>403</code>; <code>pinned</code> in <code>agentView</code>.
+</li>
+<li><code>agentView</code>, session view, OpenAPI document, <code>documentation/agents-server.md</code>.
+</li>
+<li>Chat page form.
+</li>
+</ul>
+<p>After this phase one container serves many tenants.</p>
+<h4 id="phase-5-sub-agents-and-mcp-over-http">Phase 5: sub-agents and MCP over HTTP</h4>
+<ul>
+<li><code>with</code> on <code>ExtraAgentRef</code>, evaluation in <code>runSubAgent</code>, checks (G9).
+</li>
+<li><code>Agents-Param-*</code> headers and <code>_meta</code> on <code>/mcp</code>.
+</li>
+</ul>
+<h4 id="phase-6-narrowing-helpers">Phase 6: narrowing helpers</h4>
+<ul>
+<li>Agent-level <code>bindings</code> (§8.1), with the still-open check.
+</li>
+<li><code>describe_agent</code> (§8.2), recursive, position-aware; <code>narrowable</code>.
+</li>
+<li><code>bindings</code> and <code>with</code> on <code>prompt_agent_&lt;slug&gt;</code>; <code>ctxInheritedBindings</code>;
+per-call wrapping in <code>runSubAgent</code>; snapshot; cache keys (§8.3).
+</li>
+<li>Tests on a three-level chain: root binds for the grandchild; the middle
+agent narrows further; the middle agent cannot rebind; <code>describe_agent</code>
+from the middle does not show what the root bound; resume and fork.
+</li>
+<li>Later, if needed: <code>derive_agent</code> (§8.4).
+</li>
+</ul>
+<p>Depends on Phases 1, 2 and 5 (<code>with</code>).</p>
+<h4 id="phase-7-optional-expose">Phase 7 (optional): <code>Expose</code></h4>
+<p><code>whenUnbound: &quot;expose&quot;</code> puts the argument back in the schema when the
+parameter is unbound for this session. It makes the tool list a function of
+the session, which the progressive-disclosure machinery
+(<code>Combinators/ProgressiveDisclosure.hs</code>) already does for activation, so the
+hook exists. Deferred until a real use shows up.</p>
+<hr />
+<h3 id="decisions">Decisions</h3>
+<p><strong>D1. Callers fill parameters, not tool arguments.</strong> The author decides what
+is bindable. Otherwise any client of <code>agents-server</code> could pin any argument
+of any tool, and every toolbox would need its own allow-list.</p>
+<p><strong>D2. Values travel in the call context, not in the registration.</strong> Toolboxes
+load once per tree and are shared (G2). Rebuilding a toolbox per session
+would mean re-running <code>describe</code> on every script and restarting MCP servers.</p>
+<p><strong>D3. The schema is static.</strong> A bound argument is hidden whether or not a
+value is present; a missing value is an error, not a fallback to the LLM.
+It keeps the tool list identical across sessions (prompt caching, simpler
+reasoning about what the model can do). <code>Expose</code> is the opt-in exception,
+postponed.</p>
+<p><strong>D4. <code>env</code> is a calling mode, not a second kind of binding.</strong> One concept
+(arguments) with a transport choice, rather than “argument bindings” plus
+“environment bindings” with different rules. The exception is the MCP server
+process environment, which is not a tool argument at all.</p>
+<p><strong>D5. Secrets are never persisted.</strong> The cost is that clients re-send them
+after eviction or restart. The alternative needs key management, and an
+<code>agents-server</code> database that holds customer tokens is a much more sensitive
+asset than one that does not.</p>
+<p><strong>D6. Sub-agent passing is explicit.</strong> Dynamic scoping (“the child inherits
+every parameter with the same name”) is shorter to write and leaks a token
+to any child that happens to declare the same name.</p>
+<p><strong>D7. No templating.</strong> <code>${tenant}</code> in a system prompt or a path is tempting
+and is a different feature: it changes the agent definition per session and
+puts values in front of the model. Parameters here are deliberately
+invisible to the LLM.</p>
+<p><strong>D8. The model does not know.</strong> A partially applied argument leaves no
+mark in what the model sees: not in the schema, not as a “pre-set” note in
+the description, not in error messages. The purpose of the feature is to
+shrink the local reasoning a call requires; telling the model about a key it
+cannot use, or a tenant it cannot choose, adds reasoning back and invites it
+to try. Consequently, if the LLM sends a bound key anyway, the call proceeds
+with the bound value and only a trace is emitted; and the error for an
+unbound parameter at call time goes to the operator’s trace, while the model
+gets a generic “tool unavailable” failure.</p>
+<p><strong>D9. Pinning is an operator flag, not an agent-file field.</strong> The agent file
+says what <em>may</em> vary per session; the deployment says what <em>does</em>. The same
+file then serves both the shared server and the one-tenant container.</p>
+<p><strong>D10. Message scope means one run.</strong> Not one HTTP request, not one LLM
+turn: a run is the unit after which control goes back to the client, which
+is the only moment a client can supply a fresh token.</p>
+<p><strong>D11. Narrowing composes along the chain, and only narrows.</strong> Each agent
+may bind what is still open below it; none may rebind. Whatever a narrowed
+helper can do, the un-narrowed one could, so giving this power to a model
+cannot widen anything, which is why it is on by default (<code>narrowable: false</code>
+opts out).</p>
+<p><strong>D12. Bindings ride on the call, not on a new kind of agent.</strong> The helper
+interface gains discovery and a <code>bindings</code> argument, rather than a registry
+of derived agents. A call is self-describing, lives in the parent’s history,
+and needs no lifetime rules. Naming a narrowing (§8.4) is sugar.</p>
+<p><strong>D13. Session tokens belong to this spec.</strong> They look like a separate
+authentication feature, but without them S2 either proxies everything
+through the backend or hands the browser a token that can re-parameterise
+the session, which undoes the point of binding.</p>
+<p><strong>D14. An expired credential is a failed run, and the remedy is a fork.</strong>
+No mid-run refresh, no “blocked on credential” state. <code>PUT …/params</code> covers
+rotation <em>between</em> runs, and a fork with a fresh value covers a run that
+died. Forking is cheap to specify precisely because bound values are absent
+from the history.</p>
+<p><strong>D15. No saved narrowings for now.</strong> It is kept possible, not planned: a
+narrowing is plain serializable data (helper slug, scoped <code>bindings</code>,
+<code>with</code>) and has the shape of an agent-level <code>bindings</code> list (§8.1), so a
+later “save this helper” writes that data to the agent store and resolves
+the reference at load. Nothing here should tie a narrowing to the in-memory
+identity of a session. It stays secondary to a good experience for the user
+and for the model.</p>
+<h3 id="nice-to-have-later">Nice to have, later</h3>
+<ul>
+<li>Saving a narrowed helper as a stored agent (D15).
+</li>
+<li><code>derive_agent</code>, naming a narrowing within a session (§8.4).
+</li>
+<li><code>whenUnbound: &quot;expose&quot;</code> (Phase 7).
+</li>
+</ul>
+<h3 id="related-docs">Related docs</h3>
+<ul>
+<li><code>documentation/binary-tool.md</code>: bash tool protocol, to be extended with <code>env</code> mode.
+</li>
+<li><code>documentation/tools.md</code>, <code>documentation/advanced-configuration.md</code>: toolbox configuration.
+</li>
+<li><code>documentation/agents-server.md</code>: HTTP API.
+</li>
+<li><code>todos/web-server-embedding.md</code>: the host, the runner, session metadata.
+</li>
+<li><code>todo</code>: “partial-application of tool values”.
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

@@ -1,0 +1,48 @@
+```html
+<p align="center">
+  <img src="/images/logo-01.png" alt="agents-exe" width="360">
+</p>
+```
+
+# agents-exe
+
+A handy LLM-agent tool, with a variety of calling and configuration modes so that the LLM adapts to your workflow rather than the opposite. An agent is a JSON file: an LLM endpoint and model, a system prompt, a directory of command-line tools, MCP servers, and helper agents it can prompt in turn. The same agent runs as a one-shot command, in a terminal UI, as an MCP server, or behind an HTTP server that keeps sessions across restarts.
+
+```sh
+agents-exe init                                              # write an agent.json and its tools directory
+agents-exe run --agent-file agent.json --prompt "Hello!"     # one shot
+agents-exe tui --agent-file agent.json                       # interactive terminal UI
+agents-exe serve --agent-file agent.json                     # sessions over HTTP, durable, with a chat page
+agents-exe mcp-server --agent-file agent.json                # every agent as an MCP tool
+```
+
+Tools are plain executables that describe themselves, MCP servers, or OpenAPI operations; helper agents are exposed to the model as functions the same way, so a root agent delegates to specialised ones and their results come back as tool results. Sessions are durable: a run can stop on a tool call that needs an external answer, a background call, or a message from another agent, and be resumed later, in the same process or another one.
+
+The code is on GitHub at [`lucasdicioccio/agents-exe`](https://github.com/lucasdicioccio/agents-exe ). It is a Haskell cabal project: the `agents` library, the `agents-exe` and `agents-server` executables, and `agq`, a small query tool over stored sessions.
+
+## Explore
+
+- [**Getting started**](/getting-started.html ): build it, write a first agent, store an API key, and run it in each mode.
+
+- [**Architecture**](/docs-architecture.html ): the layers, the OS model underneath (entities, resources, conversations), and where a session lives.
+
+- [**Command reference**](/commands.html ): the global options and every `agents-exe` command, one entry each.
+
+- [**Tools**](/docs-tools.html ) and [**executable tools**](/docs-binary-tool.html ): how a program describes itself to the agent, and how MCP servers and OpenAPI documents become tools.
+
+- [**Parameters, bindings and narrowing**](/docs-parameters-and-bindings.html ): pre-bind tool arguments, declare parameters an operator or a client supplies, and hand a narrowed helper to a sub-agent.
+
+- [**agents-server**](/docs-agents-server.html ): agents over HTTP, durable sessions, event streams, the chat page, MCP over HTTP.
+
+- [**Sessions**](/docs-sessions.html ) and [**asynchronous tool calls**](/docs-async-tool-calls.html ): turns, deferred and background calls, resuming.
+
+- [**The TUI**](/docs-tui.html ): the terminal UI, its keys and its views.
+
+- [**Docs**](/docs.html ) and [**Specs**](/specs.html ): every guide and reference, and the design documents with what of each has shipped.
+
+
+```html
+<script src="js/topicgraph.js"></script>
+```
+
+

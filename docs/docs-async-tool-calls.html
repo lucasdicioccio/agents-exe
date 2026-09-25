@@ -1,0 +1,163 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Asynchronous Tool Calls</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Asynchronous Tool Calls"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Asynchronous Tool Calls"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html"><meta property="og:description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/docs-async-tool-calls.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-async-tool-calls.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,","headline":"Asynchronous Tool Calls","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Asynchronous Tool Calls</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 767 words, 7 code snippets, 2 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-durable-workflows-howto.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">9/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-ai-assistant-guidelines.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/async-tool-calls.md"><code>documentation/async-tool-calls.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="asynchronous-tool-calls">Asynchronous Tool Calls</h2>
+<p>By default an agent runs every tool call of a turn one after another and only
+answers the LLM once all of them are done. In asynchronous mode, calls run
+concurrently in the background, the LLM can be handed a partial answer while
+they run, and it can ask about, wait for, or cancel them.</p>
+<p>This is useful when a turn issues several slow calls (builds, test runs, HTTP
+requests), and when you want the model (or the user) to keep working while a
+long call finishes.</p>
+<p>For deferred calls completed by an <em>external</em> worker (rather than in this
+process), see <a href="/agents-exe/docs-durable-workflows-howto.html">durable-workflows-howto.md</a>.</p>
+<h3 id="enabling-it">Enabling it</h3>
+<p>Async execution is configured per agent in the agent JSON:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-agent&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;executionMode&quot;</span><span class="fu">:</span> <span class="st">&quot;asynchronous&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;asyncYieldStrategy&quot;</span><span class="fu">:</span> <span class="st">&quot;yieldOnAnyProgress&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;maxConcurrency&quot;</span><span class="fu">:</span> <span class="dv">4</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;asyncCallTimeoutSeconds&quot;</span><span class="fu">:</span> <span class="dv">900</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;toolCallPolicyConfig&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runSync&quot;</span><span class="fu">},</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;build_project&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runAsync&quot;</span><span class="fu">}}</span><span class="ot">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;run_tests&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runAsync&quot;</span><span class="fu">}}</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><table>
+<tr><th>Field</th><th>Meaning</th><th>Default</th></tr>
+<tr><td><code>executionMode</code></td><td><code>synchronous</code> or <code>asynchronous</code></td><td><code>synchronous</code></td></tr>
+<tr><td><code>toolCallPolicyConfig</code></td><td>Which tools run in the background (<code>runAsync</code>), inline (<code>runSync</code>), isolated (<code>runIsolated</code>), or deferred to an external worker (<code>defer</code>)</td><td>everything <code>runSync</code></td></tr>
+<tr><td><code>asyncYieldStrategy</code></td><td>When a step hands control back to the LLM while calls run</td><td><code>yieldWhenAllDone</code></td></tr>
+<tr><td><code>maxConcurrency</code></td><td>Calls running at once for this agent</td><td>4</td></tr>
+<tr><td><code>asyncCallTimeoutSeconds</code></td><td>Give up on a call that runs this long</td><td>no limit</td></tr>
+</table>
+<p>Yield strategies:</p>
+<table>
+<tr><th>Value</th><th>Behaviour</th></tr>
+<tr><td><code>yieldWhenAllDone</code></td><td>Wait for every call of the turn (like synchronous mode, but concurrent)</td></tr>
+<tr><td><code>yieldOnAnyProgress</code></td><td>Answer the LLM as soon as one call finishes</td></tr>
+<tr><td><code>{"tag": "yieldOnTimeout", "milliseconds": 500}</code></td><td>Answer after the given delay, finished or not</td></tr>
+</table>
+<p>Both <code>executionMode</code> and <code>toolCallPolicyConfig</code> are needed: the mode enables
+the machinery, the policy decides which calls actually go to the background.</p>
+<p>The settings apply everywhere an agent runs: <code>run</code> (one-shot), the TUI, the
+<code>session</code> commands, and agents called as tools by other agents.</p>
+<h3 id="what-the-llm-sees">What the LLM sees</h3>
+<p>A call that has not finished when the LLM is asked for its next completion
+gets a placeholder tool message instead of a result:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;running&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;This tool call has not finished yet. Its result will be delivered in a later message. Use get-tool-call-status with this tool_call_id to inspect it, or cancel-tool-call to stop it.&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;call_abc&quot;</span><span class="fu">}</span></span></code></pre></div></div><p>Every tool call always gets exactly one tool message, as OpenAI-compatible
+APIs require.</p>
+<p>When the call finishes, its result is delivered in the next user message,
+once, as a notice:</p>
+<pre><code>Background tool calls finished since their placeholder responses:
+
+tool_call_id call_abc (run_tests) completed:
+42 tests passed
+</code></pre>
+<p>If the LLM ends its turn while calls are still running, the session does not
+stop: it waits for the results and sends them.</p>
+<h3 id="tool-call-capabilities">Tool-call capabilities</h3>
+<p>Enable these in the System Toolbox so the model can manage its own background
+calls:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;builtinToolboxes&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;SystemToolbox&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>   <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;Name&quot;</span><span class="fu">:</span> <span class="st">&quot;system&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;Description&quot;</span><span class="fu">:</span> <span class="st">&quot;System context and background tool calls&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;Capabilities&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;get-tool-call-status&quot;</span><span class="ot">,</span> <span class="st">&quot;list-running-tool-calls&quot;</span><span class="ot">,</span> <span class="st">&quot;cancel-tool-call&quot;</span><span class="ot">]</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>   <span class="fu">}}</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span><span class="fu">}</span></span></code></pre></div></div><table>
+<tr><th>Capability</th><th>Use</th></tr>
+<tr><td><code>list-running-tool-calls</code></td><td>The calls still running in this session</td></tr>
+<tr><td><code>get-tool-call-status</code></td><td>Status, progress and (once final) result of a call; can block until it finishes with <code>wait_for_completion</code></td></tr>
+<tr><td><code>cancel-tool-call</code></td><td>Interrupt a running call</td></tr>
+</table>
+<p>Calls are addressed by the <code>tool_call_id</code> the model itself used (e.g.
+<code>call_abc</code>); the internal UUID also works.</p>
+<p><code>get-tool-call-status</code> reports <code>orphaned</code> for a call that was running when its
+process went away (e.g. the session was saved and reloaded elsewhere). Such a
+call can never finish, so the stepper resolves it as failed rather than
+waiting for it.</p>
+<h3 id="progress">Progress</h3>
+<p>Tools that run in the background can report progress, which the model reads
+through <code>get-tool-call-status</code> and the TUI shows next to the running call.</p>
+<ul>
+<li><strong>Bash tools</strong> report their latest output line, at most twice a second:
+<code>{&quot;stream&quot;: &quot;stdout&quot;, &quot;line&quot;: &quot;compiling module 12/40&quot;, &quot;lines&quot;: 12, &quot;bytes&quot;: 480}</code>.
+</li>
+<li><strong>Agents called as tools</strong> report each step of the sub-agent:
+<code>{&quot;message&quot;: &quot;sub-agent calling read_file&quot;, &quot;turns&quot;: 7}</code>. This applies to a
+<code>prompt_agent_&lt;slug&gt;</code> call that still runs in-tool (narrowed with
+<code>bindings</code>/<code>with</code>/<code>as</code>, or outside the runner). Under the runner, a
+sub-agent call with no narrowing runs as its own session instead
+(<code>todos/os-as-standalone-server.md</code>, Phase 5): its progress is that
+session’s own <code>session.updated</code>/<code>text.delta</code>/<code>tool.*</code> events, not this
+per-step callback.
+</li>
+<li><strong>Your own tools</strong> can report anything JSON through <code>ctxProgressCallback</code> in
+the <code>ToolExecutionContext</code>.
+</li>
+</ul>
+<p>MCP and OpenAPI tools do not report progress yet. An OpenAPI call waits for
+one complete HTTP response, so there is nothing to stream. MCP <em>does</em> define
+progress notifications (<code>ProgressNotification</code> in <code>System.Agents.MCP.Base</code>),
+but the client currently ignores them; forwarding them to
+<code>ctxProgressCallback</code> would make MCP tools report progress like bash tools.</p>
+<p>The 50 most recent progress entries per call are kept.</p>
+<h3 id="cancelling">Cancelling</h3>
+<p><code>cancel-tool-call</code> interrupts the call’s thread. A bash tool runs its script
+in its own process group, so cancelling kills the script <em>and</em> whatever it
+started. The same happens when a call exceeds <code>asyncCallTimeoutSeconds</code>.</p>
+<p>Background calls are cancelled when the agent that owns them finishes or
+fails, so nothing keeps running (or keeps a subprocess alive) after a run.</p>
+<h3 id="in-the-tui">In the TUI</h3>
+<p>Running calls appear under the turn that issued them, with their latest
+progress:</p>
+<pre><code>[Partial] &gt; run the tests and the linter
+  ✓ lint (call_1): completed
+  ⏳ run_tests (call_2): running: 128 tests passed
+</code></pre>
+<p>A line above the conversation lists what is still running. While background
+calls run and the LLM has nothing to do, the TUI accepts input, so you can
+keep talking; whichever comes first — your message or the results — is sent
+to the model.</p>
+<h3 id="in-one-shot-runs">In one-shot runs</h3>
+<p><code>agents-exe run</code> waits for background calls: they cannot outlive the process.</p>
+<p>It stops early only when a turn waits on <em>deferred</em> calls, which an external
+worker has to complete. It then prints a JSON report and stores the session so
+it can be continued:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;paused&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;reason&quot;</span><span class="fu">:</span> <span class="st">&quot;waiting for deferred tool calls&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;session_id&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;deferred_calls&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;approve_deploy&quot;</span><span class="fu">,</span> <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;call_9&quot;</span><span class="fu">,</span> <span class="dt">&quot;continuation_token&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}</span></span></code></pre></div></div><p>Continue it with <code>agents-exe session complete</code> and <code>agents-exe session resume</code>
+(see <a href="/agents-exe/docs-durable-workflows-howto.html">durable-workflows-howto.md</a>).</p>
+<h3 id="session-files">Session files</h3>
+<p>Partial turns are stored in the session, with each call’s state. <code>session-print</code>
+shows them:</p>
+<pre><code>## ⏸️ Step 4: Partial Turn (in progress)
+_(Some tool calls had not finished when this turn was sent)_
+
+### ⏳ Tool Call Status
+
+- `lint` (`call_1`): completed
+- `run_tests` (`call_2`): running (placeholder sent)
+</code></pre>
+<h3 id="limits">Limits</h3>
+<ul>
+<li>Background calls live in the process that started them. A session reloaded
+elsewhere reports them as orphaned.
+</li>
+<li>A pause/resume in the same process keeps the running calls only if the agent
+was built with <code>withAsyncEngine</code>; <code>runAsync</code> does not hand the engine back.
+</li>
+<li>If the model reads a result with <code>get-tool-call-status</code>, the delivery notice
+repeats it once.
+</li>
+<li><code>maxConcurrency</code> is per agent. To cap several agents together, share one
+limit built with <code>newAsyncConcurrencyLimit</code> between their engines.
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

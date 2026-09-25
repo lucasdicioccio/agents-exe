@@ -1,0 +1,1718 @@
+_Generated from [`documentation/cli-commands.md`](https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/cli-commands.md ), the repository is the canonical source and may be ahead of this page._
+
+# CLI Reference
+
+Complete reference for the Agents CLI commands and options.
+
+## Global Options
+
+These options apply to all commands:
+
+```bash
+agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS]
+```
+
+```html
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--api-keys FILE</code></td><td><code>~/.config/agents-exe/secret-keys</code></td><td>Path to API keys JSON file</td></tr>
+<tr><td><code>--agent-file FILE</code></td><td>(from config)</td><td>Agent configuration file(s)</td></tr>
+<tr><td><code>--agent SLUG</code></td><td>-</td><td>Select agent by slug instead of file path</td></tr>
+<tr><td><code>--log-file FILE</code></td><td><code>agents-logfile</code></td><td>Raw log output file</td></tr>
+<tr><td><code>--log-http URL</code></td><td>-</td><td>HTTP endpoint for JSON logs</td></tr>
+<tr><td><code>--log-json-file FILE</code></td><td>-</td><td>Local JSON log file</td></tr>
+</table>
+```
+
+## Commands
+
+### check
+
+Validate agent configuration and display loaded tools.
+
+```bash
+agents-exe check [--tools MODE]
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--tools MODE</code></td><td>Tool display mode: <code>none</code>, <code>list</code>, <code>agents-exe</code>, <code>openai</code> (default: <code>none</code>)</td></tr>
+</table>
+```
+
+**Output:**
+
+```
+my-agent: A helpful file assistant (12 tools)
+```
+
+**Exit codes:**
+
+- `0` - All agents loaded successfully
+
+- `1` - Configuration errors found
+
+
+**Example:**
+
+```bash
+# Check default agents
+agents-exe check
+
+# Check specific agent
+agents-exe check --agent-file ./custom-agent.json
+
+# List tools in agents-exe format
+agents-exe check --tools agents-exe
+```
+
+### run
+
+Execute a one-shot agent conversation.
+
+```bash
+agents-exe run [OPTIONS]
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--session-file FILE</code></td><td>Resume from existing session</td></tr>
+<tr><td><code>--thinking TARGET</code></td><td>Output thinking: <code>none</code>, <code>stdout</code>, <code>stderr</code> (default: <code>none</code>)</td></tr>
+<tr><td><code>-m, --media MEDIA</code></td><td>Attach media file (can be specified multiple times)</td></tr>
+<tr><td><code>--prompt TEXT</code></td><td>Initial prompt text</td></tr>
+<tr><td><code>--file FILE</code></td><td>Read prompt from file</td></tr>
+<tr><td><code>--shell COMMAND</code></td><td>Use shell command output as prompt</td></tr>
+<tr><td><code>--alias NAME</code></td><td>Use predefined prompt alias</td></tr>
+<tr><td><code>--sep4 TEXT</code></td><td>Short separator (4 chars)</td></tr>
+<tr><td><code>--sep40 TEXT</code></td><td>Long separator (40 chars)</td></tr>
+<tr><td><code>--session-xs FILE</code></td><td>Inject session at minimal verbosity</td></tr>
+<tr><td><code>--session-s FILE</code></td><td>Inject session at low verbosity</td></tr>
+<tr><td><code>--session-m FILE</code></td><td>Inject session at medium verbosity</td></tr>
+<tr><td><code>--session-l FILE</code></td><td>Inject session at high verbosity</td></tr>
+<tr><td><code>--session-xl FILE</code></td><td>Inject session at maximum verbosity</td></tr>
+</table>
+```
+
+**Asynchronous tool calls:**
+
+If the agent file enables asynchronous execution (see [async-tool-calls.md](/docs-async-tool-calls.html )), tool calls run concurrently and the model can be answered while they run. `run` still waits for them, since they cannot outlive the process.
+
+It stops early only when a turn waits on _deferred_ calls, which an external worker completes. It then prints a JSON report and stores the session:
+
+```json
+{"status": "paused",
+ "reason": "waiting for deferred tool calls",
+ "session_id": "…",
+ "deferred_calls": [{"tool": "approve_deploy", "tool_call_id": "call_9", "continuation_token": "…"}]}
+```
+
+Continue it with `session complete` and `session resume`.
+
+**Media Attachment Format:**
+
+The `-m, --media` option accepts file paths with optional MIME type:
+
+```bash
+# Auto-detect MIME type from extension
+agents-exe run -m /path/to/image.png --prompt "Describe this image"
+
+# Explicit MIME type (semicolon separator)
+agents-exe run -m "image/jpeg;/path/to/photo.jpg" --prompt "Analyze this photo"
+```
+
+**Supported Media Types:**
+
+```html
+<table>
+<tr><th>Category</th><th>Extensions</th><th>MIME Types</th></tr>
+<tr><td><strong>Images</strong></td><td><code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.gif</code>, <code>.webp</code>, <code>.svg</code></td><td><code>image/png</code>, <code>image/jpeg</code>, <code>image/gif</code>, <code>image/webp</code>, <code>image/svg+xml</code></td></tr>
+<tr><td><strong>Documents</strong></td><td><code>.pdf</code>, <code>.txt</code>, <code>.md</code>, <code>.json</code>, <code>.xml</code></td><td><code>application/pdf</code>, <code>text/plain</code>, <code>text/markdown</code>, <code>application/json</code>, <code>application/xml</code></td></tr>
+<tr><td><strong>Audio</strong></td><td><code>.mp3</code>, <code>.wav</code>, <code>.ogg</code>, <code>.aac</code>, <code>.flac</code></td><td><code>audio/mp3</code>, <code>audio/wav</code>, <code>audio/ogg</code>, <code>audio/aac</code>, <code>audio/flac</code></td></tr>
+<tr><td><strong>Video</strong></td><td><code>.mp4</code>, <code>.webm</code>, <code>.mov</code>, <code>.avi</code></td><td><code>video/mp4</code>, <code>video/webm</code>, <code>video/quicktime</code>, <code>video/avi</code></td></tr>
+</table>
+```
+
+**Size Limit:** 50MB per file
+
+**Examples:**
+
+```bash
+# Simple prompt
+agents-exe run --agent-file agent.json --prompt "Hello!"
+
+# Read from file
+agents-exe run --agent-file agent.json --file prompt.txt
+
+# Shell command output as prompt
+agents-exe run --agent-file agent.json --shell "git diff"
+
+# Resume session
+agents-exe run --agent-file agent.json --session-file session.json
+
+# Use alias
+agents-exe run --agent-file agent.json --alias code-review --file changes.patch
+
+# Multi-part prompt with separators
+agents-exe run \
+  --prompt "Review this code:" \
+  --sep4 "----" \
+  --file code.py \
+  --sep40 "========================================" \
+  --prompt "What improvements can be made?"
+
+# Inject previous session at medium verbosity
+agents-exe run \
+  --agent-file agent.json \
+  --session-m previous-session.json \
+  --prompt "Continue from where we left off"
+
+# Attach single image
+agents-exe run \
+  --agent-file vision-agent.json \
+  -m ./screenshot.png \
+  --prompt "What do you see in this image?"
+
+# Attach multiple images
+agents-exe run \
+  --agent-file vision-agent.json \
+  -m ./image1.png \
+  -m ./image2.jpg \
+  -m "image/gif;./animation.gif" \
+  --prompt "Compare these images"
+
+# Attach document for analysis
+agents-exe run \
+  --agent-file document-agent.json \
+  -m ./report.pdf \
+  --prompt "Summarize the key findings"
+
+# Combine media with text from file
+agents-exe run \
+  --agent-file multimodal-agent.json \
+  --prompt "Analyze this diagram and code:" \
+  -m ./diagram.png \
+  --sep4 "----" \
+  --file ./source-code.py
+```
+
+### tui
+
+Start the interactive Terminal UI.
+
+```bash
+agents-exe tui [--agent-file FILE...] [--keymap FILE] [--db PATH]
+agents-exe tui --attach URL|PATH [--token TOKEN | --token-file FILE] [--keymap FILE]
+```
+
+The TUI is a client of an in-process `SessionRunner` it starts over the same `Host` config `agents-exe serve` uses, or, with `--attach`, of a running `agents-exe serve`/`agents-server` (see [tui.md](/docs-tui.html#architecture ) and [agents-server.md](/docs-agents-server.html#attaching-the-tui )).
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--keymap FILE</code>, <code>-k FILE</code></td><td>none</td><td>Path to a keymap configuration JSON file</td></tr>
+<tr><td><code>--db PATH</code></td><td>next to the resolved sessions directory</td><td>SQLite database for the TUI's embedded session runner. Old <code>conv.&lt;uuid&gt;.json</code> history under the resolved sessions directories stays readable as a read-only fallback. Not with <code>--attach</code>.</td></tr>
+<tr><td><code>--attach URL\|PATH</code></td><td>none</td><td>Drive a running server instead of an embedded runner. <code>http://HOST:PORT</code> (or <code>https://</code>, optionally with a path prefix), <code>unix:///path/to.sock</code> for <code>serve --socket</code>, or a bare socket path (anything containing a <code>/</code> or ending in <code>.sock</code>). Nothing is loaded locally: agents, API keys and sessions are the server's.</td></tr>
+<tr><td><code>--token TOKEN</code></td><td>none</td><td>Bearer token for <code>--attach</code>, when the server runs with <code>--auth-tokens</code>.</td></tr>
+<tr><td><code>--token-file FILE</code></td><td>none</td><td>The same, read from a file (surrounding whitespace ignored); keeps the token out of the process list.</td></tr>
+</table>
+```
+
+**Features:**
+
+- Real-time streaming responses
+
+- Multiple agent support (Tab to switch)
+
+- Tool call visualization
+
+- Session persistence
+
+- Turn navigation and forking
+
+- Message queue management
+
+- File attachments (Ctrl+F)
+
+- Clipboard paste support (Ctrl+V)
+
+
+**Keyboard Shortcuts:**
+
+- `Tab` / `Shift+Tab` - Switch between agents
+
+- `Enter` - Send message
+
+- `Ctrl+C` - Quit
+
+- `Up/Down` - Scroll history
+
+- `Ctrl+[` / `Ctrl+]` - Previous/Next tab
+
+- `Ctrl+E` - Pause/unpause conversation
+
+- `Ctrl+D` (when paused) - Clear queued messages
+
+- `Ctrl+F` - Attach file
+
+- `Ctrl+Shift+F` - Clear all attachments
+
+- `Ctrl+V` - Paste from clipboard
+
+
+**Examples:**
+
+```bash
+# Single agent TUI
+agents-exe tui --agent-file agent.json
+
+# Multi-agent TUI
+agents-exe tui \
+  --agent-file coder.json \
+  --agent-file reviewer.json \
+  --agent-file tester.json
+
+# Attach to a server started elsewhere with `agents-exe serve`
+agents-exe tui --attach http://127.0.0.1:8080
+agents-exe tui --attach unix:///run/agents/agents.sock
+agents-exe tui --attach https://agents.example --token-file ~/.agents-token
+```
+
+### mcp-server
+
+Start an MCP (Model Context Protocol) server.
+
+```bash
+agents-exe mcp-server [--agent-file FILE...]
+```
+
+**Description:** Exposes loaded agents as MCP tools for integration with MCP clients like Claude Desktop.
+
+**Examples:**
+
+```bash
+# Single agent MCP server
+agents-exe mcp-server --agent-file agent.json
+
+# Multi-agent MCP server
+agents-exe mcp-server \
+  --agent-file research-agent.json \
+  --agent-file writing-agent.json
+```
+
+### echo-prompt
+
+Process and echo the prompt without calling the LLM.
+
+```bash
+agents-exe echo-prompt [OPTIONS]
+```
+
+**Options:** Same as `run` command.
+
+**Use case:** Verify prompt construction before sending to LLM.
+
+**Example:**
+
+```bash
+agents-exe echo-prompt \
+  --prompt "Context:" \
+  --file context.txt \
+  --prompt "Question:" \
+  --file question.txt
+```
+
+### session-print
+
+Display a session file in markdown format.
+
+```bash
+agents-exe session-print [OPTIONS] SESSIONFILE
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--show-tool-call-results MODE</code></td><td>Display mode: <code>hidden</code>, <code>shown</code>, <code>elided</code> (default: <code>hidden</code>)</td></tr>
+<tr><td><code>--show-tool-call-arguments MODE</code></td><td>Display mode: <code>hidden</code>, <code>shown</code>, <code>elided</code> (default: <code>hidden</code>)</td></tr>
+<tr><td><code>--n-turns N</code></td><td>Limit to last N turns</td></tr>
+<tr><td><code>--repeat-system-prompt</code></td><td>Show system prompt each turn</td></tr>
+<tr><td><code>--repeat-tools</code></td><td>Show available tools each turn</td></tr>
+<tr><td><code>--antichronological</code></td><td>Newest first (default: oldest first)</td></tr>
+<tr><td><code>--no-funny-stamp</code></td><td>Skip the ASCII art logo</td></tr>
+</table>
+```
+
+**Examples:**
+
+```bash
+# Print full session
+agents-exe session-print session.json
+
+# Print with tool results visible
+agents-exe session-print --show-tool-call-results shown session.json
+
+# Elide long outputs (show first/last 10 lines)
+agents-exe session-print --show-tool-call-results elided session.json
+
+# Last 5 turns only
+agents-exe session-print --n-turns 5 session.json
+
+# Reverse order
+agents-exe session-print --antichronological session.json
+```
+
+### session-edit
+
+Edit a session file (reads JSON from STDIN, writes JSON to STDOUT).
+
+```bash
+agents-exe session-edit [OPTIONS] < input.json > output.json
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--take</code></td><td>Take first N turns (use with <code>--count</code>)</td></tr>
+<tr><td><code>--take-tail</code></td><td>Take last N turns (use with <code>--count</code>)</td></tr>
+<tr><td><code>--drop</code></td><td>Drop first N turns (use with <code>--count</code>)</td></tr>
+<tr><td><code>--drop-tail</code></td><td>Drop last N turns (use with <code>--count</code>)</td></tr>
+<tr><td><code>--count N</code>, <code>-n N</code></td><td>Number of turns for take/drop operations</td></tr>
+<tr><td><code>--censor-tool-calls</code></td><td>Remove all tool calls</td></tr>
+<tr><td><code>--censor-thinking</code></td><td>Remove all thinking content</td></tr>
+</table>
+```
+
+**Examples:**
+
+```bash
+# Keep only first 10 turns
+agents-exe session-edit --take --count 10 < session.json > trimmed.json
+
+# Keep only last 5 turns
+agents-exe session-edit --take-tail --count 5 < session.json > recent.json
+
+# Remove first 2 turns
+agents-exe session-edit --drop --count 2 < session.json > dropped.json
+
+# Remove all tool calls
+agents-exe session-edit --censor-tool-calls < session.json > no-tools.json
+
+# Remove thinking content
+agents-exe session-edit --censor-thinking < session.json > no-thinking.json
+```
+
+### session-index
+
+Manage the SQLite FTS5 search index for session files.
+
+```bash
+agents-exe session-index [OPTIONS]
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--build</code></td><td>Build the search index from scratch</td></tr>
+<tr><td><code>--update</code></td><td>Incrementally update the search index</td></tr>
+<tr><td><code>--status</code></td><td>Show index status (default)</td></tr>
+<tr><td><code>--clean</code></td><td>Remove the search index</td></tr>
+<tr><td><code>--db-path PATH</code></td><td>Path to search index database (default: <code>.agents-search.db</code>)</td></tr>
+<tr><td><code>--include-tool-outputs</code></td><td>Include tool outputs in the index</td></tr>
+</table>
+```
+
+**Description:** The `session-index` command manages a SQLite FTS5-based search index for fast fuzzy text search across session files. The index uses trigram tokenization to enable fuzzy matching (e.g., "error" matches "errors", "erroring").
+
+**Index Schema:**
+
+- `session_index` - Session metadata cache (path, mtime, agent, turn count)
+
+- `search_content` - FTS5 virtual table with trigram tokenizer
+
+- `tool_index` - Tool call index for filtering by tool name
+
+
+**Examples:**
+
+```bash
+# Build the search index
+agents-exe session-index --build
+
+# Check index status
+agents-exe session-index --status
+
+# Update index incrementally
+agents-exe session-index --update
+
+# Remove the index
+agents-exe session-index --clean
+
+# Build with tool outputs included
+agents-exe session-index --build --include-tool-outputs
+
+# Custom database location
+agents-exe session-index --build --db-path ~/.config/agents-exe/search.db
+```
+
+### session-search
+
+Search session files with fuzzy text matching and filtering.
+
+```bash
+agents-exe session-search [OPTIONS] "QUERY"
+```
+
+**Arguments:**
+
+```html
+<table>
+<tr><th>Argument</th><th>Description</th></tr>
+<tr><td><code>QUERY</code></td><td>Search query text (supports fuzzy matching)</td></tr>
+</table>
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--db-path PATH</code></td><td>Path to search index database</td></tr>
+<tr><td><code>--after DATE</code></td><td>Filter sessions after date (YYYY-MM-DD)</td></tr>
+<tr><td><code>--before DATE</code></td><td>Filter sessions before date (YYYY-MM-DD)</td></tr>
+<tr><td><code>--tool TOOLNAME</code></td><td>Filter by tool name (can specify multiple)</td></tr>
+<tr><td><code>--agent SLUG</code></td><td>Filter by agent slug</td></tr>
+<tr><td><code>--include-tool-outputs</code></td><td>Include tool outputs in search</td></tr>
+<tr><td><code>--json</code></td><td>Output results as JSON</td></tr>
+<tr><td><code>--preview N</code></td><td>Show N lines of context around matches</td></tr>
+<tr><td><code>--limit N</code></td><td>Limit to N results</td></tr>
+<tr><td><code>--auto</code></td><td>Auto-update index if stale before searching</td></tr>
+</table>
+```
+
+**Description:** Performs fast fuzzy text search across session files using an SQLite FTS5 index. The search supports trigram-based fuzzy matching, allowing queries like "error" to match "errors", "erroring", "terror", etc.
+
+**Search Features:**
+
+- **Fuzzy matching**: Trigram tokenizer handles typos and variations
+
+- **Metadata filtering**: Filter by date, tool usage, or agent
+
+- **Incremental indexing**: Only re-indexes changed sessions
+
+- **JSON output**: Machine-readable format for scripting
+
+
+**Examples:**
+
+```bash
+# Basic fuzzy search
+agents-exe session-search "database error"
+
+# Search with auto-update
+agents-exe session-search "migration" --auto
+
+# Include tool outputs in search
+agents-exe session-search "config.yaml" --include-tool-outputs
+
+# Filter by date and tool
+agents-exe session-search "auth" --after 2024-01-01 --tool write-file
+
+# Filter by agent
+agents-exe session-search "refactor" --agent my-coder
+
+# JSON output for scripting
+agents-exe session-search "TODO" --json
+
+# Show context lines
+agents-exe session-search "deploy" --preview 5
+
+# Combined filters
+agents-exe session-search "fix" --after 2024-01-01 --before 2024-12-31 --tool bash_write-file --json
+```
+
+**JSON Output Format:**
+
+```json
+{
+  "resultItems": [
+    {
+      "resultMetadata": {
+        "resultSessionId": "550e8400-e29b-41d4-a716-446655440000",
+        "resultFilePath": "/path/to/session.json",
+        "resultAgentSlug": "my-agent",
+        "resultTurnCount": 15,
+        "resultRank": 0.5
+      },
+      "resultPreview": "...context around match...",
+      "resultMatchedTerms": ["error", "database"]
+    }
+  ],
+  "resultTotalMatches": 42,
+  "resultQueryTimeMs": 15.3,
+  "resultIndexWasUpdated": false
+}
+```
+
+### list-tool-calls
+
+Extract and list all tool calls from a session file.
+
+```bash
+agents-exe list-tool-calls [OPTIONS] SESSIONFILE
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --format FORMAT</code></td><td>Output format: <code>human</code>, <code>json</code>, <code>brief</code> (default: <code>human</code>)</td></tr>
+</table>
+```
+
+**Description:** Parses a session file and extracts all tool calls made during the conversation. Useful for debugging, auditing, and replaying specific tool calls.
+
+**Output formats:**
+
+- `human` - Detailed human-readable format with indices, turn numbers, and arguments
+
+- `json` - JSON array for machine processing
+
+- `brief` - Compact tabular format (index, name, arguments preview)
+
+
+**Examples:**
+
+```bash
+# List tool calls in human-readable format
+agents-exe list-tool-calls session.json
+
+# Output as JSON
+agents-exe list-tool-calls session.json --format json
+
+# Brief format for quick overview
+agents-exe list-tool-calls session.json --format brief
+```
+
+**Example output (human format):**
+
+```
+Found 3 tool call(s):
+
+[0] bash_read-file
+  Turn: 1
+  Arguments: 
+    {"filepath":"./src/Main.hs"}
+
+[1] bash_grep-files
+  Turn: 2
+  Arguments: 
+    {"pattern":"TODO","filepath":"./src"}
+
+[2] bash_write-file
+  Turn: 2
+  Arguments: 
+    {"filepath":"./src/Main.hs","content":"..."}
+
+To replay a tool call:
+  agents-exe replay-tool-call --session <file> --tool-call <index> --tool <tool-path>
+```
+
+### replay-tool-call
+
+Replay a specific tool call from a session file, with validation.
+
+```bash
+agents-exe replay-tool-call --session FILE --tool-call INDEX --tool TOOLPATH [OPTIONS]
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-s, --session FILE</code></td><td>Path to the session file containing the tool call</td></tr>
+<tr><td><code>-i, --tool-call INDEX</code></td><td>Index of the tool call to replay (0-based)</td></tr>
+<tr><td><code>-t, --tool TOOLPATH</code></td><td>Path to the tool script to execute</td></tr>
+<tr><td><code>--validate-only</code></td><td>Only validate arguments, don't execute</td></tr>
+<tr><td><code>--raw</code></td><td>Show raw output instead of formatted</td></tr>
+</table>
+```
+
+**Description:** Extracts a tool call from a session file, validates its arguments against the tool's schema, and optionally executes the tool with the same arguments. This is useful for:
+
+- Debugging failed tool calls
+
+- Reproducing tool execution for testing
+
+- Validating historical tool calls against updated schemas
+
+
+**Exit codes:**
+
+- `0` - Validation passed (and tool executed if not --validate-only)
+
+- `1` - Validation failed or tool execution failed
+
+
+**Examples:**
+
+```bash
+# First, list tool calls to find the index
+agents-exe list-tool-calls session.json
+
+# Validate and execute a tool call
+agents-exe replay-tool-call \
+  --session session.json \
+  --tool-call 0 \
+  --tool ./tools/read-file.sh
+
+# Only validate without executing
+agents-exe replay-tool-call \
+  --session session.json \
+  --tool-call 1 \
+  --tool ./tools/grep-files.sh \
+  --validate-only
+
+# Execute and show raw output
+agents-exe replay-tool-call \
+  --session session.json \
+  --tool-call 2 \
+  --tool ./tools/write-file.sh \
+  --raw
+```
+
+**Example output:**
+
+```
+✓ Tool call validation passed
+Tool: read-file
+Arguments: {"filepath":"./src/Main.hs"}
+
+Executing tool...
+
+=== Tool Output ===
+module Main where
+
+main :: IO ()
+main = putStrLn "Hello, World!"
+===================
+```
+
+### tool-call
+
+Call a tool from the first loaded agent with JSON payload from stdin.
+
+```bash
+echo '{}' | agents-exe tool-call TOOLNAME [OPTIONS]
+```
+
+**Arguments:**
+
+```html
+<table>
+<tr><th>Argument</th><th>Description</th></tr>
+<tr><td><code>TOOLNAME</code></td><td>Name of the tool to call</td></tr>
+</table>
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-l, --log-file FILE</code></td><td>Optional log file for tracing tool execution</td></tr>
+</table>
+```
+
+**Description:** Executes a single tool directly without involving the LLM. Useful for:
+
+- Testing tool implementations
+
+- Scripting tool usage
+
+- Debugging tool behavior
+
+
+**Examples:**
+
+```bash
+# Call a tool with arguments
+echo '{"filepath": "./README.md"}' | \
+    agents-exe tool-call read-file --agent-file ./agent.json
+
+# Call with logging
+echo '{"command": "ls -la"}' | \
+    agents-exe tool-call bash --log-file ./tool-debug.log
+```
+
+### serve
+
+Run agents over HTTP, like `agents-server`, loading agents-exe.cfg.json like the TUI does.
+
+```bash
+agents-exe serve [--agent-file FILE...] [--agent SLUG] [OPTIONS]
+```
+
+**Description:**
+
+`agents-exe serve` is `agents-server`'s code (sessions in SQLite or Postgres, the HTTP API and SSE stream, MCP over HTTP, the chat page) run behind agents-exe's own config loading, so it resolves agent files the same way every other `agents-exe` command does: `--agent-file` (repeatable), else `agents-exe.cfg.json`'s `agentsFiles` plus every `.json` file under `agentsDirectories`, else `~/.config/agents-exe/default`; `--agent SLUG` narrows to one agent by slug, failing with the list of available slugs if it does not match. It shares agents-exe's global `--api-keys`, `--set`/`--set-json`/`--pin`/`--pin-json` and `--params-file`, so those are not repeated below.
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--db FILE\|URL</code></td><td>next to the resolved sessions directory</td><td>SQLite file, or <code>postgresql://</code> URL, for sessions and continuations</td></tr>
+<tr><td><code>--bind HOST</code></td><td><code>127.0.0.1</code></td><td>Address to listen on</td></tr>
+<tr><td><code>--port PORT</code></td><td><code>8080</code></td><td>Port to listen on</td></tr>
+<tr><td><code>--live-session-ttl SECONDS</code></td><td><code>900</code></td><td>Idle time before a session's in-memory state is dropped</td></tr>
+<tr><td><code>--shutdown-grace SECONDS</code></td><td><code>10</code></td><td>Time open requests get to finish on shutdown</td></tr>
+<tr><td><code>--auth-tokens FILE</code></td><td>(none)</td><td>Bearer tokens and their owners; without, no authentication</td></tr>
+<tr><td><code>--stream-tokens</code></td><td>off</td><td>Stream LLM answers as <code>text.delta</code> events</td></tr>
+<tr><td><code>--admin-owners OWNER,…</code></td><td>(none)</td><td>Owners allowed to store and delete agents over the API (needs <code>--auth-tokens</code>)</td></tr>
+<tr><td><code>--no-ui</code></td><td>off</td><td>Do not serve the chat page at <code>/</code></td></tr>
+<tr><td><code>--cors-origin ORIGIN</code></td><td>(none)</td><td>Allow this origin to call the server cross-origin; repeatable, or <code>*</code> for any (needs no <code>--auth-tokens</code>)</td></tr>
+<tr><td><code>--socket PATH</code></td><td>(none)</td><td>Also listen on this Unix domain socket, in addition to <code>--bind</code>/<code>--port</code>; created <code>0600</code>, a stale file removed at start, closed and unlinked on shutdown. The socket is the local trust boundary: no <code>Origin</code>, no bearer token beyond <code>--auth-tokens</code>.</td></tr>
+</table>
+```
+
+See [agents-server.md](/docs-agents-server.html ) for everything the running server does (the HTTP API, sessions, deferred calls, CORS, authentication, running it as a service).
+
+**Examples:**
+
+```bash
+# Explicit agent files, like agents-server
+agents-exe serve --agent-file ./weather.json --api-keys ./keys.json --port 8080
+
+# From a directory with an agents-exe.cfg.json
+agents-exe serve --port 8080
+
+# One agent from a multi-agent config, over a local socket only auth-tokens gate
+agents-exe serve --agent architect --socket /run/agents-exe/agents.sock --auth-tokens ./tokens.json
+```
+
+### check-tool-call
+
+Validate a tool call payload against a tool schema (reads JSON from stdin).
+
+```bash
+cat payload.json | agents-exe check-tool-call --tool TOOLPATH
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-t, --tool TOOLPATH</code></td><td>Path to the tool script to validate against</td></tr>
+</table>
+```
+
+**Description:** Validates that a JSON payload from stdin matches the tool's declared schema. Returns exit code 0 if valid, 1 if invalid with detailed error messages.
+
+**Example:**
+
+```bash
+# Create a test payload
+echo '{"filepath": "/path/to/file"}' | agents-exe check-tool-call --tool ./tools/read-file.sh
+
+# Validate from file
+cat payload.json | agents-exe check-tool-call --tool ./tools/my-tool.sh
+```
+
+**Example output (valid):**
+
+```
+✓ Tool call payload is valid
+```
+
+**Example output (invalid):**
+
+```
+Tool call validation failed for './tools/my-tool.sh (my-tool)' with 2 errors:
+
+1. filepath: Required property missing
+
+2. content: Required property missing
+
+Please correct these issues and try again.
+```
+
+### init
+
+Initialize a new agent configuration.
+
+```bash
+agents-exe init [--agent-file FILE]
+```
+
+**Creates:**
+
+- `agent.json` - Agent configuration
+
+- `tools/` - Tool directory
+
+- `secret-keys` - API keys file (if doesn't exist)
+
+
+**Example:**
+
+```bash
+agents-exe init --agent-file ./my-agent.json
+```
+
+### new
+
+Create scaffolding for new agents or tools.
+
+```bash
+agents-exe new (agent|tool) [OPTIONS]
+```
+
+#### new agent
+
+Create a new agent configuration file from a template.
+
+```bash
+agents-exe new agent SLUG [FILE] [MODEL] [OPTIONS]
+```
+
+**Arguments:**
+
+```html
+<table>
+<tr><th>Argument</th><th>Description</th></tr>
+<tr><td><code>SLUG</code></td><td>Unique identifier for the agent</td></tr>
+<tr><td><code>FILE</code></td><td>Output file path (default: <code>./{slug}.json</code>)</td></tr>
+<tr><td><code>MODEL</code></td><td>Model name (e.g., gpt-4o, mistral-large). The provider preset is inferred from the model catalog.</td></tr>
+</table>
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --force</code></td><td>Overwrite existing file</td></tr>
+</table>
+```
+
+Provider presets (URL, default model, API key ID) are selected automatically based on the model name. Use `agents-exe new models list` to see the built-in model patterns and `agents-exe new models init` to customize them locally.
+
+**Examples:**
+
+```bash
+# Create agent with the default OpenAI preset
+agents-exe new agent my-assistant
+
+# Create agent with custom model (preset inferred from the catalog)
+agents-exe new agent coder --model gpt-4o
+
+# Create agent with custom output path
+agents-exe new agent my-assistant ./agents/assistant.json
+
+# Overwrite existing
+agents-exe new agent my-assistant --force
+```
+
+**Generated agent file:**
+
+```json
+{
+  "agent": {
+    "slug": "my-assistant",
+    "apiKeyId": "main-key",
+    "flavor": "OpenAIv1",
+    "modelUrl": "https://api.openai.com/v1",
+    "modelName": "gpt-4-turbo-preview",
+    "announce": "a helpful assistant powered by gpt-4-turbo-preview",
+    "systemPrompt": [
+      "You are my-assistant, a helpful AI assistant.",
+      "You provide clear, accurate, and concise responses.",
+      "When using tools, you explain your actions to the user."
+    ],
+    "toolDirectory": "tools",
+    "mcpServers": [],
+    "openApiToolboxes": null,
+    "postgrestToolboxes": null,
+    "builtinToolboxes": [],
+    "extraAgents": null
+  }
+}
+```
+
+#### new tool
+
+Create a new tool script from a template.
+
+```bash
+agents-exe new tool SLUG LANGUAGE FILE [OPTIONS]
+```
+
+**Arguments:**
+
+```html
+<table>
+<tr><th>Argument</th><th>Description</th></tr>
+<tr><td><code>SLUG</code></td><td>Unique identifier for the tool</td></tr>
+<tr><td><code>LANGUAGE</code></td><td>Programming language: <code>bash</code>, <code>python</code>, <code>haskell</code>, <code>node</code></td></tr>
+<tr><td><code>FILE</code></td><td>Output file path (without extension)</td></tr>
+</table>
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --force</code></td><td>Overwrite existing file</td></tr>
+</table>
+```
+
+**Examples:**
+
+```bash
+# Create bash tool (default)
+agents-exe new tool my-tool bash ./tools/my-tool
+
+# Create Python tool
+agents-exe new tool my-tool python ./scripts/my-tool
+
+# Create Haskell tool
+agents-exe new tool my-tool haskell ./tools/my-tool
+
+# Create Node.js tool
+agents-exe new tool my-tool node ./scripts/my-tool
+```
+
+**Generated bash tool:**
+
+```bash
+#!/bin/bash
+# my-tool - A bash tool for agents-exe
+
+set -euo pipefail
+
+# Agents-exe tool protocol: describe|run
+# Environment variables available during 'run':
+#   AGENT_SESSION_ID      - UUID of the current session
+#   AGENT_CONVERSATION_ID - UUID of the conversation
+#   AGENT_TURN_ID         - UUID of the current turn
+#   AGENT_AGENT_ID        - UUID of the executing agent (if available)
+
+case "${1:-}" in
+  describe)
+    cat <<'DESCRIBE_EOF'
+{
+  "slug": "my-tool",
+  "description": "Tool my-tool - describe what this tool does",
+  "args": [],
+  "empty-result": {
+    "tag": "AddMessage",
+    "contents": "--no output--"
+  }
+}
+DESCRIBE_EOF
+    ;;
+  run)
+    # TODO: Implement tool logic
+    # Access arguments via environment or command line
+    echo "Tool my-tool executed"
+    ;;
+  *)
+    echo "Usage: my-tool <describe|run>" >&2
+    exit 1
+    ;;
+esac
+```
+
+**Next steps after creating a tool:**
+
+- .1 Edit the `args` array in the describe function
+
+- .1 Implement the `run` function logic
+
+- .1 Test with: `agents-exe describe-tool ./tools/my-tool`
+
+
+### spec
+
+Display embedded specification documentation.
+
+```bash
+agents-exe spec TOPIC
+```
+
+**Topics:**
+
+```html
+<table>
+<tr><th>Topic</th><th>Description</th></tr>
+<tr><td><code>bash-tools</code></td><td>Binary tool protocol specification</td></tr>
+</table>
+```
+
+**Examples:**
+
+```bash
+# Display bash-tools specification
+agents-exe spec bash-tools
+```
+
+**Use case:** Learn the protocol for writing bash tools without leaving the CLI.
+
+### describe-tool
+
+Display information about a tool script.
+
+```bash
+agents-exe describe-tool TOOL_PATH [OPTIONS]
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --format FORMAT</code></td><td>Output format: <code>json</code> or <code>pretty</code> (default: <code>json</code>)</td></tr>
+<tr><td><code>--check-only</code></td><td>Only check validity, don't output full description</td></tr>
+</table>
+```
+
+**Description:** Loads and displays the tool's description (the output of `tool describe`).
+
+**Example:**
+
+```bash
+agents-exe describe-tool ./tools/my-tool.sh
+
+# Pretty format
+agents-exe describe-tool ./tools/my-tool.sh --format pretty
+
+# Only check validity
+agents-exe describe-tool ./tools/my-tool.sh --check-only
+```
+
+**Output:**
+
+```json
+{
+  "slug": "my-tool",
+  "description": "What this tool does",
+  "args": [...],
+  "empty-result": {...}
+}
+```
+
+### paths
+
+Show important configuration paths.
+
+```bash
+agents-exe paths [OPTIONS]
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--json</code></td><td>Output in JSON format</td></tr>
+</table>
+```
+
+**Description:** Displays configuration paths including config directory, agent files, API keys file, and session storage configuration.
+
+**Session Storage:** The session storage configuration supports multiple read locations:
+
+- **Write location**: Where new sessions are saved
+
+- **Read locations**: Directories searched for existing sessions (includes write location by default)
+
+
+**Examples:**
+
+```bash
+# Human-readable output
+agents-exe paths
+
+# JSON output
+agents-exe paths --json
+```
+
+**Example output:**
+
+```
+Configuration:
+  File: /home/user/project/agents-exe.cfg.json
+  Directory: /home/user/project
+  Default: /home/user/.config/agents-exe
+
+Agent Files:
+  - ./main-agent.json
+  - ./secondary-agent.json
+
+API Keys:
+  /home/user/.config/agents-exe/secret-keys
+
+Session Storage:
+  Write location: ./sessions/
+  Read locations:
+    1. ./sessions/
+    2. ./.agents-sessions/
+    3. ~/.config/agents-exe/sessions/
+```
+
+### export
+
+Export agent/tool configurations to archive or git.
+
+```bash
+agents-exe export [OPTIONS]
+```
+
+**Source Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--all</code></td><td>Export all loaded agents</td></tr>
+<tr><td><code>--agent-slug SLUG</code></td><td>Export specific agent by slug</td></tr>
+<tr><td><code>--tools-only</code></td><td>Export only tools, not agent config</td></tr>
+<tr><td><code>--tool TOOLNAME</code></td><td>Export specific tool</td></tr>
+</table>
+```
+
+**Destination Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-o, --output FILE</code></td><td>Output file path</td></tr>
+<tr><td><code>--git-url URL</code></td><td>Git remote URL</td></tr>
+<tr><td><code>--git-branch BRANCH</code></td><td>Git branch</td></tr>
+<tr><td><code>--git-message MESSAGE</code></td><td>Commit message</td></tr>
+<tr><td><code>--git-push</code></td><td>Push after commit</td></tr>
+<tr><td><code>--git-tag TAG</code></td><td>Create git tag</td></tr>
+</table>
+```
+
+**Format Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--format FORMAT</code></td><td>Archive format: tar, tar.gz, zip</td></tr>
+<tr><td><code>--namespace NAMESPACE</code></td><td>Namespace for export (e.g., "team.project")</td></tr>
+<tr><td><code>--no-tools</code></td><td>Exclude tools from export</td></tr>
+<tr><td><code>--no-mcp</code></td><td>Exclude MCP servers from export</td></tr>
+</table>
+```
+
+**Examples:**
+
+```bash
+# Export to tar.gz
+agents-exe export --output ./my-agent.tar.gz
+
+# Export to git
+agents-exe export \
+  --git-url https://github.com/user/agents-repo \
+  --git-branch main \
+  --git-message "Update agent" \
+  --git-push
+
+# Export tools only
+agents-exe export --tools-only --output ./tools.tar.gz
+
+# Export specific agent
+agents-exe export --agent-slug my-agent --output ./agent.tar.gz
+
+# With namespace
+agents-exe export --namespace team-a.project-1 --output ./export.tar.gz
+```
+
+### import
+
+Import agent/tool configurations from archive or git.
+
+```bash
+agents-exe import [OPTIONS]
+```
+
+**Source Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --from-file FILE</code></td><td>Import from archive file</td></tr>
+<tr><td><code>--git-url URL</code></td><td>Import from git URL</td></tr>
+<tr><td><code>--git-ref REF</code></td><td>Git ref (branch, tag, commit)</td></tr>
+<tr><td><code>--namespace NAMESPACE</code></td><td>Namespace to import from</td></tr>
+</table>
+```
+
+**Destination Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--to-current</code></td><td>Import to current directory</td></tr>
+<tr><td><code>--to PATH</code></td><td>Import to specific path</td></tr>
+<tr><td><code>--to-config-dir</code></td><td>Import to config directory</td></tr>
+<tr><td><code>--install-to-agent FILE</code></td><td>Install tools to agent's tool directory</td></tr>
+<tr><td><code>--install-to-tooldir DIR</code></td><td>Install tools to specific directory</td></tr>
+</table>
+```
+
+**Mode Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--overwrite</code></td><td>Overwrite existing files</td></tr>
+<tr><td><code>--merge</code></td><td>Merge with existing files</td></tr>
+<tr><td>(default)</td><td>Fail on conflict</td></tr>
+</table>
+```
+
+**List Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--list-namespaces</code></td><td>List available namespaces (git only)</td></tr>
+<tr><td><code>--list-tools</code></td><td>List available tools (git only)</td></tr>
+</table>
+```
+
+**Examples:**
+
+```bash
+# Import from archive
+agents-exe import --from-file ./agent.tar.gz
+
+# Import from git
+agents-exe import \
+  --git-url https://github.com/user/agents-repo \
+  --git-ref main
+
+# Import tools to agent
+agents-exe import \
+  --from-file ./tools.tar.gz \
+  --install-to-agent ./my-agent.json
+
+# Import with overwrite
+agents-exe import --from-file ./agent.tar.gz --overwrite
+
+# List namespaces
+agents-exe import --git-url https://github.com/user/repo --list-namespaces
+
+# Import specific namespace
+agents-exe import \
+  --git-url https://github.com/user/repo \
+  --namespace team-a.tools \
+  --to ./tools/
+```
+
+### cowsay
+
+Display a fun message with the agents-exe mascot.
+
+```bash
+agents-exe cowsay [MESSAGE] [OPTIONS]
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-W, --width WIDTH</code></td><td>Maximum width of speech bubble (default: 40)</td></tr>
+</table>
+```
+
+**Description:** If no message is provided, reads from stdin.
+
+**Example:**
+
+```bash
+agents-exe cowsay "Hello, agents!"
+
+# With custom width
+agents-exe cowsay "A much longer message that needs more space" --width 60
+
+# Pipe from another command
+echo "System ready" | agents-exe cowsay
+```
+
+### describe
+
+Output self-describing schema for the agent.
+
+```bash
+agents-exe describe [OPTIONS]
+```
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--self-describe-slug NAME</code></td><td>Override the slug field</td></tr>
+<tr><td><code>--self-describe-description DESC</code></td><td>Override the description</td></tr>
+</table>
+```
+
+**Output:** JSON schema for tool calling.
+
+**Use case:** Integration with external systems that need to understand the agent's interface.
+
+### self-describe
+
+Output information about the agents-exe binary itself.
+
+```bash
+agents-exe self-describe
+```
+
+**Output:** Version, build info, and available commands.
+
+## Configuration File
+
+Project-level configuration in `agents-exe.cfg.json`:
+
+```json
+{
+  "agentsConfigDir": "/custom/config/path",
+  "agentsDirectories": [
+    "./agents",
+    "./more-agents"
+  ],
+  "agentsFiles": [
+    "./main-agent.json"
+  ],
+  "promptAliases": {
+    "translate": {
+      "systemPrompt": ["You are a translator..."],
+      "userPromptPrefix": "Translate to English:"
+    }
+  },
+  "selfDescribeSlug": "my-agent",
+  "selfDescribeDescription": "A custom agent",
+  "agentsLogs": {
+    "logJsonHttpEndpoint": "http://localhost:8080/log",
+    "logJsonPath": "./logs/agents.json",
+    "logRawPath": "./logs/agents.log"
+  },
+  "sessions": {
+    "writeLocation": "./sessions/",
+    "readLocations": [
+      "./sessions/",
+      "./.agents-sessions/",
+      "~/.config/agents-exe/sessions/"
+    ]
+  }
+}
+```
+
+**Search order:**
+
+- .1 Current directory
+
+- .1 Parent directories (upward search)
+
+
+### Sessions Configuration
+
+The `sessions` section configures multi-location session storage:
+
+```html
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>writeLocation</code></td><td><code>FilePath</code></td><td>Directory where new sessions are written</td></tr>
+<tr><td><code>readLocations</code></td><td><code>[FilePath]</code></td><td>Directories to search for existing sessions</td></tr>
+</table>
+```
+
+**Key behaviors:**
+
+- **Deduplication**: First location in `readLocations` has highest priority for duplicate session IDs
+
+- **Auto-prepending**: If `writeLocation` is not in `readLocations`, it's automatically prepended
+
+- **Tilde expansion**: Paths like `~/.config/agents-exe/sessions/` are resolved to the user's home directory
+
+- **Backwards compatibility**: If `sessions` is not present, falls back to `agentsLogs.logSessionsJsonPrefix` (deprecated)
+
+
+## Environment Variables
+
+```html
+<table>
+<tr><th>Variable</th><th>Description</th></tr>
+<tr><td><code>AGENTS_API_KEY</code></td><td>Default API key (overrides file)</td></tr>
+<tr><td><code>AGENTS_CONFIG_DIR</code></td><td>Config directory path</td></tr>
+<tr><td><code>AGENTS_LOG_LEVEL</code></td><td>Logging verbosity</td></tr>
+<tr><td><code>AGENT_MD_VIEWER</code></td><td>External markdown viewer for TUI session viewing</td></tr>
+</table>
+```
+
+## Exit Codes
+
+```html
+<table>
+<tr><th>Code</th><th>Meaning</th></tr>
+<tr><td><code>0</code></td><td>Success</td></tr>
+<tr><td><code>1</code></td><td>General error</td></tr>
+<tr><td><code>2</code></td><td>Invalid arguments</td></tr>
+<tr><td><code>3</code></td><td>Configuration error</td></tr>
+<tr><td><code>4</code></td><td>Agent loading error</td></tr>
+<tr><td><code>5</code></td><td>Tool execution error</td></tr>
+<tr><td><code>10</code></td><td>Export error</td></tr>
+<tr><td><code>11</code></td><td>Import error</td></tr>
+</table>
+```
+
+## Examples
+
+### Complete Workflow
+
+```bash
+# 1. Initialize new agent
+agents-exe new agent my-assistant
+
+# 2. Create a custom tool
+agents-exe new tool file-reader python ./tools/file-reader
+
+# 3. Edit tool and agent configurations
+# (edit files as needed)
+
+# 4. Check configuration
+agents-exe check --agent-file ./my-assistant.json
+
+# 5. Test with one-shot
+agents-exe run --agent-file ./my-assistant.json --prompt "Test"
+
+# 6. Start interactive session
+agents-exe tui --agent-file ./my-assistant.json
+
+# 7. Export for sharing
+agents-exe export --agent-file ./my-assistant.json --output ./my-assistant.tar.gz
+
+# 8. Import elsewhere
+agents-exe import --from-file ./my-assistant.tar.gz --to ./new-location/
+```
+
+### Multi-Agent Setup
+
+```bash
+# Start multi-agent TUI
+agents-exe tui \
+  --agent-file ./router.json \
+  --agent-file ./coder.json \
+  --agent-file ./reviewer.json
+
+# Start multi-agent MCP server
+agents-exe mcp-server \
+  --agent-file ./router.json \
+  --agent-file ./coder.json
+```
+
+### Session Management Workflow
+
+```bash
+# Run an agent session
+agents-exe run \
+    --agent-file ./my-agent.json \
+    --session-file ./session.json \
+    --prompt "Let's work on a project"
+
+# Later, inspect the session
+agents-exe session-print ./session.json
+
+# List all tool calls from the session
+agents-exe list-tool-calls ~/.config/agents-exe/sessions/session-*.json
+
+# Replay a specific tool call for debugging
+agents-exe replay-tool-call \
+  --session ./session.json \
+  --tool-call 0 \
+  --tool ./tools/read-file.sh \
+  --validate-only
+
+# Trim to last 20 turns
+agents-exe session-edit --take-tail --count 20 < ./session.json > ./trimmed.json
+mv ./trimmed.json ./session.json
+
+# Continue the session
+agents-exe run \
+    --agent-file ./my-agent.json \
+    --session-file ./session.json \
+    --prompt "Where were we?"
+```
+
+### Session Search Workflow
+
+```bash
+# Build the search index
+agents-exe session-index --build
+
+# Search for error-related sessions
+agents-exe session-search "error" --json
+
+# Find sessions using specific tool after a date
+agents-exe session-search "config" --after 2024-01-01 --tool write-file
+
+# Search with context preview
+agents-exe session-search "TODO" --preview 3
+
+# Auto-update index before searching
+agents-exe session-search "refactor" --auto --limit 10
+```
+
+### Multi-Modal Workflow
+
+```bash
+# Analyze a screenshot with a vision-capable agent
+agents-exe run \
+    --agent-file ./vision-agent.json \
+    -m ./screenshot.png \
+    --prompt "What UI issues do you see in this screenshot?"
+
+# Analyze multiple images
+agents-exe run \
+    --agent-file ./design-agent.json \
+    -m ./mockup-v1.png \
+    -m ./mockup-v2.png \
+    --prompt "Compare these two design mockups and recommend which to use"
+
+# Analyze a PDF document
+agents-exe run \
+    --agent-file ./document-agent.json \
+    -m ./report.pdf \
+    --prompt "Summarize the key findings and recommendations"
+
+# Combine image with code for debugging
+agents-exe run \
+    --agent-file ./debug-agent.json \
+    --prompt "This error appears in the UI:" \
+    -m ./error-screenshot.png \
+    --sep4 "----" \
+    --prompt "Here's the relevant code:" \
+    --file ./src/Main.hs
+```
+
+### Automation
+
+```bash
+# Process all files in directory
+for file in *.txt; do
+    agents-exe run \
+        --agent-file ./processor.json \
+        --prompt "Process this file:" \
+        --file "$file" \
+        --prompt "End of file."
+done
+
+# Git pre-commit hook
+agents-exe run \
+    --agent-file ./reviewer.json \
+    --shell "git diff --cached" \
+    --prompt "Review these changes."
+
+# Daily summary from logs
+agents-exe run \
+    --agent-file ./summarizer.json \
+    --shell "cat /var/log/app.log | tail -100" \
+    --prompt "Summarize any errors or warnings"
+
+# Automated image analysis with timestamp
+agents-exe run \
+    --agent-file ./monitor-agent.json \
+    -m ./screenshots/$(date +%Y%m%d-%H%M%S).png \
+    --prompt "Check for any alerts or errors in this status dashboard"
+```
+
+### Developer Workflow
+
+```bash
+# Learn the tool protocol
+agents-exe spec bash-tools
+
+# Create and validate a tool
+agents-exe new tool my-validator bash ./tools/my-validator
+# (edit the tool)
+agents-exe describe-tool ./tools/my-validator --format pretty
+
+# Validate a payload
+echo '{"input": "test"}' | agents-exe check-tool-call --tool ./tools/my-validator
+
+# Test the tool directly
+echo '{"input": "test"}' | agents-exe tool-call my-validator
+
+# Create agent with dev tools
+agents-exe new agent dev-assistant
+# (add DeveloperToolbox to builtinToolboxes)
+# Now the agent can use developer file-editing tools and show specs!
+
+# Create a tool that outputs media
+agents-exe new tool chart-generator bash ./tools/chart-gen
+# Add to describe output:
+#   "output-media-type": "image/png"
+# Now the tool's output is treated as a PNG image
+```
+
+### Debugging Tool Calls
+
+```bash
+# Run an agent session
+agents-exe run --agent-file ./my-agent.json --prompt "Read the README"
+
+# Find the session file
+agents-exe paths
+
+# List all tool calls
+agents-exe list-tool-calls ~/.config/agents-exe/sessions/session-*.json
+
+# Replay with validation only
+agents-exe replay-tool-call \
+  --session ~/.config/agents-exe/sessions/session-xxx.json \
+  --tool-call 0 \
+  --tool ./tools/read-file.sh \
+  --validate-only
+
+# Actually replay the tool call
+agents-exe replay-tool-call \
+  --session ~/.config/agents-exe/sessions/session-xxx.json \
+  --tool-call 0 \
+  --tool ./tools/read-file.sh
+```
+
+## Related Documentation
+
+- [tools.md](/docs-tools.html ) - Tool system details
+
+- [tui.md](/docs-tui.html ) - Terminal UI documentation
+
+- [sessions.md](/docs-sessions.html ) - Session management
+
+- [architecture.md](/docs-architecture.html ) - System architecture
+
+
+

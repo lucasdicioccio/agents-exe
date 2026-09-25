@@ -412,12 +412,12 @@ Example agent JSON:
   limiting (calls per minute) was added.
 
 ### Docs
-- New `docs/async-tool-calls.md` covers configuration, placeholders and late
+- New `documentation/async-tool-calls.md` covers configuration, placeholders and late
   delivery, the capabilities, progress, cancellation, the TUI, one-shot runs,
-  session files and the limits. Linked from `docs/README.md`,
-  `docs/durable-workflows-howto.md`.
-- `docs/tools.md` lists the three capabilities; `docs/tui.md` documents
-  background call display and input while calls run; `docs/cli-commands.md`
+  session files and the limits. Linked from `documentation/README.md`,
+  `documentation/durable-workflows-howto.md`.
+- `documentation/tools.md` lists the three capabilities; `documentation/tui.md` documents
+  background call display and input while calls run; `documentation/cli-commands.md`
   documents the paused JSON report of `run`.
 - The agent JSON in the new doc was checked by parsing it with `Base.Agent`.
 
@@ -441,10 +441,10 @@ Example agent JSON:
   OpenAPI/PostgREST servers (`SpecUrl`, `BaseUrl`, `Token`), the removed Lua
   `allowedPaths` field, the old SQLite `path`/`access` fields (now
   `Versioning`), and the kebab-case agent keys in
-  `docs/advanced-configuration.md` (`api-key-id` → `apiKeyId`, …). Fixed in
-  `docs/tools.md`, `docs/file-loader.md`, `docs/advanced-configuration.md` and
+  `documentation/advanced-configuration.md` (`api-key-id` → `apiKeyId`, …). Fixed in
+  `documentation/tools.md`, `documentation/file-loader.md`, `documentation/advanced-configuration.md` and
   the `Agent`/`bashToolboxes` Haddock in `System.Agents.Base`. Every JSON block
-  in `docs/` now decodes into the real types; the throwaway checker used for
+  in `documentation/` now decodes into the real types; the throwaway checker used for
   this is in the session scratchpad.
 
 ### Tests (`test/AsyncToolCallsTests.hs`, now 21)
@@ -519,6 +519,6 @@ Example agent JSON:
    step 5).
 4. Tracing for async calls and progress in `Prod.Tracer`.
 5. Verify orphan handling across a real process restart + session reload.
-6. Update `docs/tools.md`, `docs/tui.md`, `docs/cli-commands.md`, and document
+6. Update `documentation/tools.md`, `documentation/tui.md`, `documentation/cli-commands.md`, and document
    the agent JSON schema for async.
 7. Clarify whether MCP / OpenAPI tools can stream into the progress callback.

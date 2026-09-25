@@ -8,9 +8,9 @@ maintainer:         lucas@dicioccio.fr
 category:           System
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
-                    docs/agents-server.md
-                    docs/durable-workflows-howto.md
-extra-source-files: docs/binary-tool.md
+                    documentation/agents-server.md
+                    documentation/durable-workflows-howto.md
+extra-source-files: documentation/binary-tool.md
 
 copyright:          2024 Lucas DiCioccio
 synopsis:           An agent framework for building AI-assisted workflows

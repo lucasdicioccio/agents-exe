@@ -1,0 +1,251 @@
+_Generated from [`documentation/sqq-flow.md`](https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-flow.md ), the repository is the canonical source and may be ahead of this page._
+
+# SQQ Agent Flow Documentation
+
+## Overview
+
+The `sqq-agent.sh` is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests with the results.
+
+## Architecture Components
+
+### Core Configuration
+
+```html
+<table>
+<tr><th>Variable</th><th>Purpose</th></tr>
+<tr><td><code>SQQ_BIN</code></td><td>Path to the <code>sqq</code> queue management binary</td></tr>
+<tr><td><code>QUEUE_DB</code></td><td>SQLite database path for task queue storage (<code>tasks/queue.sql</code>)</td></tr>
+<tr><td><code>TASK_DIR</code></td><td>Directory for instruction files (<code>tasks/</code>)</td></tr>
+<tr><td><code>SESSIONS_DIR</code></td><td>Directory for agent session outputs (<code>tasks-sessions/</code>)</td></tr>
+<tr><td><code>BASE_BRANCH</code></td><td>Base git branch for new worktrees (<code>main</code>)</td></tr>
+<tr><td><code>GITHUB_USERNAME</code></td><td>GitHub username to filter issues by author (security filter)</td></tr>
+<tr><td><code>PROJECT_MAP</code></td><td>Maps labels to relative paths in worktree</td></tr>
+<tr><td><code>AGENT_MAP</code></td><td>Maps labels to agent configuration files</td></tr>
+</table>
+```
+
+### Data Flow
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  GitHub Issues  │────▶│  Task Files     │────▶│  Queue (sqq)    │
+│  (with labels)  │     │  (.md files)    │     │  (SQLite)       │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+         │                                               │
+         │                                               ▼
+         │                                      ┌─────────────────┐
+         │                                      │  Process Loop   │
+         │                                      └─────────────────┘
+         │                                               │
+         ▼                                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        WORKTREE EXECUTION                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+│  │ Setup        │─▶│ Prepare      │─▶│ Run Agent            │  │
+│  │ Worktree     │  │ Environment  │  │ (agents-exe)         │  │
+│  └──────────────┘  └──────────────┘  └──────────────────────┘  │
+│                                              │                  │
+│  ┌──────────────┐  ┌──────────────┐         │                  │
+│  │ Create PR    │◀─│ Push Branch  │◀────────┘                  │
+│  └──────────────┘  └──────────────┘                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Command Flows
+
+### 1. Initialization (`init`)
+
+```bash
+sqq-agent.sh init
+```
+
+- .1 Creates `TASK_DIR` and `SESSIONS_DIR` directories
+
+- .1 Initializes SQLite queue database via `sqq init --queue`
+
+
+### 2. Manual Task Addition (`add`)
+
+```bash
+sqq-agent.sh add <label> <branch>
+```
+
+- .1 Validates the project label exists in `PROJECT_MAP`
+
+- .1 Finds or creates a numbered task file (format: `NNNN-<branch>.md`)
+
+- .1 Opens `$EDITOR` for user to write instructions
+
+- .1 Enqueues job: `sqq-agent.sh worktree_exec "<label>" "<branch>" "<taskfile>"`
+
+
+### 3. GitHub Issue Import (`from_github`)
+
+```bash
+sqq-agent.sh from_github
+```
+
+- .1 Queries GitHub for issues labeled `agents/to-be-taken` **from the configured author only**
+
+- .1 For each issue:
+- .1 - Matches project label from issue labels
+
+- Creates task file with issue content (title, body, comments)
+
+- Adds note to mention issue number in commit
+
+- Enqueues worktree_exec job
+
+- Updates issue labels: removes `agents/to-be-taken`, adds `agents/taken`
+
+
+
+
+**Security Note:** The `GITHUB_USERNAME` filter ensures that only issues created by the trusted author are processed. This prevents arbitrary code execution from malicious issues filed by third parties on public repositories.
+
+### 4. Queue Processing (`process`)
+
+```bash
+sqq-agent.sh process
+```
+
+- .1 Runs `sqq process --action Exec` in a loop
+
+- .1 On failure: waits 60 seconds and retries
+
+- .1 Continues until queue is empty or manually stopped
+
+
+### 5. Worktree Execution (`worktree_exec`) - Core Engine
+
+```bash
+sqq-agent.sh worktree_exec <label> <name> <instruction_file>
+```
+
+#### Phase 1: Worktree Setup
+
+- .1 Fetch latest `origin/BASE_BRANCH`
+
+- .1 Remove existing worktree (if any) and prune
+
+- .1 Create new git worktree at directory `<name>`
+
+
+#### Phase 2: Navigation
+
+- .1 Change to project directory based on `PROJECT_MAP[<label>]`
+
+
+#### Phase 3: Environment Preparation
+
+- .1 Execute `./git-agent-task.sh prepare` if present
+
+- .1 This allows per-project dependency installation or setup
+
+
+#### Phase 4: Agent Execution
+
+- .1 Check agent configuration with `agents-exe --agent-file check`
+
+- .1 Run agent with instruction file:
+- .1 ```bash
+agents-exe --agent-file <config> run \
+    --session-file <session>.json \
+    -f <instruction_file>
+```
+
+
+- .1 Capture agent output as commit message
+
+- .1 Export session to markdown: `agents-exe session-print`
+
+
+#### Phase 5: Commit and PR
+
+- .1 Create and checkout new branch `<name>`
+
+- .1 If changes detected:
+- .1 - Stage all changes: `git add -A`
+
+- Commit with agent output as message (no verify)
+
+- Push to origin
+
+- Create Pull Request via `gh pr create` with label `agents/agent-pr`
+
+
+
+- .1 For non-GitHub tasks: optionally run `./git-agent-task.sh preview`
+
+
+### 6. Automatic Merging (`merge-pr`)
+
+```bash
+sqq-agent.sh merge-pr
+```
+
+- .1 Identifies the default branch of the repository.
+
+- .1 Lists all Pull Requests with the label `agents/agent-pr`.
+
+- .1 For each PR:
+- .1 - If the base branch is **not** the default branch, it triggers an automatic merge (`gh pr merge --auto`).
+
+- If the base branch is the default branch, it skips the PR to ensure manual review for main branch changes.
+
+
+
+
+## File Naming Conventions
+
+### Task Files
+
+- Format: `TASK_DIR/NNNN-<branch>.md`
+
+- Sequential numbering starting from 0001
+
+- Preserves existing files when re-queueing same branch
+
+
+### Session Files
+
+- JSON: `SESSIONS_DIR/<name>.session.json` (agent state)
+
+- Markdown: `SESSIONS_DIR/<name>.session.md` (human-readable)
+
+
+## Error Handling and Retries
+
+- Queue processing loops indefinitely with 60s delay on failure
+
+- Failed worktrees are force-removed before retry
+
+- Agent execution errors don't prevent commit/push if changes exist
+
+- Missing `git-agent-task.sh` generates warnings but continues
+
+
+## Integration Points
+
+```html
+<table>
+<tr><th>Tool</th><th>Purpose</th></tr>
+<tr><td><code>sqq</code></td><td>Task queue management (enqueue/dequeue/process)</td></tr>
+<tr><td><code>gh</code></td><td>GitHub CLI for issue/PR management</td></tr>
+<tr><td><code>agents-exe</code></td><td>AI agent execution engine</td></tr>
+<tr><td><code>git worktree</code></td><td>Isolated working directories per task</td></tr>
+</table>
+```
+
+## Security Considerations
+
+- Uses `--no-verify` on git commits to bypass hooks in worktrees
+
+- Force-removes worktrees (potential data loss if in-progress)
+
+- Executes `./git-agent-task.sh` without sandboxing
+
+- **Critical:** `GITHUB_USERNAME` environment variable filters GitHub issues by author to prevent processing malicious issues from third parties on public repositories. Default is `lucasdicioccio`.
+
+
+

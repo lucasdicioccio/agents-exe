@@ -1,0 +1,26 @@
+# Specs
+
+The `todos/` directory holds the design documents behind the larger features (durable workflows, asynchronous tool calls, the session mailbox, partial application of tool arguments, the standalone server) and their progress notes. Most start with a **Status** line saying what of it has shipped, which is reproduced here. These pages are generated from the [agents-exe repository](https://github.com/lucasdicioccio/agents-exe/blob/main/../tree/main/todos ): the repository is the canonical source, and may be ahead of what is published here.
+
+- [**Asynchronous / Interruptible Tool Calls**](/specs-async-tool-calls.html ), _Status:_ no status line yet
+
+- [**Async Tool Calls Implementation Progress**](/specs-async-tool-calls-progress.html ), _Status:_ no status line yet
+
+- [**Plan: Durable execution from the CLI**](/specs-durable-workflows-cli-start-plan.html ), _Status:_ no status line yet
+
+- [**Plan: Durable Workflows for agents-exe**](/specs-durable-workflows.html ), _Status:_ no status line yet
+
+- [**Durable Workflows — Implementation Progress**](/specs-durable-workflows.progress.html ), _Status:_ no status line yet
+
+- [**Spec: the OS as a standalone server (TUI and web UI as clients)**](/specs-os-as-standalone-server.html ), _Status:_ proposal, 2026-09-23, revised the same day after checking service
+
+- [**Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)**](/specs-session-mailbox.html ), _Status:_ proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
+
+- [**Spec: partial application of tool arguments**](/specs-tool-partial-application.html ), _Status:_ Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done
+
+- [**Spec: embedding agents-exe in a web server**](/specs-web-server-embedding.html ), _Status:_ proposed (2026-09-18)
+
+- [**Web server embedding — Implementation Progress**](/specs-web-server-embedding.progress.html ), _Status:_ no status line yet
+
+
+

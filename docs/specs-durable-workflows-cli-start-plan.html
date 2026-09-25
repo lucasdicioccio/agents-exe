@@ -1,0 +1,369 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Plan: Durable execution from the CLI</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: no status line yet"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Plan: Durable execution from the CLI"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: no status line yet"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Plan: Durable execution from the CLI"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html"><meta property="og:description" content="Status: no status line yet"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/specs-durable-workflows-cli-start-plan.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-durable-workflows-cli-start-plan.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"Status: no status line yet","headline":"Plan: Durable execution from the CLI","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Plan: Durable execution from the CLI</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 940 words, 9 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><span class="topic-nav-boundary">|</span></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">1/11</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows-cli-start-plan.md"><code>todos/durable-workflows-cli-start-plan.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="plan-durable-execution-from-the-cli">Plan: Durable execution from the CLI</h2>
+<h3 id="goal">Goal</h3>
+<p>Make the durable-workflow execution mode accessible from the CLI in one-shot
+form, so a user can:</p>
+<ol>
+<li>Start a brand-new session with a prompt using <code>agents session start ...</code>.
+</li>
+<li>Have the agent run until it yields (partial turn, deferred tool calls) or
+completes.
+</li>
+<li>Inspect pending calls with <code>agents session pending</code>.
+</li>
+<li>Complete deferred calls with <code>agents session complete</code>.
+</li>
+<li>Resume with <code>agents session resume</code>.
+</li>
+<li>Iterate step by step, either letting the LLM continue or injecting tool
+results on behalf of the user.
+</li>
+</ol>
+<p>This closes the gap between the existing <code>run</code> command (fully synchronous,
+runs to completion) and the <code>session pause/resume/...</code> commands (which only
+operate on already-existing sessions).</p>
+<hr />
+<h3 id="decisions-on-open-questions">Decisions on open questions</h3>
+<table>
+<tr><th>Question</th><th>Decision</th></tr>
+<tr><td>How many steps should <code>session start</code> run?</td><td><strong>Zero by default</strong>, with an optional <code>--step</code> flag to run exactly one scheduling step. The goal is to forfeit as much scheduling as possible to external processes/users.</td></tr>
+<tr><td>How is the initial turn created?</td><td><strong>Option B</strong>: construct the initial <code>UserTurn</code> directly in <code>session start</code> with the prompt and media, then persist the session.</td></tr>
+<tr><td>Isolated execution?</td><td><strong>Out of scope</strong> for this milestone. Only <code>RunSync</code>, <code>RunAsync</code>, and <code>Defer</code> are supported.</td></tr>
+<tr><td>Policy language?</td><td><strong>Keep it simple</strong>: exact tool-name rules plus a default disposition.</td></tr>
+<tr><td>Continuation store?</td><td><strong>Keep it simple</strong>: rely on the file-based <code>SessionStore</code> and the in-memory partial turn. A SQLite continuation store can be added later.</td></tr>
+</table>
+<hr />
+<h3 id="current-state-and-gaps">Current state and gaps</h3>
+<h4 id="what-already-works">What already works</h4>
+<ul>
+<li>The library has full durable-workflow primitives:
+<ul>
+<li><code>ToolCallPolicy</code>, <code>ToolCallDisposition</code> (<code>RunSync</code>, <code>RunAsync</code>, <code>Defer</code>,
+<code>RunIsolated</code>).
+</li>
+<li><code>runAsync</code> in <code>System.Agents.Session.Loop</code> runs an async agent until it
+yields a <code>PartialUserTurn</code>.
+</li>
+<li><code>resumeSession</code> and <code>wakeSession</code> in <code>System.Agents.Session.Wake</code>.
+</li>
+<li><code>SessionBackend</code>, <code>ContinuationStore</code>, and CLI commands
+<code>session pause/resume/pending/complete/run-isolated</code>.
+</li>
+</ul>
+</li>
+<li>The existing <code>run</code> command already accepts prompts, media, session files,
+and thinking-output options.
+</li>
+</ul>
+<h4 id="what-is-missing">What is missing</h4>
+<ol>
+<li>
+<p><strong>No CLI command to create a new session in async mode.</strong></p>
+<ul>
+<li><code>run</code> always uses <code>mainOneShotTextWithThinking</code>, which creates a
+synchronous agent and calls <code>Loop.run</code> to completion.
+</li>
+<li><code>session pause/resume/...</code> require an existing <code>SessionId</code>; they cannot
+start from a user prompt.
+</li>
+</ul>
+</li>
+<li>
+<p><strong>No way to configure a durable policy from the agent JSON file.</strong></p>
+<ul>
+<li><code>System.Agents.Base.Agent</code> (the JSON config type) has no fields for
+<code>executionMode</code>, <code>toolCallPolicy</code>, <code>toolExecutor</code>, <code>continuationStore</code>,
+<code>deploymentRunner</code>, or <code>sessionBackend</code>.
+</li>
+<li>The CLI’s <code>withAgentForSession</code> builds the runtime agent with
+<code>defaultToolCallPolicy</code>, so even in async mode every call runs
+synchronously and no yielding occurs.
+</li>
+</ul>
+</li>
+<li>
+<p><strong>No shared parser for <code>run</code>-like options in the <code>session</code> command group.</strong></p>
+<ul>
+<li><code>parseOneShotOptions</code> is only used by <code>run</code>.
+</li>
+<li><code>session start</code> should accept the same prompt/media/thinking options.
+</li>
+</ul>
+</li>
+<li>
+<p><strong>No single-step scheduler command wired to the CLI.</strong></p>
+<ul>
+<li><code>runAsync</code> exists in the library but is not used by any CLI handler.
+</li>
+<li><code>handlePause</code> calls <code>runStepM</code> once on an existing session, but it does
+not create the initial user turn from a prompt.
+</li>
+</ul>
+</li>
+</ol>
+<hr />
+<h3 id="proposed-cli-additions">Proposed CLI additions</h3>
+<h4 id="new-command-agents-session-start">New command: <code>agents session start</code></h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create a session with an initial UserTurn, do not call the LLM yet.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents</span> session start <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> my-agent.json <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Research the weather in Paris and New York&quot;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co"># Same, but also run one scheduling step (e.g. ask the LLM and possibly</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># execute the first batch of tool calls).</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents</span> session start <span class="at">--step</span> <span class="dt">\</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> my-agent.json <span class="dt">\</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Research the weather in Paris and New York&quot;</span></span></code></pre></div></div><p>Semantics:</p>
+<ul>
+<li>Creates a fresh <code>Session</code> with <code>sessionVersion = Just 2</code> and
+<code>sessionExecutionMode = Just Asynchronous</code>.
+</li>
+<li>Constructs an initial <code>UserTurn</code> containing the prompt (and any media
+attachments).
+</li>
+<li>Loads the agent, applies the durable configuration from the agent file
+(see below), and sets <code>ctxExecutionMode = Asynchronous</code>.
+</li>
+<li>By default, persists the session immediately without calling the LLM.
+</li>
+<li>With <code>--step</code>, calls <code>runStepM</code> exactly once before persisting.
+</li>
+<li>Prints:
+<ul>
+<li>the new <code>session-id</code>;
+</li>
+<li>the current state (<code>UserTurn</code>, <code>LlmTurn</code>, <code>PartialUserTurn</code>, or
+completed);
+</li>
+<li>continuation tokens for any deferred calls.
+</li>
+</ul>
+</li>
+</ul>
+<p>If the session completes after the optional step, the final LLM response is
+printed as well.</p>
+<h4 id="new-command-agents-session-step">New command: <code>agents session step</code></h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents</span> session step <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span></code></pre></div></div><p>Runs exactly one scheduling step on an existing session and persists the
+result. This is the workhorse for manual iteration:</p>
+<ol>
+<li><code>session start -p &quot;...&quot;</code> → session with <code>UserTurn</code>.
+</li>
+<li><code>session step &lt;id&gt;</code> → LLM produces tool calls (<code>LlmTurn</code>).
+</li>
+<li><code>session step &lt;id&gt;</code> → sync tools run, async/deferred calls yield
+(<code>PartialUserTurn</code>).
+</li>
+<li><code>session complete &lt;token&gt; result.json</code> → inject external result.
+</li>
+<li><code>session step &lt;id&gt;</code> → woken results processed, possibly another LLM turn.
+</li>
+<li>Repeat until completion.
+</li>
+</ol>
+<p><code>session step</code> is functionally similar to the existing <code>session pause</code>, but
+named for iteration rather than interruption. The existing <code>session pause</code>
+can be kept for backward compatibility.</p>
+<h4 id="reuse-run-options">Reuse <code>run</code> options</h4>
+<p>Both <code>session start</code> and <code>session step</code> should accept the same prompt-script
+options as <code>run</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents</span> session start <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> my-agent.json <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Summarize&quot;</span> <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="at">--file</span> report.md <span class="dt">\</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="at">--media</span> screenshot.png <span class="dt">\</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="at">--thinking</span> stderr</span></code></pre></div></div><p>The cleanest way is to extract a shared parser type, e.g.
+<code>OneShotPromptOptions</code>, from <code>System.Agents.CLI.OneShot</code> and reuse it for
+<code>run</code>, <code>session start</code>, and (for prompt injection) future commands.</p>
+<hr />
+<h3 id="agent-configuration-for-durable-mode">Agent configuration for durable mode</h3>
+<p>To make durable execution usable without writing Haskell, the agent JSON
+config needs to expose at least the following fields.</p>
+<h4 id="minimal-viable-config">Minimal viable config</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-durable-agent&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;executionMode&quot;</span><span class="fu">:</span> <span class="st">&quot;asynchronous&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;toolCallPolicy&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="st">&quot;runSync&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_command&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;defer&quot;</span><span class="fu">,</span> <span class="dt">&quot;reason&quot;</span><span class="fu">:</span> <span class="st">&quot;approval required&quot;</span><span class="fu">}}</span><span class="ot">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;fetch_remote&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runAsync&quot;</span><span class="fu">}}</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="proposed-json-schema-additions-to-systemagentsbaseagent">Proposed JSON schema additions to <code>System.Agents.Base.Agent</code></h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Agent</span> <span class="ot">=</span> <span class="dt">Agent</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    { <span class="op">...</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> executionMode ::</span> <span class="dt">Maybe</span> <span class="dt">ExecutionMode</span>        <span class="co">-- default Synchronous</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolCallPolicyConfig ::</span> <span class="dt">Maybe</span> <span class="dt">ToolCallPolicyConfig</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><p>Only <code>executionMode</code> and <code>toolCallPolicyConfig</code> are in scope for this
+milestone.</p>
+<h4 id="tool-call-policy-config-design">Tool-call policy config design</h4>
+<p>A declarative policy config that the runtime turns into a <code>ToolCallPolicy</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallPolicyConfig</span> <span class="ot">=</span> <span class="dt">ToolCallPolicyConfig</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> tpcDefaultDisposition ::</span> <span class="dt">ToolCallDisposition</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tpcRules ::</span> [<span class="dt">ToolCallPolicyRule</span>]</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallPolicyRule</span> <span class="ot">=</span> <span class="dt">ToolCallPolicyRule</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> tprToolName ::</span> <span class="dt">Text</span>           <span class="co">-- exact match</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tprDisposition ::</span> <span class="dt">ToolCallDisposition</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><p>The runtime combinator:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">buildToolCallPolicy ::</span> <span class="dt">ToolCallPolicyConfig</span> <span class="ot">-&gt;</span> <span class="dt">ToolCallPolicy</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>buildToolCallPolicy cfg _ctx call <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    fromMaybe cfg<span class="op">.</span>tpcDefaultDisposition <span class="op">$</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        find ((<span class="op">==</span> callName call) <span class="op">.</span> tprToolName) cfg<span class="op">.</span>tpcRules</span></code></pre></div></div><h4 id="where-the-policy-is-applied">Where the policy is applied</h4>
+<p>In <code>System.Agents.CLI.SessionDurable.withAgentForSession</code>, after building the
+runtime agent from the OS tree, inspect the JSON <code>Agent</code> config:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> agent&#39; <span class="ot">=</span> <span class="fu">maybe</span> agent (withExecutionMode <span class="dt">Asynchronous</span>) (executionMode jsonAgent)</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> agent&#39;&#39; <span class="ot">=</span> <span class="fu">maybe</span> agent&#39; (withToolCallPolicy <span class="op">.</span> buildToolCallPolicy) (toolCallPolicyConfig jsonAgent)</span></code></pre></div></div><p>This makes <code>session start</code>, <code>session step</code>, <code>session pause</code>, and
+<code>session resume</code> all use the same durable configuration.</p>
+<hr />
+<h3 id="implementation-steps">Implementation steps</h3>
+<h4 id="step-1--shared-prompt-options">Step 1 — Shared prompt options</h4>
+<p>Refactor <code>System.Agents.CLI.OneShot</code> so that the prompt/media/thinking
+options are reusable:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">PromptScriptOptions</span> <span class="ot">=</span> <span class="dt">PromptScriptOptions</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> psoPromptScript ::</span> <span class="dt">PromptScript</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> psoMediaFiles ::</span> [<span class="dt">MediaReference</span>]</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> psoThinkingOutput ::</span> <span class="dt">OneShot.ThinkingOutput</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ot">parsePromptScriptOptions ::</span> <span class="dt">Parser</span> <span class="dt">PromptScriptOptions</span></span></code></pre></div></div><p>Update <code>OneShotOptions</code> to contain <code>PromptScriptOptions</code> plus
+<code>sessionFile</code>. Update <code>parseOneShotOptions</code> accordingly.</p>
+<h4 id="step-2--add-durable-config-fields-to-json-agent">Step 2 — Add durable config fields to JSON Agent</h4>
+<p>In <code>System.Agents.Base.Agent</code>:</p>
+<ul>
+<li>Add <code>executionMode :: Maybe ExecutionMode</code>.
+</li>
+<li>Add <code>toolCallPolicyConfig :: Maybe ToolCallPolicyConfig</code> with JSON
+instances.
+</li>
+<li>Keep defaults backward-compatible (<code>Nothing</code> = synchronous, default
+policy).
+</li>
+</ul>
+<h4 id="step-3--build-policy-from-config">Step 3 — Build policy from config</h4>
+<p>In <code>System.Agents.CLI.SessionDurable</code>:</p>
+<ul>
+<li>Add <code>buildToolCallPolicy</code> / <code>applyAgentDurableConfig</code>.
+</li>
+<li>Update <code>withAgentForSession</code> to read the JSON agent config and apply
+durable settings to the runtime agent.
+</li>
+</ul>
+<h4 id="step-4--implement-session-start">Step 4 — Implement <code>session start</code></h4>
+<p>In <code>System.Agents.CLI.SessionDurable</code>:</p>
+<ul>
+<li>Add <code>SessionStart PromptScriptOptions Bool</code> command (the <code>Bool</code> is
+whether to run one step).
+</li>
+<li>Implement <code>handleStart</code>:
+<ol>
+<li>Load agent tree and build runtime agent (with durable config).
+</li>
+<li>Interpret the prompt script (aliases, files, shell, media).
+</li>
+<li>Create a fresh <code>Session</code> (version 2, async mode).
+</li>
+<li>Construct the initial <code>UserTurn</code> with the prompt/media.
+</li>
+<li>If <code>--step</code>, call <code>runStepM</code> exactly once.
+</li>
+<li>Persist the resulting session.
+</li>
+<li>Print session id, current turn state, and any deferred tokens.
+</li>
+</ol>
+</li>
+</ul>
+<h4 id="step-5--implement-session-step">Step 5 — Implement <code>session step</code></h4>
+<p>In <code>System.Agents.CLI.SessionDurable</code>:</p>
+<ul>
+<li>Add <code>SessionStep SessionId</code> command.
+</li>
+<li>Implement <code>handleStep</code>:
+<ol>
+<li>Load the existing session.
+</li>
+<li>Load the agent and apply durable config.
+</li>
+<li>Call <code>runStepM</code> exactly once.
+</li>
+<li>Persist the resulting session.
+</li>
+<li>Print the new turn state and any deferred tokens.
+</li>
+</ol>
+</li>
+</ul>
+<p>This is very close to the existing <code>handlePause</code>; consider sharing the
+implementation.</p>
+<h4 id="step-6--wire-the-parsers">Step 6 — Wire the parsers</h4>
+<p>In <code>app/Main.hs</code>:</p>
+<ul>
+<li>Add <code>SessionStart</code> and <code>SessionStep</code> constructors to
+<code>SessionDurableCommand</code>.
+</li>
+<li>Add <code>start</code> and <code>step</code> subcommand parsers reusing
+<code>parsePromptScriptOptions</code> / <code>parseSessionIdArgument</code>.
+</li>
+<li>Update help text: <code>Operate durable sessions: start, step, pause, resume, ...</code>.
+</li>
+</ul>
+<h4 id="step-7--tests">Step 7 — Tests</h4>
+<ul>
+<li>Unit tests for <code>ToolCallPolicyConfig</code> JSON parsing.
+</li>
+<li>Unit tests for <code>buildToolCallPolicy</code>.
+</li>
+<li>Integration test exercising the full iterative flow:
+<ul>
+<li><code>session start -p &quot;...&quot;</code> creates a session with a <code>UserTurn</code>;
+</li>
+<li><code>session step &lt;id&gt;</code> produces an <code>LlmTurn</code> with tool calls;
+</li>
+<li><code>session step &lt;id&gt;</code> runs sync tools and defers one call
+(<code>PartialUserTurn</code>);
+</li>
+<li><code>session pending &lt;id&gt;</code> lists the deferred token;
+</li>
+<li><code>session complete &lt;token&gt; result.json</code> injects the result;
+</li>
+<li><code>session step &lt;id&gt;</code> processes the result and produces a final response.
+</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h3 id="suggested-first-milestone">Suggested first milestone</h3>
+<p>The smallest vertical slice that proves the design:</p>
+<ol>
+<li>Extract shared <code>PromptScriptOptions</code> from <code>run</code>.
+</li>
+<li>Add <code>executionMode</code> and <code>toolCallPolicyConfig</code> to the JSON <code>Agent</code>.
+</li>
+<li>Implement <code>buildToolCallPolicy</code> and apply it in <code>withAgentForSession</code>.
+</li>
+<li>Add <code>agents session start</code> that creates a session with an initial
+<code>UserTurn</code> and optionally runs one step.
+</li>
+<li>Add <code>agents session step</code> for single-step iteration.
+</li>
+<li>Write one integration test exercising the full flow above.
+</li>
+</ol>
+<hr />
+<h3 id="related-docs">Related docs</h3>
+<ul>
+<li><code>todos/durable-workflows.md</code> — original design plan.
+</li>
+<li><code>todos/durable-workflows.progress.md</code> — implementation progress.
+</li>
+<li><code>documentation/durable-workflows-howto.md</code> — user-facing how-to.
+</li>
+<li><code>src/System/Agents/CLI/SessionDurable.hs</code> — existing session command
+handlers.
+</li>
+<li><code>src/System/Agents/Session/Loop.hs</code> — <code>runAsync</code> and <code>runStepM</code>.
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

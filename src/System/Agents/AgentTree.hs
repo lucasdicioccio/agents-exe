@@ -361,7 +361,7 @@ formatReferenceError (MissingAgentReference referrerSlug referrerFile missingSlu
             , "  not an arbitrary name. Check that your extraAgents configuration uses the"
             , "  correct slug from the target file."
             , ""
-            , "  For more information, see: docs/advanced-configuration.md"
+            , "  For more information, see: documentation/advanced-configuration.md"
             ]
 
 data LoadingError

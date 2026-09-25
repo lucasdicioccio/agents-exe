@@ -636,7 +636,7 @@ application code is a private sub-library, `agents-server-internal`
 does not depend on wai or warp. SSE is written by hand with `responseStream`
 (no `wai-extra`). All bodies are JSON. Session objects embed the raw
 `Session` JSON that is already stored, so clients can reuse `session-print`
-logic. The user guide is `docs/agents-server.md`.
+logic. The user guide is `documentation/agents-server.md`.
 
 ```
 agents-server --agent-file a.json [--agent-file b.json …] --api-keys keys.json \
@@ -809,8 +809,8 @@ tracker.
 
 * wai/warp app, routes, SSE, CLI flags, graceful shutdown on SIGTERM (stop
   accepting, `shutdownSessionRunner`, close the database).
-* `docs/agents-server.md` user guide, plus links from
-  `docs/durable-workflows-howto.md`.
+* `documentation/agents-server.md` user guide, plus links from
+  `documentation/durable-workflows-howto.md`.
 * Tests (`agents-server-tests`, threaded, the application on a random port
   with a mock LLM): the demo flow over SSE (snapshot, then per run
   `run.started` … `calls.deferred`, `run.stopped`, then the continuation's
@@ -993,7 +993,7 @@ and the riskier ones come after the ones they build on. Choices marked
 ### Phase 13: self-description and a chat page ✅
 
 The server answered `404` at `/` and published nothing a client could read:
-the only reference was `docs/agents-server.md`, which a caller holding just a
+the only reference was `documentation/agents-server.md`, which a caller holding just a
 URL does not have.
 
 * **Routes as a servant type** (`AgentsServer.Routes`). Every endpoint whose
@@ -1081,4 +1081,4 @@ Recorded 2026-09-20:
 
 * `todos/durable-workflows.md`, `todos/durable-workflows.progress.md`
 * `todos/async-tool-calls.md`
-* `docs/durable-workflows-howto.md`, `docs/async-tool-calls.md`, `docs/sessions.md`
+* `documentation/durable-workflows-howto.md`, `documentation/async-tool-calls.md`, `documentation/sessions.md`

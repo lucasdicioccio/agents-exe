@@ -1,0 +1,254 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Changelog: OS Model Migration</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="**Date:** March 2026 **Commits:** `0eb5263` to `cb52af7` ## Summary This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS)"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Changelog: OS Model Migration"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="**Date:** March 2026 **Commits:** `0eb5263` to `cb52af7` ## Summary This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS)"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Changelog: OS Model Migration"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html"><meta property="og:description" content="**Date:** March 2026 **Commits:** `0eb5263` to `cb52af7` ## Summary This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS)"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/docs-CHANGELOG-OS-MIGRATION.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-CHANGELOG-OS-MIGRATION.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"**Date:** March 2026 **Commits:** `0eb5263` to `cb52af7` ## Summary This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS)","headline":"Changelog: OS Model Migration","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Changelog: OS Model Migration</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 405 words, 3 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">20/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-architecture.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/CHANGELOG-OS-MIGRATION.md"><code>documentation/CHANGELOG-OS-MIGRATION.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="changelog-os-model-migration">Changelog: OS Model Migration</h2>
+<p><strong>Date:</strong> March 2026<br />
+<strong>Commits:</strong> <code>0eb5263</code> to <code>cb52af7</code></p>
+<h3 id="summary">Summary</h3>
+<p>This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized <strong>Entity-Component-System (ECS) based OS model</strong>.</p>
+<h3 id="major-changes">Major Changes</h3>
+<h4 id="new-architecture-ecs-based-os-model">New Architecture: ECS-Based OS Model</h4>
+<p>The framework now uses an Entity-Component-System (ECS) pattern at its core:</p>
+<ul>
+<li><strong>Entities</strong>: Lightweight UUID-based identifiers (AgentId, ToolboxId, ConversationId, etc.)
+</li>
+<li><strong>Components</strong>: Pure, serializable data attached to entities (AgentConfig, AgentState, ToolboxConfig)
+</li>
+<li><strong>Systems</strong>: Functions that operate on entities with specific component combinations
+</li>
+</ul>
+<h4 id="new-modules-27-os-modules-added">New Modules (27 OS Modules Added)</h4>
+<table>
+<tr><th>Module</th><th>Purpose</th></tr>
+<tr><td><code>System.Agents.OS</code></td><td>Main OS module, exports all OS functionality</td></tr>
+<tr><td><code>System.Agents.OS.Core</code></td><td>Core ECS types and World operations</td></tr>
+<tr><td><code>System.Agents.OS.Core.Types</code></td><td>Component typeclass and entity ID types</td></tr>
+<tr><td><code>System.Agents.OS.Core.World</code></td><td>World storage with STM-based component stores</td></tr>
+<tr><td><code>System.Agents.OS.Agents</code></td><td>OS-native agent creation and management</td></tr>
+<tr><td><code>System.Agents.OS.AgentTree</code></td><td>OS-native agent tree initialization</td></tr>
+<tr><td><code>System.Agents.OS.Concurrent</code></td><td>Concurrent access patterns</td></tr>
+<tr><td><code>System.Agents.OS.Concurrent.Types</code></td><td>Access pattern types (Exclusive, Read-Write, Pool)</td></tr>
+<tr><td><code>System.Agents.OS.Concurrent.Locks</code></td><td>STM-based locking primitives</td></tr>
+<tr><td><code>System.Agents.OS.Resources</code></td><td>Resource lifecycle management</td></tr>
+<tr><td><code>System.Agents.OS.Resources.Types</code></td><td>Resource scope definitions</td></tr>
+<tr><td><code>System.Agents.OS.Resources.Sqlite</code></td><td>SQLite resource management</td></tr>
+<tr><td><code>System.Agents.OS.Resources.Lua</code></td><td>Lua interpreter resources</td></tr>
+<tr><td><code>System.Agents.OS.Resources.Http</code></td><td>HTTP connection pool resources</td></tr>
+<tr><td><code>System.Agents.OS.Conversation</code></td><td>Conversation and turn management</td></tr>
+<tr><td><code>System.Agents.OS.Conversation.Types</code></td><td>Turn, Message, Conversation components</td></tr>
+<tr><td><code>System.Agents.OS.Conversation.Lineage</code></td><td>Call chain tracking</td></tr>
+<tr><td><code>System.Agents.OS.Persistence</code></td><td>Component persistence layer</td></tr>
+<tr><td><code>System.Agents.OS.Persistence.Types</code></td><td>Backend abstractions</td></tr>
+<tr><td><code>System.Agents.OS.Persistence.Sqlite</code></td><td>SQLite persistence backend</td></tr>
+<tr><td><code>System.Agents.OS.Persistence.File</code></td><td>File-based persistence</td></tr>
+<tr><td><code>System.Agents.OS.Persistence.Schema</code></td><td>Database schema</td></tr>
+<tr><td><code>System.Agents.OS.Compat</code></td><td>Compatibility layer exports</td></tr>
+<tr><td><code>System.Agents.OS.Compat.Runtime</code></td><td>Runtime-to-OS bridge</td></tr>
+<tr><td><code>System.Agents.OS.Interfaces</code></td><td>Interface layer</td></tr>
+<tr><td><code>System.Agents.OS.Interfaces.TUI</code></td><td>TUI adaptation for OS</td></tr>
+<tr><td><code>System.Agents.OS.Interfaces.OneShot</code></td><td>OneShot adaptation for OS</td></tr>
+</table>
+<h4 id="migration-phases">Migration Phases</h4>
+<p>The migration follows a phased approach:</p>
+<pre><code>PhaseOldOnly (REMOVED) ──&gt; PhaseDual ──&gt; PhaseNewOnly
+    (Legacy only)          (Both)        (OS only)
+</code></pre>
+<p><strong>March 2026 Update:</strong> PhaseOldOnly has been removed. The system now operates in:</p>
+<ul>
+<li><strong>PhaseDual</strong> (default): Both Runtime and OS available
+</li>
+<li><strong>PhaseNewOnly</strong>: OS only, Runtime deprecated
+</li>
+</ul>
+<h4 id="key-new-capabilities">Key New Capabilities</h4>
+<ol>
+<li><strong>Shared Toolboxes</strong>: Multiple agents can share the same SQLite database, HTTP connection pool, or other resources
+</li>
+<li><strong>Better Resource Management</strong>: Explicit lifecycle scopes (Program, Agent, Toolbox, Conversation, Turn, ToolCall)
+</li>
+<li><strong>Concurrent Access</strong>: STM-based synchronization with multiple patterns:
+<ul>
+<li><code>ExclusiveAccess</code>: Single accessor (TMVar) - for Lua interpreters
+</li>
+<li><code>ReadWriteAccess</code>: Multiple readers/single writer (RWLock) - for SQLite
+</li>
+<li><code>PoolAccess</code>: Bounded pool (TBQueue) - for HTTP connections
+</li>
+<li><code>StatelessAccess</code>: No synchronization needed
+</li>
+</ul>
+</li>
+<li><strong>Durable Persistence</strong>: Pluggable backends (SQLite, PostgreSQL, file-based)
+</li>
+<li><strong>Complete Lineage Tracking</strong>: Full call chains for debugging and accounting
+</li>
+<li><strong>Foundation for Web API</strong>: Centralized state enables HTTP server interface
+</li>
+</ol>
+<h4 id="component-type-ids">Component Type IDs</h4>
+<table>
+<tr><th>ID</th><th>Component</th></tr>
+<tr><td>1</td><td>AgentConfig</td></tr>
+<tr><td>2</td><td>AgentState</td></tr>
+<tr><td>3</td><td>ToolboxConfig</td></tr>
+<tr><td>4</td><td>ToolboxState</td></tr>
+<tr><td>5</td><td>ToolboxBinding</td></tr>
+<tr><td>30</td><td>ConversationConfig</td></tr>
+<tr><td>31</td><td>ConversationState</td></tr>
+<tr><td>32</td><td>AgentConversation</td></tr>
+<tr><td>33</td><td>TurnConfig</td></tr>
+<tr><td>34</td><td>TurnState</td></tr>
+<tr><td>35</td><td>ToolCallConfig</td></tr>
+<tr><td>36</td><td>ToolCallState</td></tr>
+<tr><td>38</td><td>Message</td></tr>
+</table>
+<h4 id="new-cli-modules">New CLI Modules</h4>
+<ul>
+<li><code>System.Agents.CLI.Export</code> - Export tools and agents
+</li>
+<li><code>System.Agents.CLI.Import</code> - Import tools and agents
+</li>
+</ul>
+<h4 id="new-documentation">New Documentation</h4>
+<table>
+<tr><th>Document</th><th>Purpose</th></tr>
+<tr><td><code>documentation/architecture.md</code></td><td>Updated with OS model architecture</td></tr>
+<tr><td><code>documentation/OS-API.md</code></td><td>Complete API reference for OS model</td></tr>
+<tr><td><code>documentation/MIGRATION-OS.md</code></td><td>Migration guide from Runtime to OS</td></tr>
+<tr><td><code>documentation/MIGRATION-GUIDE.md</code></td><td>General migration guidance</td></tr>
+<tr><td><code>documentation/advanced-configuration.md</code></td><td>Advanced configuration options</td></tr>
+</table>
+<h4 id="new-tests">New Tests</h4>
+<table>
+<tr><th>Test Module</th><th>Purpose</th></tr>
+<tr><td><code>test/OS/IntegrationTests.hs</code></td><td>End-to-end OS scenarios</td></tr>
+<tr><td><code>test/OS/CompatibilityTests.hs</code></td><td>Runtime/OS compatibility tests</td></tr>
+<tr><td><code>test/OS/CoreTests.hs</code></td><td>ECS core functionality</td></tr>
+<tr><td><code>test/OS/ConcurrentTests.hs</code></td><td>Concurrent access patterns</td></tr>
+<tr><td><code>test/OS/ResourcesTests.hs</code></td><td>Resource management</td></tr>
+<tr><td><code>test/OS/ConversationTests.hs</code></td><td>Conversation/lineage</td></tr>
+<tr><td><code>test/OS/PersistenceTests.hs</code></td><td>Persistence layer</td></tr>
+<tr><td><code>test/OS/CompatTests.hs</code></td><td>Compatibility layer</td></tr>
+<tr><td><code>test/OS/InterfaceTests.hs</code></td><td>Interface layer</td></tr>
+</table>
+<h4 id="new-benchmarks">New Benchmarks</h4>
+<table>
+<tr><th>Benchmark</th><th>Purpose</th></tr>
+<tr><td><code>bench/OSBenchmarks.hs</code></td><td>OS model performance benchmarks</td></tr>
+</table>
+<h3 id="api-changes">API Changes</h3>
+<h4 id="old-still-supported-via-compatibility-layer">Old (Still Supported via Compatibility Layer)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Legacy Runtime approach</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>runtime <span class="ot">&lt;-</span> newRuntime props agent tracer</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> runWithRuntime runtime <span class="op">$</span> <span class="kw">do</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    tools <span class="ot">&lt;-</span> listTools</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    callTool <span class="st">&quot;my-tool&quot;</span> args</span></code></pre></div></div><h4 id="new-os-model">New (OS Model)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- OS model approach</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- Initialize world</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>world <span class="ot">&lt;-</span> atomically <span class="op">$</span> <span class="kw">do</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    w <span class="ot">&lt;-</span> newWorld</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    w&#39; <span class="ot">&lt;-</span> registerComponentStore w (<span class="dt">Proxy</span> <span class="op">@</span><span class="dt">AgentConfig</span>)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    registerComponentStore w&#39; (<span class="dt">Proxy</span> <span class="op">@</span><span class="dt">AgentState</span>)</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create agent</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> config <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    { agentName <span class="ot">=</span> <span class="st">&quot;my-agent&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    , agentModel <span class="ot">=</span> <span class="dt">ModelConfig</span> <span class="st">&quot;openai&quot;</span> <span class="st">&quot;url&quot;</span> <span class="st">&quot;gpt-4&quot;</span> <span class="st">&quot;key&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    , agentSystemPrompt <span class="ot">=</span> <span class="st">&quot;You are helpful&quot;</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    , agentToolboxBindings <span class="ot">=</span> []</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>agentId <span class="ot">&lt;-</span> createAgent world config</span></code></pre></div></div><h3 id="migration-path">Migration Path</h3>
+<ol>
+<li><strong>Current (PhaseDual)</strong>: Use <code>System.Agents.OS.Compat.Runtime</code> for gradual migration
+</li>
+<li><strong>Future (PhaseNewOnly)</strong>: Direct OS model usage
+</li>
+</ol>
+<p>See <code>documentation/MIGRATION-OS.md</code> for detailed migration instructions.</p>
+<h3 id="build-changes">Build Changes</h3>
+<h4 id="new-dependencies">New Dependencies</h4>
+<ul>
+<li><code>deepseq</code> - For benchmark strictness
+</li>
+<li><code>criterion</code> - Benchmarking framework
+</li>
+<li><code>async</code> - Concurrent test execution
+</li>
+<li><code>mtl</code> - Monad transformers
+</li>
+</ul>
+<h4 id="cabal-updates">Cabal Updates</h4>
+<ul>
+<li>Added 27 new OS modules to library
+</li>
+<li>Added new test modules
+</li>
+<li>Added benchmark section
+</li>
+</ul>
+<h3 id="benefits">Benefits</h3>
+<ol>
+<li><strong>Shared Resources</strong>: Multiple agents sharing toolboxes
+</li>
+<li><strong>Resource Pooling</strong>: HTTP connections pooled across agents
+</li>
+<li><strong>Better Lifecycle</strong>: Explicit cleanup with scopes
+</li>
+<li><strong>Web API Ready</strong>: Centralized state for HTTP interface
+</li>
+<li><strong>Durable Persistence</strong>: Multiple backend options
+</li>
+<li><strong>Lineage Tracking</strong>: Complete call chains
+</li>
+</ol>
+<h3 id="tradeoffs">Tradeoffs</h3>
+<ol>
+<li><strong>ECS Complexity</strong>: Adds indirection but enables flexible composition
+</li>
+<li><strong>STM Overhead</strong>: Slight performance cost for composability
+</li>
+<li><strong>Dual Mode</strong>: Maintenance burden during transition
+</li>
+<li><strong>Storage Overhead</strong>: More memory than direct fields
+</li>
+</ol>
+<h3 id="backward-compatibility">Backward Compatibility</h3>
+<ul>
+<li>Full compatibility layer provided
+</li>
+<li>Old Runtime interface still works
+</li>
+<li>Gradual migration supported
+</li>
+<li>Breaking changes documented in migration guide
+</li>
+</ul>
+<h3 id="related-issues">Related Issues</h3>
+<ul>
+<li>#348 - Core Entity and Component Types
+</li>
+<li>#349 - Resource Management
+</li>
+<li>#350 - Concurrent Access
+</li>
+<li>#351 - Conversation and Lineage Tracking
+</li>
+<li>#352 - OS Monad
+</li>
+<li>#353 - Runtime Compatibility
+</li>
+<li>#354 - TUI and OneShot Adaptation
+</li>
+<li>#355 - Persistence Layer
+</li>
+<li>#356 - Documentation and Integration (this release)
+</li>
+</ul>
+<h3 id="contributors">Contributors</h3>
+<ul>
+<li>Lucas DiCioccio
+</li>
+</ul>
+<hr />
+<p>For questions about the migration, see <code>documentation/MIGRATION-OS.md</code> or file an issue with the “migration” label.</p>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

@@ -1,0 +1,1214 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - CLI Reference</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="Complete reference for the Agents CLI commands and options. ## Global Options These options apply to all commands: ```bash agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS] ``` | Option | Default | Description | |--------|---------|----------"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - CLI Reference"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Complete reference for the Agents CLI commands and options. ## Global Options These options apply to all commands: ```bash agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS] ``` | Option | Default | Description | |--------|---------|----------"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - CLI Reference"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html"><meta property="og:description" content="Complete reference for the Agents CLI commands and options. ## Global Options These options apply to all commands: ```bash agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS] ``` | Option | Default | Description | |--------|---------|----------"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/docs-cli-commands.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-cli-commands.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"Complete reference for the Agents CLI commands and options. ## Global Options These options apply to all commands: ```bash agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS] ``` | Option | Default | Description | |--------|---------|----------","headline":"CLI Reference","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>CLI Reference</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1157 words, 71 code snippets, 8 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-mcp.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">16/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-internal-tool-mapping.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/cli-commands.md"><code>documentation/cli-commands.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="cli-reference">CLI Reference</h2>
+<p>Complete reference for the Agents CLI commands and options.</p>
+<h3 id="global-options">Global Options</h3>
+<p>These options apply to all commands:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="pp">[</span><span class="ss">GLOBAL_OPTS</span><span class="pp">]</span> COMMAND <span class="pp">[</span><span class="ss">COMMAND_OPTS</span><span class="pp">]</span></span></code></pre></div></div><table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--api-keys FILE</code></td><td><code>~/.config/agents-exe/secret-keys</code></td><td>Path to API keys JSON file</td></tr>
+<tr><td><code>--agent-file FILE</code></td><td>(from config)</td><td>Agent configuration file(s)</td></tr>
+<tr><td><code>--agent SLUG</code></td><td>-</td><td>Select agent by slug instead of file path</td></tr>
+<tr><td><code>--log-file FILE</code></td><td><code>agents-logfile</code></td><td>Raw log output file</td></tr>
+<tr><td><code>--log-http URL</code></td><td>-</td><td>HTTP endpoint for JSON logs</td></tr>
+<tr><td><code>--log-json-file FILE</code></td><td>-</td><td>Local JSON log file</td></tr>
+</table>
+<h3 id="commands">Commands</h3>
+<h4 id="check">check</h4>
+<p>Validate agent configuration and display loaded tools.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check [--tools MODE]</span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--tools MODE</code></td><td>Tool display mode: <code>none</code>, <code>list</code>, <code>agents-exe</code>, <code>openai</code> (default: <code>none</code>)</td></tr>
+</table>
+<p><strong>Output:</strong></p>
+<pre><code>my-agent: A helpful file assistant (12 tools)
+</code></pre>
+<p><strong>Exit codes:</strong></p>
+<ul>
+<li><code>0</code> - All agents loaded successfully
+</li>
+<li><code>1</code> - Configuration errors found
+</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Check default agents</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Check specific agent</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check <span class="at">--agent-file</span> ./custom-agent.json</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># List tools in agents-exe format</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check <span class="at">--tools</span> agents-exe</span></code></pre></div></div><h4 id="run">run</h4>
+<p>Execute a one-shot agent conversation.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--session-file FILE</code></td><td>Resume from existing session</td></tr>
+<tr><td><code>--thinking TARGET</code></td><td>Output thinking: <code>none</code>, <code>stdout</code>, <code>stderr</code> (default: <code>none</code>)</td></tr>
+<tr><td><code>-m, --media MEDIA</code></td><td>Attach media file (can be specified multiple times)</td></tr>
+<tr><td><code>--prompt TEXT</code></td><td>Initial prompt text</td></tr>
+<tr><td><code>--file FILE</code></td><td>Read prompt from file</td></tr>
+<tr><td><code>--shell COMMAND</code></td><td>Use shell command output as prompt</td></tr>
+<tr><td><code>--alias NAME</code></td><td>Use predefined prompt alias</td></tr>
+<tr><td><code>--sep4 TEXT</code></td><td>Short separator (4 chars)</td></tr>
+<tr><td><code>--sep40 TEXT</code></td><td>Long separator (40 chars)</td></tr>
+<tr><td><code>--session-xs FILE</code></td><td>Inject session at minimal verbosity</td></tr>
+<tr><td><code>--session-s FILE</code></td><td>Inject session at low verbosity</td></tr>
+<tr><td><code>--session-m FILE</code></td><td>Inject session at medium verbosity</td></tr>
+<tr><td><code>--session-l FILE</code></td><td>Inject session at high verbosity</td></tr>
+<tr><td><code>--session-xl FILE</code></td><td>Inject session at maximum verbosity</td></tr>
+</table>
+<p><strong>Asynchronous tool calls:</strong></p>
+<p>If the agent file enables asynchronous execution (see
+<a href="/agents-exe/docs-async-tool-calls.html">async-tool-calls.md</a>), tool calls run concurrently and
+the model can be answered while they run. <code>run</code> still waits for them, since
+they cannot outlive the process.</p>
+<p>It stops early only when a turn waits on <em>deferred</em> calls, which an external
+worker completes. It then prints a JSON report and stores the session:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;paused&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;reason&quot;</span><span class="fu">:</span> <span class="st">&quot;waiting for deferred tool calls&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;session_id&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;deferred_calls&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;approve_deploy&quot;</span><span class="fu">,</span> <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;call_9&quot;</span><span class="fu">,</span> <span class="dt">&quot;continuation_token&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}</span></span></code></pre></div></div><p>Continue it with <code>session complete</code> and <code>session resume</code>.</p>
+<p><strong>Media Attachment Format:</strong></p>
+<p>The <code>-m, --media</code> option accepts file paths with optional MIME type:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Auto-detect MIME type from extension</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">-m</span> /path/to/image.png <span class="at">--prompt</span> <span class="st">&quot;Describe this image&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Explicit MIME type (semicolon separator)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">-m</span> <span class="st">&quot;image/jpeg;/path/to/photo.jpg&quot;</span> <span class="at">--prompt</span> <span class="st">&quot;Analyze this photo&quot;</span></span></code></pre></div></div><p><strong>Supported Media Types:</strong></p>
+<table>
+<tr><th>Category</th><th>Extensions</th><th>MIME Types</th></tr>
+<tr><td><strong>Images</strong></td><td><code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.gif</code>, <code>.webp</code>, <code>.svg</code></td><td><code>image/png</code>, <code>image/jpeg</code>, <code>image/gif</code>, <code>image/webp</code>, <code>image/svg+xml</code></td></tr>
+<tr><td><strong>Documents</strong></td><td><code>.pdf</code>, <code>.txt</code>, <code>.md</code>, <code>.json</code>, <code>.xml</code></td><td><code>application/pdf</code>, <code>text/plain</code>, <code>text/markdown</code>, <code>application/json</code>, <code>application/xml</code></td></tr>
+<tr><td><strong>Audio</strong></td><td><code>.mp3</code>, <code>.wav</code>, <code>.ogg</code>, <code>.aac</code>, <code>.flac</code></td><td><code>audio/mp3</code>, <code>audio/wav</code>, <code>audio/ogg</code>, <code>audio/aac</code>, <code>audio/flac</code></td></tr>
+<tr><td><strong>Video</strong></td><td><code>.mp4</code>, <code>.webm</code>, <code>.mov</code>, <code>.avi</code></td><td><code>video/mp4</code>, <code>video/webm</code>, <code>video/quicktime</code>, <code>video/avi</code></td></tr>
+</table>
+<p><strong>Size Limit:</strong> 50MB per file</p>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Simple prompt</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> agent.json <span class="at">--prompt</span> <span class="st">&quot;Hello!&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Read from file</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> agent.json <span class="at">--file</span> prompt.txt</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Shell command output as prompt</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> agent.json <span class="at">--shell</span> <span class="st">&quot;git diff&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Resume session</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> agent.json <span class="at">--session-file</span> session.json</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Use alias</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> agent.json <span class="at">--alias</span> code-review <span class="at">--file</span> changes.patch</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co"># Multi-part prompt with separators</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;Review this code:&quot;</span> <span class="dt">\</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>  <span class="at">--sep4</span> <span class="st">&quot;----&quot;</span> <span class="dt">\</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> code.py <span class="dt">\</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>  <span class="at">--sep40</span> <span class="st">&quot;========================================&quot;</span> <span class="dt">\</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;What improvements can be made?&quot;</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="co"># Inject previous session at medium verbosity</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> agent.json <span class="dt">\</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>  <span class="at">--session-m</span> previous-session.json <span class="dt">\</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;Continue from where we left off&quot;</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a><span class="co"># Attach single image</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> vision-agent.json <span class="dt">\</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>  <span class="at">-m</span> ./screenshot.png <span class="dt">\</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;What do you see in this image?&quot;</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a><span class="co"># Attach multiple images</span></span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> vision-agent.json <span class="dt">\</span></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a>  <span class="at">-m</span> ./image1.png <span class="dt">\</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a>  <span class="at">-m</span> ./image2.jpg <span class="dt">\</span></span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a>  <span class="at">-m</span> <span class="st">&quot;image/gif;./animation.gif&quot;</span> <span class="dt">\</span></span>
+<span id="42"><a href="#42" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;Compare these images&quot;</span></span>
+<span id="43"><a href="#43" aria-hidden="true" tabindex="-1"></a></span>
+<span id="44"><a href="#44" aria-hidden="true" tabindex="-1"></a><span class="co"># Attach document for analysis</span></span>
+<span id="45"><a href="#45" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="46"><a href="#46" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> document-agent.json <span class="dt">\</span></span>
+<span id="47"><a href="#47" aria-hidden="true" tabindex="-1"></a>  <span class="at">-m</span> ./report.pdf <span class="dt">\</span></span>
+<span id="48"><a href="#48" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;Summarize the key findings&quot;</span></span>
+<span id="49"><a href="#49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="50"><a href="#50" aria-hidden="true" tabindex="-1"></a><span class="co"># Combine media with text from file</span></span>
+<span id="51"><a href="#51" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="52"><a href="#52" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> multimodal-agent.json <span class="dt">\</span></span>
+<span id="53"><a href="#53" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;Analyze this diagram and code:&quot;</span> <span class="dt">\</span></span>
+<span id="54"><a href="#54" aria-hidden="true" tabindex="-1"></a>  <span class="at">-m</span> ./diagram.png <span class="dt">\</span></span>
+<span id="55"><a href="#55" aria-hidden="true" tabindex="-1"></a>  <span class="at">--sep4</span> <span class="st">&quot;----&quot;</span> <span class="dt">\</span></span>
+<span id="56"><a href="#56" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> ./source-code.py</span></code></pre></div></div><h4 id="tui">tui</h4>
+<p>Start the interactive Terminal UI.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui [--agent-file FILE...] [--keymap FILE] [--db PATH]</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="at">--attach</span> URL<span class="kw">|</span><span class="ex">PATH</span> [--token TOKEN <span class="kw">|</span> <span class="ex">--token-file</span> FILE] [--keymap FILE]</span></code></pre></div></div><p>The TUI is a client of an in-process <code>SessionRunner</code> it starts over the
+same <code>Host</code> config <code>agents-exe serve</code> uses, or, with <code>--attach</code>, of a
+running <code>agents-exe serve</code>/<code>agents-server</code> (see
+<a href="/agents-exe/docs-tui.html#architecture">tui.md</a> and
+<a href="/agents-exe/docs-agents-server.html#attaching-the-tui">agents-server.md</a>).</p>
+<p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--keymap FILE</code>, <code>-k FILE</code></td><td>none</td><td>Path to a keymap configuration JSON file</td></tr>
+<tr><td><code>--db PATH</code></td><td>next to the resolved sessions directory</td><td>SQLite database for the TUI's embedded session runner. Old <code>conv.&lt;uuid&gt;.json</code> history under the resolved sessions directories stays readable as a read-only fallback. Not with <code>--attach</code>.</td></tr>
+<tr><td><code>--attach URL\|PATH</code></td><td>none</td><td>Drive a running server instead of an embedded runner. <code>http://HOST:PORT</code> (or <code>https://</code>, optionally with a path prefix), <code>unix:///path/to.sock</code> for <code>serve --socket</code>, or a bare socket path (anything containing a <code>/</code> or ending in <code>.sock</code>). Nothing is loaded locally: agents, API keys and sessions are the server's.</td></tr>
+<tr><td><code>--token TOKEN</code></td><td>none</td><td>Bearer token for <code>--attach</code>, when the server runs with <code>--auth-tokens</code>.</td></tr>
+<tr><td><code>--token-file FILE</code></td><td>none</td><td>The same, read from a file (surrounding whitespace ignored); keeps the token out of the process list.</td></tr>
+</table>
+<p><strong>Features:</strong></p>
+<ul>
+<li>Real-time streaming responses
+</li>
+<li>Multiple agent support (Tab to switch)
+</li>
+<li>Tool call visualization
+</li>
+<li>Session persistence
+</li>
+<li>Turn navigation and forking
+</li>
+<li>Message queue management
+</li>
+<li>File attachments (Ctrl+F)
+</li>
+<li>Clipboard paste support (Ctrl+V)
+</li>
+</ul>
+<p><strong>Keyboard Shortcuts:</strong></p>
+<ul>
+<li><code>Tab</code> / <code>Shift+Tab</code> - Switch between agents
+</li>
+<li><code>Enter</code> - Send message
+</li>
+<li><code>Ctrl+C</code> - Quit
+</li>
+<li><code>Up/Down</code> - Scroll history
+</li>
+<li><code>Ctrl+[</code> / <code>Ctrl+]</code> - Previous/Next tab
+</li>
+<li><code>Ctrl+E</code> - Pause/unpause conversation
+</li>
+<li><code>Ctrl+D</code> (when paused) - Clear queued messages
+</li>
+<li><code>Ctrl+F</code> - Attach file
+</li>
+<li><code>Ctrl+Shift+F</code> - Clear all attachments
+</li>
+<li><code>Ctrl+V</code> - Paste from clipboard
+</li>
+</ul>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Single agent TUI</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="at">--agent-file</span> agent.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Multi-agent TUI</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="dt">\</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> coder.json <span class="dt">\</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> reviewer.json <span class="dt">\</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> tester.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Attach to a server started elsewhere with `agents-exe serve`</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="at">--attach</span> http://127.0.0.1:8080</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="at">--attach</span> unix:///run/agents/agents.sock</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="at">--attach</span> https://agents.example <span class="at">--token-file</span> ~/.agents-token</span></code></pre></div></div><h4 id="mcp-server">mcp-server</h4>
+<p>Start an MCP (Model Context Protocol) server.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> mcp-server [--agent-file FILE...]</span></code></pre></div></div><p><strong>Description:</strong>
+Exposes loaded agents as MCP tools for integration with MCP clients like Claude Desktop.</p>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Single agent MCP server</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> mcp-server <span class="at">--agent-file</span> agent.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Multi-agent MCP server</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> mcp-server <span class="dt">\</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> research-agent.json <span class="dt">\</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> writing-agent.json</span></code></pre></div></div><h4 id="echo-prompt">echo-prompt</h4>
+<p>Process and echo the prompt without calling the LLM.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> echo-prompt <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Options:</strong> Same as <code>run</code> command.</p>
+<p><strong>Use case:</strong> Verify prompt construction before sending to LLM.</p>
+<p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> echo-prompt <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;Context:&quot;</span> <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> context.txt <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--prompt</span> <span class="st">&quot;Question:&quot;</span> <span class="dt">\</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> question.txt</span></code></pre></div></div><h4 id="session-print">session-print</h4>
+<p>Display a session file in markdown format.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span> SESSIONFILE</span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--show-tool-call-results MODE</code></td><td>Display mode: <code>hidden</code>, <code>shown</code>, <code>elided</code> (default: <code>hidden</code>)</td></tr>
+<tr><td><code>--show-tool-call-arguments MODE</code></td><td>Display mode: <code>hidden</code>, <code>shown</code>, <code>elided</code> (default: <code>hidden</code>)</td></tr>
+<tr><td><code>--n-turns N</code></td><td>Limit to last N turns</td></tr>
+<tr><td><code>--repeat-system-prompt</code></td><td>Show system prompt each turn</td></tr>
+<tr><td><code>--repeat-tools</code></td><td>Show available tools each turn</td></tr>
+<tr><td><code>--antichronological</code></td><td>Newest first (default: oldest first)</td></tr>
+<tr><td><code>--no-funny-stamp</code></td><td>Skip the ASCII art logo</td></tr>
+</table>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Print full session</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print session.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Print with tool results visible</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--show-tool-call-results</span> shown session.json</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Elide long outputs (show first/last 10 lines)</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--show-tool-call-results</span> elided session.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Last 5 turns only</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--n-turns</span> 5 session.json</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Reverse order</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--antichronological</span> session.json</span></code></pre></div></div><h4 id="session-edit">session-edit</h4>
+<p>Edit a session file (reads JSON from STDIN, writes JSON to STDOUT).</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span> <span class="op">&lt;</span> input.json <span class="op">&gt;</span> output.json</span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--take</code></td><td>Take first N turns (use with <code>--count</code>)</td></tr>
+<tr><td><code>--take-tail</code></td><td>Take last N turns (use with <code>--count</code>)</td></tr>
+<tr><td><code>--drop</code></td><td>Drop first N turns (use with <code>--count</code>)</td></tr>
+<tr><td><code>--drop-tail</code></td><td>Drop last N turns (use with <code>--count</code>)</td></tr>
+<tr><td><code>--count N</code>, <code>-n N</code></td><td>Number of turns for take/drop operations</td></tr>
+<tr><td><code>--censor-tool-calls</code></td><td>Remove all tool calls</td></tr>
+<tr><td><code>--censor-thinking</code></td><td>Remove all thinking content</td></tr>
+</table>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Keep only first 10 turns</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--take</span> <span class="at">--count</span> 10 <span class="op">&lt;</span> session.json <span class="op">&gt;</span> trimmed.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Keep only last 5 turns</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--take-tail</span> <span class="at">--count</span> 5 <span class="op">&lt;</span> session.json <span class="op">&gt;</span> recent.json</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Remove first 2 turns</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--drop</span> <span class="at">--count</span> 2 <span class="op">&lt;</span> session.json <span class="op">&gt;</span> dropped.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Remove all tool calls</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--censor-tool-calls</span> <span class="op">&lt;</span> session.json <span class="op">&gt;</span> no-tools.json</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Remove thinking content</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--censor-thinking</span> <span class="op">&lt;</span> session.json <span class="op">&gt;</span> no-thinking.json</span></code></pre></div></div><h4 id="session-index">session-index</h4>
+<p>Manage the SQLite FTS5 search index for session files.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--build</code></td><td>Build the search index from scratch</td></tr>
+<tr><td><code>--update</code></td><td>Incrementally update the search index</td></tr>
+<tr><td><code>--status</code></td><td>Show index status (default)</td></tr>
+<tr><td><code>--clean</code></td><td>Remove the search index</td></tr>
+<tr><td><code>--db-path PATH</code></td><td>Path to search index database (default: <code>.agents-search.db</code>)</td></tr>
+<tr><td><code>--include-tool-outputs</code></td><td>Include tool outputs in the index</td></tr>
+</table>
+<p><strong>Description:</strong>
+The <code>session-index</code> command manages a SQLite FTS5-based search index for fast fuzzy text search across session files. The index uses trigram tokenization to enable fuzzy matching (e.g., “error” matches “errors”, “erroring”).</p>
+<p><strong>Index Schema:</strong></p>
+<ul>
+<li><code>session_index</code> - Session metadata cache (path, mtime, agent, turn count)
+</li>
+<li><code>search_content</code> - FTS5 virtual table with trigram tokenizer
+</li>
+<li><code>tool_index</code> - Tool call index for filtering by tool name
+</li>
+</ul>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Build the search index</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--build</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Check index status</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--status</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Update index incrementally</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--update</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Remove the index</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--clean</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Build with tool outputs included</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--build</span> <span class="at">--include-tool-outputs</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co"># Custom database location</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--build</span> <span class="at">--db-path</span> ~/.config/agents-exe/search.db</span></code></pre></div></div><h4 id="session-search">session-search</h4>
+<p>Search session files with fuzzy text matching and filtering.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span> <span class="st">&quot;QUERY&quot;</span></span></code></pre></div></div><p><strong>Arguments:</strong></p>
+<table>
+<tr><th>Argument</th><th>Description</th></tr>
+<tr><td><code>QUERY</code></td><td>Search query text (supports fuzzy matching)</td></tr>
+</table>
+<p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--db-path PATH</code></td><td>Path to search index database</td></tr>
+<tr><td><code>--after DATE</code></td><td>Filter sessions after date (YYYY-MM-DD)</td></tr>
+<tr><td><code>--before DATE</code></td><td>Filter sessions before date (YYYY-MM-DD)</td></tr>
+<tr><td><code>--tool TOOLNAME</code></td><td>Filter by tool name (can specify multiple)</td></tr>
+<tr><td><code>--agent SLUG</code></td><td>Filter by agent slug</td></tr>
+<tr><td><code>--include-tool-outputs</code></td><td>Include tool outputs in search</td></tr>
+<tr><td><code>--json</code></td><td>Output results as JSON</td></tr>
+<tr><td><code>--preview N</code></td><td>Show N lines of context around matches</td></tr>
+<tr><td><code>--limit N</code></td><td>Limit to N results</td></tr>
+<tr><td><code>--auto</code></td><td>Auto-update index if stale before searching</td></tr>
+</table>
+<p><strong>Description:</strong>
+Performs fast fuzzy text search across session files using an SQLite FTS5 index. The search supports trigram-based fuzzy matching, allowing queries like “error” to match “errors”, “erroring”, “terror”, etc.</p>
+<p><strong>Search Features:</strong></p>
+<ul>
+<li><strong>Fuzzy matching</strong>: Trigram tokenizer handles typos and variations
+</li>
+<li><strong>Metadata filtering</strong>: Filter by date, tool usage, or agent
+</li>
+<li><strong>Incremental indexing</strong>: Only re-indexes changed sessions
+</li>
+<li><strong>JSON output</strong>: Machine-readable format for scripting
+</li>
+</ul>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Basic fuzzy search</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;database error&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Search with auto-update</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;migration&quot;</span> <span class="at">--auto</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Include tool outputs in search</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;config.yaml&quot;</span> <span class="at">--include-tool-outputs</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter by date and tool</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;auth&quot;</span> <span class="at">--after</span> 2024-01-01 <span class="at">--tool</span> write-file</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter by agent</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;refactor&quot;</span> <span class="at">--agent</span> my-coder</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co"># JSON output for scripting</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;TODO&quot;</span> <span class="at">--json</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co"># Show context lines</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;deploy&quot;</span> <span class="at">--preview</span> 5</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="co"># Combined filters</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;fix&quot;</span> <span class="at">--after</span> 2024-01-01 <span class="at">--before</span> 2024-12-31 <span class="at">--tool</span> bash_write-file <span class="at">--json</span></span></code></pre></div></div><p><strong>JSON Output Format:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;resultItems&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;resultMetadata&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;resultSessionId&quot;</span><span class="fu">:</span> <span class="st">&quot;550e8400-e29b-41d4-a716-446655440000&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;resultFilePath&quot;</span><span class="fu">:</span> <span class="st">&quot;/path/to/session.json&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;resultAgentSlug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-agent&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;resultTurnCount&quot;</span><span class="fu">:</span> <span class="dv">15</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;resultRank&quot;</span><span class="fu">:</span> <span class="fl">0.5</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>      <span class="fu">},</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;resultPreview&quot;</span><span class="fu">:</span> <span class="st">&quot;...context around match...&quot;</span><span class="fu">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;resultMatchedTerms&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;error&quot;</span><span class="ot">,</span> <span class="st">&quot;database&quot;</span><span class="ot">]</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;resultTotalMatches&quot;</span><span class="fu">:</span> <span class="dv">42</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;resultQueryTimeMs&quot;</span><span class="fu">:</span> <span class="fl">15.3</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;resultIndexWasUpdated&quot;</span><span class="fu">:</span> <span class="kw">false</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="list-tool-calls">list-tool-calls</h4>
+<p>Extract and list all tool calls from a session file.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> list-tool-calls <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span> SESSIONFILE</span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --format FORMAT</code></td><td>Output format: <code>human</code>, <code>json</code>, <code>brief</code> (default: <code>human</code>)</td></tr>
+</table>
+<p><strong>Description:</strong>
+Parses a session file and extracts all tool calls made during the conversation.
+Useful for debugging, auditing, and replaying specific tool calls.</p>
+<p><strong>Output formats:</strong></p>
+<ul>
+<li><code>human</code> - Detailed human-readable format with indices, turn numbers, and arguments
+</li>
+<li><code>json</code> - JSON array for machine processing
+</li>
+<li><code>brief</code> - Compact tabular format (index, name, arguments preview)
+</li>
+</ul>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># List tool calls in human-readable format</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> list-tool-calls session.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Output as JSON</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> list-tool-calls session.json <span class="at">--format</span> json</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Brief format for quick overview</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> list-tool-calls session.json <span class="at">--format</span> brief</span></code></pre></div></div><p><strong>Example output (human format):</strong></p>
+<pre><code>Found 3 tool call(s):
+
+[0] bash_read-file
+  Turn: 1
+  Arguments: 
+    {&quot;filepath&quot;:&quot;./src/Main.hs&quot;}
+
+[1] bash_grep-files
+  Turn: 2
+  Arguments: 
+    {&quot;pattern&quot;:&quot;TODO&quot;,&quot;filepath&quot;:&quot;./src&quot;}
+
+[2] bash_write-file
+  Turn: 2
+  Arguments: 
+    {&quot;filepath&quot;:&quot;./src/Main.hs&quot;,&quot;content&quot;:&quot;...&quot;}
+
+To replay a tool call:
+  agents-exe replay-tool-call --session &lt;file&gt; --tool-call &lt;index&gt; --tool &lt;tool-path&gt;
+</code></pre>
+<h4 id="replay-tool-call">replay-tool-call</h4>
+<p>Replay a specific tool call from a session file, with validation.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> replay-tool-call <span class="at">--session</span> FILE <span class="at">--tool-call</span> INDEX <span class="at">--tool</span> TOOLPATH <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-s, --session FILE</code></td><td>Path to the session file containing the tool call</td></tr>
+<tr><td><code>-i, --tool-call INDEX</code></td><td>Index of the tool call to replay (0-based)</td></tr>
+<tr><td><code>-t, --tool TOOLPATH</code></td><td>Path to the tool script to execute</td></tr>
+<tr><td><code>--validate-only</code></td><td>Only validate arguments, don't execute</td></tr>
+<tr><td><code>--raw</code></td><td>Show raw output instead of formatted</td></tr>
+</table>
+<p><strong>Description:</strong>
+Extracts a tool call from a session file, validates its arguments against the tool’s schema,
+and optionally executes the tool with the same arguments. This is useful for:</p>
+<ul>
+<li>Debugging failed tool calls
+</li>
+<li>Reproducing tool execution for testing
+</li>
+<li>Validating historical tool calls against updated schemas
+</li>
+</ul>
+<p><strong>Exit codes:</strong></p>
+<ul>
+<li><code>0</code> - Validation passed (and tool executed if not –validate-only)
+</li>
+<li><code>1</code> - Validation failed or tool execution failed
+</li>
+</ul>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># First, list tool calls to find the index</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> list-tool-calls session.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Validate and execute a tool call</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> replay-tool-call <span class="dt">\</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--session</span> session.json <span class="dt">\</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool-call</span> 0 <span class="dt">\</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool</span> ./tools/read-file.sh</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Only validate without executing</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> replay-tool-call <span class="dt">\</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--session</span> session.json <span class="dt">\</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool-call</span> 1 <span class="dt">\</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool</span> ./tools/grep-files.sh <span class="dt">\</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>  <span class="at">--validate-only</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co"># Execute and show raw output</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> replay-tool-call <span class="dt">\</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>  <span class="at">--session</span> session.json <span class="dt">\</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool-call</span> 2 <span class="dt">\</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool</span> ./tools/write-file.sh <span class="dt">\</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>  <span class="at">--raw</span></span></code></pre></div></div><p><strong>Example output:</strong></p>
+<pre><code>✓ Tool call validation passed
+Tool: read-file
+Arguments: {&quot;filepath&quot;:&quot;./src/Main.hs&quot;}
+
+Executing tool...
+
+=== Tool Output ===
+module Main where
+
+main :: IO ()
+main = putStrLn &quot;Hello, World!&quot;
+===================
+</code></pre>
+<h4 id="tool-call">tool-call</h4>
+<p>Call a tool from the first loaded agent with JSON payload from stdin.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&#39;{}&#39;</span> <span class="kw">|</span> <span class="ex">agents-exe</span> tool-call TOOLNAME <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Arguments:</strong></p>
+<table>
+<tr><th>Argument</th><th>Description</th></tr>
+<tr><td><code>TOOLNAME</code></td><td>Name of the tool to call</td></tr>
+</table>
+<p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-l, --log-file FILE</code></td><td>Optional log file for tracing tool execution</td></tr>
+</table>
+<p><strong>Description:</strong>
+Executes a single tool directly without involving the LLM. Useful for:</p>
+<ul>
+<li>Testing tool implementations
+</li>
+<li>Scripting tool usage
+</li>
+<li>Debugging tool behavior
+</li>
+</ul>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Call a tool with arguments</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&#39;{&quot;filepath&quot;: &quot;./README.md&quot;}&#39;</span> <span class="kw">|</span> <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="ex">agents-exe</span> tool-call read-file <span class="at">--agent-file</span> ./agent.json</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co"># Call with logging</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&#39;{&quot;command&quot;: &quot;ls -la&quot;}&#39;</span> <span class="kw">|</span> <span class="dt">\</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="ex">agents-exe</span> tool-call bash <span class="at">--log-file</span> ./tool-debug.log</span></code></pre></div></div><h4 id="serve">serve</h4>
+<p>Run agents over HTTP, like <code>agents-server</code>, loading agents-exe.cfg.json like the TUI does.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> serve [--agent-file FILE...] [--agent SLUG] <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Description:</strong></p>
+<p><code>agents-exe serve</code> is <code>agents-server</code>’s code (sessions in SQLite or Postgres,
+the HTTP API and SSE stream, MCP over HTTP, the chat page) run behind
+agents-exe’s own config loading, so it resolves agent files the same way
+every other <code>agents-exe</code> command does: <code>--agent-file</code> (repeatable), else
+<code>agents-exe.cfg.json</code>’s <code>agentsFiles</code> plus every <code>.json</code> file under
+<code>agentsDirectories</code>, else <code>~/.config/agents-exe/default</code>; <code>--agent SLUG</code>
+narrows to one agent by slug, failing with the list of available slugs if it
+does not match. It shares agents-exe’s global <code>--api-keys</code>,
+<code>--set</code>/<code>--set-json</code>/<code>--pin</code>/<code>--pin-json</code> and <code>--params-file</code>, so those are
+not repeated below.</p>
+<p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--db FILE\|URL</code></td><td>next to the resolved sessions directory</td><td>SQLite file, or <code>postgresql://</code> URL, for sessions and continuations</td></tr>
+<tr><td><code>--bind HOST</code></td><td><code>127.0.0.1</code></td><td>Address to listen on</td></tr>
+<tr><td><code>--port PORT</code></td><td><code>8080</code></td><td>Port to listen on</td></tr>
+<tr><td><code>--live-session-ttl SECONDS</code></td><td><code>900</code></td><td>Idle time before a session's in-memory state is dropped</td></tr>
+<tr><td><code>--shutdown-grace SECONDS</code></td><td><code>10</code></td><td>Time open requests get to finish on shutdown</td></tr>
+<tr><td><code>--auth-tokens FILE</code></td><td>(none)</td><td>Bearer tokens and their owners; without, no authentication</td></tr>
+<tr><td><code>--stream-tokens</code></td><td>off</td><td>Stream LLM answers as <code>text.delta</code> events</td></tr>
+<tr><td><code>--admin-owners OWNER,…</code></td><td>(none)</td><td>Owners allowed to store and delete agents over the API (needs <code>--auth-tokens</code>)</td></tr>
+<tr><td><code>--no-ui</code></td><td>off</td><td>Do not serve the chat page at <code>/</code></td></tr>
+<tr><td><code>--cors-origin ORIGIN</code></td><td>(none)</td><td>Allow this origin to call the server cross-origin; repeatable, or <code>*</code> for any (needs no <code>--auth-tokens</code>)</td></tr>
+<tr><td><code>--socket PATH</code></td><td>(none)</td><td>Also listen on this Unix domain socket, in addition to <code>--bind</code>/<code>--port</code>; created <code>0600</code>, a stale file removed at start, closed and unlinked on shutdown. The socket is the local trust boundary: no <code>Origin</code>, no bearer token beyond <code>--auth-tokens</code>.</td></tr>
+</table>
+<p>See <a href="/agents-exe/docs-agents-server.html">agents-server.md</a> for everything the running server
+does (the HTTP API, sessions, deferred calls, CORS, authentication, running
+it as a service).</p>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Explicit agent files, like agents-server</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> serve <span class="at">--agent-file</span> ./weather.json <span class="at">--api-keys</span> ./keys.json <span class="at">--port</span> 8080</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># From a directory with an agents-exe.cfg.json</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> serve <span class="at">--port</span> 8080</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># One agent from a multi-agent config, over a local socket only auth-tokens gate</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> serve <span class="at">--agent</span> architect <span class="at">--socket</span> /run/agents-exe/agents.sock <span class="at">--auth-tokens</span> ./tokens.json</span></code></pre></div></div><h4 id="check-tool-call">check-tool-call</h4>
+<p>Validate a tool call payload against a tool schema (reads JSON from stdin).</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> payload.json <span class="kw">|</span> <span class="ex">agents-exe</span> check-tool-call <span class="at">--tool</span> TOOLPATH</span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-t, --tool TOOLPATH</code></td><td>Path to the tool script to validate against</td></tr>
+</table>
+<p><strong>Description:</strong>
+Validates that a JSON payload from stdin matches the tool’s declared schema.
+Returns exit code 0 if valid, 1 if invalid with detailed error messages.</p>
+<p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create a test payload</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&#39;{&quot;filepath&quot;: &quot;/path/to/file&quot;}&#39;</span> <span class="kw">|</span> <span class="ex">agents-exe</span> check-tool-call <span class="at">--tool</span> ./tools/read-file.sh</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Validate from file</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> payload.json <span class="kw">|</span> <span class="ex">agents-exe</span> check-tool-call <span class="at">--tool</span> ./tools/my-tool.sh</span></code></pre></div></div><p><strong>Example output (valid):</strong></p>
+<pre><code>✓ Tool call payload is valid
+</code></pre>
+<p><strong>Example output (invalid):</strong></p>
+<pre><code>Tool call validation failed for './tools/my-tool.sh (my-tool)' with 2 errors:
+
+1. filepath: Required property missing
+
+2. content: Required property missing
+
+Please correct these issues and try again.
+</code></pre>
+<h4 id="init">init</h4>
+<p>Initialize a new agent configuration.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> init [--agent-file FILE]</span></code></pre></div></div><p><strong>Creates:</strong></p>
+<ul>
+<li><code>agent.json</code> - Agent configuration
+</li>
+<li><code>tools/</code> - Tool directory
+</li>
+<li><code>secret-keys</code> - API keys file (if doesn’t exist)
+</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> init <span class="at">--agent-file</span> ./my-agent.json</span></code></pre></div></div><h4 id="new">new</h4>
+<p>Create scaffolding for new agents or tools.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new <span class="er">(</span><span class="ex">agent</span><span class="kw">|</span><span class="ex">tool</span><span class="kw">)</span> <span class="ex">[OPTIONS]</span></span></code></pre></div></div><h5 id="new-agent">new agent</h5>
+<p>Create a new agent configuration file from a template.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new agent SLUG <span class="pp">[</span><span class="ss">FILE</span><span class="pp">]</span> <span class="pp">[</span><span class="ss">MODEL</span><span class="pp">]</span> <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Arguments:</strong></p>
+<table>
+<tr><th>Argument</th><th>Description</th></tr>
+<tr><td><code>SLUG</code></td><td>Unique identifier for the agent</td></tr>
+<tr><td><code>FILE</code></td><td>Output file path (default: <code>./{slug}.json</code>)</td></tr>
+<tr><td><code>MODEL</code></td><td>Model name (e.g., gpt-4o, mistral-large). The provider preset is inferred from the model catalog.</td></tr>
+</table>
+<p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --force</code></td><td>Overwrite existing file</td></tr>
+</table>
+<p>Provider presets (URL, default model, API key ID) are selected automatically
+based on the model name. Use <code>agents-exe new models list</code> to see the built-in
+model patterns and <code>agents-exe new models init</code> to customize them locally.</p>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create agent with the default OpenAI preset</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new agent my-assistant</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Create agent with custom model (preset inferred from the catalog)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new agent coder <span class="at">--model</span> gpt-4o</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Create agent with custom output path</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new agent my-assistant ./agents/assistant.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Overwrite existing</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new agent my-assistant <span class="at">--force</span></span></code></pre></div></div><p><strong>Generated agent file:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agent&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-assistant&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;main-key&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIv1&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com/v1&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4-turbo-preview&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;a helpful assistant powered by gpt-4-turbo-preview&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You are my-assistant, a helpful AI assistant.&quot;</span><span class="ot">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You provide clear, accurate, and concise responses.&quot;</span><span class="ot">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;When using tools, you explain your actions to the user.&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span><span class="fu">,</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;mcpServers&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;openApiToolboxes&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;postgrestToolboxes&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;builtinToolboxes&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="kw">null</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h5 id="new-tool">new tool</h5>
+<p>Create a new tool script from a template.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new tool SLUG LANGUAGE FILE <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Arguments:</strong></p>
+<table>
+<tr><th>Argument</th><th>Description</th></tr>
+<tr><td><code>SLUG</code></td><td>Unique identifier for the tool</td></tr>
+<tr><td><code>LANGUAGE</code></td><td>Programming language: <code>bash</code>, <code>python</code>, <code>haskell</code>, <code>node</code></td></tr>
+<tr><td><code>FILE</code></td><td>Output file path (without extension)</td></tr>
+</table>
+<p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --force</code></td><td>Overwrite existing file</td></tr>
+</table>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create bash tool (default)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new tool my-tool bash ./tools/my-tool</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Create Python tool</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new tool my-tool python ./scripts/my-tool</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Create Haskell tool</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new tool my-tool haskell ./tools/my-tool</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Create Node.js tool</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new tool my-tool node ./scripts/my-tool</span></code></pre></div></div><p><strong>Generated bash tool:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/bin/bash</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co"># my-tool - A bash tool for agents-exe</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> <span class="at">-euo</span> pipefail</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co"># Agents-exe tool protocol: describe|run</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Environment variables available during &#39;run&#39;:</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">#   AGENT_SESSION_ID      - UUID of the current session</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">#   AGENT_CONVERSATION_ID - UUID of the conversation</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">#   AGENT_TURN_ID         - UUID of the current turn</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">#   AGENT_AGENT_ID        - UUID of the executing agent (if available)</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="cf">case</span> <span class="st">&quot;</span><span class="va">${1</span><span class="op">:-</span><span class="va">}</span><span class="st">&quot;</span> <span class="kw">in</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>  <span class="ss">describe</span><span class="kw">)</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">cat</span> <span class="op">&lt;&lt;&#39;DESCRIBE_EOF&#39;</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="st">{</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;slug&quot;: &quot;my-tool&quot;,</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;description&quot;: &quot;Tool my-tool - describe what this tool does&quot;,</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;args&quot;: [],</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;empty-result&quot;: {</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;tag&quot;: &quot;AddMessage&quot;,</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="st">    &quot;contents&quot;: &quot;--no output--&quot;</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="st">  }</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="st">}</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="op">DESCRIBE_EOF</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="cf">;;</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>  <span class="ss">run</span><span class="kw">)</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="co"># </span><span class="al">TODO</span><span class="co">: Implement tool logic</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Access arguments via environment or command line</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    <span class="bu">echo</span> <span class="st">&quot;Tool my-tool executed&quot;</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    <span class="cf">;;</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>  <span class="pp">*</span><span class="kw">)</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>    <span class="bu">echo</span> <span class="st">&quot;Usage: my-tool &lt;describe|run&gt;&quot;</span> <span class="op">&gt;&amp;</span><span class="dv">2</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>    <span class="bu">exit</span> 1</span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>    <span class="cf">;;</span></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a><span class="cf">esac</span></span></code></pre></div></div><p><strong>Next steps after creating a tool:</strong></p>
+<ol>
+<li>Edit the <code>args</code> array in the describe function
+</li>
+<li>Implement the <code>run</code> function logic
+</li>
+<li>Test with: <code>agents-exe describe-tool ./tools/my-tool</code>
+</li>
+</ol>
+<h4 id="spec">spec</h4>
+<p>Display embedded specification documentation.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> spec TOPIC</span></code></pre></div></div><p><strong>Topics:</strong></p>
+<table>
+<tr><th>Topic</th><th>Description</th></tr>
+<tr><td><code>bash-tools</code></td><td>Binary tool protocol specification</td></tr>
+</table>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Display bash-tools specification</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> spec bash-tools</span></code></pre></div></div><p><strong>Use case:</strong> Learn the protocol for writing bash tools without leaving the CLI.</p>
+<h4 id="describe-tool">describe-tool</h4>
+<p>Display information about a tool script.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> describe-tool TOOL_PATH <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --format FORMAT</code></td><td>Output format: <code>json</code> or <code>pretty</code> (default: <code>json</code>)</td></tr>
+<tr><td><code>--check-only</code></td><td>Only check validity, don't output full description</td></tr>
+</table>
+<p><strong>Description:</strong>
+Loads and displays the tool’s description (the output of <code>tool describe</code>).</p>
+<p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> describe-tool ./tools/my-tool.sh</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co"># Pretty format</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> describe-tool ./tools/my-tool.sh <span class="at">--format</span> pretty</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co"># Only check validity</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> describe-tool ./tools/my-tool.sh <span class="at">--check-only</span></span></code></pre></div></div><p><strong>Output:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-tool&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;What this tool does&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;args&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="er">...</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;empty-result&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="er">...</span><span class="fu">}</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="paths">paths</h4>
+<p>Show important configuration paths.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> paths <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--json</code></td><td>Output in JSON format</td></tr>
+</table>
+<p><strong>Description:</strong>
+Displays configuration paths including config directory, agent files,
+API keys file, and session storage configuration.</p>
+<p><strong>Session Storage:</strong>
+The session storage configuration supports multiple read locations:</p>
+<ul>
+<li><strong>Write location</strong>: Where new sessions are saved
+</li>
+<li><strong>Read locations</strong>: Directories searched for existing sessions (includes write location by default)
+</li>
+</ul>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Human-readable output</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> paths</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># JSON output</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> paths <span class="at">--json</span></span></code></pre></div></div><p><strong>Example output:</strong></p>
+<pre><code>Configuration:
+  File: /home/user/project/agents-exe.cfg.json
+  Directory: /home/user/project
+  Default: /home/user/.config/agents-exe
+
+Agent Files:
+  - ./main-agent.json
+  - ./secondary-agent.json
+
+API Keys:
+  /home/user/.config/agents-exe/secret-keys
+
+Session Storage:
+  Write location: ./sessions/
+  Read locations:
+    1. ./sessions/
+    2. ./.agents-sessions/
+    3. ~/.config/agents-exe/sessions/
+</code></pre>
+<h4 id="export">export</h4>
+<p>Export agent/tool configurations to archive or git.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> export <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Source Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--all</code></td><td>Export all loaded agents</td></tr>
+<tr><td><code>--agent-slug SLUG</code></td><td>Export specific agent by slug</td></tr>
+<tr><td><code>--tools-only</code></td><td>Export only tools, not agent config</td></tr>
+<tr><td><code>--tool TOOLNAME</code></td><td>Export specific tool</td></tr>
+</table>
+<p><strong>Destination Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-o, --output FILE</code></td><td>Output file path</td></tr>
+<tr><td><code>--git-url URL</code></td><td>Git remote URL</td></tr>
+<tr><td><code>--git-branch BRANCH</code></td><td>Git branch</td></tr>
+<tr><td><code>--git-message MESSAGE</code></td><td>Commit message</td></tr>
+<tr><td><code>--git-push</code></td><td>Push after commit</td></tr>
+<tr><td><code>--git-tag TAG</code></td><td>Create git tag</td></tr>
+</table>
+<p><strong>Format Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--format FORMAT</code></td><td>Archive format: tar, tar.gz, zip</td></tr>
+<tr><td><code>--namespace NAMESPACE</code></td><td>Namespace for export (e.g., "team.project")</td></tr>
+<tr><td><code>--no-tools</code></td><td>Exclude tools from export</td></tr>
+<tr><td><code>--no-mcp</code></td><td>Exclude MCP servers from export</td></tr>
+</table>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Export to tar.gz</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> export <span class="at">--output</span> ./my-agent.tar.gz</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Export to git</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> export <span class="dt">\</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--git-url</span> https://github.com/user/agents-repo <span class="dt">\</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--git-branch</span> main <span class="dt">\</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--git-message</span> <span class="st">&quot;Update agent&quot;</span> <span class="dt">\</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--git-push</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co"># Export tools only</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> export <span class="at">--tools-only</span> <span class="at">--output</span> ./tools.tar.gz</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="co"># Export specific agent</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> export <span class="at">--agent-slug</span> my-agent <span class="at">--output</span> ./agent.tar.gz</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co"># With namespace</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> export <span class="at">--namespace</span> team-a.project-1 <span class="at">--output</span> ./export.tar.gz</span></code></pre></div></div><h4 id="import">import</h4>
+<p>Import agent/tool configurations from archive or git.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> import <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Source Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-f, --from-file FILE</code></td><td>Import from archive file</td></tr>
+<tr><td><code>--git-url URL</code></td><td>Import from git URL</td></tr>
+<tr><td><code>--git-ref REF</code></td><td>Git ref (branch, tag, commit)</td></tr>
+<tr><td><code>--namespace NAMESPACE</code></td><td>Namespace to import from</td></tr>
+</table>
+<p><strong>Destination Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--to-current</code></td><td>Import to current directory</td></tr>
+<tr><td><code>--to PATH</code></td><td>Import to specific path</td></tr>
+<tr><td><code>--to-config-dir</code></td><td>Import to config directory</td></tr>
+<tr><td><code>--install-to-agent FILE</code></td><td>Install tools to agent's tool directory</td></tr>
+<tr><td><code>--install-to-tooldir DIR</code></td><td>Install tools to specific directory</td></tr>
+</table>
+<p><strong>Mode Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--overwrite</code></td><td>Overwrite existing files</td></tr>
+<tr><td><code>--merge</code></td><td>Merge with existing files</td></tr>
+<tr><td>(default)</td><td>Fail on conflict</td></tr>
+</table>
+<p><strong>List Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--list-namespaces</code></td><td>List available namespaces (git only)</td></tr>
+<tr><td><code>--list-tools</code></td><td>List available tools (git only)</td></tr>
+</table>
+<p><strong>Examples:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Import from archive</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> import <span class="at">--from-file</span> ./agent.tar.gz</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Import from git</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> import <span class="dt">\</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--git-url</span> https://github.com/user/agents-repo <span class="dt">\</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--git-ref</span> main</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co"># Import tools to agent</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> import <span class="dt">\</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>  <span class="at">--from-file</span> ./tools.tar.gz <span class="dt">\</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--install-to-agent</span> ./my-agent.json</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="co"># Import with overwrite</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> import <span class="at">--from-file</span> ./agent.tar.gz <span class="at">--overwrite</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co"># List namespaces</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> import <span class="at">--git-url</span> https://github.com/user/repo <span class="at">--list-namespaces</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="co"># Import specific namespace</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> import <span class="dt">\</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>  <span class="at">--git-url</span> https://github.com/user/repo <span class="dt">\</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>  <span class="at">--namespace</span> team-a.tools <span class="dt">\</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>  <span class="at">--to</span> ./tools/</span></code></pre></div></div><h4 id="cowsay">cowsay</h4>
+<p>Display a fun message with the agents-exe mascot.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> cowsay <span class="pp">[</span><span class="ss">MESSAGE</span><span class="pp">]</span> <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>-W, --width WIDTH</code></td><td>Maximum width of speech bubble (default: 40)</td></tr>
+</table>
+<p><strong>Description:</strong>
+If no message is provided, reads from stdin.</p>
+<p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> cowsay <span class="st">&quot;Hello, agents!&quot;</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co"># With custom width</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> cowsay <span class="st">&quot;A much longer message that needs more space&quot;</span> <span class="at">--width</span> 60</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co"># Pipe from another command</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;System ready&quot;</span> <span class="kw">|</span> <span class="ex">agents-exe</span> cowsay</span></code></pre></div></div><h4 id="describe">describe</h4>
+<p>Output self-describing schema for the agent.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> describe <span class="pp">[</span><span class="ss">OPTIONS</span><span class="pp">]</span></span></code></pre></div></div><p><strong>Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--self-describe-slug NAME</code></td><td>Override the slug field</td></tr>
+<tr><td><code>--self-describe-description DESC</code></td><td>Override the description</td></tr>
+</table>
+<p><strong>Output:</strong> JSON schema for tool calling.</p>
+<p><strong>Use case:</strong> Integration with external systems that need to understand the agent’s interface.</p>
+<h4 id="self-describe">self-describe</h4>
+<p>Output information about the agents-exe binary itself.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> self-describe</span></code></pre></div></div><p><strong>Output:</strong> Version, build info, and available commands.</p>
+<h3 id="configuration-file">Configuration File</h3>
+<p>Project-level configuration in <code>agents-exe.cfg.json</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsConfigDir&quot;</span><span class="fu">:</span> <span class="st">&quot;/custom/config/path&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsDirectories&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;./agents&quot;</span><span class="ot">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;./more-agents&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsFiles&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;./main-agent.json&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;promptAliases&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;translate&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;You are a translator...&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;userPromptPrefix&quot;</span><span class="fu">:</span> <span class="st">&quot;Translate to English:&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;selfDescribeSlug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-agent&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;selfDescribeDescription&quot;</span><span class="fu">:</span> <span class="st">&quot;A custom agent&quot;</span><span class="fu">,</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsLogs&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;logJsonHttpEndpoint&quot;</span><span class="fu">:</span> <span class="st">&quot;http://localhost:8080/log&quot;</span><span class="fu">,</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;logJsonPath&quot;</span><span class="fu">:</span> <span class="st">&quot;./logs/agents.json&quot;</span><span class="fu">,</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;logRawPath&quot;</span><span class="fu">:</span> <span class="st">&quot;./logs/agents.log&quot;</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sessions&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;writeLocation&quot;</span><span class="fu">:</span> <span class="st">&quot;./sessions/&quot;</span><span class="fu">,</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;readLocations&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./sessions/&quot;</span><span class="ot">,</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./.agents-sessions/&quot;</span><span class="ot">,</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;~/.config/agents-exe/sessions/&quot;</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><strong>Search order:</strong></p>
+<ol>
+<li>Current directory
+</li>
+<li>Parent directories (upward search)
+</li>
+</ol>
+<h4 id="sessions-configuration">Sessions Configuration</h4>
+<p>The <code>sessions</code> section configures multi-location session storage:</p>
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>writeLocation</code></td><td><code>FilePath</code></td><td>Directory where new sessions are written</td></tr>
+<tr><td><code>readLocations</code></td><td><code>[FilePath]</code></td><td>Directories to search for existing sessions</td></tr>
+</table>
+<p><strong>Key behaviors:</strong></p>
+<ul>
+<li><strong>Deduplication</strong>: First location in <code>readLocations</code> has highest priority for duplicate session IDs
+</li>
+<li><strong>Auto-prepending</strong>: If <code>writeLocation</code> is not in <code>readLocations</code>, it’s automatically prepended
+</li>
+<li><strong>Tilde expansion</strong>: Paths like <code>~/.config/agents-exe/sessions/</code> are resolved to the user’s home directory
+</li>
+<li><strong>Backwards compatibility</strong>: If <code>sessions</code> is not present, falls back to <code>agentsLogs.logSessionsJsonPrefix</code> (deprecated)
+</li>
+</ul>
+<h3 id="environment-variables">Environment Variables</h3>
+<table>
+<tr><th>Variable</th><th>Description</th></tr>
+<tr><td><code>AGENTS_API_KEY</code></td><td>Default API key (overrides file)</td></tr>
+<tr><td><code>AGENTS_CONFIG_DIR</code></td><td>Config directory path</td></tr>
+<tr><td><code>AGENTS_LOG_LEVEL</code></td><td>Logging verbosity</td></tr>
+<tr><td><code>AGENT_MD_VIEWER</code></td><td>External markdown viewer for TUI session viewing</td></tr>
+</table>
+<h3 id="exit-codes">Exit Codes</h3>
+<table>
+<tr><th>Code</th><th>Meaning</th></tr>
+<tr><td><code>0</code></td><td>Success</td></tr>
+<tr><td><code>1</code></td><td>General error</td></tr>
+<tr><td><code>2</code></td><td>Invalid arguments</td></tr>
+<tr><td><code>3</code></td><td>Configuration error</td></tr>
+<tr><td><code>4</code></td><td>Agent loading error</td></tr>
+<tr><td><code>5</code></td><td>Tool execution error</td></tr>
+<tr><td><code>10</code></td><td>Export error</td></tr>
+<tr><td><code>11</code></td><td>Import error</td></tr>
+</table>
+<h3 id="examples">Examples</h3>
+<h4 id="complete-workflow">Complete Workflow</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1. Initialize new agent</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new agent my-assistant</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># 2. Create a custom tool</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new tool file-reader python ./tools/file-reader</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># 3. Edit tool and agent configurations</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co"># (edit files as needed)</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># 4. Check configuration</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check <span class="at">--agent-file</span> ./my-assistant.json</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># 5. Test with one-shot</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> ./my-assistant.json <span class="at">--prompt</span> <span class="st">&quot;Test&quot;</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co"># 6. Start interactive session</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="at">--agent-file</span> ./my-assistant.json</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co"># 7. Export for sharing</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> export <span class="at">--agent-file</span> ./my-assistant.json <span class="at">--output</span> ./my-assistant.tar.gz</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="co"># 8. Import elsewhere</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> import <span class="at">--from-file</span> ./my-assistant.tar.gz <span class="at">--to</span> ./new-location/</span></code></pre></div></div><h4 id="multi-agent-setup">Multi-Agent Setup</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Start multi-agent TUI</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> ./router.json <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> ./coder.json <span class="dt">\</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> ./reviewer.json</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Start multi-agent MCP server</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> mcp-server <span class="dt">\</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> ./router.json <span class="dt">\</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="at">--agent-file</span> ./coder.json</span></code></pre></div></div><h4 id="session-management-workflow">Session Management Workflow</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Run an agent session</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./my-agent.json <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="at">--session-file</span> ./session.json <span class="dt">\</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Let&#39;s work on a project&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Later, inspect the session</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print ./session.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># List all tool calls from the session</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> list-tool-calls ~/.config/agents-exe/sessions/session-<span class="pp">*</span>.json</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Replay a specific tool call for debugging</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> replay-tool-call <span class="dt">\</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>  <span class="at">--session</span> ./session.json <span class="dt">\</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool-call</span> 0 <span class="dt">\</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool</span> ./tools/read-file.sh <span class="dt">\</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>  <span class="at">--validate-only</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="co"># Trim to last 20 turns</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--take-tail</span> <span class="at">--count</span> 20 <span class="op">&lt;</span> ./session.json <span class="op">&gt;</span> ./trimmed.json</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="fu">mv</span> ./trimmed.json ./session.json</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="co"># Continue the session</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./my-agent.json <span class="dt">\</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    <span class="at">--session-file</span> ./session.json <span class="dt">\</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Where were we?&quot;</span></span></code></pre></div></div><h4 id="session-search-workflow">Session Search Workflow</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Build the search index</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--build</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Search for error-related sessions</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;error&quot;</span> <span class="at">--json</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Find sessions using specific tool after a date</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;config&quot;</span> <span class="at">--after</span> 2024-01-01 <span class="at">--tool</span> write-file</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Search with context preview</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;TODO&quot;</span> <span class="at">--preview</span> 3</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Auto-update index before searching</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;refactor&quot;</span> <span class="at">--auto</span> <span class="at">--limit</span> 10</span></code></pre></div></div><h4 id="multi-modal-workflow">Multi-Modal Workflow</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Analyze a screenshot with a vision-capable agent</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./vision-agent.json <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="at">-m</span> ./screenshot.png <span class="dt">\</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;What UI issues do you see in this screenshot?&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Analyze multiple images</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./design-agent.json <span class="dt">\</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="at">-m</span> ./mockup-v1.png <span class="dt">\</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="at">-m</span> ./mockup-v2.png <span class="dt">\</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Compare these two design mockups and recommend which to use&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="co"># Analyze a PDF document</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./document-agent.json <span class="dt">\</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="at">-m</span> ./report.pdf <span class="dt">\</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Summarize the key findings and recommendations&quot;</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="co"># Combine image with code for debugging</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./debug-agent.json <span class="dt">\</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;This error appears in the UI:&quot;</span> <span class="dt">\</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="at">-m</span> ./error-screenshot.png <span class="dt">\</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="at">--sep4</span> <span class="st">&quot;----&quot;</span> <span class="dt">\</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Here&#39;s the relevant code:&quot;</span> <span class="dt">\</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    <span class="at">--file</span> ./src/Main.hs</span></code></pre></div></div><h4 id="automation">Automation</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Process all files in directory</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> file <span class="kw">in</span> <span class="pp">*</span>.txt<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        <span class="at">--agent-file</span> ./processor.json <span class="dt">\</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="at">--prompt</span> <span class="st">&quot;Process this file:&quot;</span> <span class="dt">\</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        <span class="at">--file</span> <span class="st">&quot;</span><span class="va">$file</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        <span class="at">--prompt</span> <span class="st">&quot;End of file.&quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Git pre-commit hook</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./reviewer.json <span class="dt">\</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="at">--shell</span> <span class="st">&quot;git diff --cached&quot;</span> <span class="dt">\</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Review these changes.&quot;</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co"># Daily summary from logs</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./summarizer.json <span class="dt">\</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="at">--shell</span> <span class="st">&quot;cat /var/log/app.log | tail -100&quot;</span> <span class="dt">\</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Summarize any errors or warnings&quot;</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="co"># Automated image analysis with timestamp</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="dt">\</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./monitor-agent.json <span class="dt">\</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="at">-m</span> ./screenshots/<span class="va">$(</span><span class="fu">date</span> +%Y%m%d-%H%M%S<span class="va">)</span>.png <span class="dt">\</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Check for any alerts or errors in this status dashboard&quot;</span></span></code></pre></div></div><h4 id="developer-workflow">Developer Workflow</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Learn the tool protocol</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> spec bash-tools</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Create and validate a tool</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new tool my-validator bash ./tools/my-validator</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co"># (edit the tool)</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> describe-tool ./tools/my-validator <span class="at">--format</span> pretty</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co"># Validate a payload</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&#39;{&quot;input&quot;: &quot;test&quot;}&#39;</span> <span class="kw">|</span> <span class="ex">agents-exe</span> check-tool-call <span class="at">--tool</span> ./tools/my-validator</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co"># Test the tool directly</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&#39;{&quot;input&quot;: &quot;test&quot;}&#39;</span> <span class="kw">|</span> <span class="ex">agents-exe</span> tool-call my-validator</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="co"># Create agent with dev tools</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new agent dev-assistant</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co"># (add DeveloperToolbox to builtinToolboxes)</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="co"># Now the agent can use developer file-editing tools and show specs!</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="co"># Create a tool that outputs media</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> new tool chart-generator bash ./tools/chart-gen</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="co"># Add to describe output:</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="co">#   &quot;output-media-type&quot;: &quot;image/png&quot;</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="co"># Now the tool&#39;s output is treated as a PNG image</span></span></code></pre></div></div><h4 id="debugging-tool-calls">Debugging Tool Calls</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Run an agent session</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> ./my-agent.json <span class="at">--prompt</span> <span class="st">&quot;Read the README&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Find the session file</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> paths</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># List all tool calls</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> list-tool-calls ~/.config/agents-exe/sessions/session-<span class="pp">*</span>.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Replay with validation only</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> replay-tool-call <span class="dt">\</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>  <span class="at">--session</span> ~/.config/agents-exe/sessions/session-xxx.json <span class="dt">\</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool-call</span> 0 <span class="dt">\</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool</span> ./tools/read-file.sh <span class="dt">\</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>  <span class="at">--validate-only</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co"># Actually replay the tool call</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> replay-tool-call <span class="dt">\</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>  <span class="at">--session</span> ~/.config/agents-exe/sessions/session-xxx.json <span class="dt">\</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool-call</span> 0 <span class="dt">\</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool</span> ./tools/read-file.sh</span></code></pre></div></div><h3 id="related-documentation">Related Documentation</h3>
+<ul>
+<li><a href="/agents-exe/docs-tools.html">tools.md</a> - Tool system details
+</li>
+<li><a href="/agents-exe/docs-tui.html">tui.md</a> - Terminal UI documentation
+</li>
+<li><a href="/agents-exe/docs-sessions.html">sessions.md</a> - Session management
+</li>
+<li><a href="/agents-exe/docs-architecture.html">architecture.md</a> - System architecture
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

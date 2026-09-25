@@ -10,12 +10,14 @@ Kitchen-Sink assembles them into a static site.
   pages (`index.cmark`, `getting-started.cmark`, `docs.cmark`, `llms.txt`),
   the layout pages (`topics`, `hashtags`, `glossary`) and the CSS/JS they reference.
 - `scripts/` — `sync-repo-docs.sh` regenerates the mirrored pages
-  (`docs-*.cmark` from `docs/`, `specs-*.cmark` and `specs.cmark` from
+  (`docs-*.cmark` from `documentation/`, `specs-*.cmark` and `specs.cmark` from
   `todos/`, `commands.cmark` from the README's command reference);
   `mirror.py` and `md_tables_to_html.py` are what it runs. Those outputs are
   gitignored: the repository's markdown is the source of truth, the site is
   a view of it.
-- `www/` — the output directory (gitignored).
+- `www/` — the dev server's output directory (gitignored). The published
+  site is produced into the repository's `docs/`, which GitHub Pages serves
+  from `main` (`scripts/publish.sh`).
 
 ## Regenerate and preview
 
@@ -25,14 +27,13 @@ kitchen-sink serve --srcDir website/src --outDir website/www --servMode DEV --ht
 ```
 
 Then open http://localhost:7655/. The dev server rebuilds on file changes
-under `src/`; re-run the sync script after editing anything under `docs/`,
-`todos/` or the README.
+under `src/`; re-run the sync script after editing anything under
+`documentation/`, `todos/` or the README.
 
-To produce the site once:
+To publish, produce the site into `docs/` and commit it:
 
 ```sh
-./website/scripts/sync-repo-docs.sh
-kitchen-sink produce --srcDir website/src --outDir website/www
+./website/scripts/publish.sh    # sync, then kitchen-sink produce --srcDir website/src --outDir docs
 ```
 
 `kitchen-sink.json`'s `basePath` is `/agents-exe`, so every absolute `/x.html`

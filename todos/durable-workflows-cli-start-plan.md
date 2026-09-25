@@ -336,7 +336,7 @@ The smallest vertical slice that proves the design:
 
 * `todos/durable-workflows.md` — original design plan.
 * `todos/durable-workflows.progress.md` — implementation progress.
-* `docs/durable-workflows-howto.md` — user-facing how-to.
+* `documentation/durable-workflows-howto.md` — user-facing how-to.
 * `src/System/Agents/CLI/SessionDurable.hs` — existing session command
   handlers.
 * `src/System/Agents/Session/Loop.hs` — `runAsync` and `runStepM`.

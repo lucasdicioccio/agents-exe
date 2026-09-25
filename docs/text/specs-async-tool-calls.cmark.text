@@ -1,0 +1,512 @@
+_Generated from [`todos/async-tool-calls.md`](https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls.md ), the repository is the canonical source and may be ahead of this page._
+
+# Asynchronous / Interruptible Tool Calls
+
+## Goal
+
+Make tool calls in a TUI/oneshot session truly interruptible and inspectable:
+
+- Tool calls can execute concurrently instead of blocking the whole turn.
+
+- The LLM can receive _partial_ answers as soon as individual calls finish.
+
+- The LLM can later query the status of a still-running or previously-yielded tool call.
+
+- Tool calls become first-class entities in the ECS-style OS, visible to the rest of the system.
+
+
+Today the flow is:
+
+- .1 LLM turn emits tool calls.
+
+- .1 `agents-exe` schedules them synchronously:
+- .1 - tool call 1 runs
+
+- tool call 2 runs
+
+
+
+- .1 `agents-exe` returns the LLM turn.
+
+
+We want:
+
+- .1 LLM turn emits tool calls.
+
+- .1 `agents-exe` promotes each call to an OS entity and starts them concurrently.
+
+- .1 As soon as at least one call has a useful partial result, the scheduler can yield a partial user turn back to the LLM.
+
+- .1 The LLM can continue the conversation, optionally calling a system capability to inspect any call it is interested in.
+
+- .1 When all calls for the turn are complete, the turn finalizes normally.
+
+
+## Current State
+
+There is already async scaffolding in place:
+
+- `System.Agents.Session.Types` defines `TrackedToolCall`, `ToolCallState` (`Ready`, `Running`, `Deferred`, `Completed`, `Failed`), `ToolCallDisposition` (`RunSync`, `RunAsync`, `RunIsolated`, `Defer`, `Decorate`), `ContinuationToken`, etc.
+
+- `System.Agents.Session.Async` provides continuation tokens, snapshots, and a `ContinuationStore` (SQLite-backed).
+
+- `System.Agents.Session.Step` has `runStepMAsync`, which classifies calls via `ctxToolCallPolicy` and can defer calls.
+
+- `System.Agents.Session.Loop` has `runAsync` / `runAsyncWithProgress` that pause when a `PartialUserTurn` is present.
+
+
+What is missing:
+
+- `RunAsync` / `Running` are mostly nominal. Calls are still executed sequentially in one batch; `RunAsync` just defers them.
+
+- There is no real concurrent execution engine.
+
+- There is no way for the LLM to ask "what is the status of tool-call X?" while it is running.
+
+- Tool calls are not yet represented as ECS entities with runtime components.
+
+- Partial answers are not surfaced: a call is either done or deferred.
+
+
+## Design Overview
+
+We introduce three layers:
+
+- .1 **ECS OS layer** — every tool call becomes an `EntityId` with `ToolCallConfig` and `ToolCallState` components. The OS is the source of truth for status.
+
+- .1 **Async execution engine** — a small scheduler that runs approved calls concurrently, updates OS components, and emits heartbeat/partial progress.
+
+- .1 **System-toolbox introspection capability** — a new `get-tool-call-status` capability (and possibly `list-running-tool-calls`) that any agent can invoke.
+
+
+The key idea is that the existing `PartialUserTurn` mechanism is extended so that a turn can be yielded _before_ all calls are complete, carrying intermediate responses. The LLM can then decide whether to keep waiting, do something else, or inspect a specific call.
+
+## ECS Integration
+
+`System.Agents.OS.Conversation.Types` already has the right component shapes:
+
+- `ToolCallConfig` — static info: turn, tool name, input args, parent call.
+
+- `ToolCallState` — runtime status, timestamps, result value.
+
+
+We extend them with async-specific fields:
+
+```haskell
+data ToolCallConfig = ToolCallConfig
+    { tcTurnId :: TurnId
+    , tcToolName :: Text
+    , tcToolInput :: Value
+    , tcParentCallId :: Maybe ToolCallId
+    , tcSessionId :: SessionId          -- NEW: which session owns this call
+    , tcConversationId :: ConversationId -- NEW
+    }
+
+data ToolCallState = ToolCallState
+    { tcStatus :: ToolCallStatus
+    , tcStartedAt :: Maybe UTCTime      -- NEW: was required, now optional until actually started
+    , tcCompletedAt :: Maybe UTCTime
+    , tcResult :: Maybe Value
+    , tcProgress :: [ToolCallProgress]  -- NEW: ordered structured partial updates
+    }
+
+-- NEW component-like value stored inside ToolCallState.
+-- All progress payloads are structured JSON.
+data ToolCallProgress = ToolCallProgress
+    { progressAt :: UTCTime
+    , progressKind :: ProgressKind
+    , progressPayload :: Value
+    }
+    deriving (Show, Eq, Generic)
+
+data ProgressKind
+    = ProgressStarted
+    | ProgressLog Text          -- free-form log line (still wrapped in JSON)
+    | ProgressPartial Value     -- structured partial result
+    | ProgressHeartbeat         -- "still alive"
+    deriving (Show, Eq, Generic)
+```
+
+When the scheduler receives tool calls from an LLM turn, it:
+
+- .1 Creates one OS entity per call.
+
+- .1 Attaches `ToolCallConfig` and `ToolCallState { TcPending }`.
+
+- .1 Links the call back to the current `TurnId` and `ConversationId`.
+
+- .1 Returns a lightweight `ToolCallHandle` (entity id + `ToolCallId`) to the session layer.
+
+
+The existing `TrackedToolCall` keeps its `ToolCallId` but gains a `tcEntityId :: Maybe EntityId` so the session can map back to the OS.
+
+## Async Execution Engine
+
+A new module `System.Agents.Session.Async.Engine` provides:
+
+```haskell
+data AsyncEngine = AsyncEngine
+    { aeWorld :: World
+    , aeExecutor :: ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
+    , aeMaxConcurrency :: Int
+    }
+
+-- | Start executing a batch of calls concurrently.
+-- Returns handles and, if some calls already completed synchronously, their results.
+startAsyncBatch :: AsyncEngine -> [TrackedToolCall] -> IO AsyncBatch
+
+-- | Block until at least one call in the batch makes progress, then return.
+waitForProgress :: AsyncBatch -> IO AsyncBatchUpdate
+
+-- | Finalize any completed calls into UserToolResponses.
+finalizeCompleted :: AsyncBatch -> IO [(ToolCallId, UserToolResponse)]
+
+-- | Cancel all still-running calls (best effort).
+cancelAsyncBatch :: AsyncBatch -> IO ()
+
+-- | Cancel a single running call by its handle.
+cancelToolCall :: AsyncEngine -> ToolCallId -> IO Bool
+```
+
+The engine uses `async`/`Async` (or `forkIO` + `TVar`) to run calls. For each call:
+
+- .1 It sets the OS state to `TcExecuting`.
+
+- .1 It runs the call in a background thread.
+
+- .1 The call can emit progress via a callback injected into `ToolExecutionContext`:
+- .1 ```haskell
+ctxProgressCallback :: Maybe (Value -> IO ())
+```
+
+- .1 All payloads passed to this callback must be valid JSON values.
+
+- .1 On completion it sets the OS state to `TcCompleted result` (or `TcFailed err` / `TcCancelled`).
+
+
+Policy integration:
+
+- `RunSync` calls are still executed inline.
+
+- `RunAsync` calls go to the engine.
+
+- `RunIsolated` calls are delegated to the configured deployment runner but also tracked as OS entities.
+
+- `Defer` calls stay in `TcPending` with a continuation token.
+
+
+## Partial Answers
+
+A tool can emit a partial answer by calling the progress callback if the tool supports streaming. For tools that do not support streaming, the engine can still yield after each individual call finishes, so the LLM gets _some_ responses earlier.
+
+When the session stepper asks for a user turn, the scheduler can produce a `PartialUserTurn` with the subset of calls that have completed so far. The LLM then sees:
+
+```json
+{
+  "tool_call_id": "...",
+  "status": "completed",
+  "result": "..."
+}
+```
+
+and for still-running calls:
+
+```json
+{
+  "tool_call_id": "...",
+  "status": "running",
+  "progress": [
+    {"at": "...", "kind": "log", "payload": "downloading..."},
+    {"at": "...", "kind": "partial", "payload": {"percent": 50}}
+  ]
+}
+```
+
+The LLM can choose to continue immediately (if the completed answers are enough) or call `get_tool_call_status` for more detail.
+
+## Tool-Call Status System Capability
+
+Add new capabilities to `SystemToolCapability`:
+
+```haskell
+| SystemToolGetToolCallStatus
+| SystemToolListRunningToolCalls
+| SystemToolCancelToolCall
+```
+
+and expose them through `System.Agents.Tools.SystemToolbox`.
+
+### `get_tool_call_status`
+
+Input schema:
+
+```json
+{
+  "tool_call_id": "uuid",
+  "include_progress": true,
+  "wait_for_completion": false,
+  "timeout_seconds": 5
+}
+```
+
+Output schema:
+
+```json
+{
+  "tool_call_id": "uuid",
+  "status": "pending|running|completed|failed|cancelled|orphaned",
+  "tool_name": "bash",
+  "started_at": "...",
+  "completed_at": null,
+  "result": null,
+  "progress": [...],
+  "is_final": false
+}
+```
+
+Status values:
+
+- `pending` — call is queued but has not started.
+
+- `running` — call is executing.
+
+- `completed` — call finished successfully.
+
+- `failed` — call finished with an error.
+
+- `cancelled` — call was cancelled before completion.
+
+- `orphaned` — the call is referenced in the chat history but no longer exists in the OS (process restarted, entity was dropped, etc.). This is the clear "task no longer exists" status.
+
+
+If `wait_for_completion` is true, the tool blocks up to `timeout_seconds` and returns the final result when available. This lets an LLM poll efficiently.
+
+### `list_running_tool_calls`
+
+Returns calls filtered by the current session/conversation scope (reusing the existing session-introspection scope rules). Useful for the LLM to discover what it can inspect.
+
+### `cancel_tool_call`
+
+Input schema:
+
+```json
+{
+  "tool_call_id": "uuid",
+  "reason": "user request"
+}
+```
+
+Output schema:
+
+```json
+{
+  "tool_call_id": "uuid",
+  "cancelled": true,
+  "previous_status": "running"
+}
+```
+
+Cancellation is best-effort. If the call is already final, the capability returns `cancelled: false`.
+
+## Changes to Session Step / Loop
+
+- .1 `runStepMAsync` currently defers `RunAsync` calls. We change it to:
+
+- .1 - Classify calls.
+
+- Execute `RunSync` calls inline.
+
+- Hand `RunAsync` calls to the async engine.
+
+- If _all_ calls complete quickly, produce a normal `UserTurn`.
+
+- Otherwise produce a `PartialUserTurn` and yield.
+
+
+
+- .1 Add a new agent configuration field:
+
+- .1 ```haskell
+ctxAsyncYieldStrategy :: AsyncYieldStrategy
+
+data AsyncYieldStrategy
+    = YieldOnAnyProgress       -- yield as soon as one call finishes
+    | YieldWhenAllDone         -- DEFAULT: yield only once every synchronous and asynchronous call in the batch has reached a final state
+    | YieldOnTimeout Int       -- yield after N milliseconds even if nothing finished
+    deriving (Show, Eq)
+```
+
+- .1 The default is `YieldWhenAllDone` for backward compatibility with the existing synchronous mental model.
+
+
+- .1 On resume (`continuePartialTurn`), the stepper checks the OS for calls that have completed since the last step and finalizes them. Any still-running calls remain in the `PartialUserTurn`.
+
+
+- .1 When the LLM invokes `get_tool_call_status` and the call is still running, the stepper does not block the whole session; it returns the current snapshot. If the call completed, the result is copied back into the `TrackedToolCall`.
+
+
+
+## Sub-Conversations and Lineage
+
+Lineage remains important. Tool-call entities already carry `tcParentCallId` for nested calls. Sub-conversations will eventually need richer primitives so that one conversation can ask another conversation for more information. The work described here is a prerequisite: once a tool-call result can be replaced by a later status update, the LLM can treat a long-running sub-conversation as an "interruptible" tool call. For now we keep the existing call-stack/lineage plumbing and ensure child tool-call entities are created with the correct parent reference.
+
+## TUI / OneShot Integration
+
+- The TUI already has a buffered-message queue and pause mechanism (`ConversationStatus_Paused`).
+
+- When a partial turn is yielded, the TUI should render running tool calls with a spinner/progress indicator.
+
+- The TUI event loop should listen for `AppEvent_ToolCallProgress` events emitted by the async engine and refresh the conversation view.
+
+- OneShot mode should support a `--wait-for-async` flag; without it, oneshot exits with a JSON description of pending calls and a continuation token.
+
+
+## Lifecycle State Machine
+
+```
+Pending -> Executing -> Completed
+        -> Executing -> Failed
+        -> Executing -> Cancelled
+        -> Deferred   -> Pending  (wake/resume)
+        -> Deferred   -> Completed (external completion)
+```
+
+When a session resumes after a process restart, any tool call referenced in the chat history that has no corresponding OS entity is reported as `orphaned` by `get_tool_call_status`. No in-progress call persistence is required; the LLM is responsible for deciding what to do with an orphaned call.
+
+`Ready` / `Running` / `Deferred` / `Completed` / `Failed` from `ToolCallState` map cleanly to ECS `ToolCallStatus`:
+
+```html
+<table>
+<tr><th>Session <code>ToolCallState</code></th><th>ECS <code>ToolCallStatus</code></th></tr>
+<tr><td>Ready</td><td>TcPending</td></tr>
+<tr><td>Running</td><td>TcExecuting</td></tr>
+<tr><td>Deferred</td><td>TcPending (with continuation token)</td></tr>
+<tr><td>Completed</td><td>TcCompleted</td></tr>
+<tr><td>Failed</td><td>TcFailed</td></tr>
+</table>
+```
+
+Cancelled session calls become `TcCancelled`. Missing OS entities become the `orphaned` status in the capability response.
+
+## New Modules / Files
+
+- `System.Agents.Session.Async.Engine` — concurrent execution engine.
+
+- `System.Agents.OS.Conversation.ToolCalls` — helpers to create/update/query tool-call entities.
+
+- `System.Agents.Tools.SystemToolbox.ToolCallStatus` — implementation of the new capabilities.
+
+- `System.Agents.TUI.Event.ToolCallProgress` — TUI event handling for progress updates.
+
+
+## Modified Modules
+
+- `System.Agents.OS.Conversation.Types` — add progress, session/conversation ids to tool-call components; add `TcCancelled`.
+
+- `System.Agents.Session.Types` — add `tcEntityId` to `TrackedToolCall`; add `AsyncYieldStrategy`.
+
+- `System.Agents.Session.Step` — integrate the async engine and partial-yield logic.
+
+- `System.Agents.Session.Loop` — handle resume from partial turns with running background calls.
+
+- `System.Agents.Session.Async` — reuse continuation store; add progress-related helpers.
+
+- `System.Agents.Base` — add new `SystemToolCapability` constructors.
+
+- `System.Agents.Tools.SystemToolbox.Core` — register new capabilities.
+
+- `System.Agents.Tools.SystemToolbox.Types` — add query/error types for tool-call status.
+
+- `System.Agents.TUI.Types` — add events for tool-call progress.
+
+
+## Implementation Phases
+
+### Phase 1: ECS Tool-Call Entities
+
+- Promote tool-call creation from session layer to OS layer.
+
+- Add `tcEntityId` to `TrackedToolCall`.
+
+- Ensure every tool call in a session has a corresponding OS entity.
+
+- Write tests in `test/OS/ConversationTests.hs`.
+
+
+### Phase 2: Async Engine
+
+- Implement `AsyncEngine` with background threads and progress callbacks.
+
+- Integrate engine into `runStepMAsync` for `RunAsync` calls.
+
+- Keep `RunSync` behavior unchanged.
+
+- Add `AsyncYieldStrategy` with default `YieldWhenAllDone`.
+
+
+### Phase 3: System Capability
+
+- Add `SystemToolGetToolCallStatus`, `SystemToolListRunningToolCalls`, and `SystemToolCancelToolCall`.
+
+- Implement lookup by `ToolCallId` / entity id from the OS `World`.
+
+- Add `wait_for_completion` optional blocking.
+
+- Implement cancellation and the `orphaned` status.
+
+- Expose capabilities in agent configs.
+
+
+### Phase 4: TUI / OneShot UX
+
+- Render running calls and progress in the TUI.
+
+- Add progress events to the TUI event channel.
+
+- Add oneshot `--wait-for-async` / continuation-token resume.
+
+
+### Phase 5: Cleanup & Hardening
+
+- Cancellation on session abort.
+
+- Expiration of stale running calls.
+
+- Rate limiting / max concurrency enforcement.
+
+- Ensure orphaned status is returned consistently after process restart.
+
+
+## Open Questions
+
+None remaining. Decisions from review:
+
+- .1 Progress payloads are structured JSON.
+
+- .1 Cancellation capability is included.
+
+- .1 Lineage is preserved; sub-conversation primitives will be built later on top of interruptible tool calls.
+
+- .1 In-progress calls are not persisted; missing OS entities are reported as `orphaned`.
+
+- .1 Default `AsyncYieldStrategy` is `YieldWhenAllDone`.
+
+
+## Success Criteria
+
+- [ ] Two long-running tool calls issued in one LLM turn execute concurrently.
+
+- [ ] The LLM receives a partial user turn as soon as the first call finishes (when `YieldOnAnyProgress` is configured).
+
+- [ ] The LLM can call `get_tool_call_status` for any call and see current structured progress or final result.
+
+- [ ] The LLM can call `cancel_tool_call` to stop a running call.
+
+- [ ] Tool calls appear as ECS entities in the OS `World`.
+
+- [ ] Existing synchronous behavior is unchanged when `ExecutionMode = Synchronous`.
+
+- [ ] `get_tool_call_status` returns `orphaned` for calls referenced in history that no longer exist.
+
+
+

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerates the mirrored pages of website/src from the repository:
 #
-#   docs/<name>.md              -> website/src/docs-<name>.cmark
+#   documentation/<name>.md     -> website/src/docs-<name>.cmark
 #   todos/<name>.md             -> website/src/specs-<name>.cmark
 #   README.md's command reference -> website/src/commands.cmark
 #   the specs' Status: lines    -> website/src/specs.cmark  (one line per spec)
@@ -9,6 +9,7 @@
 # so the site never needs hand-copying when a doc changes. Everything this
 # writes is mechanical output, not a source of truth: gitignored (see
 # .gitignore) and regenerated fresh each run, including the "generated" date.
+# docs/ is what GitHub Pages serves: publish.sh runs this, then produces there.
 set -euo pipefail
 cd "$(dirname "$0")/../.."  # repo root
 
@@ -33,8 +34,8 @@ status_of() {
   printf '%s' "${s:-no status line yet}"
 }
 
-# docs/: the guides and references
-for src in docs/*.md; do
+# documentation/: the guides and references
+for src in documentation/*.md; do
   name="$(basename "$src" .md)"
   $MIRROR --kind docs --source "$src" --title "$(title_of "$src")" --topic docs \
     --keywords "guide, documentation" --summary "$(summary_of "$src")" \

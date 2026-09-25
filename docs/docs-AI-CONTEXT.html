@@ -1,0 +1,496 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - AI Context - Working on the Agents Framework</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="&gt; **READ THIS FIRST** when invoked on this codebase. ## Immediate First Steps When you&#39;re invoked on this project, run these queries immediately: ```sql -- 1. What is this project? SELECT * FROM project_overview; -- 2. What docs exist? SELE"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - AI Context - Working on the Agents Framework"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="&gt; **READ THIS FIRST** when invoked on this codebase. ## Immediate First Steps When you&#39;re invoked on this project, run these queries immediately: ```sql -- 1. What is this project? SELECT * FROM project_overview; -- 2. What docs exist? SELE"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - AI Context - Working on the Agents Framework"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html"><meta property="og:description" content="&gt; **READ THIS FIRST** when invoked on this codebase. ## Immediate First Steps When you&#39;re invoked on this project, run these queries immediately: ```sql -- 1. What is this project? SELECT * FROM project_overview; -- 2. What docs exist? SELE"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/docs-AI-CONTEXT.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-AI-CONTEXT.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"> **READ THIS FIRST** when invoked on this codebase. ## Immediate First Steps When you're invoked on this project, run these queries immediately: ```sql -- 1. What is this project? SELECT * FROM project_overview; -- 2. What docs exist? SELE","headline":"AI Context - Working on the Agents Framework","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>AI Context - Working on the Agents Framework</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 577 words, 19 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-internal-tool-mapping.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">18/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/AI-CONTEXT.md"><code>documentation/AI-CONTEXT.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="ai-context---working-on-the-agents-framework">AI Context - Working on the Agents Framework</h2>
+<blockquote>
+<p><strong>READ THIS FIRST</strong> when invoked on this codebase.</p>
+</blockquote>
+<h3 id="immediate-first-steps">Immediate First Steps</h3>
+<p>When you’re invoked on this project, run these queries immediately:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- 1. What is this project?</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> project_overview;</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- 2. What docs exist?</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> doc_path, title <span class="kw">FROM</span> docs_index <span class="kw">ORDER</span> <span class="kw">BY</span> doc_path;</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- 3. What&#39;s the module structure?</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> module_name, purpose, documented_in </span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> code_index </span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> filepath;</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co">-- 4. Check for recent changes</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> code_index </span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> module_name <span class="kw">LIKE</span> <span class="st">&#39;%OS%&#39;</span> </span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> filepath;</span></code></pre></div></div><h3 id="project-snapshot">Project Snapshot</h3>
+<p><strong>Agents</strong> is a Haskell framework for AI agent orchestration with:</p>
+<ul>
+<li><strong>NEW (2026-03)</strong>: ECS-based OS Model for agent management
+</li>
+<li>Multi-agent hierarchies (agents can call other agents as tools)
+</li>
+<li>Tool system: bash scripts, MCP servers, OpenAPI specs
+</li>
+<li>Session persistence
+</li>
+<li>TUI + CLI + MCP server interfaces
+</li>
+<li>OpenAI-compatible LLM integration
+</li>
+</ul>
+<h4 id="architecture-overview">Architecture Overview</h4>
+<pre><code>┌────────────────────────────────────────────────────────────────┐
+│                    Interface Layer                              │
+│  (CLI commands, TUI, MCP server, HTTP endpoints)                │
+├────────────────────────────────────────────────────────────────┤
+│                    OS Model Layer     [NEW]                     │
+│  (Entity-Component-System, Resource Management,                 │
+│   Conversation Tracking, Concurrent Access)                     │
+├────────────────────────────────────────────────────────────────┤
+│                    Agent Tree Layer                             │
+│  (multi-agent hierarchy, reference validation, cycle detection) │
+├────────────────────────────────────────────────────────────────┤
+│                    Foundation Layer                             │
+│  (sessions, tools, LLM integration, file loading)               │
+└────────────────────────────────────────────────────────────────┘
+</code></pre>
+<p><strong>Key architectural pattern</strong>: The <strong>OS Model</strong> (Entity-Component-System) now manages agents, toolboxes, and resources, replacing the legacy Runtime-per-agent model.</p>
+<h3 id="critical-files">Critical Files</h3>
+<table>
+<tr><th>File</th><th>Why It Matters</th></tr>
+<tr><td><code>src/System/Agents/OS.hs</code></td><td><strong>NEW</strong>: Main OS module, exports ECS-based agent management</td></tr>
+<tr><td><code>src/System/Agents/OS/Core.hs</code></td><td><strong>NEW</strong>: Core ECS types: <code>World</code>, <code>EntityId</code>, <code>Component</code></td></tr>
+<tr><td><code>src/System/Agents/OS/Agents.hs</code></td><td><strong>NEW</strong>: OS-native agent creation and management</td></tr>
+<tr><td><code>src/System/Agents/OS/Compat/Runtime.hs</code></td><td><strong>NEW</strong>: Migration bridge from old Runtime to new OS</td></tr>
+<tr><td><code>src/System/Agents/Base.hs</code></td><td>Core types: <code>Agent</code>, <code>AgentId</code>, <code>ConversationId</code>, <code>ExtraAgentRef</code></td></tr>
+<tr><td><code>src/System/Agents/AgentTree.hs</code></td><td>Multi-agent discovery, cycle detection, reference validation</td></tr>
+<tr><td><code>src/System/Agents/Runtime/Runtime.hs</code></td><td>Legacy Runtime (deprecated, use OS model)</td></tr>
+<tr><td><code>app/Main.hs</code></td><td>CLI entry point - all commands defined here</td></tr>
+<tr><td><code>agents.cabal</code></td><td>Dependencies, build config</td></tr>
+</table>
+<h3 id="documentation-map">Documentation Map</h3>
+<pre><code>documentation/
+├── README.md              # Start here for overview
+├── architecture.md        # System design, data flow, module relationships
+├── OS-API.md              # [NEW] OS Model API reference
+├── MIGRATION-OS.md        # [NEW] Migration guide: Runtime -&gt; OS
+├── CHANGELOG-OS-MIGRATION.md # [NEW] Recent changes summary
+├── tools.md               # Tool registration (bash/MCP/OpenAPI/IO)
+├── mcp.md                 # Model Context Protocol integration
+├── sessions.md            # Session persistence and lifecycle
+├── tui.md                 # Terminal UI (Brick library)
+├── cli-commands.md        # All CLI commands reference
+├── export-import.md       # Tool sharing (tar.gz/git)
+├── file-loader.md         # JSON loading, section extraction
+├── AI-CONTEXT.md          # This file
+└── ai-assistant-guidelines.md # Detailed reference
+</code></pre>
+<h3 id="the-os-model-entity-component-system">The OS Model (Entity-Component-System)</h3>
+<p>The <strong>OS Model</strong> is the new architectural foundation (Phase 2+):</p>
+<h4 id="core-concepts">Core Concepts</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Entity: Just a unique ID</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">EntityId</span> <span class="ot">=</span> <span class="dt">EntityId</span> <span class="dt">UUID</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">AgentId</span> <span class="ot">=</span> <span class="dt">AgentId</span> <span class="dt">EntityId</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ToolboxId</span> <span class="ot">=</span> <span class="dt">ToolboxId</span> <span class="dt">EntityId</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Component: Pure data attached to entities</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentConfig</span> <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> agentName ::</span> <span class="dt">Text</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentModel ::</span> <span class="dt">ModelConfig</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentSystemPrompt ::</span> <span class="dt">Text</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentToolboxBindings ::</span> [<span class="dt">ToolboxBindingSpec</span>]</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentState</span> <span class="ot">=</span> <span class="dt">AgentState</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> agentStatus ::</span> <span class="dt">AgentStatus</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentCurrentConversation ::</span> <span class="dt">Maybe</span> <span class="dt">ConversationId</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentCreatedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="co">-- World: Container for all component stores</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">World</span> <span class="ot">=</span> <span class="dt">World</span> </span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> componentStores ::</span> <span class="dt">HashMap</span> <span class="dt">ComponentTypeId</span> (<span class="dt">TVar</span> <span class="dt">Any</span>) </span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="basic-usage">Basic Usage</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Initialize world with component stores</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>world <span class="ot">&lt;-</span> atomically <span class="op">$</span> <span class="kw">do</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    w <span class="ot">&lt;-</span> newWorld</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    w&#39; <span class="ot">&lt;-</span> registerComponentStore w (<span class="dt">Proxy</span> <span class="op">@</span><span class="dt">AgentConfig</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    registerComponentStore w&#39; (<span class="dt">Proxy</span> <span class="op">@</span><span class="dt">AgentState</span>)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create agent</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> config <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    { agentName <span class="ot">=</span> <span class="st">&quot;my-agent&quot;</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    , agentModel <span class="ot">=</span> <span class="dt">ModelConfig</span> <span class="st">&quot;openai&quot;</span> <span class="st">&quot;url&quot;</span> <span class="st">&quot;gpt-4&quot;</span> <span class="st">&quot;key&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    , agentSystemPrompt <span class="ot">=</span> <span class="st">&quot;You are helpful&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    , agentToolboxBindings <span class="ot">=</span> []</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> createAgent world config</span></code></pre></div></div><h4 id="migration-phases">Migration Phases</h4>
+<pre><code>PhaseOldOnly (REMOVED) ──&gt; PhaseDual ──&gt; PhaseNewOnly
+    (Legacy only)          (Both)        (OS only)
+</code></pre>
+<p><strong>Current</strong>: PhaseDual is the default, with PhaseNewOnly available.</p>
+<h4 id="resource-scopes">Resource Scopes</h4>
+<p>Resources have explicit lifetimes:</p>
+<ol>
+<li><strong>Program Scope</strong>: Global resources (HTTP pools)
+</li>
+<li><strong>Agent Scope</strong>: Per-agent resources
+</li>
+<li><strong>Toolbox Scope</strong>: Per-toolbox resources (SQLite)
+</li>
+<li><strong>Conversation Scope</strong>: Per-conversation resources
+</li>
+<li><strong>Turn Scope</strong>: Temporary turn resources
+</li>
+<li><strong>ToolCall Scope</strong>: Single-use resources
+</li>
+</ol>
+<h4 id="concurrent-access-patterns">Concurrent Access Patterns</h4>
+<table>
+<tr><th>Pattern</th><th>Use Case</th><th>Implementation</th></tr>
+<tr><td><code>ExclusiveAccess</code></td><td>Lua interpreters</td><td>TMVar</td></tr>
+<tr><td><code>ReadWriteAccess</code></td><td>SQLite (WAL mode)</td><td>RWLock</td></tr>
+<tr><td><code>PoolAccess</code></td><td>HTTP connections</td><td>TBQueue</td></tr>
+<tr><td><code>StatelessAccess</code></td><td>Immutable data</td><td>None</td></tr>
+</table>
+<h3 id="knowledge-base-schema">Knowledge Base Schema</h3>
+<p>The SQLite knowledge base (<code>agents_kb.sqlite</code>) tracks state:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Key tables:</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co">--   project_overview  - project metadata</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">--   code_index        - 108 Haskell modules with docs linkage</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">--   docs_index        - 15+ documentation files</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">--   commits_seen      - git commits already processed</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Common queries:</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find OS modules:</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> code_index <span class="kw">WHERE</span> filepath <span class="kw">LIKE</span> <span class="st">&#39;%OS%&#39;</span>;</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find where a module is documented:</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> documented_in <span class="kw">FROM</span> code_index </span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> module_name <span class="op">=</span> <span class="st">&#39;System.Agents.OS.Core&#39;</span>;</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="co">-- Check documentation coverage:</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> </span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="fu">COUNT</span>(<span class="op">*</span>) <span class="kw">as</span> total_modules,</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="fu">SUM</span>(<span class="cf">CASE</span> <span class="cf">WHEN</span> documented_in <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="cf">THEN</span> <span class="dv">1</span> <span class="cf">ELSE</span> <span class="dv">0</span> <span class="cf">END</span>) <span class="kw">as</span> documented</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> code_index;</span></code></pre></div></div><h3 id="module-to-doc-mapping">Module-to-Doc Mapping</h3>
+<table>
+<tr><th>If working on...</th><th>Update...</th></tr>
+<tr><td><code>System.Agents.OS.*</code></td><td><code>documentation/OS-API.md</code></td></tr>
+<tr><td><code>System.Agents.OS.Compat*</code></td><td><code>documentation/MIGRATION-OS.md</code></td></tr>
+<tr><td><code>System.Agents.Base</code></td><td><code>documentation/architecture.md</code>, <code>documentation/README.md</code></td></tr>
+<tr><td><code>System.Agents.Runtime*</code></td><td><code>documentation/architecture.md</code> (legacy)</td></tr>
+<tr><td><code>System.Agents.AgentTree*</code></td><td><code>documentation/architecture.md</code></td></tr>
+<tr><td><code>System.Agents.Tools.*</code></td><td><code>documentation/tools.md</code></td></tr>
+<tr><td><code>System.Agents.MCP.*</code></td><td><code>documentation/mcp.md</code></td></tr>
+<tr><td><code>System.Agents.Session*</code></td><td><code>documentation/sessions.md</code></td></tr>
+<tr><td><code>System.Agents.TUI.*</code></td><td><code>documentation/tui.md</code></td></tr>
+<tr><td><code>System.Agents.CLI.*</code></td><td><code>documentation/cli-commands.md</code></td></tr>
+<tr><td><code>app/Main.hs</code></td><td><code>documentation/cli-commands.md</code></td></tr>
+<tr><td><code>System.Agents.ExportImport*</code></td><td><code>documentation/export-import.md</code></td></tr>
+<tr><td><code>System.Agents.FileLoader*</code></td><td><code>documentation/file-loader.md</code></td></tr>
+</table>
+<h3 id="code-patterns-to-recognize">Code Patterns to Recognize</h3>
+<h4 id="pattern-ecs-component-definition">Pattern: ECS Component Definition</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Define component type</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ComponentTypeId</span> <span class="ot">=</span> <span class="dt">ComponentTypeId</span> {<span class="ot"> unComponentTypeId ::</span> <span class="dt">Int</span> }</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> <span class="dt">Component</span> a <span class="kw">where</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">    componentId ::</span> <span class="dt">Proxy</span> a <span class="ot">-&gt;</span> <span class="dt">ComponentTypeId</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create a component</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">instance</span> <span class="dt">Component</span> <span class="dt">MyComponent</span> <span class="kw">where</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    componentId _ <span class="ot">=</span> <span class="dt">ComponentTypeId</span> <span class="dv">100</span>  <span class="co">-- Unique ID</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- Use with world</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> <span class="kw">do</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    setComponent world eid myComponent</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    mComp <span class="ot">&lt;-</span> getComponent <span class="op">@</span><span class="dt">MyComponent</span> world eid</span></code></pre></div></div><h4 id="pattern-os-agent-creation">Pattern: OS Agent Creation</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- OS model approach</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> createAgent world <span class="op">$</span> <span class="dt">AgentConfig</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    { agentName <span class="ot">=</span> <span class="st">&quot;my-agent&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    , agentModel <span class="ot">=</span> <span class="dt">ModelConfig</span> <span class="st">&quot;openai&quot;</span> <span class="st">&quot;url&quot;</span> <span class="st">&quot;gpt-4&quot;</span> <span class="st">&quot;key&quot;</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    , agentSystemPrompt <span class="ot">=</span> <span class="st">&quot;You are helpful&quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    , agentToolboxBindings <span class="ot">=</span> []</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">case</span> result <span class="kw">of</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Left</span> err <span class="ot">-&gt;</span> handleError err</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> agentId <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- Agent created successfully</span></span></code></pre></div></div><h4 id="pattern-resource-management">Pattern: Resource Management</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Resources</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create registry</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>registry <span class="ot">&lt;-</span> atomically newResourceRegistry</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> ctx <span class="ot">=</span> <span class="dt">ResourceContext</span> [<span class="dt">ProgramScope</span>] registry</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create resource</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>rid <span class="ot">&lt;-</span> createResource ctx (<span class="dt">SqliteResource</span> config) <span class="op">$</span> <span class="op">\</span>rid <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    conn <span class="ot">&lt;-</span> openConnection config</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">pure</span> <span class="dt">ResourceHandle</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        { handleId <span class="ot">=</span> rid</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        , handleCleanup <span class="ot">=</span> closeConnection conn</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        , handleAccess <span class="ot">=</span> <span class="op">\</span>f <span class="ot">-&gt;</span> f (<span class="dt">SqliteAccessor</span> conn)</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- Cleanup</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>cleanupScope registry (<span class="dt">AgentScope</span> agentId)</span></code></pre></div></div><h4 id="pattern-migration-compatibility">Pattern: Migration Compatibility</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- During migration, use compatibility layer</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Compat.Runtime</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> initializeWithMigration defaultMigrationConfig</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">case</span> result <span class="kw">of</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> os <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- Use new OS with compatibility bridge</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        bridge <span class="ot">&lt;-</span> newRuntimeBridge agentId os</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        runWithBridge bridge <span class="op">$</span> <span class="kw">do</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>            tools <span class="ot">&lt;-</span> listTools</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>            callTool <span class="st">&quot;my-tool&quot;</span> args</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    _ <span class="ot">-&gt;</span> <span class="fu">error</span> <span class="st">&quot;Migration not configured&quot;</span></span></code></pre></div></div><h4 id="pattern-tracer-usage">Pattern: Tracer Usage</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- All operations are traced</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">Prod.Tracer</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">MyTrace</span> <span class="ot">=</span> <span class="dt">Started</span> <span class="op">|</span> <span class="dt">Completed</span> <span class="op">|</span> <span class="dt">Failed</span> <span class="dt">String</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">myFunction ::</span> <span class="dt">Tracer</span> <span class="dt">IO</span> <span class="dt">MyTrace</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>myFunction tracer <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    runTracer tracer <span class="dt">Started</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    result <span class="ot">&lt;-</span> try operation</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> result <span class="kw">of</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">Right</span> _ <span class="ot">-&gt;</span> runTracer tracer <span class="dt">Completed</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">Left</span> e  <span class="ot">-&gt;</span> runTracer tracer (<span class="dt">Failed</span> <span class="op">$</span> <span class="fu">show</span> e)</span></code></pre></div></div><h4 id="pattern-concurrent-access-with-stm">Pattern: Concurrent Access with STM</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- SQLite with concurrent reads (WAL mode)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> runResourceM ctx <span class="op">$</span> withRead rid <span class="op">$</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    queryDatabase sql</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- Lua with exclusive access</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> runResourceM ctx <span class="op">$</span> withExclusive luaRid <span class="op">$</span> <span class="kw">do</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    runLuaScript script</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- HTTP with connection pool</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> runResourceM ctx <span class="op">$</span> withPooled httpRid <span class="op">$</span> <span class="kw">do</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    makeHttpRequest req</span></code></pre></div></div><h3 id="key-types-reference">Key Types Reference</h3>
+<h4 id="os-model-types">OS Model Types</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- ECS Core</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">EntityId</span> <span class="ot">=</span> <span class="dt">EntityId</span> <span class="dt">UUID</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">AgentId</span> <span class="ot">=</span> <span class="dt">AgentId</span> <span class="dt">EntityId</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ToolboxId</span> <span class="ot">=</span> <span class="dt">ToolboxId</span> <span class="dt">EntityId</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ConversationId</span> <span class="ot">=</span> <span class="dt">ConversationId</span> <span class="dt">EntityId</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Agent Components</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentConfig</span> <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> agentName ::</span> <span class="dt">Text</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentModel ::</span> <span class="dt">ModelConfig</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentSystemPrompt ::</span> <span class="dt">Text</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentToolboxBindings ::</span> [<span class="dt">Text</span>]</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentState</span> <span class="ot">=</span> <span class="dt">AgentState</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> agentStatus ::</span> <span class="dt">AgentStatus</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentCurrentConversation ::</span> <span class="dt">Maybe</span> <span class="dt">ConversationId</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentCreatedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="co">-- Resource Management</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ResourceScope</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ScopeGlobal</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ScopeAgent</span> <span class="dt">AgentId</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ScopeConversation</span> <span class="dt">ConversationId</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AccessPattern</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ExclusiveAccess</span>      <span class="co">-- TMVar</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ReadWriteAccess</span>      <span class="co">-- RWLock</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">PoolAccess</span> <span class="dt">Int</span>       <span class="co">-- TBQueue</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">StatelessAccess</span>      <span class="co">-- No lock</span></span></code></pre></div></div><h4 id="legacy-types-still-supported">Legacy Types (Still Supported)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Original Runtime types</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Agent</span> <span class="ot">=</span> <span class="dt">Agent</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> slug ::</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> apiKeyId ::</span> <span class="dt">Text</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> flavor ::</span> <span class="dt">Text</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> modelUrl ::</span> <span class="dt">Text</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> modelName ::</span> <span class="dt">Text</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> systemPrompt ::</span> [<span class="dt">Text</span>]</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolDirectory ::</span> <span class="dt">FilePath</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mcpServers ::</span> <span class="dt">Maybe</span> [<span class="dt">McpServerDescription</span>]</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> extraAgents ::</span> <span class="dt">Maybe</span> [<span class="dt">ExtraAgentRef</span>]</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ExtraAgentRef</span> <span class="ot">=</span> <span class="dt">ExtraAgentRef</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> extraAgentSlug ::</span> <span class="dt">Text</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> extraAgentPath ::</span> <span class="dt">FilePath</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h3 id="git-workflow">Git Workflow</h3>
+<p>When documentation work spans multiple invocations:</p>
+<ol>
+<li><strong>First invocation</strong>: Plan, gather info, create initial docs
+</li>
+<li><strong>Intermediate</strong>: Continue where left off, check <code>commits_seen</code>
+</li>
+<li><strong>Final</strong>: Update all indices, ensure consistency
+</li>
+</ol>
+<p>Always include a summary line as the <strong>first line of response</strong>.</p>
+<h3 id="testing-documentation">Testing Documentation</h3>
+<p>Verify docs are correct by checking:</p>
+<ol>
+<li>Type definitions match source code
+</li>
+<li>File paths in examples exist
+</li>
+<li>JSON examples are valid
+</li>
+<li>Module names are correct (use <code>bash_grep-files</code> to verify)
+</li>
+</ol>
+<h4 id="running-tests">Running Tests</h4>
+<pre><code class="language-console"># All tests
+cabal test
+
+# OS-specific tests
+cabal test --test-option=--pattern=&quot;OS&quot;
+
+# Benchmarks
+cabal bench
+</code></pre>
+<h3 id="red-flags">Red Flags</h3>
+<p>Watch for these issues:</p>
+<table>
+<tr><th>Issue</th><th>Action</th></tr>
+<tr><td>Undocumented OS modules</td><td>Add to <code>code_index</code>, update <code>documentation/OS-API.md</code></td></tr>
+<tr><td>Docs referencing wrong modules</td><td>Update <code>docs_index.related_modules</code></td></tr>
+<tr><td>Missing migration guidance</td><td>Update <code>documentation/MIGRATION-OS.md</code></td></tr>
+<tr><td>Broken code examples</td><td>Fix or mark as "illustrative"</td></tr>
+<tr><td>New CLI commands not in <code>cli-commands.md</code></td><td>Add with examples</td></tr>
+<tr><td>Commits not tracked</td><td>Process and insert to <code>commits_seen</code></td></tr>
+</table>
+<h3 id="quick-queries">Quick Queries</h3>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find all OS-related modules:</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> module_name, filepath </span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> code_index </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> module_name <span class="kw">LIKE</span> <span class="st">&#39;%OS%&#39;</span> <span class="kw">OR</span> filepath <span class="kw">LIKE</span> <span class="st">&#39;%OS%&#39;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> filepath;</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find all documentation:</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> doc_path, title <span class="kw">FROM</span> docs_index <span class="kw">ORDER</span> <span class="kw">BY</span> doc_path;</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- Check documentation coverage:</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> </span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="fu">COUNT</span>(<span class="op">*</span>) <span class="kw">as</span> total,</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">SUM</span>(<span class="cf">CASE</span> <span class="cf">WHEN</span> documented_in <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="cf">THEN</span> <span class="dv">1</span> <span class="cf">ELSE</span> <span class="dv">0</span> <span class="cf">END</span>) <span class="kw">as</span> documented,</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ROUND</span>(<span class="fl">100.0</span> <span class="op">*</span> <span class="fu">SUM</span>(<span class="cf">CASE</span> <span class="cf">WHEN</span> documented_in <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="cf">THEN</span> <span class="dv">1</span> <span class="cf">ELSE</span> <span class="dv">0</span> <span class="cf">END</span>) <span class="op">/</span> <span class="fu">COUNT</span>(<span class="op">*</span>), <span class="dv">1</span>) <span class="kw">as</span> pct</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> code_index;</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find modules by documentation file:</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> module_name, filepath </span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> code_index </span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> documented_in <span class="op">=</span> <span class="st">&#39;documentation/OS-API.md&#39;</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> module_name;</span></code></pre></div></div><h3 id="working-with-cabal">Working with Cabal</h3>
+<p>The project uses <code>agents.cabal</code>. Key stanzas:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Library exports modules under System.Agents</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">library</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">exposed-modules</span>:</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        System.Agents</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        System.Agents.OS           <span class="co">-- NEW</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        System.Agents.OS.Core      <span class="co">-- NEW</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        System.Agents.OS.Agents    <span class="co">-- NEW</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        System.Agents.Base</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        System.Agents.Runtime</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        ...</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co">-- Executable is app/Main.hs</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="dt">executable</span> agents-exe</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">main-is</span>: Main.hs</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">hs-source-dirs</span>: app</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">build-depends</span>: agents, ...</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="co">-- Test suite</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="kw">test-suite</span><span class="at"> agents-tests</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="dt">other-modules</span>:</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>        OS.CoreTests</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>        OS.IntegrationTests</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>        OS.CompatibilityTests</span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>        ...</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="co">-- Benchmarks</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a><span class="kw">benchmark</span><span class="at"> os-benchmarks</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="dt">main-is</span>: OSBenchmarks.hs</span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="dt">hs-source-dirs</span>: bench</span></code></pre></div></div><h3 id="common-import-patterns">Common Import Patterns</h3>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- OS Model (New)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Core</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Agents</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Compat.Runtime</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Core types</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Base</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- Legacy Runtime (being deprecated)</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Runtime</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="kw">qualified</span> <span class="dt">System.Agents.Runtime.Runtime</span> <span class="kw">as</span> <span class="dt">Runtime</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="co">-- Agent tree</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="kw">qualified</span> <span class="dt">System.Agents.AgentTree</span> <span class="kw">as</span> <span class="dt">AgentTree</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="kw">qualified</span> <span class="dt">System.Agents.OS.AgentTree</span> <span class="kw">as</span> <span class="dt">OSAgentTree</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="co">-- Tools</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="kw">qualified</span> <span class="dt">System.Agents.Tools.Bash</span> <span class="kw">as</span> <span class="dt">Bash</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="kw">qualified</span> <span class="dt">System.Agents.Tools.BashToolbox</span> <span class="kw">as</span> <span class="dt">BashToolbox</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="co">-- Sessions</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="kw">qualified</span> <span class="dt">System.Agents.Session.Base</span> <span class="kw">as</span> <span class="dt">Session</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="co">-- Tracing</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">Prod.Tracer</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a><span class="co">-- STM for concurrency</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">Control.Concurrent.STM</span></span></code></pre></div></div><h3 id="summary-checklist">Summary Checklist</h3>
+<p>Before finishing work:</p>
+<ul>
+<li>[ ] Summary line included (first line of response)
+</li>
+<li>[ ] Knowledge base tables updated if needed
+</li>
+<li>[ ] New OS modules added to <code>code_index</code>
+</li>
+<li>[ ] New documentation files added to <code>docs_index</code>
+</li>
+<li>[ ] Documentation created/updated for changes
+</li>
+<li>[ ] Cross-references checked
+</li>
+<li>[ ] Code examples verified
+</li>
+</ul>
+<h3 id="emergency-contacts">Emergency Contacts</h3>
+<p>If completely lost:</p>
+<ol>
+<li>Read <code>documentation/README.md</code> for overview
+</li>
+<li>Check <code>documentation/CHANGELOG-OS-MIGRATION.md</code> for recent changes
+</li>
+<li>Read <code>documentation/MIGRATION-OS.md</code> for migration guidance
+</li>
+<li>Look at <code>src/System/Agents/OS.hs</code> for OS entry point
+</li>
+<li>Check <code>app/Main.hs</code> for current command structure
+</li>
+<li>Query <code>code_index</code> for module purposes
+</li>
+</ol>
+<p>Remember: This is a well-structured Haskell project in transition from Runtime-per-agent to ECS-based OS model. Follow the types, follow the imports, and you’ll find your way.</p>
+<h3 id="recent-changes-march-2026">Recent Changes (March 2026)</h3>
+<p>See <code>documentation/CHANGELOG-OS-MIGRATION.md</code> for detailed change log.</p>
+<p>Key highlights:</p>
+<ul>
+<li><strong>27 new OS modules</strong> added for ECS-based architecture
+</li>
+<li><strong>PhaseOldOnly removed</strong> - now only PhaseDual and PhaseNewOnly
+</li>
+<li><strong>Full compatibility layer</strong> for gradual migration
+</li>
+<li><strong>New documentation</strong>: OS-API.md, MIGRATION-OS.md
+</li>
+<li><strong>New tests</strong>: Integration, Compatibility, benchmarks
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

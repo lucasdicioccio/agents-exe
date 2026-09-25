@@ -22,14 +22,14 @@
 }
 
 =base:summary.cmark
-The guides and references, mirrored from the repository's docs/ directory: architecture, tools, the server, sessions, the TUI, parameters, and the migration and workflow notes.
+The guides and references, mirrored from the repository's documentation/ directory: architecture, tools, the server, sessions, the TUI, parameters, and the migration and workflow notes.
 
 =base:main-content.cmark
 
 # Docs
 
-These pages are generated straight from the `docs/` directory of the
-[agents-exe repository](https://github.com/lucasdicioccio/agents-exe/tree/main/docs):
+These pages are generated straight from the `documentation/` directory of the
+[agents-exe repository](https://github.com/lucasdicioccio/agents-exe/tree/main/documentation):
 the repository is always the canonical source, and may be ahead of what is
 published here.
 

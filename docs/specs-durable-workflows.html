@@ -1,0 +1,363 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Plan: Durable Workflows for agents-exe</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: no status line yet"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Plan: Durable Workflows for agents-exe"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: no status line yet"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Plan: Durable Workflows for agents-exe"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html"><meta property="og:description" content="Status: no status line yet"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/specs-durable-workflows.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-durable-workflows.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"Status: no status line yet","headline":"Plan: Durable Workflows for agents-exe","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Plan: Durable Workflows for agents-exe</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1127 words, 12 code snippets, 1 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-os-as-standalone-server.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">4/11</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-async-tool-calls-progress.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.md"><code>todos/durable-workflows.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="plan-durable-workflows-for-agents-exe">Plan: Durable Workflows for agents-exe</h2>
+<p>See <a href="/agents-exe/specs-durable-workflows.progress.html"><code>todos/durable-workflows.progress.md</code></a> for implementation progress.</p>
+<h3 id="goal">Goal</h3>
+<h3 id="goal-1">Goal</h3>
+<p>Turn agents-exe into a system suitable for:</p>
+<ul>
+<li><strong>Durable executions</strong>: sessions can be stored in and resumed from databases.
+</li>
+<li><strong>Isolated deployments</strong>: tool calls can run inside Docker or as local processes, transparently.
+</li>
+<li><strong>Transparent synchronous/asynchronous tool calls</strong>: the runtime can pause a turn after any subset of tool calls, yield to the outside world, and wake up later when results arrive.
+</li>
+</ul>
+<p>Requested example flow:</p>
+<ol>
+<li>user-turn 1: some question
+</li>
+<li>agent-turn 1: reply with 3 tool calls
+</li>
+<li>user-turn: perform 1 tool call, mark 2 as deferred
+</li>
+<li>system: yields (possibly even reboots)
+</li>
+<li>system: wakes up, executes deferred tool calls and places results, then wakes up again
+</li>
+<li>user-turn: provides 3 tool results to agent
+</li>
+<li>agent: continues
+</li>
+</ol>
+<p>This document lists the primitives and architectural changes needed to support that flow.</p>
+<hr />
+<h3 id="current-state">Current state</h3>
+<p>The codebase already has scaffolding:</p>
+<ul>
+<li><code>ExecutionMode</code> (<code>Synchronous</code> / <code>Asynchronous</code>)
+</li>
+<li><code>PartialUserTurn</code>
+</li>
+<li><code>ContinuationToken</code>, <code>AsyncToolResponse</code> (<code>ToolComplete</code> / <code>ToolYield</code>)
+</li>
+<li><code>ContinuationStore</code> / <code>ToolContinuation</code>
+</li>
+<li><code>ToolCache</code>
+</li>
+<li>OS persistence layer with SQLite/Postgres backends
+</li>
+<li>File-based <code>SessionStore</code>
+</li>
+</ul>
+<p>What is missing:</p>
+<ul>
+<li>The async scheduler does not actually use <code>ctxAsyncToolCall</code> or <code>AsyncToolResponse</code>; it just runs tools synchronously and pauses after each one.
+</li>
+<li>There is no per-call decision primitive for sync vs. deferred vs. isolated execution.
+</li>
+<li>There is no “wake up and inject external results” primitive.
+</li>
+<li><code>ContinuationStore</code> has stubbed load/list implementations.
+</li>
+<li><code>ToolExecutionContext</code> contains non-serializable fields (portal, world, event queue), making durable continuations fragile.
+</li>
+<li>Session storage is file-only.
+</li>
+<li>There is no abstraction for running a tool call outside the current process (Docker / subprocess).
+</li>
+</ul>
+<hr />
+<h3 id="phase-1--core-primitives-types--interfaces">Phase 1 — Core primitives (types &amp; interfaces)</h3>
+<h4 id="11-rich-tool-call-state-inside-a-turn">1.1 Rich tool-call state inside a turn</h4>
+<p>Introduce an explicit state machine for every LLM-issued tool call within a user turn:</p>
+<pre><code class="language-text">Ready      -&gt; Running | Deferred | Completed
+Running    -&gt; Completed | Failed
+Deferred   -&gt; Ready | Completed   (via external wake)
+Completed  -&gt; terminal
+</code></pre>
+<p>Add a <code>TrackedToolCall</code> type wrapping <code>LlmToolCall</code> with:</p>
+<ul>
+<li><code>tcId :: ToolCallId</code> — stable ID for matching external results
+</li>
+<li><code>tcState :: ToolCallState</code>
+</li>
+<li><code>tcResult :: Maybe UserToolResponse</code>
+</li>
+<li><code>tcContinuation :: Maybe ContinuationToken</code>
+</li>
+<li><code>tcPolicy :: AppliedPolicy</code> — record of why it ran this way
+</li>
+</ul>
+<p>Refactor <code>PartialUserTurnContent</code> to hold <code>[TrackedToolCall]</code> instead of separate <code>pCompletedResponses</code>, <code>pPendingCalls</code>, and <code>pPendingContinuations</code> lists.</p>
+<h4 id="12-tool-call-policy--decorator">1.2 Tool-call policy / decorator</h4>
+<p>Add a pure decision primitive:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallDisposition</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="ot">=</span> <span class="dt">RunSync</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="op">|</span> <span class="dt">RunAsync</span>                  <span class="co">-- yield a continuation token</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="op">|</span> <span class="dt">RunIsolated</span> <span class="dt">IsolationSpec</span> <span class="co">-- run outside the current process</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="op">|</span> <span class="dt">Defer</span> <span class="dt">Reason</span>              <span class="co">-- intentionally pause (e.g., approval)</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="op">|</span> <span class="dt">Decorate</span> [<span class="dt">Decorator</span>] <span class="dt">ToolCallDisposition</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="dt">ToolCallPolicy</span> <span class="ot">=</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">LlmToolCall</span> <span class="ot">-&gt;</span> <span class="dt">ToolCallDisposition</span></span></code></pre></div></div><p>This is the requested decoration primitive. It lets the runtime decide, per call, whether to execute immediately, defer, or run in isolation.</p>
+<p>Provide <code>defaultToolCallPolicy = const $ const RunSync</code> for backward compatibility.</p>
+<h4 id="13-pluggable-executor-interface">1.3 Pluggable executor interface</h4>
+<p>Decouple <em>how</em> a tool call runs from the session loop:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolExecutor</span> <span class="ot">=</span> <span class="dt">ToolExecutor</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  {<span class="ot"> execSync  ::</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">LlmToolCall</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">UserToolResponse</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  ,<span class="ot"> execAsync ::</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">LlmToolCall</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">AsyncToolResponse</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  }</span></code></pre></div></div><p>Concrete executors to provide:</p>
+<ul>
+<li><code>inProcessExecutor</code> — current behavior
+</li>
+<li><code>yieldingExecutor</code> — always returns <code>ToolYield</code>
+</li>
+<li><code>cachingExecutor :: ToolCache -&gt; ToolExecutor -&gt; ToolExecutor</code>
+</li>
+<li><code>isolatedExecutor :: DeploymentRunner -&gt; ToolExecutor</code>
+</li>
+</ul>
+<p>Replace the single <code>Agent.ctxAsyncToolCall</code> with an optional <code>ToolExecutor</code> selected by the policy.</p>
+<hr />
+<h3 id="phase-2--async-scheduler-in-the-session-loop">Phase 2 — Async scheduler in the session loop</h3>
+<h4 id="21-replace-the-one-at-a-time-async-loop">2.1 Replace the one-at-a-time async loop</h4>
+<p>Current <code>runStepMAsync</code> executes exactly one pending call per step and then pauses.</p>
+<p>New scheduler behavior, given a set of <code>TrackedToolCall</code>s:</p>
+<ol>
+<li>Classify each call via <code>ToolCallPolicy</code>.
+</li>
+<li>Run all <code>RunSync</code> calls and collect results.
+</li>
+<li>For <code>RunAsync</code> / <code>Defer</code> calls, generate continuation tokens and move them to <code>Deferred</code>.
+</li>
+<li>Yield a <code>PartialUserTurn</code> containing:
+<ul>
+<li>completed calls,
+</li>
+<li>deferred calls with tokens,
+</li>
+<li>any remaining ready calls.
+</li>
+</ul>
+</li>
+</ol>
+<p>This matches the requested flow:</p>
+<blockquote>
+<p>perform 1 tool call, mark 2 as deferred → system yields → wakes up, executes deferred calls, places results → user-turn provides 3 tool results.</p>
+</blockquote>
+<h4 id="22-continuation-snapshot">2.2 Continuation snapshot</h4>
+<p>When a call is deferred, generate a <code>ContinuationToken</code> and store a serializable <code>ToolContinuationSnapshot</code>:</p>
+<ul>
+<li><code>token</code>
+</li>
+<li><code>sessionId</code>
+</li>
+<li><code>toolCallId</code>
+</li>
+<li><code>llmToolCall</code>
+</li>
+<li><code>cacheKey</code>
+</li>
+<li><code>policy</code> / <code>isolationSpec</code>
+</li>
+<li>serializable context fields: <code>ctxSessionId</code>, <code>ctxConversationId</code>, <code>ctxTurnId</code>, <code>ctxCallStack</code>, <code>ctxAllowedTools</code>, <code>ctxParentConversation</code>
+</li>
+</ul>
+<p>Do <strong>not</strong> store the non-serializable fields (<code>ctxToolPortal</code>, <code>ctxWorld</code>, <code>ctxEventQueue</code>). Re-hydrate those on wake.</p>
+<hr />
+<h3 id="phase-3--durable-session-storage">Phase 3 — Durable session storage</h3>
+<h4 id="31-generalize-sessionstore">3.1 Generalize <code>SessionStore</code></h4>
+<p>The current <code>SessionStore</code> is file-only. Introduce a backend interface:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionBackend</span> <span class="ot">=</span> <span class="dt">SessionBackend</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  {<span class="ot"> sbStore  ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  ,<span class="ot"> sbLoad   ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> <span class="dt">Session</span>)</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  ,<span class="ot"> sbList   ::</span> <span class="dt">IO</span> [(<span class="dt">SessionId</span>, <span class="dt">UTCTime</span>)]</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  ,<span class="ot"> sbDelete ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  }</span></code></pre></div></div><p>Backends:</p>
+<ul>
+<li><code>FileSessionStore FilePath</code>
+</li>
+<li><code>SqliteSessionStore Connection</code>
+</li>
+<li><code>CompositeSessionStore [SessionBackend]</code> for read fallback with a single write target
+</li>
+</ul>
+<h4 id="32-use-os-persistence-optional">3.2 Use OS persistence (optional)</h4>
+<p>The OS layer already has <code>SqliteBackend</code>, component tables, and migrations. Consider adding a <code>SessionComponent</code> persisted via <code>persistComponent</code>/<code>loadComponent</code>. This reuses ECS migrations and unifies backends.</p>
+<p>If session storage stays separate, at least align IDs: <code>SessionId</code>/<code>TurnId</code>/<code>ConversationId</code> are UUID-based, and OS <code>EntityId</code> is also UUID-based, so conversion is trivial.</p>
+<hr />
+<h3 id="phase-4--wake--resume-api">Phase 4 — Wake / resume API</h3>
+<h4 id="41-inject-external-results">4.1 Inject external results</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">wakeSession ::</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>     <span class="dt">Session</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> [(<span class="dt">ContinuationToken</span>, <span class="dt">UserToolResponse</span>)]</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">Session</span></span></code></pre></div></div><p>Behavior:</p>
+<ul>
+<li>Find the <code>PartialUserTurn</code> and matching deferred <code>TrackedToolCall</code>s.
+</li>
+<li>Move them to <code>Completed</code> with the provided result.
+</li>
+<li>Update the cache if configured.
+</li>
+<li>If all calls are complete, convert the <code>PartialUserTurn</code> to a full <code>UserTurn</code>.
+</li>
+<li>Otherwise leave remaining deferred/ready calls in place.
+</li>
+</ul>
+<h4 id="42-resume-execution">4.2 Resume execution</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">resumeSession ::</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>     <span class="dt">ConversationId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">Agent</span> r</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">Session</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> r <span class="dt">Session</span>)</span></code></pre></div></div><ul>
+<li>If the latest turn is <code>PartialUserTurn</code>, run the scheduler on remaining ready/deferred calls.
+</li>
+<li>If the latest turn is <code>UserTurn</code>, continue to the LLM step.
+</li>
+<li>Returns <code>Left r</code> on completion, <code>Right Session</code> when it needs to yield again.
+</li>
+</ul>
+<h4 id="43-complete-continuations-from-external-workers">4.3 Complete continuations from external workers</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">completeContinuation ::</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>     <span class="dt">ContinuationStore</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">ToolCache</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">ContinuationToken</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">UserToolResponse</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">Bool</span></span></code></pre></div></div><p>This already exists as <code>resumeAsyncToolCall</code> but the <code>ContinuationStore</code> implementation is stubbed. Finish the load/list implementations and ensure proper JSON round-tripping.</p>
+<hr />
+<h3 id="phase-5--isolated-deployment-primitives">Phase 5 — Isolated deployment primitives</h3>
+<h4 id="51-deploymentrunner-abstraction">5.1 <code>DeploymentRunner</code> abstraction</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">DeploymentRunner</span> <span class="ot">=</span> <span class="dt">DeploymentRunner</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  {<span class="ot"> drName    ::</span> <span class="dt">Text</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  ,<span class="ot"> drExecute ::</span> <span class="dt">IsolationSpec</span> <span class="ot">-&gt;</span> <span class="dt">LlmToolCall</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">IsolationError</span> <span class="dt">UserToolResponse</span>)</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  }</span></code></pre></div></div><p>Implementations:</p>
+<ul>
+<li><code>localProcessRunner</code> — fork a worker process
+</li>
+<li><code>dockerRunner</code> — run inside a container
+</li>
+<li><code>functionRunner</code> — for serverless/FaaS (future)
+</li>
+</ul>
+<h4 id="52-serialization-contract-for-isolated-calls">5.2 Serialization contract for isolated calls</h4>
+<p>Define a stable JSON envelope consumed by any external runner:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;token&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;toolCall&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="er">...</span> <span class="fu">},</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contextSnapshot&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="er">...</span> <span class="fu">},</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;policy&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;RunIsolated&quot;</span><span class="fu">,</span> <span class="dt">&quot;spec&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;image&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span> <span class="dt">&quot;sandbox&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Result envelope:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;token&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;success&quot;</span><span class="fu">,</span> <span class="dt">&quot;result&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="er">...</span> <span class="fu">}</span> <span class="fu">}</span></span></code></pre></div></div><p>This makes Docker vs. local execution transparent to the agent.</p>
+<h4 id="53-tool-call-decorator-for-isolation">5.3 Tool-call decorator for isolation</h4>
+<p>Example policy:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">isolateBash ::</span> <span class="dt">ToolCallPolicy</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>isolateBash ctx call</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="op">|</span> toolName call <span class="op">==</span> <span class="st">&quot;bash_command&quot;</span> <span class="ot">=</span> <span class="dt">RunIsolated</span> (<span class="dt">Docker</span> <span class="st">&quot;agents-exe/bash-runner:latest&quot;</span>)</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="op">|</span> <span class="fu">otherwise</span>                       <span class="ot">=</span> <span class="dt">RunSync</span></span></code></pre></div></div><hr />
+<h3 id="phase-6--integration--agent-combinators">Phase 6 — Integration &amp; agent combinators</h3>
+<h4 id="61-extend-agent-record">6.1 Extend <code>Agent</code> record</h4>
+<p>Add to <code>Agent r</code>:</p>
+<ul>
+<li><code>ctxToolCallPolicy :: ToolCallPolicy</code>
+</li>
+<li><code>ctxSessionBackend :: Maybe SessionBackend</code>
+</li>
+<li><code>ctxContinuationStore :: Maybe ContinuationStore</code>
+</li>
+<li><code>ctxDeploymentRunner :: Maybe DeploymentRunner</code>
+</li>
+</ul>
+<p>Keep defaults so existing agents compile unchanged.</p>
+<h4 id="62-new-combinators">6.2 New combinators</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">withToolCallPolicy    ::</span> <span class="dt">ToolCallPolicy</span> <span class="ot">-&gt;</span> <span class="dt">Agent</span> r <span class="ot">-&gt;</span> <span class="dt">Agent</span> r</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">withSessionBackend    ::</span> <span class="dt">SessionBackend</span> <span class="ot">-&gt;</span> <span class="dt">Agent</span> r <span class="ot">-&gt;</span> <span class="dt">Agent</span> r</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">withContinuationStore ::</span> <span class="dt">ContinuationStore</span> <span class="ot">-&gt;</span> <span class="dt">Agent</span> r <span class="ot">-&gt;</span> <span class="dt">Agent</span> r</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ot">withDeploymentRunner  ::</span> <span class="dt">DeploymentRunner</span> <span class="ot">-&gt;</span> <span class="dt">Agent</span> r <span class="ot">-&gt;</span> <span class="dt">Agent</span> r</span></code></pre></div></div><h4 id="63-update-agentstoresession">6.3 Update <code>agentStoreSession</code></h4>
+<p><code>System.Agents.Combinators.StoreSessionProgress</code> should store via the configured <code>SessionBackend</code> rather than only files, while still supporting file fallback.</p>
+<hr />
+<h3 id="phase-7--cli--operator-api">Phase 7 — CLI / operator API</h3>
+<p>New commands for real operation:</p>
+<ul>
+<li><code>agents session pause &lt;session-id&gt;</code> — yield after current step
+</li>
+<li><code>agents session resume &lt;session-id&gt;</code> — continue execution
+</li>
+<li><code>agents session pending &lt;session-id&gt;</code> — list deferred calls / continuation tokens
+</li>
+<li><code>agents session complete &lt;token&gt; &lt;result-file&gt;</code> — inject an external result
+</li>
+<li><code>agents session run-isolated &lt;session-id&gt;</code> — poll and execute <code>RunIsolated</code> calls
+</li>
+</ul>
+<hr />
+<h3 id="phase-8--testing-strategy">Phase 8 — Testing strategy</h3>
+<p>Add tests for:</p>
+<ol>
+<li>Policy classification: a policy can mark some calls sync and some deferred.
+</li>
+<li>Partial turn serialization: a session with deferred calls round-trips through SQLite/file backends.
+</li>
+<li>Wake/resume: <code>wakeSession</code> injects results and eventually produces a full <code>UserTurn</code>.
+</li>
+<li>Cache integration: deferred calls whose result is later cached are resolved on resume.
+</li>
+<li>Isolation contract: a <code>DeploymentRunner</code> can execute a tool call via a subprocess and return a result envelope.
+</li>
+<li>Determinism: the same session state resumed twice produces the same outcome.
+</li>
+</ol>
+<hr />
+<h3 id="open-questions">Open questions</h3>
+<ol>
+<li>
+<p><strong>Should <code>PartialUserTurnContent</code> keep its current shape or be rewritten around <code>TrackedToolCall</code>?</strong><br />
+Rewriting is cleaner but touches JSON serialization and existing tests.</p>
+</li>
+<li>
+<p><strong>Should session storage move into the OS ECS persistence layer or stay separate?</strong><br />
+Moving into ECS unifies migrations/backends; keeping it separate is less invasive.</p>
+</li>
+<li>
+<p><strong>How do we handle non-serializable <code>ToolExecutionContext</code> fields on resume?</strong><br />
+Recommended: store a serializable snapshot and re-hydrate portal/world/event queue in the runtime.</p>
+</li>
+<li>
+<p><strong>Do we want true concurrency for sync calls or sequential execution?</strong><br />
+Sequential is simpler and matches current cache semantics; concurrency can be added later behind a policy flag.</p>
+</li>
+<li>
+<p><strong>Should <code>ToolCallId</code> be a UUID or an index into the turn?</strong><br />
+A UUID is safer for external workers and database keys; an index is smaller and deterministic. Hybrid: <code>ToolCallId = TurnId + Int index</code>.</p>
+</li>
+</ol>
+<hr />
+<h3 id="suggested-first-milestone">Suggested first milestone</h3>
+<p>The smallest vertical slice that proves the design:</p>
+<ol>
+<li>Add <code>TrackedToolCall</code> and refactor <code>PartialUserTurnContent</code>.
+</li>
+<li>Implement <code>ToolCallPolicy</code> with <code>RunSync</code> / <code>Defer</code> decisions.
+</li>
+<li>Update the async scheduler to batch sync calls and yield deferred ones.
+</li>
+<li>Implement <code>wakeSession</code>.
+</li>
+<li>Add a SQLite-backed <code>SessionBackend</code>.
+</li>
+<li>Write a test exercising the full requested flow:
+<ul>
+<li>3 tool calls issued,
+</li>
+<li>policy executes 1 and defers 2,
+</li>
+<li>session persists,
+</li>
+<li>wake injects 2 results,
+</li>
+<li>session resumes and produces a <code>UserTurn</code> with all 3 results.
+</li>
+</ul>
+</li>
+</ol>
+<p>This milestone delivers the requested primitives without yet building Docker runners or Postgres backends.</p>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

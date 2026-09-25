@@ -112,7 +112,7 @@ def main():
 
         # Ctrl+N: new conversation with the selected agent (from the Agents
         # tab; the new conversation is added and selected in the Chats
-        # tab's list, but the tab itself is not switched -- see docs/tui.md).
+        # tab's list, but the tab itself is not switched -- see documentation/tui.md).
         child.send("\x0e")
         time.sleep(2.5)  # let a heartbeat (1s) land the conversation in the list
 

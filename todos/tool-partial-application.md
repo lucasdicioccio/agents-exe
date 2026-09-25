@@ -515,7 +515,7 @@ model, and do not show in `session-print`.
   wrapper and replaces their values with `<secret>` in `RunCommandStart` /
   `RunCommandStopped`. With the load-time check of §2, secrets are env-only
   anyway; the redaction is the second line of defence.
-* `docs/binary-tool.md` and `agents-exe spec bash-tools` document the `env`
+* `documentation/binary-tool.md` and `agents-exe spec bash-tools` document the `env`
   mode.
 
 #### 3.2 MCP toolboxes
@@ -986,7 +986,7 @@ After this phase the docker use case works with one tenant per container.
   `409 params_required` (§5.1).
 * `fork` on session creation and `session start --fork` (§5.2).
 * Pinned parameters refused with `403`; `pinned` in `agentView`.
-* `agentView`, session view, OpenAPI document, `docs/agents-server.md`.
+* `agentView`, session view, OpenAPI document, `documentation/agents-server.md`.
 * Chat page form.
 
 After this phase one container serves many tenants.
@@ -1110,8 +1110,8 @@ and for the model.
 
 ## Related docs
 
-* `docs/binary-tool.md`: bash tool protocol, to be extended with `env` mode.
-* `docs/tools.md`, `docs/advanced-configuration.md`: toolbox configuration.
-* `docs/agents-server.md`: HTTP API.
+* `documentation/binary-tool.md`: bash tool protocol, to be extended with `env` mode.
+* `documentation/tools.md`, `documentation/advanced-configuration.md`: toolbox configuration.
+* `documentation/agents-server.md`: HTTP API.
 * `todos/web-server-embedding.md`: the host, the runner, session metadata.
 * `todo`: "partial-application of tool values".

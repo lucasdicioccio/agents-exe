@@ -1,0 +1,352 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Internal Tool Mapping Documentation</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="## Overview This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints. ## The Problem LLM AP"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Internal Tool Mapping Documentation"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="## Overview This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints. ## The Problem LLM AP"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Internal Tool Mapping Documentation"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html"><meta property="og:description" content="## Overview This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints. ## The Problem LLM AP"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/docs-internal-tool-mapping.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-internal-tool-mapping.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"## Overview This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints. ## The Problem LLM AP","headline":"Internal Tool Mapping Documentation","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Internal Tool Mapping Documentation</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 631 words, 17 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-cli-commands.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">17/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-AI-CONTEXT.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/internal-tool-mapping.md"><code>documentation/internal-tool-mapping.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="internal-tool-mapping-documentation">Internal Tool Mapping Documentation</h2>
+<h3 id="overview">Overview</h3>
+<p>This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints.</p>
+<h3 id="the-problem">The Problem</h3>
+<p>LLM APIs (like OpenAI) have strict requirements for function names:</p>
+<ul>
+<li>Must start with a letter (a-z, A-Z)
+</li>
+<li>Can only contain alphanumeric characters and underscores: <code>[a-zA-Z0-9_]</code>
+</li>
+<li>Some providers have additional length constraints
+</li>
+</ul>
+<p>Note: Dashes (<code>-</code>) and colons (<code>:</code>) are <strong>not</strong> allowed, even though some documentation may suggest otherwise.</p>
+<p>However, tool identifiers from external sources may contain invalid characters:</p>
+<ul>
+<li>OpenAPI operation IDs can contain dots (e.g., <code>pet.findByStatus</code>)
+</li>
+<li>OpenAPI operation IDs can contain slashes (e.g., <code>users/pets/get</code>)
+</li>
+<li>URLs may contain dots, colons, slashes, and other special characters (e.g., <code>localhost:8001</code>)
+</li>
+<li>MCP tool names may contain dashes, colons, or other special characters
+</li>
+</ul>
+<h3 id="current-naming-schemes">Current Naming Schemes</h3>
+<h4 id="1-io-tools">1. IO Tools</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">io2LLMName ::</span> <span class="dt">IOScript</span> a b <span class="ot">-&gt;</span> <span class="dt">OpenAI.ToolName</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>io2LLMName io <span class="ot">=</span> <span class="dt">OpenAI.ToolName</span> (<span class="st">&quot;io_&quot;</span> <span class="op">&lt;&gt;</span> io<span class="op">.</span>description<span class="op">.</span>ioSlug)</span></code></pre></div></div><ul>
+<li>Prefix: <code>io_</code>
+</li>
+<li>Source: User-defined slug
+</li>
+<li>Constraints: Assumed valid (user-controlled)
+</li>
+</ul>
+<h4 id="2-bash-tools">2. Bash Tools</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">bash2LLMName ::</span> <span class="dt">ScriptDescription</span> <span class="ot">-&gt;</span> <span class="dt">OpenAI.ToolName</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>bash2LLMName bash <span class="ot">=</span> <span class="dt">OpenAI.ToolName</span> (<span class="st">&quot;bash_&quot;</span> <span class="op">&lt;&gt;</span> bash<span class="op">.</span>scriptInfo<span class="op">.</span>scriptSlug)</span></code></pre></div></div><ul>
+<li>Prefix: <code>bash_</code>
+</li>
+<li>Source: User-defined slug
+</li>
+<li>Constraints: Assumed valid (user-controlled)
+</li>
+</ul>
+<h4 id="3-mcp-tools">3. MCP Tools</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">mcp2LLMName ::</span> <span class="dt">Toolbox</span> <span class="ot">-&gt;</span> <span class="dt">ToolDescription</span> <span class="ot">-&gt;</span> <span class="dt">OpenAI.ToolName</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>mcp2LLMName box mcp <span class="ot">=</span> <span class="dt">OpenAI.ToolName</span> (<span class="st">&quot;mcp_&quot;</span> <span class="op">&lt;&gt;</span> box<span class="op">.</span>name <span class="op">&lt;&gt;</span> <span class="st">&quot;_&quot;</span> <span class="op">&lt;&gt;</span> mcp<span class="op">.</span>getToolDescription<span class="op">.</span>name)</span></code></pre></div></div><ul>
+<li>Prefix: <code>mcp_&lt;toolboxName&gt;_</code>
+</li>
+<li>Source: MCP tool name from server
+</li>
+<li><strong>Issue</strong>: MCP tool names may contain invalid characters (dashes, colons, etc.)
+</li>
+</ul>
+<h4 id="4-openapi-tools">4. OpenAPI Tools</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">openapi2LLMName ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">OpenAI.ToolName</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>openapi2LLMName tboxName operationId <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">OpenAI.ToolName</span> (<span class="st">&quot;openapi_&quot;</span> <span class="op">&lt;&gt;</span> tboxName <span class="op">&lt;&gt;</span> <span class="st">&quot;_&quot;</span> <span class="op">&lt;&gt;</span> operationId)</span></code></pre></div></div><ul>
+<li>Prefix: <code>openapi_&lt;toolboxName&gt;_</code>
+</li>
+<li>Source: OpenAPI operationId
+</li>
+<li><strong>Issue</strong>: operationId often contains dots (e.g., <code>pet.findByStatus</code>)
+</li>
+<li><strong>Issue</strong>: Toolbox names derived from URLs may contain colons (e.g., <code>localhost:8001</code>)
+</li>
+</ul>
+<h3 id="error-manifestation">Error Manifestation</h3>
+<p>When an invalid tool name is sent to an LLM API, you may see errors like:</p>
+<pre><code>&quot;Invalid request: function name is invalid, must start with a letter 
+ and can contain only alphanumerics and underscores&quot;
+</code></pre>
+<p>This commonly occurs with:</p>
+<ul>
+<li>OpenAPI specs that use dot-notation for operation IDs:
+<ul>
+<li><code>pet.findByStatus</code> → Invalid (contains dot)
+</li>
+<li><code>users/pets/get</code> → Invalid (contains slash)
+</li>
+</ul>
+</li>
+<li>Toolbox names derived from URLs:
+<ul>
+<li><code>localhost:8001</code> → Invalid (contains colon)
+</li>
+<li><code>api.example.com</code> → Invalid (contains dots)
+</li>
+</ul>
+</li>
+<li>MCP tool names with dashes or special characters:
+<ul>
+<li><code>get-pet</code> → Invalid (contains dash)
+</li>
+</ul>
+</li>
+</ul>
+<h3 id="proposed-solution-normalization-with-bi-directional-mapping">Proposed Solution: Normalization with Bi-directional Mapping</h3>
+<h4 id="core-principles">Core Principles</h4>
+<ol>
+<li><strong>Normalization</strong>: Convert all tool names to LLM-valid format (alphanumeric + underscore only)
+</li>
+<li><strong>Bi-directional Mapping</strong>: Maintain ability to map back to original names
+</li>
+<li><strong>Consistency</strong>: Same normalization logic for registration and lookup
+</li>
+<li><strong>Collision Avoidance</strong>: Ensure unique normalized names
+</li>
+</ol>
+<h4 id="normalization-function">Normalization Function</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Normalize a tool name to be LLM-compatible.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co">-- </span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Rules:</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- 1. Must start with a letter (prefix with &#39;t&#39; if needed)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- 2. Replace all non-alphanumeric characters with underscores</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- 3. Collapse multiple consecutive underscores</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- 4. Preserve case (some providers are case-sensitive)</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">--</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- Examples:</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- &gt;&gt;&gt; normalizeToolName &quot;pet.findByStatus&quot;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- &quot;pet_findByStatus&quot;</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co">-- &gt;&gt;&gt; normalizeToolName &quot;users/pets/get&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co">-- &quot;users_pets_get&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="co">-- &gt;&gt;&gt; normalizeToolName &quot;2.0_getPet&quot;  -- starts with number</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="co">-- &quot;t2_0_getPet&quot;</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- &gt;&gt;&gt; normalizeToolName &quot;localhost:8001&quot;  -- contains colon</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co">-- &quot;localhost_8001&quot;</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="co">-- &gt;&gt;&gt; normalizeToolName &quot;get-pet&quot;  -- contains dash</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co">-- &quot;get_pet&quot;</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="ot">normalizeToolName ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Text</span></span></code></pre></div></div><h4 id="character-replacement-rules">Character Replacement Rules</h4>
+<table>
+<tr><th>Character</th><th>Replacement</th><th>Example</th></tr>
+<tr><td><code>.</code> (dot)</td><td><code>_</code> (underscore)</td><td><code>pet.find</code> → <code>pet_find</code></td></tr>
+<tr><td><code>/</code> (slash)</td><td><code>_</code> (underscore)</td><td><code>users/pets</code> → <code>users_pets</code></td></tr>
+<tr><td><code>:</code> (colon)</td><td><code>_</code> (underscore)</td><td><code>localhost:8001</code> → <code>localhost_8001</code></td></tr>
+<tr><td><code>-</code> (dash)</td><td><code>_</code> (underscore)</td><td><code>get-pet</code> → <code>get_pet</code></td></tr>
+<tr><td>Other special chars</td><td><code>_</code> (underscore)</td><td><code>pet@home</code> → <code>pet_home</code></td></tr>
+<tr><td>Leading digit</td><td>Prefix with <code>t</code></td><td><code>2.0_api</code> → <code>t2_0_api</code></td></tr>
+</table>
+<h4 id="bi-directional-mapping-strategy">Bi-directional Mapping Strategy</h4>
+<p>For OpenAPI tools, we need to maintain a mapping from normalized LLM names back to original operation IDs:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolNameMapping</span> <span class="ot">=</span> <span class="dt">ToolNameMapping</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> originalName ::</span> <span class="dt">Text</span>        <span class="co">-- ^ Original operationId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> normalizedName ::</span> <span class="dt">Text</span>      <span class="co">-- ^ LLM-safe name</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> fullLLMName ::</span> <span class="dt">Text</span>         <span class="co">-- ^ With prefix (e.g., &quot;openapi_pets_pet_findByStatus&quot;)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Build mapping during tool registration</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">buildNameMapping ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> [<span class="dt">OpenAPITool</span>] <span class="ot">-&gt;</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">ToolNameMapping</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>buildNameMapping toolboxName tools <span class="ot">=</span> <span class="op">...</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- Lookup during tool execution</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ot">findToolByLLMName ::</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">ToolNameMapping</span> <span class="ot">-&gt;</span> <span class="dt">OpenAI.ToolName</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">OpenAPITool</span></span></code></pre></div></div><h4 id="implementation-in-openapi-toolbox">Implementation in OpenAPI Toolbox</h4>
+<p>The OpenAPI toolbox should:</p>
+<ol>
+<li>
+<p><strong>During Initialization</strong>:</p>
+<ul>
+<li>Normalize the toolbox name itself (may contain colons from URLs)
+</li>
+<li>Convert all operation IDs to normalized form
+</li>
+<li>Store mapping from normalized → original
+</li>
+<li>Generate LLM tool names with normalized IDs
+</li>
+</ul>
+</li>
+<li>
+<p><strong>During Tool Execution</strong>:</p>
+<ul>
+<li>Receive LLM tool call with normalized name
+</li>
+<li>Look up original operation ID from mapping
+</li>
+<li>Execute using original ID
+</li>
+</ul>
+</li>
+</ol>
+<h4 id="updated-naming-flow">Updated Naming Flow</h4>
+<pre><code>OpenAPI Spec
+    │
+    ▼
+Parse Operations
+    │
+    ▼
+Extract operationId (e.g., &quot;pet.findByStatus&quot;)
+    │
+    ▼
+Normalize ──────────────────┐
+    │                        │
+    ▼                        │
+&quot;pet_findByStatus&quot;          │
+    │                        │
+    ▼                        ▼
+Add prefix:              Store mapping:
+&quot;openapi_pets_pet_findByStatus&quot;  &quot;pet_findByStatus&quot; → &quot;pet.findByStatus&quot;
+    │
+    ▼
+Register with LLM
+    │
+    ▼
+LLM calls tool with name &quot;openapi_pets_pet_findByStatus&quot;
+    │
+    ▼
+Lookup mapping → &quot;pet.findByStatus&quot;
+    │
+    ▼
+Execute HTTP request
+</code></pre>
+<h3 id="implementation-plan">Implementation Plan</h3>
+<h4 id="phase-1-normalization-function">Phase 1: Normalization Function</h4>
+<p>Add to <code>System.Agents.Tools.OpenAPI.Converter</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Normalize a tool name for LLM compatibility.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co">-- Only allows alphanumeric characters and underscores.</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">normalizeForLLM ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>normalizeForLLM <span class="ot">=</span> collapseUnderscores <span class="op">.</span> ensureLetterStart <span class="op">.</span> replaceInvalid</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="kw">where</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    replaceInvalid <span class="ot">=</span> Text.map replaceChar</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    replaceChar c</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        <span class="op">|</span> isValidChar c <span class="ot">=</span> c</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        <span class="op">|</span> <span class="fu">otherwise</span> <span class="ot">=</span> <span class="ch">&#39;_&#39;</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Only alphanumeric and underscore allowed (NO dashes, NO colons)</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    isValidChar c <span class="ot">=</span> isLetter c <span class="op">||</span> <span class="fu">isDigit</span> c <span class="op">||</span> c <span class="op">==</span> <span class="ch">&#39;_&#39;</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    ensureLetterStart t</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        <span class="op">|</span> Text.null t <span class="ot">=</span> <span class="st">&quot;tool&quot;</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        <span class="op">|</span> isLetter (Text.head t) <span class="ot">=</span> t</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        <span class="op">|</span> <span class="fu">otherwise</span> <span class="ot">=</span> <span class="st">&quot;t&quot;</span> <span class="op">&lt;&gt;</span> t</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    collapseUnderscores <span class="ot">=</span> Text.intercalate <span class="st">&quot;_&quot;</span> <span class="op">.</span> <span class="fu">filter</span> (<span class="fu">not</span> <span class="op">.</span> Text.null) <span class="op">.</span> Text.splitOn <span class="st">&quot;_&quot;</span></span></code></pre></div></div><h4 id="phase-2-bi-directional-mapping">Phase 2: Bi-directional Mapping</h4>
+<p>Add to <code>System.Agents.Tools.OpenAPI.Converter</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">NameMapping</span> <span class="ot">=</span> <span class="dt">NameMapping</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> nmOriginal ::</span> <span class="dt">Text</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> nmNormalized ::</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">buildToolNameMapping ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> [<span class="dt">OpenAPITool</span>] <span class="ot">-&gt;</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">NameMapping</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>buildToolNameMapping toolboxName tools <span class="ot">=</span> </span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    Map.fromList [(nmNormalized m, m) <span class="op">|</span> m <span class="ot">&lt;-</span> mappings]</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="kw">where</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    mappings <span class="ot">=</span> [ <span class="dt">NameMapping</span> orig (normalizeForLLM orig)</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>               <span class="op">|</span> tool <span class="ot">&lt;-</span> tools</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>               , <span class="kw">let</span> orig <span class="ot">=</span> getOperationIdOrFallback tool</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>               ]</span></code></pre></div></div><h4 id="phase-3-update-openapi-toolbox">Phase 3: Update OpenAPI Toolbox</h4>
+<p>Modify <code>Toolbox</code> to store name mapping:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Toolbox</span> <span class="ot">=</span> <span class="dt">Toolbox</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> toolboxName ::</span> <span class="dt">Text</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolboxBaseUrl ::</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolboxTools ::</span> [<span class="dt">OpenAPITool</span>]</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolboxNameMapping ::</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">NameMapping</span>  <span class="co">-- ^ normalized → original</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> httpRuntime ::</span> <span class="dt">HttpClient.Runtime</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> headerFunc ::</span> <span class="dt">Maybe</span> (<span class="dt">IO</span> (<span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">Text</span>))</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> staticHeaders ::</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">Text</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="phase-4-update-registration-functions">Phase 4: Update Registration Functions</h4>
+<p>Update <code>openapi2LLMName</code> to use normalized names for both toolbox and operation:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">openapi2LLMName ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">OpenAI.ToolName</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>openapi2LLMName tboxName operationId <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> normalizedBox <span class="ot">=</span> normalizeForLLM tboxName</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        normalizedOp <span class="ot">=</span> normalizeForLLM operationId</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">in</span> <span class="dt">OpenAI.ToolName</span> (<span class="st">&quot;openapi_&quot;</span> <span class="op">&lt;&gt;</span> normalizedBox <span class="op">&lt;&gt;</span> <span class="st">&quot;_&quot;</span> <span class="op">&lt;&gt;</span> normalizedOp)</span></code></pre></div></div><p>Note: Both <code>tboxName</code> and <code>operationId</code> must be normalized because toolbox names may come from URLs containing colons.</p>
+<h3 id="testing-strategy">Testing Strategy</h3>
+<ol>
+<li>
+<p><strong>Unit Tests</strong>:</p>
+<ul>
+<li>Test normalization of various edge cases (dots, slashes, colons, dashes)
+</li>
+<li>Test bi-directional mapping
+</li>
+<li>Test collision handling
+</li>
+</ul>
+</li>
+<li>
+<p><strong>Integration Tests</strong>:</p>
+<ul>
+<li>Test with real OpenAPI specs containing dots in operationIds
+</li>
+<li>Test with toolbox names from URLs containing colons
+</li>
+<li>Test end-to-end tool registration and execution
+</li>
+</ul>
+</li>
+<li>
+<p><strong>Property Tests</strong>:</p>
+<ul>
+<li>Round-trip property: normalize → denormalize should preserve original
+</li>
+<li>Validity property: normalized names always match <code>[a-zA-Z][a-zA-Z0-9_]*</code>
+</li>
+</ul>
+</li>
+</ol>
+<h3 id="edge-cases">Edge Cases</h3>
+<h4 id="1-name-collisions">1. Name Collisions</h4>
+<p>When two different operation IDs normalize to the same name:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Original names</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;pet.find&quot;</span> <span class="fu">and</span> <span class="st">&quot;pet_find&quot;</span> both normalize to <span class="st">&quot;pet_find&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- Solution: Append number suffix</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;pet_find&quot;</span> <span class="fu">and</span> <span class="st">&quot;pet_find_2&quot;</span></span></code></pre></div></div><h4 id="2-empty-operation-ids">2. Empty Operation IDs</h4>
+<p>When operationId is missing, we fall back to path/method:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- From path &quot;/pets/{id}&quot; and method &quot;GET&quot;</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co">-- Generated name: &quot;get_pets__id_&quot;</span></span></code></pre></div></div><h4 id="3-very-long-names">3. Very Long Names</h4>
+<p>Some providers have length limits. Strategy:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Truncate with hash suffix to maintain uniqueness</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;openapi_very_long_toolbox_name_very_long_operation_id_...&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  → <span class="st">&quot;openapi_very_long_toolbox_name_very_long_operat_a1b2c3&quot;</span></span></code></pre></div></div><h4 id="4-unicode-characters">4. Unicode Characters</h4>
+<p>Non-ASCII characters in operation IDs:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Replace with underscores</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;获取宠物&quot;</span> → <span class="st">&quot;____&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Then ensure letter start: &quot;t____&quot;</span></span></code></pre></div></div><h4 id="5-toolbox-names-from-urls">5. Toolbox Names from URLs</h4>
+<p>When toolbox names are derived from URLs, they may contain colons and dots:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Original URL-based name</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;localhost:8001&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Normalized</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;localhost_8001&quot;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Original URL-based name</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;api.example.com:8080&quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- Normalized</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;api_example_com_8080&quot;</span></span></code></pre></div></div><h3 id="related-files">Related Files</h3>
+<ul>
+<li><code>src/System/Agents/Tools/OpenAPI/Converter.hs</code> - Tool conversion logic
+</li>
+<li><code>src/System/Agents/Tools/OpenAPI/Types.hs</code> - Type definitions
+</li>
+<li><code>src/System/Agents/Tools/OpenAPIToolbox.hs</code> - Toolbox implementation
+</li>
+<li><code>src/System/Agents/ToolRegistration.hs</code> - LLM registration
+</li>
+<li><code>src/System/Agents/LLMs/OpenAI.hs</code> - LLM ToolName type
+</li>
+</ul>
+<h3 id="future-considerations">Future Considerations</h3>
+<ol>
+<li><strong>Caching</strong>: Cache normalized names to avoid recomputation
+</li>
+<li><strong>Configuration</strong>: Allow users to provide custom normalization rules
+</li>
+<li><strong>Validation</strong>: Pre-validate specs during initialization
+</li>
+<li><strong>Reporting</strong>: Log warnings when names are normalized
+</li>
+</ol>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

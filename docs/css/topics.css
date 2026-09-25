@@ -1,0 +1,82 @@
+body, html {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg);
+  color: var(--ink);
+}
+
+.main {
+  max-width: 70ch;
+  padding: 3em 1em;
+  margin: auto;
+  line-height: 1.75;
+  font-size: 1.15em;
+  font-family: var(--font-sans);
+}
+
+h1,h2,h3,h4,h5,h6 {
+  margin: 1.4em 0 0.5em;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+a {
+  color: var(--accent);
+}
+a:hover {
+  color: var(--code-accent);
+}
+
+p,ul,ol {
+  margin-bottom: 1.5em;
+  font-family: var(--font-sans);
+  color: var(--ink-soft);
+}
+
+/*~~ topiclist ~~~~~~~~~~~~~~~~~~~~*/
+
+div.topiclist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em;
+}
+
+div.topic {
+  width: 12em;
+  display: table-cell;
+  text-align: center;
+  margin-right: 0;
+  margin-bottom: 0;
+  padding: 0.5em 0.7em;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+div.topic:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+a.topic-link {
+  text-decoration: none;
+  font-size: 0.8em;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+a.topic-link:hover {
+  text-decoration: none;
+  color: var(--accent);
+}
+
+span.topic-name {
+   text-transform: uppercase;
+}
+
+span.topic-count {
+  margin-left: 0.75em;
+  color: var(--muted);
+}

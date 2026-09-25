@@ -8,7 +8,7 @@
 server-sent events stream per session.
 
 Every endpoint that can start a run takes @wait@ and @timeout@ query
-parameters; see @docs/agents-server.md@ for the full reference.
+parameters; see @documentation/agents-server.md@ for the full reference.
 -}
 module AgentsServer.Api (
     ServerEnv (..),

@@ -1,0 +1,300 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Durable Workflows How-To</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="This guide shows how to exercise and extend the durable-workflow features in `agents-exe`. Durable workflows let an agent turn pause after some tool calls, persist its state, and resume later when external results arrive. The canonical exam"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Durable Workflows How-To"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="This guide shows how to exercise and extend the durable-workflow features in `agents-exe`. Durable workflows let an agent turn pause after some tool calls, persist its state, and resume later when external results arrive. The canonical exam"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Durable Workflows How-To"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html"><meta property="og:description" content="This guide shows how to exercise and extend the durable-workflow features in `agents-exe`. Durable workflows let an agent turn pause after some tool calls, persist its state, and resume later when external results arrive. The canonical exam"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/docs-durable-workflows-howto.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-durable-workflows-howto.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"This guide shows how to exercise and extend the durable-workflow features in `agents-exe`. Durable workflows let an agent turn pause after some tool calls, persist its state, and resume later when external results arrive. The canonical exam","headline":"Durable Workflows How-To","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Durable Workflows How-To</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1040 words, 22 code snippets, 7 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-OS-API.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">8/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-async-tool-calls.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/durable-workflows-howto.md"><code>documentation/durable-workflows-howto.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="durable-workflows-how-to">Durable Workflows How-To</h2>
+<p>This guide shows how to exercise and extend the durable-workflow features in
+<code>agents-exe</code>.  Durable workflows let an agent turn pause after some tool calls,
+persist its state, and resume later when external results arrive.</p>
+<p>The canonical example flow is:</p>
+<ol>
+<li>The user asks a question.
+</li>
+<li>The LLM replies with three tool calls.
+</li>
+<li>The runtime executes one call immediately and defers the other two.
+</li>
+<li>The process yields (and can even be restarted).
+</li>
+<li>External workers complete the deferred calls.
+</li>
+<li>The runtime wakes the session with the results.
+</li>
+<li>The LLM receives all three results and continues.
+</li>
+</ol>
+<p>This guide covers:</p>
+<ul>
+<li><a href="#running-the-demonstrator">A ready-to-run demonstrator</a> that exercises the
+flow without calling a real LLM.
+</li>
+<li><a href="#core-concepts">Core concepts</a> behind durable execution.
+</li>
+<li><a href="#cli-commands-for-operators">CLI commands</a> for operating durable sessions.
+</li>
+<li><a href="#building-your-own-durable-agent">Building your own durable agent</a> in
+Haskell.
+</li>
+</ul>
+<p>To run durable agents behind an HTTP API, with sessions in SQLite, see
+<a href="/agents-exe/docs-agents-server.html">agents-server.md</a>.</p>
+<hr />
+<h3 id="running-the-demonstrator">Running the demonstrator</h3>
+<p>The repository contains a self-contained executable called
+<code>durable-workflow-demo</code>.  It uses a mock LLM so you can run it without API
+keys.</p>
+<p>Build and run:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">cabal</span> run durable-workflow-demo</span></code></pre></div></div><p>You should see output similar to:</p>
+<pre><code>Durable workflow demonstrator
+=============================
+
+Step 1: run the async scheduler on the LLM turn.
+  [executing in-process] fetch_local
+Yielded partial turn:
+  completed: 1
+    - fetch_local: result from fetch_local
+  deferred: 2
+    - fetch_remote_a token: 550e8400-e29b-41d4-a716-446655440000
+    - fetch_remote_b token: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+
+Step 2: complete the deferred calls from the outside world.
+  providing result for token 550e8400-e29b-41d4-a716-446655440000
+  providing result for token 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+Turn is now complete.
+
+Step 3: resume the session until the LLM produces a final answer.
+
+=== Final LLM response ===
+All three calls are complete. Results:
+- fetch_local: result from fetch_local
+- fetch_remote_a: external result for fetch_remote_a
+- fetch_remote_b: external result for fetch_remote_b
+</code></pre>
+<p>The source is in <code>examples/durable-workflow-demo/Main.hs</code> and is heavily
+commented.  It is the best starting point for adapting the workflow to your
+own agents.</p>
+<hr />
+<h3 id="core-concepts">Core concepts</h3>
+<p>Durable workflows are built from four composable layers.</p>
+<h4 id="1-execution-mode">1. Execution mode</h4>
+<p><code>Agent.ctxExecutionMode</code> is either <code>Synchronous</code> (default) or <code>Asynchronous</code>.
+Only asynchronous agents yield partial turns.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a>asyncAgent <span class="ot">=</span> agent{ctxExecutionMode <span class="ot">=</span> <span class="dt">Asynchronous</span>}</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co">-- or</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>asyncAgent <span class="ot">=</span> withExecutionMode <span class="dt">Asynchronous</span> agent</span></code></pre></div></div><h4 id="2-tool-call-policy">2. Tool-call policy</h4>
+<p>A <code>ToolCallPolicy</code> is a pure function that decides, for every tool call,
+whether to run it synchronously, defer it, run it asynchronously, or isolate
+it:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">policy ::</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">LlmToolCall</span> <span class="ot">-&gt;</span> <span class="dt">ToolCallDisposition</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>policy _ctx call</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> callName call <span class="op">==</span> <span class="st">&quot;fetch_local&quot;</span>  <span class="ot">=</span> <span class="dt">RunSync</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> callName call <span class="op">==</span> <span class="st">&quot;bash_command&quot;</span> <span class="ot">=</span> <span class="dt">RunIsolated</span> (<span class="dt">Docker</span> <span class="st">&quot;agents-exe/bash-runner:latest&quot;</span>)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="fu">otherwise</span>                       <span class="ot">=</span> <span class="dt">Defer</span> (<span class="dt">Reason</span> <span class="st">&quot;waiting for external service&quot;</span>)</span></code></pre></div></div><p>Dispositions can be decorated with timeouts, retries, cache keys, or labels:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="dt">Decorate</span> [<span class="dt">WithTimeout</span> <span class="dv">30</span>, <span class="dt">WithRetries</span> <span class="dv">2</span>] <span class="dt">RunSync</span></span></code></pre></div></div><p>Agents loaded from JSON can declare the same policy without Haskell code; see
+<a href="#configuring-an-agent-for-durable-mode">Configuring an agent for durable mode</a>.</p>
+<h4 id="3-pluggable-executor">3. Pluggable executor</h4>
+<p><code>ToolExecutor</code> decouples <em>how</em> a call runs from the session loop.  The
+runtime provides <code>inProcessExecutor</code>, <code>yieldingExecutor</code>, <code>cachingExecutor</code>,
+<code>isolatedExecutor</code>, and <code>mkDurableExecutor</code> to compose them.</p>
+<p>For most use cases you only need to set <code>ctxToolCallPolicy</code>; the session loop
+falls back to the agent’s native <code>toolCall</code> for synchronous calls.</p>
+<h4 id="4-persistence-and-wakeresume">4. Persistence and wake/resume</h4>
+<p>When a call is deferred, the runtime optionally stores a serialisable
+<code>ToolContinuationSnapshot</code> in a <code>ContinuationStore</code> and emits a
+<code>PartialUserTurn</code>.  Later:</p>
+<ul>
+<li><code>wakeSession</code> injects external results.
+</li>
+<li><code>resumeSession</code> continues execution until completion or the next yield.
+</li>
+<li><code>SessionBackend</code> (file, SQLite, or composite) stores session state across
+process restarts.
+</li>
+</ul>
+<hr />
+<h3 id="cli-commands-for-operators">CLI commands for operators</h3>
+<p>The <code>agents-exe session</code> command group creates and operates on stored
+sessions.  These commands load sessions through the configured file-based
+<code>SessionStore</code> and use the first supplied <code>--agent-file</code> when execution needs
+to advance.  Every command that advances execution forces the agent into
+asynchronous mode.</p>
+<h4 id="configuring-an-agent-for-durable-mode">Configuring an agent for durable mode</h4>
+<p>To defer calls from the CLI, declare a tool-call policy in the agent JSON.  The
+policy and execution mode are applied everywhere the agent runs: <code>run</code>, the
+TUI, the <code>session</code> commands, and sub-agents.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-agent&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;executionMode&quot;</span><span class="fu">:</span> <span class="st">&quot;asynchronous&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;toolCallPolicyConfig&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runSync&quot;</span><span class="fu">},</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;fetch_remote_a&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;defer&quot;</span><span class="fu">,</span> <span class="dt">&quot;reason&quot;</span><span class="fu">:</span> <span class="st">&quot;external worker&quot;</span><span class="fu">}}</span><span class="ot">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;fetch_remote_b&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;defer&quot;</span><span class="fu">,</span> <span class="dt">&quot;reason&quot;</span><span class="fu">:</span> <span class="st">&quot;external worker&quot;</span><span class="fu">}}</span><span class="ot">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;build_project&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runAsync&quot;</span><span class="fu">}}</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Rules match on the exact tool name; calls that match no rule get <code>default</code>.
+Available disposition tags are <code>runSync</code>, <code>runAsync</code>, <code>runIsolated</code> (with a
+<code>spec</code>), <code>defer</code> (with a <code>reason</code>), and <code>decorate</code> (with <code>decorators</code> and
+<code>inner</code>).  Without <code>toolCallPolicyConfig</code>, every call runs synchronously and
+nothing is ever deferred.</p>
+<p>See <a href="/agents-exe/docs-async-tool-calls.html">async-tool-calls.md</a> for the related
+<code>asyncYieldStrategy</code>, <code>maxConcurrency</code>, and <code>asyncCallTimeoutSeconds</code> fields.</p>
+<h4 id="walkthrough">Walkthrough</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1. Create a session holding the initial prompt.  The LLM is not called yet.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session start <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--prompt</span> <span class="st">&quot;Fetch the local and remote data, then summarise it&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># session-id: &lt;session-id&gt;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co"># 2. Advance until the turn yields on deferred calls.</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session resume <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co"># 3. See what is waiting on the outside world.</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session pending <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co"># 4. Provide each deferred result.</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session complete <span class="op">&lt;</span>token<span class="op">&gt;</span> result.txt</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="co"># 5. Let the LLM continue with all results.</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session resume <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span></code></pre></div></div><p><code>agents-exe run</code> can start the same flow: when a turn waits on deferred calls
+it stops, stores the session, and prints a JSON report with the session id
+and continuation tokens.  Continue it with <code>session complete</code> and
+<code>session resume</code>.</p>
+<p>The TUI (<code>agents-exe tui</code>) can also answer deferred calls directly, without
+the <code>session</code> CLI: a run that stops on deferred calls shows a Pending panel
+listing each call, and <code>Ctrl+Y</code> (<code>answer-pending</code>) puts the message editor
+into “answer mode” for the oldest one — type the result and send it, which
+calls the same <code>completeCall</code> mechanism (with <code>autoResume</code> set) the server’s
+own <code>GET /v1/sessions/:id/pending</code> workers use, so the run resumes on its
+own. See <code>documentation/tui.md</code>’s “Pending calls” section.</p>
+<h4 id="start-a-new-session">Start a new session</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session start <span class="at">--prompt</span> <span class="st">&quot;...&quot;</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session start <span class="at">--step</span> <span class="at">--prompt</span> <span class="st">&quot;...&quot;</span></span></code></pre></div></div><p>Creates a new asynchronous session whose first turn contains the prompt, stores
+it, and prints its <code>session-id</code>.  By default no scheduling happens, which
+leaves every step to an external process or operator.  With <code>--step</code>, it also
+runs one scheduling step right away.  It accepts the same prompt options as
+<code>run</code> (<code>--prompt</code>, <code>--file</code>, media attachments, and so on).</p>
+<h4 id="run-exactly-one-step">Run exactly one step</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session step <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span></code></pre></div></div><p>Runs a single scheduling step and prints the resulting session state: a turn
+waiting for the LLM, the LLM’s tool calls, a yielded partial turn, or the
+final answer.</p>
+<h4 id="pause-after-one-async-step">Pause after one async step</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session pause <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span></code></pre></div></div><p>Runs one asynchronous step and persists the resulting session, like <code>step</code>.
+If the turn yields, it prints the continuation tokens for deferred calls.</p>
+<h4 id="resume-until-completion-or-next-yield">Resume until completion or next yield</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session resume <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span></code></pre></div></div><p>Calls <code>resumeSession</code> and persists after each yield.</p>
+<h4 id="list-pending-deferred-calls">List pending deferred calls</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session pending <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span></code></pre></div></div><p>Shows each deferred call’s tool name, call id, continuation token, and
+disposition.</p>
+<h4 id="inject-an-external-result">Inject an external result</h4>
+<p>Create a result file.  JSON is parsed as a <code>UserToolResponse</code>; anything else
+is treated as plain text.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># JSON result</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&#39;{&quot;type&quot;:&quot;text&quot;,&quot;content&quot;:&quot;42&quot;}&#39;</span> <span class="op">&gt;</span> result.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session complete <span class="op">&lt;</span>token<span class="op">&gt;</span> result.json</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co"># Plain-text result</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;42&quot;</span> <span class="op">&gt;</span> result.txt</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session complete <span class="op">&lt;</span>token<span class="op">&gt;</span> result.txt</span></code></pre></div></div><p><code>complete</code> scans all sessions in the store to find the one containing the
+token.</p>
+<h4 id="run-deferred-isolated-calls">Run deferred isolated calls</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./my-agent.json session run-isolated <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span></code></pre></div></div><p>If the agent has <code>ctxDeploymentRunner</code> configured, this executes deferred
+<code>RunIsolated</code> calls through the runner and injects their results back into the
+session.</p>
+<hr />
+<h3 id="building-your-own-durable-agent">Building your own durable agent</h3>
+<p>The demo is a minimal Haskell program.  The key pieces are reproduced below.</p>
+<h4 id="1-make-the-agent-asynchronous-and-set-a-policy">1. Make the agent asynchronous and set a policy</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Base</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">myPolicy ::</span> <span class="dt">ToolCallPolicy</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>myPolicy _ctx call</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> callName call <span class="op">==</span> <span class="st">&quot;fetch_local&quot;</span> <span class="ot">=</span> <span class="dt">RunSync</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="fu">otherwise</span>                      <span class="ot">=</span> <span class="dt">Defer</span> (<span class="dt">Reason</span> <span class="st">&quot;external&quot;</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>agent&#39; <span class="ot">=</span> agent</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    { ctxExecutionMode <span class="ot">=</span> <span class="dt">Asynchronous</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    , ctxToolCallPolicy <span class="ot">=</span> myPolicy</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="2-run-the-async-scheduler">2. Run the async scheduler</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Step</span> (runStepM)</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>(_agent, result) <span class="ot">&lt;-</span> runStepM convId agent&#39; session0</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">case</span> result <span class="kw">of</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Left</span> final      <span class="ot">-&gt;</span> <span class="fu">putStrLn</span> <span class="st">&quot;Session completed immediately.&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> session1  <span class="ot">-&gt;</span> <span class="fu">putStrLn</span> <span class="st">&quot;Session yielded.&quot;</span></span></code></pre></div></div><h4 id="3-wake-with-external-results">3. Wake with external results</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Wake</span> (wakeSession)</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> responses <span class="ot">=</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        [ (token, <span class="dt">TextResponse</span> <span class="st">&quot;external answer&quot;</span>)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="op">|</span> (token, _call) <span class="ot">&lt;-</span> deferredCalls</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        ]</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>session2 <span class="ot">&lt;-</span> wakeSession session1 responses</span></code></pre></div></div><h4 id="4-resume">4. Resume</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Wake</span> (resumeSession)</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>final <span class="ot">&lt;-</span> resumeSession convId agent&#39; session2</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">case</span> final <span class="kw">of</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Left</span> (llmTurn, _session) <span class="ot">-&gt;</span> <span class="fu">print</span> (llmTurn<span class="op">.</span>llmResponse<span class="op">.</span>responseText)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> session3           <span class="ot">-&gt;</span> <span class="fu">putStrLn</span> <span class="st">&quot;Yielded again.&quot;</span></span></code></pre></div></div><h4 id="5-add-durable-storage">5. Add durable storage</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Async</span> (mkSqliteContinuationStore)</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.SessionStore</span> (mkSqliteSessionStore)</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">Database.SQLite.Simple</span> (open)</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>conn <span class="ot">&lt;-</span> open <span class="st">&quot;.agents-durable.db&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>backend <span class="ot">&lt;-</span> mkSqliteSessionStore conn</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>store   <span class="ot">&lt;-</span> mkSqliteContinuationStore conn</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> durableAgent <span class="ot">=</span> withDurableWorkflows backend store agent&#39;</span></code></pre></div></div><p><code>withDurableWorkflows</code> is a convenience combinator that installs both a
+session backend and a continuation store.</p>
+<h4 id="6-add-a-tool-cache">6. Add a tool cache</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Tools.Cache</span> (mkSqliteToolCache)</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>cache <span class="ot">&lt;-</span> mkSqliteToolCache <span class="st">&quot;.agents-cache.db&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> cachedAgent <span class="ot">=</span> withToolCache agent&#39; cache</span></code></pre></div></div><p>Cached synchronous calls are skipped on resume if their result is already in
+the cache.</p>
+<hr />
+<h3 id="isolated-execution">Isolated execution</h3>
+<p>To run a tool call outside the current process, provide a <code>DeploymentRunner</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Base</span> (dockerRunner, localProcessRunner)</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>runner <span class="ot">=</span> localProcessRunner <span class="st">&quot;./worker.sh&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- or</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>runner <span class="ot">=</span> dockerRunner <span class="st">&quot;agents-exe/bash-runner:latest&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>isolatedAgent <span class="ot">=</span> withDeploymentRunner runner durableAgent</span></code></pre></div></div><p>The worker receives a stable JSON envelope on stdin and must print a result
+envelope on stdout.  See <code>System.Agents.Session.Isolation</code> for the envelope
+schema, or look at the worker script in <code>test/DurableWorkflowTests.hs</code>.</p>
+<hr />
+<h3 id="testing">Testing</h3>
+<p>The durable-workflow implementation is covered by:</p>
+<ul>
+<li><code>test/DurableWorkflowTests.hs</code> — policy, wake/resume, cache, backends,
+isolation envelopes, and integration.
+</li>
+<li><code>test/DurableWorkflowDeterminismTests.hs</code> — resume-twice and edge-case
+tests.
+</li>
+<li><code>test/SessionDurableTests.hs</code> — CLI helper tests.
+</li>
+</ul>
+<p>Run them with:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">cabal</span> test agents-tests</span></code></pre></div></div><hr />
+<h3 id="further-reading">Further reading</h3>
+<ul>
+<li><code>todos/durable-workflows.md</code> — design plan and architectural decisions.
+</li>
+<li><code>todos/durable-workflows.progress.md</code> — implementation progress.
+</li>
+<li><code>todos/durable-workflows-cli-start-plan.md</code> — design of <code>session start</code> and
+<code>session step</code>.
+</li>
+<li><code>examples/durable-workflow-demo/Main.hs</code> — runnable mock-LLM demo.
+</li>
+<li><code>documentation/cli-commands.md</code> — full CLI reference, including <code>agents session</code>.
+</li>
+<li><code>documentation/sessions.md</code> — session storage and multi-location stores.
+</li>
+<li><code>documentation/async-tool-calls.md</code> — background tool calls in the same process,
+with progress, cancellation and partial answers.
+</li>
+<li><code>documentation/agents-server.md</code> — the same flow over HTTP, with sessions in SQLite
+and live events.
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

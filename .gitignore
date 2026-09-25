@@ -12,7 +12,7 @@ localdev-agents/
 # Kitchen-Sink site build output. website/src/ is source and stays tracked.
 website/www/
 
-# Mirrored pages written by website/scripts/sync-repo-docs.sh from docs/,
+# Mirrored pages written by website/scripts/sync-repo-docs.sh from documentation/,
 # todos/ and README.md: mechanical output, not source.
 website/src/docs-*.cmark
 website/src/specs-*.cmark

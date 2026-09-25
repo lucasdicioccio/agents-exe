@@ -1,0 +1,579 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Advanced Configuration</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls. ## Table of Contents - [Recursive Agent References](#recursive-agent-references) - [Self-"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Advanced Configuration"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls. ## Table of Contents - [Recursive Agent References](#recursive-agent-references) - [Self-"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Advanced Configuration"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html"><meta property="og:description" content="This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls. ## Table of Contents - [Recursive Agent References](#recursive-agent-references) - [Self-"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/docs-advanced-configuration.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-advanced-configuration.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls. ## Table of Contents - [Recursive Agent References](#recursive-agent-references) - [Self-","headline":"Advanced Configuration","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Advanced Configuration</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1097 words, 27 code snippets, 13 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-parameters-and-bindings.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">24/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-file-loader.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/advanced-configuration.md"><code>documentation/advanced-configuration.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="advanced-configuration">Advanced Configuration</h2>
+<p>This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls.</p>
+<h3 id="table-of-contents">Table of Contents</h3>
+<ul>
+<li><a href="#recursive-agent-references">Recursive Agent References</a>
+<ul>
+<li><a href="#self-references">Self-References</a>
+</li>
+<li><a href="#mutual-recursion">Mutual Recursion</a>
+</li>
+<li><a href="#configuration-via-extraagents">Configuration via extraAgents</a>
+</li>
+</ul>
+</li>
+<li><a href="#recursion-safety">Recursion Safety</a>
+<ul>
+<li><a href="#depth-limits">Depth Limits</a>
+</li>
+<li><a href="#call-stack-tracking">Call Stack Tracking</a>
+</li>
+</ul>
+</li>
+<li><a href="#configuration-examples">Configuration Examples</a>
+<ul>
+<li><a href="#basic-recursive-agent">Basic Recursive Agent</a>
+</li>
+<li><a href="#mutually-recursive-agents">Mutually Recursive Agents</a>
+</li>
+<li><a href="#hierarchical-agent-with-recursion">Hierarchical Agent with Recursion</a>
+</li>
+</ul>
+</li>
+<li><a href="#best-practices">Best Practices</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
+</ul>
+<hr />
+<h3 id="recursive-agent-references">Recursive Agent References</h3>
+<p>By default, agents can only reference sub-agents located in their <code>toolDirectory</code>. This creates a strict tree hierarchy. However, some use cases require:</p>
+<ol>
+<li><strong>Self-references</strong>: An agent that can call itself for iterative refinement
+</li>
+<li><strong>Mutual recursion</strong>: Agent A calls Agent B, which calls Agent A
+</li>
+<li><strong>Cross-tree references</strong>: Agents in different branches need to collaborate
+</li>
+</ol>
+<p>The <code>extraAgents</code> configuration field enables these patterns by allowing explicit declarations of agent references outside the normal directory hierarchy.</p>
+<h4 id="how-it-works">How It Works</h4>
+<p>When an agent defines <code>extraAgents</code>, the system uses a <strong>two-phase initialization</strong>:</p>
+<ol>
+<li><strong>Discovery Phase</strong>: All agent configurations are loaded via BFS traversal
+</li>
+<li><strong>Validation Phase</strong>: References are validated (all slugs must exist)
+</li>
+<li><strong>Runtime Shell Phase</strong>: Runtime shells are created with empty tool lists
+</li>
+<li><strong>Wiring Phase</strong>: Tool references are resolved via the <code>RuntimeRegistry</code>
+</li>
+<li><strong>Tree Building Phase</strong>: The final <code>AgentTree</code> is constructed
+</li>
+</ol>
+<p>This approach allows cycles in the agent reference graph while preventing runtime failures from missing references.</p>
+<h4 id="self-references">Self-References</h4>
+<p>An agent can reference itself to implement iterative refinement patterns:</p>
+<pre><code>┌─────────────────┐
+│  refine-code    │◄────────────────┐
+│  (self-ref)     │                 │
+└────────┬────────┘                 │
+         │                          │
+         │ tool call                │
+         ▼                          │
+┌─────────────────┐                 │
+│  refine-code    │─────────────────┘
+│  (same agent)   │
+└─────────────────┘
+</code></pre>
+<p>Use cases:</p>
+<ul>
+<li>Iterative code improvement (“make it faster”, “add tests”)
+</li>
+<li>Progressive document refinement
+</li>
+<li>Recursive problem decomposition with depth limits
+</li>
+</ul>
+<h4 id="mutual-recursion">Mutual Recursion</h4>
+<p>Two or more agents can reference each other:</p>
+<pre><code>┌─────────────┐      ┌─────────────┐
+│  planner    │─────►│  executor   │
+│             │◄─────│             │
+└─────────────┘      └─────────────┘
+</code></pre>
+<p>Use cases:</p>
+<ul>
+<li>Planning and execution loops
+</li>
+<li>Code generation and review cycles
+</li>
+<li>Question-answering with fact-checking
+</li>
+</ul>
+<h4 id="configuration-via-extraagents">Configuration via extraAgents</h4>
+<p>The <code>extraAgents</code> field in an agent’s JSON configuration declares references to agents outside the <code>toolDirectory</code> hierarchy.</p>
+<p><strong>Field Structure:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ExtraAgentRef</span> <span class="ot">=</span> <span class="dt">ExtraAgentRef</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> extraAgentSlug ::</span> <span class="dt">AgentSlug</span>   <span class="co">-- ^ How to reference this agent</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> extraAgentPath ::</span> <span class="dt">FilePath</span>    <span class="co">-- ^ Path to agent JSON file</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><blockquote>
+<p><strong>Important</strong>: The <code>slug</code> field in <code>extraAgents</code> must match the target agent’s
+actual <code>slug</code> as defined in its JSON file. It is NOT an alias. The system uses
+this slug to look up the agent in the registry after all configurations are loaded.</p>
+<p>For example, if you want to reference an agent defined in <code>helper.json</code> that has
+<code>&quot;slug&quot;: &quot;my-helper&quot;</code>, your extraAgents entry must use <code>&quot;slug&quot;: &quot;my-helper&quot;</code>,
+not any other name.</p>
+</blockquote>
+<p><strong>JSON Format:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-agent&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;my-key&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAI&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;helper-agent&quot;</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;../helpers/helper-agent.json&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span><span class="ot">,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-agent&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./agent.json&quot;</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span><span class="fu">,</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;A recursive agent that can call itself.&quot;</span><span class="fu">,</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You are a helpful assistant.&quot;</span><span class="ot">,</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You can call yourself recursively for complex tasks.&quot;</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><strong>Field Descriptions:</strong></p>
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>slug</code></td><td>string</td><td>Must match the target agent's actual <code>slug</code> as defined in its JSON file</td></tr>
+<tr><td><code>path</code></td><td>string</td><td>Relative or absolute path to the agent's JSON file</td></tr>
+</table>
+<blockquote>
+<p><strong>Warning</strong>: A common mistake is to use an arbitrary name for the <code>slug</code> field
+in <code>extraAgents</code>. This will cause a <code>MissingAgentReference</code> error because the
+system cannot find an agent with that slug. Always ensure the slug in
+<code>extraAgents</code> matches the <code>slug</code> field in the target agent’s configuration file.</p>
+</blockquote>
+<hr />
+<h3 id="recursion-safety">Recursion Safety</h3>
+<p>Unbounded recursion can lead to infinite loops and excessive API costs. The system provides multiple safety mechanisms.</p>
+<h4 id="depth-limits">Depth Limits</h4>
+<p>The <code>ToolExecutionContext</code> tracks recursion depth via a call stack:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolExecutionContext</span> <span class="ot">=</span> <span class="dt">ToolExecutionContext</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> ctxCallStack ::</span> [<span class="dt">CallStackEntry</span>]  <span class="co">-- ^ Call chain tracking</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxMaxDepth  ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span>         <span class="co">-- ^ Optional depth limit</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ... other fields</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">CallStackEntry</span> <span class="ot">=</span> <span class="dt">CallStackEntry</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> callAgentSlug      ::</span> <span class="dt">Text</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> callConversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> callDepth          ::</span> <span class="dt">Int</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><p>When an agent calls another agent, the system:</p>
+<ol>
+<li>Creates a new <code>CallStackEntry</code> with incremented depth
+</li>
+<li>Checks against <code>ctxMaxDepth</code> if set
+</li>
+<li>Returns <code>Left (MaxRecursionDepthExceeded callStack)</code> if limit exceeded
+</li>
+<li>Otherwise, continues with the new context
+</li>
+</ol>
+<p><strong>Important</strong>: Currently, depth limits are enforced at runtime via the context, not at configuration time. Future versions may support <code>maxRecursionDepth</code> in agent configuration.</p>
+<h4 id="call-stack-tracking">Call Stack Tracking</h4>
+<p>Every nested agent call appends to the call stack:</p>
+<pre><code>Depth 0: [root]                    -- Initial context
+Depth 1: [agent-a, root]           -- After first call
+Depth 2: [agent-b, agent-a, root]  -- After second call
+</code></pre>
+<p>The call stack enables:</p>
+<ul>
+<li><strong>Debugging</strong>: Full call chain in error messages
+</li>
+<li><strong>Cycle detection</strong>: Check if an agent is already in the stack
+</li>
+<li><strong>Context-aware behavior</strong>: Different logic at different depths
+</li>
+</ul>
+<p><strong>Helper Functions:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Check current recursion depth</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">currentRecursionDepth ::</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">Int</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- Check if at or beyond specific depth</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">isAtDepth ::</span> <span class="dt">Int</span> <span class="ot">-&gt;</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Get full call chain (root first)</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">callChain ::</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> [<span class="dt">CallStackEntry</span>]</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- Check for cycles (agent already in stack)</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">isAgentInCallStack ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span></span></code></pre></div></div><hr />
+<h3 id="configuration-examples">Configuration Examples</h3>
+<h4 id="basic-recursive-agent">Basic Recursive Agent</h4>
+<p>An agent that can call itself for iterative code refinement:</p>
+<p><strong>Directory Structure:</strong></p>
+<pre><code>refine-agent/
+├── agent.json
+└── tools/
+    └── some-tool.sh
+</code></pre>
+<p><strong>agent.json:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;refine-code&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai-key&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAI&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;refine-code&quot;</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./agent.json&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;Code refinement agent with self-recursion.&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You are a code refinement specialist.&quot;</span><span class="ot">,</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Analyze the provided code and suggest improvements.&quot;</span><span class="ot">,</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;If the task is complex, break it into steps and call&quot;</span><span class="ot">,</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;the &#39;refine-code&#39; tool iteratively, up to 3 levels deep.&quot;</span><span class="ot">,</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Track your progress and stop when improvements diminish.&quot;</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Note that the <code>slug</code> in <code>extraAgents</code> (<code>&quot;refine-code&quot;</code>) matches the agent’s own
+<code>slug</code> field. This is required for self-references to work correctly.</p>
+<p><strong>Usage:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">-p</span> <span class="st">&quot;Refactor this Python function for performance:&quot;</span> <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>               <span class="at">-f</span> myscript.py <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>               <span class="at">--agent-file</span> refine-agent/agent.json</span></code></pre></div></div><h4 id="mutually-recursive-agents">Mutually Recursive Agents</h4>
+<p>A planner and executor that collaborate in a loop:</p>
+<p><strong>Directory Structure:</strong></p>
+<pre><code>plan-exec/
+├── planner.json
+├── executor.json
+└── tools/
+    └── validate.sh
+</code></pre>
+<p><strong>planner.json:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;task-planner&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai-key&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAI&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;task-executor&quot;</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./executor.json&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;Task planner that delegates to executor.&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You are a strategic planner.&quot;</span><span class="ot">,</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Break down complex tasks into executable steps.&quot;</span><span class="ot">,</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Use the &#39;task-executor&#39; tool to execute each step.&quot;</span><span class="ot">,</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Review results and iterate up to 5 times if needed.&quot;</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><strong>executor.json:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;task-executor&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai-key&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAI&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;task-planner&quot;</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./planner.json&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;Task executor that can request replanning.&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You are an execution specialist.&quot;</span><span class="ot">,</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Implement the planned steps precisely.&quot;</span><span class="ot">,</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;If execution fails or needs adjustment,&quot;</span><span class="ot">,</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;call &#39;task-planner&#39; with context for revised planning.&quot;</span><span class="ot">,</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Stop after 5 iterations to prevent infinite loops.&quot;</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Note that in <code>planner.json</code>, the <code>extraAgents</code> slug is <code>&quot;task-executor&quot;</code> which
+must match the <code>slug</code> field in <code>executor.json</code>. Similarly, in <code>executor.json</code>,
+the <code>extraAgents</code> slug is <code>&quot;task-planner&quot;</code> which must match the <code>slug</code> field in
+<code>planner.json</code>.</p>
+<p><strong>Usage:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">-p</span> <span class="st">&quot;Set up a Django project with user auth:&quot;</span> <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>               <span class="at">--agent-file</span> plan-exec/planner.json</span></code></pre></div></div><h4 id="hierarchical-agent-with-recursion">Hierarchical Agent with Recursion</h4>
+<p>A boss agent with recursive worker agents at different levels:</p>
+<p><strong>Directory Structure:</strong></p>
+<pre><code>hierarchy/
+├── boss.json
+├── senior-dev.json
+├── junior-dev.json
+└── tools/
+    ├── git.sh
+    └── test.sh
+</code></pre>
+<p><strong>boss.json:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;boss&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai-key&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAI&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;senior-dev&quot;</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./senior-dev.json&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;Project manager coordinating development.&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You are a technical project manager.&quot;</span><span class="ot">,</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Delegate architecture decisions to senior-dev.&quot;</span><span class="ot">,</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Track overall progress and ensure quality.&quot;</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><strong>senior-dev.json:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;senior-dev&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai-key&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAI&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o-mini&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;junior-dev&quot;</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./junior-dev.json&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span><span class="ot">,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;senior-dev&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./senior-dev.json&quot;</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span><span class="fu">,</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;Senior developer for architecture and review.&quot;</span><span class="fu">,</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You are a senior software developer.&quot;</span><span class="ot">,</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Design architecture and review implementations.&quot;</span><span class="ot">,</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Delegate implementation tasks to junior-dev.&quot;</span><span class="ot">,</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Use self-recursion for complex code reviews (max 2 levels).&quot;</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><strong>junior-dev.json:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;junior-dev&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai-key&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAI&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o-mini&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;Junior developer for implementation.&quot;</span><span class="fu">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;You are a junior software developer.&quot;</span><span class="ot">,</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Implement features following senior-dev specifications.&quot;</span><span class="ot">,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;Write tests and documentation for all code.&quot;</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><hr />
+<h3 id="best-practices">Best Practices</h3>
+<h4 id="1-always-set-depth-limits">1. Always Set Depth Limits</h4>
+<p>When implementing recursive patterns, explicitly track depth and set limits:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- In tool implementation</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">case</span> pushAgentContext <span class="st">&quot;my-agent&quot;</span> newConvId parentCtx <span class="kw">of</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Left</span> (<span class="dt">MaxRecursionDepthExceeded</span> stack) <span class="ot">-&gt;</span> </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        <span class="fu">return</span> <span class="op">$</span> <span class="st">&quot;Max depth reached. Current chain: &quot;</span> <span class="op">++</span> <span class="fu">show</span> (<span class="fu">map</span> callAgentSlug stack)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> newCtx <span class="ot">-&gt;</span> continueWithSubAgent newCtx</span></code></pre></div></div><h4 id="2-document-recursion-patterns">2. Document Recursion Patterns</h4>
+<p>Add clear documentation in system prompts:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;You can call yourself recursively using the &#39;my-agent&#39; tool.&quot;</span><span class="ot">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;IMPORTANT: Stop after 3 levels of recursion.&quot;</span><span class="ot">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;Track recursion depth in your reasoning.&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="3-use-appropriate-models">3. Use Appropriate Models</h4>
+<p>Different recursion depths benefit from different models:</p>
+<table>
+<tr><th>Depth</th><th>Recommendation</th></tr>
+<tr><td>1-2 (root + 1 level)</td><td>Use strongest model (gpt-4o)</td></tr>
+<tr><td>3-5</td><td>Can use lighter model (gpt-4o-mini)</td></tr>
+<tr><td>5+</td><td>Review architecture; may indicate wrong approach</td></tr>
+</table>
+<h4 id="4-validate-configuration">4. Validate Configuration</h4>
+<p>Use the <code>check</code> command to validate recursive configurations:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check <span class="at">--agent-file</span> my-recursive-agent.json</span></code></pre></div></div><p>This will:</p>
+<ul>
+<li>Verify all <code>extraAgents</code> paths resolve
+</li>
+<li>Check for duplicate slugs
+</li>
+<li>Warn about detected cycles (cycles are allowed but warned)
+</li>
+</ul>
+<h4 id="5-monitor-costs">5. Monitor Costs</h4>
+<p>Recursive agents can incur unexpected API costs:</p>
+<ul>
+<li>Log recursion depth in your traces
+</li>
+<li>Set up budget alerts
+</li>
+<li>Consider using lighter models for deep recursion
+</li>
+<li>Test with depth limits before removing them
+</li>
+</ul>
+<h4 id="6-prefer-explicit-over-implicit">6. Prefer Explicit Over Implicit</h4>
+<p>Be explicit about which agents can recurse:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;explicit-self&quot;</span><span class="fu">,</span> <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./agent.json&quot;</span><span class="fu">}</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Rather than relying on implicit discovery.</p>
+<h4 id="7-handle-cycle-warnings">7. Handle Cycle Warnings</h4>
+<p>When the system detects cycles, it logs warnings but continues:</p>
+<pre><code>CyclicReferencesWarning [[&quot;agent-a&quot;, &quot;agent-b&quot;, &quot;agent-a&quot;]]
+</code></pre>
+<p>Review these warnings to ensure cycles are intentional.</p>
+<hr />
+<h3 id="troubleshooting">Troubleshooting</h3>
+<h4 id="missingagentreference-error">“MissingAgentReference” Error</h4>
+<p><strong>Problem:</strong> An agent references a slug that doesn’t exist.</p>
+<pre><code>ReferenceError: Missing agent reference 'self-reference'
+  Referrer: 'local:lrm' in file: localdev-agents/kimi-07.err1.json
+  
+  Hint: The slug 'self-reference' was not found in any loaded agent configuration.
+  
+  Did you mean to reference one of these agents?
+    - 'local:lrm' (defined in localdev-agents/kimi-07.err1.json)
+  
+  Remember: The 'slug' in extraAgents must match the target agent's actual slug,
+  not an arbitrary name. Check that your extraAgents configuration uses the 
+  correct slug from the target file.
+</code></pre>
+<p><strong>Common Causes:</strong></p>
+<ol>
+<li>The <code>slug</code> in <code>extraAgents</code> doesn’t match the target agent’s actual <code>slug</code>
+</li>
+<li>The referenced agent file doesn’t exist at the specified path
+</li>
+<li>The referenced agent file has a different <code>slug</code> than expected
+</li>
+</ol>
+<p><strong>Solutions:</strong></p>
+<ol>
+<li>Check that the <code>slug</code> in <code>extraAgents</code> matches the target agent’s <code>slug</code> field exactly
+</li>
+<li>Verify the <code>path</code> in <code>extraAgents</code> points to the correct file
+</li>
+<li>Open the target agent’s JSON file and confirm its <code>slug</code> field
+</li>
+<li>Remember: The <code>slug</code> in <code>extraAgents</code> is NOT an alias - it must match the target’s actual slug
+</li>
+</ol>
+<p><strong>Example Fix:</strong></p>
+<p>If you have an agent file <code>helper.json</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-helper&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="er">...</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Your <code>extraAgents</code> entry must use <code>&quot;slug&quot;: &quot;my-helper&quot;</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-helper&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./helper.json&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Using <code>&quot;slug&quot;: &quot;helper&quot;</code> or any other name will cause the error.</p>
+<h4 id="duplicateagentslug-error">“DuplicateAgentSlug” Error</h4>
+<p><strong>Problem:</strong> The same slug is defined in multiple files.</p>
+<pre><code>ReferenceError (DuplicateAgentSlug &quot;helper&quot; [&quot;./a/helper.json&quot;, &quot;./b/helper.json&quot;])
+</code></pre>
+<p><strong>Solutions:</strong></p>
+<ol>
+<li>Rename one of the agents
+</li>
+<li>Use different slugs for different purposes
+</li>
+<li>Consolidate duplicate definitions
+</li>
+</ol>
+<h4 id="infinite-recursion">Infinite Recursion</h4>
+<p><strong>Problem:</strong> Agents call each other indefinitely.</p>
+<p><strong>Symptoms:</strong></p>
+<ul>
+<li>High API costs
+</li>
+<li>Sessions don’t terminate
+</li>
+<li>Repeated tool calls with similar parameters
+</li>
+</ul>
+<p><strong>Solutions:</strong></p>
+<ol>
+<li>Add explicit depth tracking to system prompts
+</li>
+<li>Use <code>pushAgentContext</code> with <code>ctxMaxDepth</code> in tool implementations
+</li>
+<li>Add termination conditions (“stop if no improvements”)
+</li>
+<li>Review and simplify agent collaboration patterns
+</li>
+</ol>
+<h4 id="performance-issues">Performance Issues</h4>
+<p><strong>Problem:</strong> Recursive agents are slow.</p>
+<p><strong>Solutions:</strong></p>
+<ol>
+<li>Use lighter models for deep recursion levels
+</li>
+<li>Reduce context window by summarizing earlier results
+</li>
+<li>Cache intermediate results
+</li>
+<li>Consider flattening the recursion into iteration
+</li>
+</ol>
+<hr />
+<h3 id="summary">Summary</h3>
+<p>Recursive agent references enable powerful patterns like iterative refinement and collaborative problem-solving. The key points are:</p>
+<ol>
+<li>Use <code>extraAgents</code> to declare references outside <code>toolDirectory</code>
+</li>
+<li><strong>Important</strong>: The <code>slug</code> in <code>extraAgents</code> must match the target agent’s actual <code>slug</code>
+</li>
+<li>The system validates all references before runtime
+</li>
+<li>Implement depth limits via <code>ToolExecutionContext</code>
+</li>
+<li>Monitor for cycles and unintended infinite recursion
+</li>
+<li>Document recursion patterns in system prompts
+</li>
+</ol>
+<p>For more information, see:</p>
+<ul>
+<li><code>System.Agents.AgentTree</code> - Loading and initialization
+</li>
+<li><code>System.Agents.Tools.Context</code> - Recursion tracking
+</li>
+<li><code>System.Agents.Base</code> - <code>ExtraAgentRef</code> type
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

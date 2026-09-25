@@ -197,7 +197,7 @@ reported warnings, now fixed:
     New regression test `a subscriber skips other sessions' events` (fails on
     the old code: no events after 5 s).
   - New `subscribeSTM`, used by the events stream.
-- `docs/agents-server.md`; links from `docs/durable-workflows-howto.md` and
+- `documentation/agents-server.md`; links from `documentation/durable-workflows-howto.md` and
   `README.md`; added to `extra-doc-files`.
 
 ### Differences from the first version of the spec (spec updated)
@@ -247,7 +247,7 @@ reported warnings, now fixed:
     session, answering 404 `unknown_token`. Listing filters by owner, or by
     an owned `parent`.
   - `server.started` logs `authentication: bearer|none`.
-- `docs/agents-server.md`: an Authentication section.
+- `documentation/agents-server.md`: an Authentication section.
 
 ### Not done here
 
@@ -272,7 +272,7 @@ reported warnings, now fixed:
   - refuses non-loopback `Origin`s when authentication is off (403
     `forbidden_origin`), as the MCP transport requires against DNS rebinding;
   - `waitForRun` is shared by the REST and MCP handlers.
-- `docs/agents-server.md`: an MCP over HTTP section, and the origin rule.
+- `documentation/agents-server.md`: an MCP over HTTP section, and the origin rule.
 
 ### Verification
 
@@ -292,7 +292,7 @@ reported warnings, now fixed:
 - `agents.cabal`: new public library `agents-tui`. `agents-lib` loses
   those modules and `brick`, `vty`, `text-zipper`, `data-clist`.
   `agents-exe` adds `agents-tui`.
-- `docs/architecture.md`: a "Libraries and executables" table.
+- `documentation/architecture.md`: a "Libraries and executables" table.
 
 ### Verification
 
@@ -306,8 +306,8 @@ reported warnings, now fixed:
 - `agents-postgres` library and `agents-postgres-tests` suite (see the spec).
 - `Host.withHostStores` / `HostStores`; `withHost` uses it.
 - `agents-server --db postgresql://…`; `redactDatabase` for the log.
-- Docs: a Postgres section in `docs/agents-server.md`, and the library in
-  the table in `docs/architecture.md`.
+- Docs: a Postgres section in `documentation/agents-server.md`, and the library in
+  the table in `documentation/architecture.md`.
 
 ### Verification
 
@@ -325,7 +325,7 @@ reported warnings, now fixed:
   `HostConfig.hcStreamTokens`, `SessionEvent.TextDelta`,
   `agents-server --stream-tokens`.
 - Docs: a "Streaming answers" section and the `text.delta` event in
-  `docs/agents-server.md`.
+  `documentation/agents-server.md`.
 
 ### Verification
 
@@ -340,7 +340,7 @@ reported warnings, now fixed:
 - `AgentStore` (new), `AgentTree.loadAgentTreeFromConfig`, stored agents in
   `Host`, `mkPostgresAgentStore`, `/v1/agents/:slug` endpoints,
   `--admin-owners`. See the spec for the differences from the plan.
-- Docs: a "Storing agents" section in `docs/agents-server.md`.
+- Docs: a "Storing agents" section in `documentation/agents-server.md`.
 
 ### Verification
 

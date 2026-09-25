@@ -1,0 +1,516 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Web server embedding — Implementation Progress</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: no status line yet"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Web server embedding — Implementation Progress"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: no status line yet"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Web server embedding — Implementation Progress"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html"><meta property="og:description" content="Status: no status line yet"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/specs-web-server-embedding.progress.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-web-server-embedding.progress.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"Status: no status line yet","headline":"Web server embedding — Implementation Progress","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Web server embedding — Implementation Progress</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1758 words, 0 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-async-tool-calls-progress.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">6/11</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-web-server-embedding.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.progress.md"><code>todos/web-server-embedding.progress.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="web-server-embedding--implementation-progress">Web server embedding — Implementation Progress</h2>
+<p>Progress tracker for <code>todos/web-server-embedding.md</code>.</p>
+<h3 id="phase-1--storage-wiring-fix-white_check_mark-complete">Phase 1 — Storage wiring fix ✅ COMPLETE</h3>
+<ul>
+<li><code>Combinators.StoreSessionProgress</code>:
+<ul>
+<li><code>SessionSink</code> (<code>SinkBackend</code> / <code>SinkFiles</code> / <code>SinkNone</code>), chosen when the
+agent is built.
+</li>
+<li><code>agentPersistSession</code> and <code>sinkStoreCallback</code>.
+</li>
+<li><code>agentStoreSession</code> and <code>agentStoreSessionWithCallback</code> keep their
+behaviour (backend read from the wrapped agent, else files) on top of
+<code>sinkStoreCallback</code>.
+</li>
+</ul>
+</li>
+<li><code>CLI/SessionDurable.handleStart</code> derives the conversation ID from the
+session ID, so <code>session start --step</code> no longer writes a second
+<code>conv.&lt;random&gt;.json</code> next to <code>conv.&lt;session-id&gt;.json</code>.
+</li>
+</ul>
+<h3 id="phase-2--single-agent-factory-white_check_mark-complete">Phase 2 — Single agent factory ✅ COMPLETE</h3>
+<ul>
+<li>New <code>System.Agents.AgentFactory</code>:
+<ul>
+<li><code>buildAgent :: Tracer IO Trace -&gt; AgentDeps -&gt; AgentRole -&gt; ConversationId -&gt; OSAgentNode -&gt; IO Agent</code>.
+</li>
+<li><code>AgentDeps</code> (API keys, session sink, continuation store, tool cache,
+completion override), <code>defaultAgentDeps</code>, <code>fileAgentDeps</code>.
+</li>
+<li><code>AgentRole</code> = <code>RootAgent | SubAgent parentConv callStack</code>.
+</li>
+<li><code>Trace</code> (moved from <code>OneShot</code>, which re-exports it) and
+<code>mapProgressiveDisclosureTrace</code>.
+</li>
+</ul>
+</li>
+<li>Callers moved onto it, and their copies of the agent record, the OpenAI
+completion setup, API key lookup, and <code>toolRegistrationToSystemTool</code> removed:
+<ul>
+<li><code>OneShot.nodeToAgent</code> / <code>nodeToAgentWithThinking</code> (also used by the TUI):
+thinking output, media injection, and the <code>--session-file</code> copy are now
+decorators on the factory’s agent.
+</li>
+<li><code>AgentTree.OneShotTool.turnAgentRuntimeIntoIOTool</code> takes <code>AgentDeps</code>
+instead of a <code>SessionStore</code> and API keys. <code>OneShotTool.Trace</code> is now a
+single <code>OneShotTrace</code> constructor.
+</li>
+<li><code>MCP.Server.runAgentWithQuery</code>.
+</li>
+<li><code>CLI.SessionDurable.buildAgentForFile</code> (drops its own JSON re-parse).
+</li>
+</ul>
+</li>
+<li><code>toolRegistrationToSystemTool</code> has one definition, exported from
+<code>Combinators.ProgressiveDisclosure</code>.
+</li>
+<li><code>Session.Types.newSessionFromPrompt</code>, used by <code>session start</code>.
+</li>
+</ul>
+<h4 id="behaviour-changes">Behaviour changes</h4>
+<ul>
+<li>Progressive disclosure now applies to the MCP server and the durable
+<code>session</code> commands too; before, only <code>run</code>, the TUI, and sub-agents had it.
+</li>
+<li>The MCP server applies the agent’s <code>executionMode</code> / <code>toolCallPolicyConfig</code>
+and runs with <code>runUntilBlocked</code>. A turn waiting on deferred calls returns an
+error rather than looping forever.
+</li>
+<li>A sub-agent’s session file is named after the conversation ID used for its
+call-stack entry and OS World entity, not an unrelated random ID.
+</li>
+</ul>
+<h4 id="verification">Verification</h4>
+<ul>
+<li><code>cabal build all --enable-tests</code> succeeded. (It did not check warnings: the
+library was not built with <code>-Wall</code> then, see the Phase 4 section.)
+</li>
+<li><code>agents-tests</code>: 902 tests pass, including 8 new <code>AgentFactoryTests</code>.
+</li>
+<li>Smoke test of <code>session start</code>, <code>session start --step</code>, and <code>session step</code>
+with an isolated <code>HOME</code>: exactly one <code>conv.&lt;session-id&gt;.json</code> per session.
+</li>
+</ul>
+<h3 id="phase-3--metadata-versions-migrations-catalog-white_check_mark-complete">Phase 3 — Metadata, versions, migrations, catalog ✅ COMPLETE</h3>
+<ul>
+<li><code>Session.Types</code>: <code>SessionStatus</code> (idle / ready / running /
+waiting_external / failed) with text and JSON forms, and <code>sessionStatusOf</code>.
+<code>isBlockedOnDeferredCalls</code> (from <code>Session.Loop</code>) and <code>hasBackgroundCalls</code> /
+<code>backgroundCalls</code> (from <code>Session.Step</code>) moved here; <code>Session.Loop</code> still
+re-exports <code>isBlockedOnDeferredCalls</code>.
+</li>
+<li><code>SessionStore</code>:
+<ul>
+<li><code>SessionLabels</code>, <code>SessionMeta</code>, <code>SessionQuery</code>, <code>VersionConflict</code>.
+</li>
+<li><code>SessionBackend</code> gains <code>sbStoreLabelled</code>, <code>sbLoadMeta</code>,
+<code>sbCompareAndStore</code>, and <code>sbQuery</code>. Every write increments the version;
+unconditional stores derive the status, except that a running status is
+kept.
+</li>
+<li>SQLite: <code>runMigrations</code> with a component-scoped <code>schema_migrations</code>
+table; migration 2 adds the metadata columns and indexes and derives the
+status of existing rows. Compare-and-store is a single conditional
+statement with <code>RETURNING</code>.
+</li>
+<li>File backend: <code>meta.&lt;uuid&gt;.json</code> sidecars.
+</li>
+<li>Composite: writes and queries on the primary, loads with fallback.
+</li>
+<li><code>SessionCatalog</code> / <code>CatalogEntry</code>, <code>fileCatalog</code>, <code>backendCatalog</code>,
+<code>isFileBusy</code>.
+</li>
+</ul>
+</li>
+<li><code>StoreSessionProgress</code>: <code>sinkStoreCallback</code> and <code>agentPersistSession</code> take
+<code>SessionLabels</code>; <code>backendStoreCallbackWith</code>.
+</li>
+<li><code>AgentFactory</code> labels sessions with the agent slug and, for sub-agents, the
+parent session. <code>OneShotTool</code> gives a sub-agent’s session the ID of its
+conversation.
+</li>
+<li>Session tools (<code>SystemToolbox/Session</code>) read through
+<code>introspectionCatalog</code>; <code>getSessionModTime</code> removed. <code>AgentTree.Props</code>
+takes <code>sessionCatalog</code>; the CLI and TUI pass <code>fileCatalog</code>.
+</li>
+<li><code>agents.cabal</code>: the library’s <code>import: warnings</code> moved above <code>visibility</code>.
+Cabal ignored it in its old position, so the library was built without
+<code>-Wall -Werror</code> since the library was made public.
+</li>
+</ul>
+<h4 id="not-done-here">Not done here</h4>
+<ul>
+<li>The search index (<code>Session/Search</code>) stays on the file store (CLI-only).
+</li>
+<li><code>PRAGMA</code> settings are left to <code>withHost</code> (Phase 5).
+</li>
+</ul>
+<h4 id="verification-1">Verification</h4>
+<ul>
+<li><code>agents-tests</code>: 923 tests pass, including 21 new <code>SessionMetadataTests</code>.
+</li>
+<li>The “forced full rebuild shows no warnings” claim made here (and in the
+Phase 3 commit message) was wrong: that rebuild did not recompile with
+<code>-Wall -Werror</code>. See the Phase 4 section for the real check and the fixes.
+</li>
+</ul>
+<h3 id="warning-fixes-after-re-enabling--wall--werror">Warning fixes after re-enabling <code>-Wall -Werror</code></h3>
+<p>A rebuild of the library from an empty build directory under <code>-Wall -Werror</code>
+reported warnings, now fixed:</p>
+<ul>
+<li>From Phases 2 and 3 (this branch): unused imports in
+<code>Tools/SystemToolbox/Session.hs</code>, <code>TUI/Event/Conversation.hs</code>,
+<code>CLI/SessionDurable.hs</code>, and <code>MCP/Server.hs</code>.
+</li>
+<li>Already present before this branch: a <code>name</code> binding shadowing a record
+field in <code>Session/Step.hs</code> (<code>lateResultsQuery</code>), and a missing signature on
+<code>resetQuitConfirmation</code> in <code>TUI/Event.hs</code>.
+</li>
+</ul>
+<h3 id="phase-4--continuation-consistency-white_check_mark-complete">Phase 4 — Continuation consistency ✅ COMPLETE</h3>
+<ul>
+<li><code>Session.Async</code>:
+<ul>
+<li><code>ContinuationStore.csFindSession</code>: the session of a pending or completed
+token.
+</li>
+<li>The continuation schema goes through <code>runMigrations</code> (component
+<code>continuations</code>); migration 2 adds a <code>(session_id, completed_at)</code> index.
+</li>
+<li><code>csComplete</code> detects the update with <code>RETURNING</code> instead of
+<code>SELECT changes()</code>.
+</li>
+</ul>
+</li>
+<li><code>Session.Wake</code>:
+<ul>
+<li><code>wakeSessionWith</code> returns a <code>WakeOutcome</code> (applied / already completed /
+unknown tokens) and marks applied tokens completed in the store.
+<code>wakeSession</code> and <code>wakeSessionWithCache</code> wrap it.
+</li>
+<li><code>findSessionForToken</code> (index first, then a scan of the backend) and
+<code>sessionHasToken</code>.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="not-done-here-1">Not done here</h4>
+<ul>
+<li>The CLI <code>complete</code> command keeps scanning the file store: CLI agents have
+no continuation store.
+</li>
+</ul>
+<h4 id="verification-2">Verification</h4>
+<ul>
+<li>Library rebuilt from an empty build directory under <code>-Wall -Werror</code>:
+clean.
+</li>
+<li><code>cabal build all --enable-tests</code> succeeded.
+</li>
+<li><code>agents-tests</code>: 930 tests pass, including 7 new
+<code>ContinuationConsistencyTests</code>.
+</li>
+</ul>
+<h3 id="phase-5--session-runner-white_check_mark-complete">Phase 5 — Session runner ✅ COMPLETE</h3>
+<ul>
+<li><code>System.Agents.Host</code>: <code>Host</code>, <code>HostConfig</code> / <code>defaultHostConfig</code>,
+<code>HostTrace</code>, <code>HostError</code>, <code>withHost</code> (WAL, busy timeout, migrations, agent
+files, sub-agent tools storing into the database).
+</li>
+<li><code>System.Agents.Host.Runner</code>: <code>SessionRunner</code> with <code>createSession</code>,
+<code>postMessage</code>, <code>resume</code>, <code>completeCall</code>, <code>cancelRun</code>, <code>getSession</code>,
+<code>awaitRun</code>, <code>deleteSession</code> (dry run and cascade), <code>subscribe</code>,
+<code>recoverOnStartup</code>, <code>runnerStats</code>, and an idle-session reaper.
+</li>
+<li><code>Session.Types</code>: <code>DeferredCallView</code> and <code>pendingDeferredCalls</code>; the CLI’s
+<code>extractDeferredCalls</code> wraps them.
+</li>
+<li><code>Session.Async</code>: <code>csCountSession</code> and <code>csDeleteSession</code>.
+</li>
+</ul>
+<h4 id="differences-from-the-first-version-of-the-spec-spec-updated">Differences from the first version of the spec (spec updated)</h4>
+<ul>
+<li>Results completed during a run are queued and applied by the run, instead
+of being written by <code>completeCall</code>, which would make the run’s next
+versioned store conflict.
+</li>
+<li>Events use one runner-wide broadcast channel; <code>subscribe</code> returns a
+blocking “next event” action for one session, which survives eviction.
+</li>
+<li><code>NoActiveRun</code> error; <code>csCountSession</code> for dry runs; deletion also refused
+while an ancestor runs; runner agents always run asynchronously.
+</li>
+<li>After a cancel, background calls below the head turn are reported as
+cancelled by the next run (late results), not by <code>cancelRun</code> itself.
+</li>
+</ul>
+<h4 id="verification-3">Verification</h4>
+<ul>
+<li>Library under <code>-Wall -Werror</code>: clean. <code>cabal build all --enable-tests</code>
+succeeded.
+</li>
+<li><code>agents-tests</code>: 940 tests pass, including 10 new <code>RunnerTests</code>. The runner
+tests passed 15 repeated runs. The test suite is not built with
+<code>-threaded</code>; the bundled SQLite is <code>THREADSAFE=1</code> (serialized), which the
+threaded server in Phase 6 relies on.
+</li>
+</ul>
+<h3 id="phase-6--agents-server-executable-white_check_mark-complete">Phase 6 — <code>agents-server</code> executable ✅ COMPLETE</h3>
+<ul>
+<li><code>examples/agents-server/</code>:
+<ul>
+<li><code>src/AgentsServer/Api.hs</code>: the wai application (routing, JSON views,
+<code>wait</code>/<code>timeout</code>, SSE with keepalives and a shutdown flag).
+</li>
+<li><code>src/AgentsServer/Log.hs</code>: JSON-line logs on stderr, traces summarised
+field by field.
+</li>
+<li><code>src/AgentsServer/Server.hs</code>: CLI options, startup (host, runner,
+startup recovery), warp settings, SIGTERM/SIGINT handling.
+</li>
+<li><code>app/Main.hs</code>, <code>test/Main.hs</code>.
+</li>
+</ul>
+</li>
+<li><code>agents.cabal</code>: private library <code>agents-server-internal</code>, executable
+<code>agents-server</code>, test suite <code>agents-server-tests</code> (all threaded where it
+matters). wai 3.2.4 and warp 3.4.12 were already in the build plan, so
+nothing new is downloaded.
+</li>
+<li><code>Host.Runner</code>:
+<ul>
+<li>Fixed <code>subscribe</code>: it filtered with <code>retry</code> after <code>readTChan</code>, which rolls
+the read back, so a subscriber blocked forever on the first event of
+another session. The Phase 5 tests only ever had one session emitting.
+New regression test <code>a subscriber skips other sessions' events</code> (fails on
+the old code: no events after 5 s).
+</li>
+<li>New <code>subscribeSTM</code>, used by the events stream.
+</li>
+</ul>
+</li>
+<li><code>documentation/agents-server.md</code>; links from <code>documentation/durable-workflows-howto.md</code> and
+<code>README.md</code>; added to <code>extra-doc-files</code>.
+</li>
+</ul>
+<h4 id="differences-from-the-first-version-of-the-spec-spec-updated-1">Differences from the first version of the spec (spec updated)</h4>
+<ul>
+<li>The app code is a private sub-library so the test suite can run it.
+</li>
+<li><code>SessionMetaView</code> is the <code>SessionMeta</code> JSON, so it includes <code>owner</code>
+(always null for now).
+</li>
+<li>Status codes: <code>202</code> exactly when the stored status is <code>running</code> at the
+time of answering, <code>200</code> otherwise; creation always <code>201</code>, with a
+<code>Location</code> header.
+</li>
+<li>In the events stream, a run’s <code>session.updated</code> (running version) comes
+just before its <code>run.started</code>: the runner stores, then announces.
+</li>
+<li>Additions: <code>--live-session-ttl</code>, <code>--shutdown-grace</code>, <code>filename</code> on media,
+<code>mode</code> on resume, 404 <code>not_found</code>, 405, 413 (32 MiB bodies), list
+<code>limit</code> 1–500 (default 50), comma-separated <code>status</code>.
+</li>
+<li>On shutdown, waiting requests answer at once and event streams end, so the
+grace period is only for other requests.
+</li>
+</ul>
+<h4 id="verification-4">Verification</h4>
+<ul>
+<li><code>cabal build all --enable-tests</code> under <code>-Wall -Werror</code>: clean.
+</li>
+<li><code>agents-tests</code>: 941 tests pass (one new runner test).
+</li>
+<li><code>agents-server-tests</code>: 7 tests pass; 30 repeated runs plus 10 with
+<code>+RTS -N4</code>, no failures.
+</li>
+<li>Smoke tests of the binary against a fake OpenAI endpoint:
+<ul>
+<li>health, agents, and a created session answered by the LLM;
+</li>
+<li>a deferred call completed over HTTP, with the events stream;
+</li>
+<li>a restart on the same database, with the session still there;
+</li>
+<li>SIGTERM with an open events stream: exit 0 in 0.01 s;
+</li>
+<li>the API key reached the LLM but not the log.
+</li>
+</ul>
+</li>
+<li>The guide’s Haskell snippet typechecks.
+</li>
+</ul>
+<h3 id="phase-7--authentication-and-owners-white_check_mark-complete">Phase 7 — Authentication and owners ✅ COMPLETE</h3>
+<ul>
+<li>Spec: new “Milestone 2” section planning Phases 7–12, with the defaults
+taken recorded as decisions 5–10.
+</li>
+<li><code>SessionStore</code>: <code>SessionQuery.sqOwner</code> (SQLite, file, composite), and
+migration 3 adding an <code>(owner, updated_at)</code> index.
+</li>
+<li><code>Host.Runner</code>: <code>createSessionAs</code> (with an owner) and <code>sessionOwner</code>, which
+returns the owner of the root session.
+</li>
+<li><code>agents-server</code>:
+<ul>
+<li><code>AgentsServer.Auth</code>: loads the tokens file (<code>sha256</code> or plain <code>token</code>
+entries), compares tokens by SHA-256 digest, parses <code>Bearer</code> headers.
+</li>
+<li><code>--auth-tokens</code>: 401 <code>unauthorized</code> without a valid token (<code>/healthz</code>
+stays open). Every session endpoint checks the owner, answering 404 for
+another owner’s session. Continuations check the owner of the token’s
+session, answering 404 <code>unknown_token</code>. Listing filters by owner, or by
+an owned <code>parent</code>.
+</li>
+<li><code>server.started</code> logs <code>authentication: bearer|none</code>.
+</li>
+</ul>
+</li>
+<li><code>documentation/agents-server.md</code>: an Authentication section.
+</li>
+</ul>
+<h4 id="not-done-here-2">Not done here</h4>
+<ul>
+<li>Per-owner API keys and a default isolation policy (see “Remaining later
+work” in the spec).
+</li>
+</ul>
+<h4 id="verification-5">Verification</h4>
+<ul>
+<li><code>cabal build all --enable-tests</code> under <code>-Wall -Werror</code>: clean.
+</li>
+<li><code>agents-tests</code>: 941 pass. The delete test now also checks that a
+sub-session has its root’s owner. The migrations test expects
+migrations 1–3.
+</li>
+<li><code>agents-server-tests</code>: 9 pass, including the two-owner flow and loading a
+tokens file.
+</li>
+</ul>
+<h3 id="phase-8--mcp-over-http-white_check_mark-complete">Phase 8 — MCP over HTTP ✅ COMPLETE</h3>
+<ul>
+<li><code>AgentsServer.Mcp</code>: the Streamable HTTP transport, answering with JSON,
+one <code>ask_&lt;slug&gt;</code> tool per root agent, runs through the session runner.
+</li>
+<li><code>AgentsServer.Api</code>:
+<ul>
+<li>routes <code>POST /mcp</code> (405 for other methods);
+</li>
+<li>refuses non-loopback <code>Origin</code>s when authentication is off (403
+<code>forbidden_origin</code>), as the MCP transport requires against DNS rebinding;
+</li>
+<li><code>waitForRun</code> is shared by the REST and MCP handlers.
+</li>
+</ul>
+</li>
+<li><code>documentation/agents-server.md</code>: an MCP over HTTP section, and the origin rule.
+</li>
+</ul>
+<h4 id="verification-6">Verification</h4>
+<ul>
+<li><code>agents-server-tests</code>: 12 pass. New tests: an MCP flow
+(initialize with version negotiation, the notification’s 202, tools/list,
+tools/call with <code>_meta.session_id</code>, unknown tool, unknown method, batch,
+GET 405), a deferred call reported through MCP then completed over REST,
+and origin checks with and without authentication.
+</li>
+<li>The official Python MCP SDK (2.2.0, <code>streamable_http_client</code>) against the
+binary and a fake OpenAI endpoint: initialize (2025-06-18), list tools,
+call <code>ask_weather</code>, which reported the deferred call and its token.
+</li>
+</ul>
+<h3 id="phase-9--tui-out-of-the-core-library-white_check_mark-complete">Phase 9 — TUI out of the core library ✅ COMPLETE</h3>
+<ul>
+<li><code>git mv</code> of 25 modules from <code>src/</code> to <code>tui/</code>: <code>TUI.*</code> except
+<code>ToolCallActivity</code>, plus <code>CLI.TUI</code>, <code>CLI.Config</code>, and <code>CLI</code>.
+</li>
+<li><code>agents.cabal</code>: new public library <code>agents-tui</code>. <code>agents-lib</code> loses
+those modules and <code>brick</code>, <code>vty</code>, <code>text-zipper</code>, <code>data-clist</code>.
+<code>agents-exe</code> adds <code>agents-tui</code>.
+</li>
+<li><code>documentation/architecture.md</code>: a “Libraries and executables” table.
+</li>
+</ul>
+<h4 id="verification-7">Verification</h4>
+<ul>
+<li><code>cabal build all --enable-tests</code>: clean. The build plan shows brick, vty,
+and text-zipper only under <code>agents-tui</code>, and nowhere in <code>agents-lib</code>’s
+transitive closure.
+</li>
+<li><code>cabal test all</code>: 941 + 12 pass. <code>agents-exe --help</code> runs.
+</li>
+</ul>
+<h3 id="phase-10--postgres-backend-white_check_mark-complete">Phase 10 — Postgres backend ✅ COMPLETE</h3>
+<ul>
+<li><code>agents-postgres</code> library and <code>agents-postgres-tests</code> suite (see the spec).
+</li>
+<li><code>Host.withHostStores</code> / <code>HostStores</code>; <code>withHost</code> uses it.
+</li>
+<li><code>agents-server --db postgresql://…</code>; <code>redactDatabase</code> for the log.
+</li>
+<li>Docs: a Postgres section in <code>documentation/agents-server.md</code>, and the library in
+the table in <code>documentation/architecture.md</code>.
+</li>
+</ul>
+<h4 id="verification-8">Verification</h4>
+<ul>
+<li><code>agents-postgres-tests</code>: 5 pass against a throwaway Postgres 16 cluster.
+</li>
+<li>Smoke test of the binary on a Postgres 16 cluster:
+<ul>
+<li>created a session blocked on a deferred call, restarted the server, and
+completed the call: the session reached <code>idle</code>, with consistent rows;
+</li>
+<li>the URL’s password is absent from the log, which holds only JSON lines.
+</li>
+</ul>
+</li>
+</ul>
+<h3 id="phase-11--token-streaming-white_check_mark-complete">Phase 11 — Token streaming ✅ COMPLETE</h3>
+<ul>
+<li><code>LLMs/OpenAIStream.hs</code> (new), <code>HttpClient.postStream</code>,
+<code>OpenAI.callLLMPayloadStreaming</code> and <code>withOverloadedRetry</code>,
+<code>OpenAICompletionConfig.cfgOnTextDelta</code>, <code>AgentDeps.adOnTextDelta</code>,
+<code>HostConfig.hcStreamTokens</code>, <code>SessionEvent.TextDelta</code>,
+<code>agents-server --stream-tokens</code>.
+</li>
+<li>Docs: a “Streaming answers” section and the <code>text.delta</code> event in
+<code>documentation/agents-server.md</code>.
+</li>
+</ul>
+<h4 id="verification-9">Verification</h4>
+<ul>
+<li><code>agents-tests</code>: 5 new <code>OpenAIStreamTests</code>.
+</li>
+<li><code>agents-server-tests</code>: 13 pass, including streaming against a fake
+streaming endpoint.
+</li>
+<li>The non-streaming path through the binary still works (fake endpoint,
+deferred call reported).
+</li>
+</ul>
+<h3 id="phase-12--agents-from-the-database-white_check_mark-complete">Phase 12 — Agents from the database ✅ COMPLETE</h3>
+<ul>
+<li><code>AgentStore</code> (new), <code>AgentTree.loadAgentTreeFromConfig</code>, stored agents in
+<code>Host</code>, <code>mkPostgresAgentStore</code>, <code>/v1/agents/:slug</code> endpoints,
+<code>--admin-owners</code>. See the spec for the differences from the plan.
+</li>
+<li>Docs: a “Storing agents” section in <code>documentation/agents-server.md</code>.
+</li>
+</ul>
+<h4 id="verification-10">Verification</h4>
+<ul>
+<li><code>agents-tests</code>: 947 pass (a new runner test for stored agents).
+</li>
+<li><code>agents-server-tests</code>: 15 pass.
+</li>
+<li><code>agents-postgres-tests</code>: 6 pass.
+</li>
+<li>Smoke test of the binary with authentication:
+<ul>
+<li>a non-admin PUT is refused (403); an admin PUT stores an agent whose MCP
+server is <code>agents-exe mcp-server</code>, and its tool
+(<code>mcp_weather_ask_weather_000</code>) is listed;
+</li>
+<li>after a restart the agent is reloaded from SQLite with its tool;
+</li>
+<li>no tokens in the logs, and no MCP server process left after shutdown.
+</li>
+</ul>
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

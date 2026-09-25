@@ -1,0 +1,902 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - agents-server: agents over HTTP</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - agents-server: agents over HTTP"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - agents-server: agents over HTTP"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><meta property="og:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="article:published_time" content="2026-09-25T12:56:18Z"><meta name="article:modified_time" content="2026-09-25T12:56:18Z"><meta name="ks:article_json" content="/agents-exe/json/docs-agents-server.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-agents-server.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T12:56:18Z","datePublished":"2026-09-25T12:56:18Z","description":"`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s","headline":"agents-server: agents over HTTP","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>agents-server: agents over HTTP</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 4840 words, 21 code snippets, 17 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-MIGRATION-GUIDE.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">2/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-tui.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"><code>documentation/agents-server.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="agents-server-agents-over-http">agents-server: agents over HTTP</h2>
+<p><code>agents-server</code> runs agents as a long-lived HTTP service. Sessions live in a
+SQLite database rather than in files, so a web application can start
+conversations, follow them live, complete deferred tool calls from its own
+workers, and pick sessions up again after a restart.</p>
+<p>It uses the same agent files as <code>agents-exe</code>, and the same durable-session
+machinery as the <code>session</code> CLI commands (see
+<a href="/agents-exe/docs-durable-workflows-howto.html">durable-workflows-howto.md</a>): an agent can pause on
+deferred tool calls, and the server resumes it when the results arrive.</p>
+<blockquote>
+<p><strong>Authentication is off by default.</strong> Without <code>--auth-tokens</code>, anyone who
+can reach the server can run its agents, with its API keys. It binds to
+<code>127.0.0.1</code> by default. See <a href="#authentication">Authentication</a> before exposing
+it.</p>
+</blockquote>
+<hr />
+<h3 id="running-the-server">Running the server</h3>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">cabal</span> build agents-server</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">cabal</span> run agents-server <span class="at">--</span> <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--agent-file</span> ./weather.json <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="at">--api-keys</span> ./secrets/keys.json <span class="dt">\</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="at">--db</span> ./agents-server.db <span class="dt">\</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="at">--port</span> 8080</span></code></pre></div></div><table>
+<tr><th>Flag</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>--agent-file FILE</code></td><td>(required)</td><td>A root agent file. Repeat it to serve several agents; each is addressed by its <code>slug</code>, which must be unique.</td></tr>
+<tr><td><code>--api-keys FILE</code></td><td>(required)</td><td>The API keys file, as for <code>agents-exe</code>.</td></tr>
+<tr><td><code>--db FILE\|URL</code></td><td><code>agents-server.db</code></td><td>Where sessions and continuation tokens live: a SQLite file, or a <code>postgresql://</code> URL (see [Postgres](#postgres)). Created or migrated on start.</td></tr>
+<tr><td><code>--bind HOST</code></td><td><code>127.0.0.1</code></td><td>Address to listen on.</td></tr>
+<tr><td><code>--port PORT</code></td><td><code>8080</code></td><td>Port to listen on.</td></tr>
+<tr><td><code>--live-session-ttl SECONDS</code></td><td><code>900</code></td><td>How long an idle session keeps its in-memory state (including background tool calls) before it is dropped. It is reloaded from the database on next use.</td></tr>
+<tr><td><code>--shutdown-grace SECONDS</code></td><td><code>10</code></td><td>How long open requests get to finish on shutdown.</td></tr>
+<tr><td><code>--auth-tokens FILE</code></td><td>(none)</td><td>Bearer tokens and their owners. See [Authentication](#authentication).</td></tr>
+<tr><td><code>--admin-owners OWNER,…</code></td><td>(none)</td><td>Owners allowed to store and delete agents over the API. Needs <code>--auth-tokens</code>. See [Storing agents](#storing-agents).</td></tr>
+<tr><td><code>--stream-tokens</code></td><td>off</td><td>Stream LLM answers: the events stream gets <code>text.delta</code> events as the text arrives. See [Streaming answers](#streaming-answers).</td></tr>
+<tr><td><code>--no-ui</code></td><td>off</td><td>Do not serve the chat page at <code>/</code>. See [Finding your way around](#finding-your-way-around).</td></tr>
+<tr><td><code>--cors-origin ORIGIN</code></td><td>(none)</td><td>Allow this origin to call the server cross-origin (a browser page on another host or port). Repeatable, or <code>*</code> for any origin — refused at startup together with <code>--auth-tokens</code>. See [Authentication](#authentication).</td></tr>
+<tr><td><code>--socket PATH</code></td><td>(none)</td><td>Also listen on this Unix domain socket, in addition to <code>--bind</code>/<code>--port</code>. A stale file at the path is removed at start; the socket is created with mode <code>0600</code>. Requests over it carry no <code>Origin</code> header and need no bearer token beyond what <code>--auth-tokens</code> imposes elsewhere: the socket, and who can reach it on the filesystem, is the trust boundary. Closed and unlinked on shutdown.</td></tr>
+<tr><td><code>--set NAME=VALUE</code>, <code>--set-json NAME=JSON</code></td><td>(none)</td><td>Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters).</td></tr>
+<tr><td><code>--pin NAME=VALUE</code>, <code>--pin-json NAME=JSON</code></td><td>(none)</td><td>Like <code>--set</code>, but sessions cannot override it. Repeatable. See [Parameters](#parameters).</td></tr>
+</table>
+<p>Sub-agents (<code>prompt_agent_&lt;slug&gt;</code> calls) run as real sessions of their own:
+the child is created, stored in the same database and linked to the calling
+session as its parent (<code>smParent</code> / <code>GET /v1/sessions?parent=</code>), <em>before</em>
+the parent’s tool call returns — a client watching the parent’s <code>parent=</code>
+listing, or subscribing with <code>scope=owner</code>/<code>scope=all</code>, sees <code>session.created</code>
+for it right away, and the child’s own <code>session.updated</code> events (its stream,
+not the parent’s) show its progress live, the same as any other session.
+The parent’s tool call waits for the child to stop and returns its final
+answer as the tool result, same as before; cancelling the parent’s call
+cancels the child (<code>cancelRun</code>), and the child can also be cancelled,
+inspected or subscribed to directly and independently through its own id.
+<code>subcall.started</code>/<code>subcall.completed</code>/<code>subcall.failed</code> (below) still appear
+on the <em>parent’s</em> stream for convenience, now carrying the child’s real
+session id. A call with narrowing (<code>bindings</code>/<code>with</code>/<code>as</code>) still runs
+in-tool, inside the parent’s own call, with no session of its own — the
+older behaviour, kept for that case until it is supported the same way.</p>
+<h4 id="configuration">Configuration</h4>
+<p><code>agents-server</code> itself only ever takes agent files from <code>--agent-file</code>: it has
+no config file of its own. <code>agents-exe serve</code> is the same code (see
+<a href="#embedding-the-runner-in-your-own-program">Embedding the runner in your own program</a>)
+behind agents-exe’s own config loading: it reads <code>agents-exe.cfg.json</code> and
+resolves agent files the way the TUI and every other <code>agents-exe</code> command do
+(<code>agentsFiles</code>, <code>agentsDirectories</code>, the <code>~/.config/agents-exe/default</code>
+fallback, <code>--agent-file</code>, <code>--agent SLUG</code> to pick one agent by name), and
+shares agents-exe’s global <code>--api-keys</code>, <code>--set</code>/<code>--pin</code>/<code>--set-json</code>/
+<code>--pin-json</code> and <code>--params-file</code>. Its own flags are the rest of this table
+(<code>--db</code>, <code>--bind</code>, <code>--port</code>, <code>--live-session-ttl</code>, <code>--shutdown-grace</code>,
+<code>--auth-tokens</code>, <code>--stream-tokens</code>, <code>--admin-owners</code>, <code>--no-ui</code>,
+<code>--cors-origin</code>, <code>--socket</code>); <code>--db</code> defaults next to the resolved sessions
+directory instead of <code>./agents-server.db</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./weather.json serve <span class="at">--port</span> 8080</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co"># or, from a directory with an agents-exe.cfg.json:</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> serve <span class="at">--port</span> 8080</span></code></pre></div></div><p>See <a href="/agents-exe/docs-cli-commands.html#serve">cli-commands.md</a> for the full flag list.</p>
+<h4 id="finding-your-way-around">Finding your way around</h4>
+<p>The server describes itself, so a client that knows only its URL can start
+using it:</p>
+<table>
+<tr><th>Path</th><th>What it is</th></tr>
+<tr><td><code>GET /</code></td><td>A small chat page, for a person at this machine. Served on a loopback bind, or when <code>--auth-tokens</code> is on; <code>--no-ui</code> turns it off.</td></tr>
+<tr><td><code>GET /openapi.json</code></td><td>The whole API as an OpenAPI 3 document, generated from the routes.</td></tr>
+<tr><td><code>GET /healthz</code></td><td>Liveness and counters.</td></tr>
+</table>
+<p>None of the three needs a bearer token: they describe the server, not its
+sessions or its agents.</p>
+<p>The OpenAPI document is the machine-readable reference, and it is generated
+from the same servant types that route the requests, so it cannot drift from
+the server. An agents-exe agent can use it directly as a toolbox:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;openApiToolboxes&quot;</span><span class="er">:</span> <span class="ot">[</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAPIServer&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;SpecUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;http://127.0.0.1:8080/openapi.json&quot;</span><span class="fu">}}</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span></span></code></pre></div></div><p>The chat page is one self-contained HTML document with no build step and no
+assets. It starts sessions, follows their event streams, offers a box to
+complete deferred tool calls, and attaches files, so it doubles as a worked
+example of the API. Its session list follows <code>GET /v1/events</code> (see
+<a href="#following-every-session">Following every session</a>), so sessions created,
+deleted or changed by any other client (another tab, an attached TUI, a
+script) show up without a reload.</p>
+<p><strong>Attachments.</strong> <em>Attach</em> adds files to the next message, up to 20 MB in
+total (the body limit is 32 MiB and base64 adds a third). They are sent as
+the <code>media</code> field described under
+<a href="#api-reference">API reference</a>, and the agent’s model must accept them.</p>
+<p>A PDF is sent as a <code>file</code> content part, text is inlined into the message,
+and anything else is sent as an image. So images, PDFs and text files
+(including CSV, JSON, YAML and Markdown) all work; audio and video depend
+on the provider.</p>
+<h4 id="an-agent-for-the-examples">An agent for the examples</h4>
+<p>The examples below use an agent that defers every tool call to an external
+worker:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;weather&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIv1&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com/v1&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o-mini&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;answers weather questions&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;You answer weather questions. Use get_weather.&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;builtinToolboxes&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;mcpServers&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;executionMode&quot;</span><span class="fu">:</span> <span class="st">&quot;asynchronous&quot;</span><span class="fu">,</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;toolCallPolicyConfig&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;defer&quot;</span><span class="fu">,</span> <span class="dt">&quot;reason&quot;</span><span class="fu">:</span> <span class="st">&quot;weather service&quot;</span><span class="fu">},</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Agents without a <code>toolCallPolicyConfig</code> run all their tools in the server
+process and never wait on the outside world. The server always runs agents
+in asynchronous mode.</p>
+<hr />
+<h3 id="a-first-conversation">A first conversation</h3>
+<p>Ask a question and wait for the run to stop:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST <span class="st">&#39;localhost:8080/v1/sessions?wait=true&#39;</span> <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>     <span class="at">-d</span> <span class="st">&#39;{&quot;agent&quot;: &quot;weather&quot;, &quot;prompt&quot;: &quot;Weather in Paris?&quot;}&#39;</span></span></code></pre></div></div><p>The LLM called <code>get_weather</code>, which the policy defers, so the session is
+waiting on the outside world (turns elided):</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;session_id&quot;</span><span class="fu">:</span> <span class="st">&quot;4ed40545-d192-4230-aed0-39cd09117123&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agent&quot;</span><span class="fu">:</span> <span class="st">&quot;weather&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;parent_session_id&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;owner&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;waiting_external&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;status_detail&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;version&quot;</span><span class="fu">:</span> <span class="dv">5</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;created_at&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-09-19T07:31:55.703930717Z&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;updated_at&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-09-19T07:31:55.713658207Z&quot;</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;session&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;turns&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;…&quot;</span><span class="ot">]</span><span class="fu">},</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;pending&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;017bb633-3306-4f95-8512-534427a4c030&quot;</span><span class="fu">,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;continuation_token&quot;</span><span class="fu">:</span> <span class="st">&quot;0dd070c1-eada-4669-9755-bb75a2783df1&quot;</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;get_weather&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;defer&quot;</span><span class="fu">,</span> <span class="dt">&quot;reason&quot;</span><span class="fu">:</span> <span class="st">&quot;weather service&quot;</span><span class="fu">},</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;call&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;call_1&quot;</span><span class="fu">,</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;function&quot;</span><span class="fu">,</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;function&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;get_weather&quot;</span><span class="fu">,</span> <span class="dt">&quot;arguments&quot;</span><span class="fu">:</span> <span class="st">&quot;{</span><span class="ch">\&quot;</span><span class="st">city</span><span class="ch">\&quot;</span><span class="st">: </span><span class="ch">\&quot;</span><span class="st">Paris</span><span class="ch">\&quot;</span><span class="st">}&quot;</span><span class="fu">}</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>A worker computes the result and posts it with the continuation token. The
+session resumes on its own; with <code>wait=true</code> the answer holds the LLM’s
+final turn:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST <span class="st">&#39;localhost:8080/v1/continuations/0dd070c1-eada-4669-9755-bb75a2783df1?wait=true&#39;</span> <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>     <span class="at">-d</span> <span class="st">&#39;{&quot;result&quot;: &quot;sunny, 24°C&quot;}&#39;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co"># 200, &quot;status&quot;: &quot;idle&quot;, &quot;pending&quot;: []</span></span></code></pre></div></div><p>Continue the conversation with another message:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> <span class="at">-X</span> POST <span class="st">&#39;localhost:8080/v1/sessions/4ed40545-…/messages?wait=true&#39;</span> <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>     <span class="at">-d</span> <span class="st">&#39;{&quot;prompt&quot;: &quot;And tomorrow?&quot;}&#39;</span></span></code></pre></div></div><hr />
+<h3 id="sessions-and-runs">Sessions and runs</h3>
+<p>A <strong>session</strong> is one conversation. A <strong>run</strong> steps it in the background: it
+calls the LLM, runs or defers tool calls, and stops when the LLM answers,
+when only deferred calls remain, or after one step in <code>step</code> mode. A session
+has at most one run at a time.</p>
+<p>Each session has a <code>status</code>:</p>
+<table>
+<tr><th>Status</th><th>Meaning</th><th>What moves it on</th></tr>
+<tr><td><code>ready</code></td><td>Can progress: a prompt or tool results are waiting for the LLM.</td><td><code>resume</code></td></tr>
+<tr><td><code>running</code></td><td>A run is active.</td><td>Wait for it, or <code>cancel</code> it.</td></tr>
+<tr><td><code>waiting_external</code></td><td>Only deferred calls remain.</td><td>Post their results to <code>/v1/continuations/:token</code>.</td></tr>
+<tr><td><code>idle</code></td><td>The LLM answered.</td><td>Post a new message.</td></tr>
+<tr><td><code>paused</code></td><td>Stopped by <code>pause</code>.</td><td><code>resume</code>, or any mail if the agent's <code>resumeOnAnyMail</code> option is set.</td></tr>
+<tr><td><code>failed</code></td><td>The last run failed; <code>status_detail</code> says why.</td><td><code>resume</code> retries from the last stored version.</td></tr>
+</table>
+<p>Every stored change increments the session’s <code>version</code>.</p>
+<h4 id="waiting-for-a-run">Waiting for a run</h4>
+<p>Endpoints that can start a run (create, messages, resume, continuations)
+take two query parameters:</p>
+<ul>
+<li><code>wait=true|false</code> (default <code>false</code>). Without waiting, the server answers
+as soon as the run has started. With <code>wait=true</code>, it answers when the run
+stops.
+</li>
+<li><code>timeout=SECONDS</code> (default <code>120</code>, at most <code>600</code>), used with <code>wait=true</code>. When
+it expires, the server answers with the current state (<code>status: &quot;running&quot;</code>)
+and the run carries on.
+</li>
+</ul>
+<p>The answer is always the session as it is at that moment, including its
+pending deferred calls. Creation answers <code>201</code>. The other endpoints answer
+<code>202</code> while a run is still going and <code>200</code> otherwise. A client that
+disconnects while waiting does not cancel the run.</p>
+<p>How far a run goes is set in the body: <code>run</code> on create and messages (<code>none</code>,
+<code>step</code>, or <code>until_blocked</code>, the default), <code>mode</code> on resume (<code>step</code> or
+<code>until_blocked</code>). With <code>run: &quot;none&quot;</code>, the session is stored as <code>ready</code> and
+nothing runs until <code>resume</code>.</p>
+<h4 id="deferred-results-arriving-during-a-run">Deferred results arriving during a run</h4>
+<p>A result posted while a run is active is checked and queued, and the run
+applies it before its next step. If the result makes the session able to
+progress, a run about to stop keeps going instead. Posting with
+<code>&quot;resume&quot;: false</code> stores the result without starting a run; <code>resume</code> later.
+While a run is active the result is queued for it, and <code>resume</code> is ignored:
+the run applies it either way.</p>
+<hr />
+<h3 id="mail">Mail</h3>
+<p><code>POST /v1/sessions/:id/mail</code> generalizes the <code>interrupt</code> flag on
+<code>POST .../messages</code>: any piece of mail, from a control instruction to a
+message from another session, to a session that may not even be live in
+this process (a stored, idle session still has its durable mailbox, and
+gets one opened for it). Unlike <code>messages</code>, this never refuses on a
+session’s status: the mail just queues, folded into the session’s next
+turn (or the current one, if a run is already going) the same way every
+other mail is (see <a href="#following-a-session-live">Following a session live</a>
+for the events a run produces along the way). A <code>paused</code> session may wake
+on it if the agent’s <code>resumeOnAnyMail</code> option is set and the mail’s sender
+is in its <code>wakeOn</code> list (the same rule an ordinary message follows against
+a paused session).</p>
+<p>The request body is <code>{body, priority?}</code>. <code>priority</code> is <code>&quot;normal&quot;</code> (the
+default) or <code>&quot;interrupt&quot;</code>. <code>body</code> is a <code>MailBody</code>, tagged JSON:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;userMessage&quot;</span><span class="fu">,</span> <span class="dt">&quot;query&quot;</span><span class="fu">:</span> <span class="st">&quot;are you there?&quot;</span><span class="fu">}</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;userMessage&quot;</span><span class="fu">,</span> <span class="dt">&quot;query&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;look at this&quot;</span><span class="fu">,</span> <span class="dt">&quot;media&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;mimeType&quot;</span><span class="fu">:</span> <span class="st">&quot;image/png&quot;</span><span class="fu">,</span> <span class="dt">&quot;base64Data&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}}</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;agentMessage&quot;</span><span class="fu">,</span> <span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;status update&quot;</span><span class="fu">,</span> <span class="dt">&quot;inReplyTo&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span> <span class="dt">&quot;expectsReply&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">}</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;control&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;pause&quot;</span><span class="fu">}}</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;control&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;resume&quot;</span><span class="fu">}}</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;control&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;stopRun&quot;</span><span class="fu">}}</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;control&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;cancelAllAttached&quot;</span><span class="fu">}}</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;control&quot;</span><span class="fu">,</span> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;cancelCalls&quot;</span><span class="fu">,</span> <span class="dt">&quot;toolCallIds&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;017bb633-…&quot;</span><span class="ot">]</span><span class="fu">}}</span></span></code></pre></div></div><p><code>toolCallFinished</code>, <code>continuationResult</code> and <code>watchedEvent</code> are also valid
+<code>MailBody</code> tags (the async engine, <code>completeCall</code>, and <code>watch-session</code>
+produce them respectively), but there is no reason to post one by hand over
+this endpoint. <code>POST /v1/sessions/:id/mail</code> answers <code>202</code> with the mail’s
+<code>Receipt</code>: <code>{&quot;id&quot;: &quot;&lt;message id&gt;&quot;, &quot;seq&quot;: &lt;int&gt;, &quot;duplicate&quot;: false}</code>.</p>
+<p><code>GET /v1/sessions/:id/mail?unread=true|false</code> lists the session’s mail,
+oldest first, as <code>{&quot;mail&quot;: [Envelope, …]}</code>. <code>unread=true</code> (default <code>false</code>)
+limits it to what is still unread past the session’s stored cursor – what
+its next turn, or a run already going, has not folded in yet. An <code>Envelope</code>
+is:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;2cdb9b15-…&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;seq&quot;</span><span class="fu">:</span> <span class="dv">4</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;from&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;user&quot;</span><span class="fu">,</span> <span class="dt">&quot;owner&quot;</span><span class="fu">:</span> <span class="st">&quot;alice&quot;</span><span class="fu">},</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;priority&quot;</span><span class="fu">:</span> <span class="st">&quot;normal&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;hops&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sentAt&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-09-23T19:08:06Z&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;body&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;agentMessage&quot;</span><span class="fu">,</span> <span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;status update&quot;</span><span class="fu">,</span> <span class="dt">&quot;inReplyTo&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span> <span class="dt">&quot;expectsReply&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">}</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><code>from</code> (a <code>Sender</code>) is one of <code>{&quot;tag&quot;: &quot;user&quot;, &quot;owner&quot;?}</code> (a client’s own
+mail, <code>owner</code> set when the server authenticates callers – this is what
+<code>POST .../mail</code> always sends as), <code>{&quot;tag&quot;: &quot;session&quot;, &quot;sessionId&quot;, &quot;agent&quot;?}</code>
+(another session, e.g. <code>send-message</code>), <code>{&quot;tag&quot;: &quot;toolCall&quot;, &quot;toolCallId&quot;}</code>,
+or <code>{&quot;tag&quot;: &quot;system&quot;, &quot;source&quot;}</code> (the runner itself, e.g. <code>watch-session</code>).</p>
+<hr />
+<h3 id="parameters">Parameters</h3>
+<p>An agent’s declared <code>parameters</code> (see
+<a href="/agents-exe/docs-parameters-and-bindings.html">Parameters, Bindings &amp; Narrowing Sub-Agents</a>)
+can be bound straight into tool arguments the model never sees — a tenant
+id, an API token, anything the caller of this session knows and the model
+does not need to. <code>agents-server</code> is where a <code>session</code>- or <code>message</code>-scope
+parameter actually varies per caller: give it a value in the same <code>params</code>
+object every request that can start a run accepts:</p>
+<pre><code class="language-console">curl -sS localhost:8080/v1/sessions \
+    -d '{&quot;agent&quot;: &quot;invoices-agent&quot;, &quot;prompt&quot;: &quot;how many invoices are overdue?&quot;, &quot;params&quot;: {&quot;tenant&quot;: &quot;acme-corp&quot;}}'
+</code></pre>
+<p><code>params</code> is an object of parameter name to value; a <code>null</code> value clears a
+previously-set session-scope value. A <code>session</code>-scope value is kept in this
+process’s memory for the life of the session — a client must resupply it
+after a restart or an idle eviction, or the next run that needs it fails
+with <code>params_required</code>. A <code>message</code>-scope value applies to that one run
+only and is never stored. A secret value is never returned by any endpoint:
+<code>GET /v1/sessions/:id</code>’s own <code>params</code> field only ever holds the
+non-secret session-scope values (the current, actual values); <code>GET /v1/agents/:slug</code>’s <code>parameters</code> field describes the agent’s own
+declarations generically — one entry per parameter, with <code>bound</code> and
+<code>pinned</code> flags, never a value.</p>
+<p>A request whose <code>params</code> do not check out is refused before anything runs:</p>
+<table>
+<tr><th>Error</th><th>Meaning</th></tr>
+<tr><td><code>422 unknown_params</code></td><td>A name the agent does not declare.</td></tr>
+<tr><td><code>403 forbidden_params</code></td><td>A <code>process</code>-scope parameter, or one pinned with <code>--pin</code>/<code>--pin-json</code> at server start: only the operator may set it.</td></tr>
+<tr><td><code>422 invalid_params</code></td><td>A <code>secret</code> parameter's value was not given as a string.</td></tr>
+<tr><td><code>422 params_required</code></td><td>A required parameter has no value once this request's <code>params</code> are applied — process value or default, session value, and message value combined.</td></tr>
+</table>
+<p><code>--set NAME=VALUE</code>, <code>--set-json NAME=JSON</code>, <code>--pin NAME=VALUE</code>, and
+<code>--pin-json NAME=JSON</code> on <code>agents-server</code> itself set process-scope values
+every session shares, the same flags and meaning as <code>agents-exe</code> (except
+<code>--params-file</code>, which only <code>agents-exe</code> has).</p>
+<h4 id="whenunbound-expose-and-live-sessions"><code>whenUnbound: &quot;expose&quot;</code> and live sessions</h4>
+<p>A binding’s argument marked <code>whenUnbound: &quot;expose&quot;</code> reappears in a tool’s
+schema for as long as its parameter is unbound <em>for that session</em> — the
+tool list a session sees changes the moment <code>params</code> sets or clears the
+value, with no agent rebuild or restart.</p>
+<h4 id="setting-parameters-over-mcp">Setting parameters over MCP</h4>
+<p>A <code>tools/call</code> sets parameters two ways, both string-keyed to the JSON
+values requests use, and both scoped to that one call, like a
+message-scope value: <code>Agents-Param-&lt;name&gt;: &lt;value&gt;</code> request headers (every
+value is a string), and/or <code>_meta.&quot;agents-exe/params&quot;</code> on the call itself
+(any JSON value; overrides a same-named header). Both go through the same
+validation table above.</p>
+<hr />
+<h3 id="following-a-session-live">Following a session live</h3>
+<p><code>GET /v1/sessions/:id/events</code> is a
+<a href="https://html.spec.whatwg.org/multipage/server-sent-events.html">server-sent events</a>
+stream. Each frame carries an <code>id:</code> line (the event’s sequence number, unique
+and increasing per server) alongside the usual <code>event:</code>/<code>data:</code>. It first
+sends a <code>snapshot</code> of the session’s metadata (unless it is a replay – see
+<a href="#reconnecting">Reconnecting</a> below), then one event per change:</p>
+<table>
+<tr><th>Event</th><th>Data</th></tr>
+<tr><td><code>snapshot</code></td><td>Session metadata (the object above without <code>session</code> and <code>pending</code>).</td></tr>
+<tr><td><code>session.updated</code></td><td>Session metadata after a stored change, plus <code>head_turn</code>: the newest turn.</td></tr>
+<tr><td><code>run.started</code></td><td><code>{session_id, mode}</code></td></tr>
+<tr><td><code>calls.deferred</code></td><td><code>{session_id, calls}</code>: the run stopped on these deferred calls.</td></tr>
+<tr><td><code>run.stopped</code></td><td><code>{session_id, status}</code></td></tr>
+<tr><td><code>session.failed</code></td><td><code>{session_id, message}</code>, followed by <code>run.stopped</code> with status <code>failed</code>.</td></tr>
+<tr><td><code>text.delta</code></td><td><code>{session_id, text}</code>: the next piece of the LLM's answer, with <code>--stream-tokens</code> only.</td></tr>
+<tr><td><code>tool.started</code></td><td><code>{session_id, tool_call_id, tool}</code>: a tool call still attached to the session (not deferred) started running.</td></tr>
+<tr><td><code>tool.completed</code></td><td><code>{session_id, tool_call_id, tool, succeeded}</code>: that call reached a final state. <code>succeeded</code> is <code>false</code> for a failed or cancelled call. A call that both starts and finishes within one step is not reported (informational only; the stored session remains the source of truth).</td></tr>
+<tr><td><code>tool.progressed</code></td><td><code>{session_id, tool_call_id, tool, phase, payload?, error?, provider_call_id?, at}</code>: a background (async-engine) tool call's lifecycle -- <code>phase</code> is one of <code>started</code>, <code>progressed</code> (with a <code>payload</code>), <code>completed</code>, <code>failed</code> (with an <code>error</code>), <code>cancelled</code>. Reported for every phase, not only intermediate progress; complements <code>tool.started</code>/<code>tool.completed</code> above, which are derived separately by diffing the stored session.</td></tr>
+<tr><td><code>subcall.started</code></td><td><code>{session_id, parent_session_id, child_session_id, agent, depth}</code>: a <code>prompt_agent_&lt;slug&gt;</code> call started a sub-agent run. <code>session_id</code> (the event's own, top-level field) is the <em>parent</em> -- the session actually running the call, whose stream this shows up on -- and <code>parent_session_id</code> repeats it explicitly alongside <code>child_session_id</code>, the sub-agent's own id. When the call runs as a real session (the common case), <code>child_session_id</code> is a session a client can <code>GetSession</code>/subscribe to on its own, already created (<code>session.created</code> fired) by the time this event is reported; a still-narrowed call (<code>bindings</code>/<code>with</code>/<code>as</code>) runs in-tool instead, and <code>child_session_id</code> there is just the id generated for it, not a session of its own.</td></tr>
+<tr><td><code>subcall.completed</code></td><td><code>{session_id, child_session_id, result?}</code>: that sub-agent run finished, with its result text when it produced one.</td></tr>
+<tr><td><code>subcall.failed</code></td><td><code>{session_id, child_session_id, message}</code>: that sub-agent run failed.</td></tr>
+<tr><td><code>session.created</code></td><td><code>{session_id, …}</code> (full session metadata): a new session was created. Only seen on <code>GET /v1/events</code> (below); a single session's own stream never reports its own creation.</td></tr>
+<tr><td><code>session.deleted</code></td><td><code>{session_id}</code>: a session (and everything under it) was deleted. Only seen on <code>GET /v1/events</code>.</td></tr>
+<tr><td><code>hook.failed</code></td><td><code>{session_id, message}</code>: a tool-call hook (a before/after command hook) failed outside of the normal tool-call result path. Not a session failure -- the run continues, unlike <code>session.failed</code>.</td></tr>
+</table>
+<p>A typical run, from a <code>resume</code>:</p>
+<pre><code>id: 101
+event: snapshot
+data: {&quot;session_id&quot;:&quot;4ed4…&quot;,&quot;status&quot;:&quot;ready&quot;,&quot;version&quot;:1,…}
+
+id: 102
+event: session.updated
+data: {&quot;session_id&quot;:&quot;4ed4…&quot;,&quot;status&quot;:&quot;running&quot;,&quot;version&quot;:2,&quot;head_turn&quot;:{…},…,&quot;kind&quot;:&quot;session.updated&quot;,&quot;seq&quot;:102}
+
+id: 103
+event: run.started
+data: {&quot;mode&quot;:&quot;until_blocked&quot;,&quot;session_id&quot;:&quot;4ed4…&quot;,&quot;kind&quot;:&quot;run.started&quot;,&quot;seq&quot;:103}
+
+id: 104
+event: session.updated
+data: {&quot;session_id&quot;:&quot;4ed4…&quot;,&quot;status&quot;:&quot;running&quot;,&quot;version&quot;:3,&quot;head_turn&quot;:{…},…,&quot;kind&quot;:&quot;session.updated&quot;,&quot;seq&quot;:104}
+
+id: 105
+event: calls.deferred
+data: {&quot;session_id&quot;:&quot;4ed4…&quot;,&quot;calls&quot;:[{&quot;continuation_token&quot;:&quot;0dd0…&quot;,…}],&quot;kind&quot;:&quot;calls.deferred&quot;,&quot;seq&quot;:105}
+
+id: 106
+event: run.stopped
+data: {&quot;session_id&quot;:&quot;4ed4…&quot;,&quot;status&quot;:&quot;waiting_external&quot;,&quot;kind&quot;:&quot;run.stopped&quot;,&quot;seq&quot;:106}
+</code></pre>
+<p>(The <code>snapshot</code> frame has no <code>id:</code>: it is a point-in-time read, not an event
+in the sequence. <code>kind</code> and <code>seq</code> inside <code>data</code> are additive – every field
+this doc’s table names was already there.)</p>
+<h4 id="streaming-answers">Streaming answers</h4>
+<p>With <code>--stream-tokens</code>, the server asks the LLM for a streamed answer
+(<code>&quot;stream&quot;: true</code>) and forwards each piece of text as a <code>text.delta</code> event,
+before the answer is stored. Concatenating a step’s deltas gives the text of
+the LLM turn that the following <code>session.updated</code> carries. Tool calls
+are not streamed: they appear in the stored turn as usual. A sub-agent that
+runs as its own session streams like any other session, on its own id (its
+own <code>text.delta</code>s, not the parent’s); a still-narrowed sub-agent call
+running in-tool does not (see “Sub-agents” above).</p>
+<p>The option applies to every agent of the server. It needs an endpoint that
+supports streaming: OpenAI and most OpenAI-compatible APIs do. For the
+<code>OpenAIv1</code> flavor the server also asks for token usage in the last chunk
+(<code>stream_options.include_usage</code>).</p>
+<p>The stream stays open across runs. It sends a <code>: keepalive</code> comment after 15
+seconds without events.</p>
+<h4 id="reconnecting">Reconnecting</h4>
+<p>The server keeps a ring of the last 4096 events (across every session, not
+per session). A reconnecting client sends <code>Last-Event-ID</code> – set
+automatically by the browser’s <code>EventSource</code> on a dropped connection – or,
+for any other client, <code>?after=&lt;seq&gt;</code> naming the same thing explicitly. Two
+cases:</p>
+<ul>
+<li>The sequence number is still in the ring: the missed events replay first,
+in order, with no gap and no duplicate at the point where the stream goes
+live (the server takes the ring snapshot and subscribes to new events in
+one atomic step). No <code>snapshot</code> frame is sent in this case – the client
+already has a consistent view and only needs what it missed.
+</li>
+<li>It is older than everything still in the ring (a long disconnect, or a
+server restart, which starts the sequence over): the stream falls back to
+a fresh <code>snapshot</code> followed by live events, exactly like a first
+connection. There is no way to tell “missed too much” apart from “never
+connected before” other than this: either way, a <code>snapshot</code> means re-read
+anything you need from it (and <code>GET /v1/sessions/:id</code> for the full turns).
+</li>
+</ul>
+<p>The ring is in-memory only: it does not survive a restart, and does not
+replace <code>session_mail</code>/the stored session as the durable record.</p>
+<p>Every event stream answers with an <code>Agents-Replay</code> header saying which case
+applies before any frame arrives: <code>live</code> (no <code>Last-Event-ID</code>/<code>after</code> was
+given), <code>replayed</code>, or <code>unavailable</code>. A client that must know whether it
+missed events (the attached TUI’s <code>httpClient</code>) reads it rather than
+waiting for a first frame, which on a quiet stream could take a while.</p>
+<h4 id="following-every-session">Following every session</h4>
+<p><code>GET /v1/events?scope=&amp;after=</code> is the same stream, server-wide instead of
+per session: every event above, plus <code>session.created</code> and
+<code>session.deleted</code>, and the same <code>Last-Event-ID</code>/<code>after</code> reconnect (no
+<code>snapshot</code> here – there is no single session to snapshot). <code>scope=owner</code>
+(the default when the caller has an owner) is that caller’s own sessions;
+<code>scope=all</code> is every session on the server, and needs authentication off or
+the caller to be one of <code>--admin-owners</code>, since it would otherwise let any
+authenticated caller watch every other owner’s sessions. This is what a
+live session list, or a dashboard across sessions, follows instead of
+polling <code>GET /v1/sessions</code>.</p>
+<h4 id="attaching-the-tui">Attaching the TUI</h4>
+<p><code>agents-exe tui --attach</code> runs the terminal UI against this server instead
+of a runner of its own:</p>
+<pre><code class="language-sh">agents-exe serve --port 8080 --socket /run/agents/agents.sock   # on the server
+agents-exe tui --attach http://127.0.0.1:8080                   # over TCP
+agents-exe tui --attach unix:///run/agents/agents.sock          # over the socket
+agents-exe tui --attach https://agents.example --token-file ~/.agents-token
+</code></pre>
+<p>The TUI is then one more client of this API, like the chat page: it lists
+agents from <code>GET /v1/agents</code>, drives sessions through the routes above,
+follows <code>GET /v1/events</code> (<code>scope=all</code>, or <code>scope=owner</code> when a non-admin
+token is used), and fetches <code>GET /v1/sessions/:id</code> on each
+<code>session.updated</code>. It sees the sessions of its token’s owner (or every
+session, without authentication), including ones created by other clients,
+and quitting it leaves its sessions running here. Its <code>--params-file</code>
+values travel as <code>params</code> on each create and message, as the chat page’s
+do. See <a href="/agents-exe/docs-tui.html#architecture">tui.md</a> for what differs from the embedded
+TUI.</p>
+<hr />
+<h3 id="api-reference">API reference</h3>
+<p>All bodies are JSON. Errors are <code>{&quot;error&quot;: &quot;&lt;code&gt;&quot;, &quot;message&quot;: &quot;&lt;text&gt;&quot;}</code>.</p>
+<table>
+<tr><th>Method and path</th><th>Body</th><th>Success</th><th>Errors</th></tr>
+<tr><td><code>GET /</code></td><td></td><td><code>200 text/html</code> chat page</td><td>404 when the page is off</td></tr>
+<tr><td><code>GET /openapi.json</code></td><td></td><td><code>200</code> OpenAPI 3 document</td><td></td></tr>
+<tr><td><code>GET /healthz</code></td><td></td><td><code>200 {ok, live_sessions, active_runs}</code></td><td></td></tr>
+<tr><td><code>POST /mcp</code></td><td>JSON-RPC message or batch</td><td><code>200</code> JSON-RPC answer, or <code>202</code></td><td>see [MCP over HTTP](#mcp-over-http)</td></tr>
+<tr><td><code>GET /v1/agents</code></td><td></td><td><code>200 [{slug, description, model, system_prompt, tools, parameters, helpers, source, …}]</code></td><td></td></tr>
+<tr><td><code>GET /v1/agents/:slug</code></td><td></td><td><code>200</code> agent (same shape)</td><td>404 <code>unknown_agent</code></td></tr>
+<tr><td><code>PUT /v1/agents/:slug</code></td><td>agent configuration</td><td><code>201</code> (new) or <code>200</code> agent</td><td>403 <code>agent_edits_disabled</code> / <code>forbidden</code>, 400 <code>agent_uses_files</code> / <code>agent_failed_to_load</code> / <code>bad_request</code>, 409 <code>agent_defined_by_file</code></td></tr>
+<tr><td><code>DELETE /v1/agents/:slug</code></td><td></td><td><code>200 {deleted}</code></td><td>403, 404 <code>unknown_agent</code>, 409 <code>agent_defined_by_file</code></td></tr>
+<tr><td><code>POST /v1/sessions?wait=&amp;timeout=</code></td><td><code>{agent, prompt?, media?, run?, params?, parent?}</code></td><td><code>201</code> session, with a <code>Location</code> header</td><td>404 <code>unknown_agent</code>, 404 <code>unknown_session</code> (parent), 400 <code>bad_request</code>, see [Parameters](#parameters)</td></tr>
+<tr><td><code>GET /v1/sessions?agent=&amp;status=&amp;parent=&amp;limit=&amp;before=</code></td><td></td><td><code>200 {sessions, next_before}</code></td><td>400 <code>bad_request</code></td></tr>
+<tr><td><code>GET /v1/sessions/:id?wait=&amp;timeout=</code></td><td></td><td><code>200</code> session, or <code>202</code> when <code>wait</code> expired with a run still active</td><td>404 <code>unknown_session</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/messages?wait=&amp;timeout=</code></td><td><code>{prompt, media?, run?, params?, interrupt?}</code></td><td><code>202</code> or <code>200</code> session</td><td>404, 409 <code>run_in_progress</code>, 409 <code>not_accepting_messages</code>, see [Parameters](#parameters)</td></tr>
+<tr><td><code>POST /v1/sessions/:id/resume?wait=&amp;timeout=</code></td><td><code>{mode?, params?}</code> or no body</td><td><code>202</code> or <code>200</code> session</td><td>404, 409 <code>run_in_progress</code>, see [Parameters](#parameters)</td></tr>
+<tr><td><code>POST /v1/sessions/:id/cancel</code></td><td></td><td><code>200</code> session metadata</td><td>404, 409 <code>no_active_run</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/cancel-attached</code></td><td></td><td><code>200</code> session metadata</td><td>404</td></tr>
+<tr><td><code>POST /v1/sessions/:id/pause</code></td><td></td><td><code>200</code> session metadata</td><td>404</td></tr>
+<tr><td><code>POST /v1/sessions/:id/mail</code></td><td><code>{body, priority?}</code></td><td><code>202</code> mail <code>Receipt</code>: <code>{id, seq, duplicate}</code></td><td>404, see [Mail](#mail)</td></tr>
+<tr><td><code>GET /v1/sessions/:id/mail?unread=</code></td><td></td><td><code>200 {mail: [Envelope]}</code></td><td>404</td></tr>
+<tr><td><code>POST /v1/sessions/:id/fork</code></td><td><code>{at_turn?, agent?}</code></td><td><code>201</code> new session, with a <code>Location</code> header</td><td>404 <code>unknown_session</code> / <code>unknown_turn</code> / <code>unknown_agent</code></td></tr>
+<tr><td><code>GET /v1/sessions/:id/pending</code></td><td></td><td><code>200 {calls}</code></td><td>404</td></tr>
+<tr><td><code>GET /v1/sessions/:id/events?after=</code></td><td></td><td><code>200 text/event-stream</code></td><td>404</td></tr>
+<tr><td><code>GET /v1/events?scope=&amp;after=</code></td><td></td><td><code>200 text/event-stream</code></td><td>403 <code>forbidden</code> (<code>scope=all</code> without authentication off or an admin owner)</td></tr>
+<tr><td><code>POST /v1/continuations/:token?wait=&amp;timeout=</code></td><td><code>{result, resume?, params?}</code></td><td><code>202</code> or <code>200</code> session</td><td>404 <code>unknown_token</code>, 409 <code>token_already_completed</code>, 409 <code>conflict</code>, see [Parameters](#parameters)</td></tr>
+<tr><td><code>DELETE /v1/sessions/:id?dry_run=</code></td><td></td><td><code>200 {sessions, continuations, dry_run}</code></td><td>404, 409 <code>run_in_progress</code></td></tr>
+</table>
+<p><code>prompt</code> on create may be omitted (with no <code>media</code> either): this stores an
+idle session with no turn at all, <code>status: &quot;ready&quot;</code>, ready for a later
+message, mail, or <code>resume</code> – nothing runs. A <code>prompt</code> behaves as before.</p>
+<p><code>parent</code> on create (a session id) records the new session as a child of
+that one, for lineage only: it is listed through <code>?parent=</code>, deleted with
+its parent, and is never told anything by its parent or vice versa. The
+caller must be able to see the parent (another owner’s answers
+<code>404 unknown_session</code>). This is what an attached TUI sends for
+<code>createSessionAsChild</code> and <code>spawnSession</code>.</p>
+<p><code>wait=true</code> on <code>GET /v1/sessions/:id</code> first waits (up to <code>timeout</code> seconds,
+default 120, at most 600) for the session’s active run to stop, then
+answers the session with <code>200</code>, or <code>202</code> if a run is still active once the
+time is up. Without <code>wait</code>, it answers at once, always <code>200</code>.</p>
+<p><code>at_turn</code> on fork is a 0-based index into the session’s <code>turns</code>, <strong>newest
+first</strong> (<code>turns[0]</code> is the most recent turn): the fork keeps that turn and
+every older one, dropping anything newer. Absent, the whole session is
+copied. <code>agent</code> rebinds the fork to another agent’s slug (also how to
+“continue with another agent”: fork with no <code>at_turn</code>, or <code>at_turn: 0</code>, and
+an <code>agent</code>). The fork gets a fresh <code>session_id</code>, <code>forkedFromSessionId</code> set
+to the source, the source’s parent link and non-secret parameters, and
+<code>status</code> derived from the turns it kept – never the source’s own status,
+and it starts no run, so it never picks up a later change to the source.</p>
+<p>Any endpoint that reads a body or a query parameter can answer
+<code>400 bad_request</code>; the table names it only where it is the usual outcome.
+Other errors: <code>401 unauthorized</code> when authentication is on (with a
+<code>WWW-Authenticate: Bearer</code> header),
+<code>403 forbidden_origin</code> when it is off (see <a href="#authentication">Authentication</a>),
+<code>404 not_found</code> for an unknown path, <code>405 method_not_allowed</code>,
+<code>413 payload_too_large</code> for bodies over 32 MiB, and <code>500 internal_error</code>.</p>
+<p><strong>Messages</strong> (<code>prompt</code>, <code>media</code>, <code>interrupt</code>). <code>media</code> is a list of
+<code>{&quot;mime&quot;: &quot;image/png&quot;, &quot;base64&quot;: &quot;…&quot;, &quot;filename&quot;: &quot;optional&quot;}</code>. <code>interrupt</code>
+(default <code>false</code>) only matters against a busy session (<code>status: &quot;running&quot;</code>):
+instead of being refused with <code>409 not_accepting_messages</code>, the message is
+posted as interrupt-priority mail, which detaches the session’s currently
+attached tool calls (and, with the agent’s <code>interruptCompletions</code> on,
+cancels an in-flight LLM completion) and asks the model again with this
+message folded in. A detached call’s result, if it still arrives, is
+reported on a later run rather than lost. On an idle session <code>interrupt</code> has
+no effect: there is nothing to interrupt.</p>
+<p>Mail (a message, or any other envelope R1 folds into a turn) normally
+becomes a separate user message after a round of attached tool results. For
+a provider that rejects a user message directly after tool results, set the
+agent’s <code>mailInToolResult</code> (default <code>false</code>): R1 then appends the folded
+mail, with the same <code>[mail …]</code> header, as a trailing block of the <em>last</em>
+tool result of that round instead. Only applies when the round actually had
+tool calls; a plain user turn (no tool results) is unaffected, and
+detached/deferred results already arrive as mail of their own.</p>
+<p><strong>Results</strong> (<code>result</code>). A JSON string is a text result. Other forms are
+<code>{&quot;type&quot;: &quot;text&quot;, &quot;content&quot;: &quot;…&quot;}</code>, <code>{&quot;type&quot;: &quot;json&quot;, &quot;content&quot;: &lt;any&gt;}</code>,
+<code>{&quot;type&quot;: &quot;media&quot;, &quot;mimeType&quot;: &quot;…&quot;, &quot;base64Data&quot;: &quot;…&quot;}</code>, and
+<code>{&quot;type&quot;: &quot;mixed&quot;, &quot;parts&quot;: [...]}</code>.</p>
+<p><strong>Listing.</strong> Sessions come newest first (by <code>updated_at</code>). Filters:
+<code>agent=&lt;slug&gt;</code>, <code>status=&lt;s1,s2,…&gt;</code>, <code>parent=&lt;session id&gt;</code> (the sub-sessions
+of a session; another owner’s session answers <code>404 unknown_session</code>). <code>limit</code> is 1 to 500 (default 50). When a page is full,
+<code>next_before</code> holds the <code>updated_at</code> of its last session: pass it as
+<code>before=</code> to get the next page.</p>
+<p><strong>Cancelling</strong> stops the active run and its background tool calls. The
+session is stored with the status its turns imply, usually <code>ready</code>. The
+cancelled calls are reported to the LLM on the next run.</p>
+<p><strong><code>cancel-attached</code></strong> hard-cancels every tool call currently attached to the
+session, through the async engine, <em>without</em> stopping the run itself. A
+cancelled call’s result never arrives. Contrast with posting a message with
+<code>interrupt: true</code>, which only detaches attached calls and lets them finish.</p>
+<p><strong><code>pause</code></strong> posts <code>Pause</code> control mail: the run stops at its next iteration
+and the session is stored as <code>status: &quot;paused&quot;</code>. Attached calls keep running
+unless the agent’s config sets <code>pauseCancelsCalls</code> — cancel them explicitly
+with <code>cancel-attached</code> instead. <code>resume</code> works from <code>paused</code> regardless of
+whether the pause has taken effect yet.</p>
+<p><strong>Deleting</strong> removes the session, all its sub-sessions, and their
+continuation tokens. It is refused while a run is active on any of them or on
+a parent session. <code>dry_run=true</code> answers with what would be removed and
+changes nothing.</p>
+<h4 id="postgres">Postgres</h4>
+<p><code>--db postgresql://user:password@host:5432/agents</code> stores sessions in
+Postgres instead of SQLite. The server creates its tables on start
+(<code>sessions</code>, <code>tool_continuations</code>, <code>agents</code>, <code>schema_migrations</code>); the
+database must exist and the user must be allowed to create tables. The logs show the URL
+without its user and password.</p>
+<p>Several servers may share one Postgres database: every write is versioned,
+so a conflicting write is detected and refused (<code>409 conflict</code>). Runs are
+not coordinated between servers, though: route all requests for a session to
+the same server.</p>
+<hr />
+<h3 id="storing-agents">Storing agents</h3>
+<p>Besides <code>--agent-file</code>, agents can live in the server’s database and be
+created, replaced, and deleted over the API. Storing agents is off unless
+<code>--admin-owners</code> names the owners allowed to do it, which needs
+<code>--auth-tokens</code>: an agent definition can start MCP servers, which are
+commands run on the server’s machine.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-X</span> PUT localhost:8080/v1/agents/helper <span class="at">-H</span> <span class="st">&#39;Authorization: Bearer &lt;admin token&gt;&#39;</span> <span class="at">-d</span> <span class="st">&#39;{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;apiKeyId&quot;: &quot;openai&quot;, &quot;flavor&quot;: &quot;OpenAIv1&quot;,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;modelUrl&quot;: &quot;https://api.openai.com/v1&quot;, &quot;modelName&quot;: &quot;gpt-4o-mini&quot;,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;announce&quot;: &quot;a helpful assistant&quot;, &quot;systemPrompt&quot;: [&quot;You help.&quot;],</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;builtinToolboxes&quot;: [], &quot;mcpServers&quot;: []</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="st">}&#39;</span></span></code></pre></div></div><ul>
+<li>The body is what goes under <code>contents</code> in an agent file. The slug comes
+from the path.
+</li>
+<li>A stored agent cannot use anything that refers to files:
+<code>toolDirectory</code>, <code>bashToolboxes</code>, <code>openApiToolboxes</code>,
+<code>postgrestToolboxes</code>, <code>extraAgents</code>, <code>skillSources</code>, <code>autoEnableSkills</code>
+(<code>400 agent_uses_files</code>). Builtin toolboxes and MCP servers work, as do the
+execution mode and tool-call policy.
+</li>
+<li>The agent is loaded before it is stored: if an MCP server fails to start,
+the answer is <code>400 agent_failed_to_load</code> and nothing is stored.
+</li>
+<li>A slug used by an agent file cannot be stored (<code>409 agent_defined_by_file</code>). If an agent file with the slug of a stored agent
+appears later, the file wins, and the stored agent is skipped at startup
+(logged as <code>agents.stored_skipped</code>).
+</li>
+<li><code>GET /v1/agents</code> lists both kinds, with <code>source: &quot;file&quot;</code> or <code>&quot;database&quot;</code>.
+Stored agents also show <code>config</code>, <code>updated_at</code>, and <code>updated_by</code>.
+</li>
+<li>New sessions use a replaced agent at once. Sessions already in memory keep
+the version they built until they are idle long enough to be dropped
+(<code>--live-session-ttl</code>). Sessions of a deleted agent stay, but runs on them
+fail with <code>unknown_agent</code> until an agent with that slug exists again.
+</li>
+<li>MCP servers started for a stored agent keep running when the agent is
+replaced or deleted, until the server stops.
+</li>
+</ul>
+<hr />
+<h3 id="authentication">Authentication</h3>
+<p>With <code>--auth-tokens tokens.json</code>, every endpoint except <code>/healthz</code> needs an
+<code>Authorization: Bearer &lt;token&gt;</code> header, and each caller only sees their own
+sessions. The file maps tokens to owners:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;tokens&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span><span class="dt">&quot;owner&quot;</span><span class="fu">:</span> <span class="st">&quot;alice&quot;</span><span class="fu">,</span> <span class="dt">&quot;sha256&quot;</span><span class="fu">:</span> <span class="st">&quot;42f5d7b6be1957766e51c84756eb7a7c19a0e690a75d628238e2ab78f0ba9d19&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span><span class="dt">&quot;owner&quot;</span><span class="fu">:</span> <span class="st">&quot;bob&quot;</span><span class="fu">,</span> <span class="dt">&quot;token&quot;</span><span class="fu">:</span> <span class="st">&quot;a-long-random-token&quot;</span><span class="fu">}</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span><span class="fu">}</span></span></code></pre></div></div><p><code>sha256</code> is the hex SHA-256 of the token (<code>printf %s TOKEN | sha256sum</code>), so
+the file need not hold the token itself. <code>token</code> holds it in plain text.
+Several tokens may share an owner. The file is read at startup.</p>
+<ul>
+<li>A missing or unknown token answers <code>401 unauthorized</code>.
+</li>
+<li>A session belongs to the caller who created it. Sub-sessions, created by
+sub-agents, belong to the owner of their root session.
+</li>
+<li>Another owner’s session answers <code>404</code>, exactly as a session that does not
+exist, including its continuation tokens (<code>404 unknown_token</code>).
+</li>
+<li><code>GET /v1/sessions</code> lists the caller’s own sessions. Sub-sessions are
+listed through their parent: <code>?parent=&lt;session id&gt;</code>.
+</li>
+<li>Sessions created while authentication was off have no owner, and no caller
+sees them once it is on.
+</li>
+<li><code>GET /v1/sessions/:id/events</code> also accepts the token as an <code>access_token</code>
+query parameter, because a browser’s <code>EventSource</code> cannot set headers. No
+other endpoint does, and the request log records no query strings.
+</li>
+</ul>
+<p>All owners share the agents and the API keys of the server.</p>
+<p><strong>Browser origins.</strong> Without <code>--auth-tokens</code>, requests carrying an <code>Origin</code>
+header that is not <code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code>, or a <code>--cors-origin</code>
+answer <code>403 forbidden_origin</code>. This stops a web page from reaching a local
+server through DNS rebinding. Clients that send no <code>Origin</code> (curl, servers,
+MCP clients) are not affected. With authentication on, origins are not
+checked (a bearer token already proves the caller is authorized; there is no
+cookie to leak). <code>/healthz</code>, <code>/openapi.json</code> and <code>/</code> are answered before the
+check, so a monitor or a documentation browser reaches them from anywhere.</p>
+<p><strong>Cross-origin browser access (CORS).</strong> <code>--cors-origin ORIGIN</code> (repeatable)
+lets a page served by a <em>different</em> origin — another host, port, or scheme —
+call the API and open its event stream directly, instead of proxying
+through that page’s own backend. An origin must match exactly: scheme and
+port are significant, host is compared case-insensitively (so
+<code>http://app.example:5173</code> and <code>https://app.example</code> are different origins,
+and each needs its own <code>--cors-origin</code>). <code>--cors-origin '*'</code> allows any
+origin and is refused at startup together with <code>--auth-tokens</code>, since with
+tokens in play a bearer credential must not be sent to a page the operator
+never named.</p>
+<p>A listed origin:</p>
+<ul>
+<li>passes the origin check above even without <code>--auth-tokens</code> — it was opted
+in explicitly, unlike an arbitrary non-loopback origin;
+</li>
+<li>gets <code>Access-Control-Allow-Origin</code> (echoing the request’s own <code>Origin</code>,
+never a literal <code>*</code>), <code>Vary: Origin</code>, and
+<code>Access-Control-Expose-Headers: Location</code> on every response, including
+errors and the event stream (<code>fetch</code> needs <code>Location</code> to read the
+<code>Location</code> header <code>POST /v1/sessions</code> answers with; <code>EventSource</code>/<code>fetch</code>
+need the others to read the response at all);
+</li>
+<li>gets its <code>OPTIONS</code> preflight requests answered with <code>204</code> and
+<code>Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS</code>,
+<code>Access-Control-Allow-Headers: Authorization, Content-Type, Last-Event-ID</code>,
+and <code>Access-Control-Max-Age: 600</code>. Preflight is answered on any path,
+before authentication and before the origin check the real request would
+otherwise get — except that a non-loopback origin not on the list still
+gets <code>403 forbidden_origin</code> here too, when there is no <code>--auth-tokens</code>,
+matching what the real request would get.
+</li>
+</ul>
+<p><code>GET /v1/sessions/:id/events</code> keeps working cross-origin the same way it
+works same-origin: <code>EventSource</code> cannot set the <code>Authorization</code> header, so
+with <code>--auth-tokens</code> the token still goes as <code>?access_token=</code> (see above);
+without tokens, a listed origin needs nothing extra.</p>
+<hr />
+<h3 id="mcp-over-http">MCP over HTTP</h3>
+<p><code>POST /mcp</code> serves the agents to MCP clients over the
+<a href="https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http">Streamable HTTP transport</a>.
+Point a client at <code>http://127.0.0.1:8080/mcp</code>; with <code>--auth-tokens</code>, it must
+send the same bearer token as REST clients.</p>
+<ul>
+<li>Each root agent is one tool, <code>ask_&lt;slug&gt;</code>, with a single string argument
+<code>prompt</code>. Parameters for the session that call creates can be set with
+<code>Agents-Param-&lt;name&gt;</code> headers or <code>_meta</code> — see
+<a href="#setting-parameters-over-mcp">Setting parameters over MCP</a>.
+</li>
+<li>A call creates a session, owned by the caller, and waits for its run (up to
+120 seconds). The result is the agent’s final answer. <code>_meta.session_id</code>
+names the session, which is also visible through the REST API.
+</li>
+<li>If the run stops on deferred tool calls, the result (not an error) says
+so and lists the pending calls with their continuation tokens: complete
+them through <code>POST /v1/continuations/:token</code>. If the run is still going when
+the wait ends, the result gives the session id to follow.
+</li>
+<li>A failed run returns a result with <code>isError: true</code>.
+</li>
+<li>A body that is not a JSON-RPC message, or an empty batch, answers <code>400</code>
+with a JSON-RPC error (<code>-32700</code>, <code>-32600</code>). An unknown method answers
+<code>-32601</code>, and an unknown tool or bad arguments <code>-32602</code>, both inside a
+<code>200</code>.
+</li>
+<li>Every request gets a plain JSON response. Notifications answer <code>202</code>.
+The server sends no requests or notifications of its own, so <code>GET /mcp</code>
+answers <code>405</code>. MCP sessions (<code>Mcp-Session-Id</code>) are not used.
+</li>
+<li>Supported protocol versions: <code>2025-06-18</code>, <code>2025-03-26</code>, <code>2024-11-05</code>.
+</li>
+</ul>
+<p>For the stdio MCP server that runs agents without storing sessions, see
+<a href="/agents-exe/docs-mcp.html">mcp.md</a>.</p>
+<hr />
+<h3 id="restarts-and-shutdown">Restarts and shutdown</h3>
+<p>On <code>SIGTERM</code> or <code>SIGINT</code>, the server:</p>
+<ol>
+<li>stops accepting connections;
+</li>
+<li>ends event streams and answers waiting requests with the current state;
+</li>
+<li>gives other open requests the grace period (<code>--shutdown-grace</code>);
+</li>
+<li>cancels active runs, storing their sessions;
+</li>
+<li>closes the database.
+</li>
+</ol>
+<p>On start, sessions left <code>running</code> by a crash are stored with the status their
+turns imply. Their interrupted step is lost, and background tool calls they
+were running are reported to the LLM as orphaned on the next run. Nothing is
+resumed automatically: <code>resume</code> them.</p>
+<p>Background tool calls (<code>runAsync</code>) live in the server process. They survive
+between runs of a session, but not a restart. A session is not dropped at
+the TTL while one of its background calls is still running: it is kept until
+they finish. Deferred calls are the durable kind:
+their tokens stay valid across restarts.</p>
+<hr />
+<h3 id="running-as-a-service">Running as a service</h3>
+<p>Both <code>agents-server</code> and <code>agents-exe serve</code> are already service-ready: every
+path either needs is a flag, they log JSON lines on stderr (see
+<a href="#logs">Logs</a> below), <code>SIGTERM</code>/<code>SIGINT</code> trigger the graceful shutdown
+described above (<code>--shutdown-grace</code> bounds it), and <code>recoverOnStartup</code> runs
+before the first request is accepted. A <code>systemd</code> unit only needs to point
+one at the right files and restart it on crash.</p>
+<p>Create a user and directories for its state, put the agent files, API keys
+and token file somewhere readable, and write a unit. This one uses
+<code>agents-exe serve</code>, so agents-exe.cfg.json in <code>WorkingDirectory</code> can carry
+the agent files instead of repeating <code>--agent-file</code>; <code>agents-server</code> works
+the same way with <code>ExecStart=/usr/local/bin/agents-server</code> and the agent
+files always on the command line:</p>
+<pre><code class="language-ini"># /etc/systemd/system/agents-server.service
+[Unit]
+Description=agents-server
+After=network.target
+
+[Service]
+Type=simple
+User=agents-server
+Group=agents-server
+ExecStart=/usr/local/bin/agents-exe serve \
+    --agent-file /etc/agents-server/weather.json \
+    --api-keys /etc/agents-server/keys.json \
+    --db /var/lib/agents-server/agents.db \
+    --bind 127.0.0.1 \
+    --port 8080 \
+    --auth-tokens /etc/agents-server/tokens.json \
+    --shutdown-grace 10
+Restart=on-failure
+RestartSec=2
+# The database directory must exist and be writable before the first start.
+StateDirectory=agents-server
+WorkingDirectory=/var/lib/agents-server
+
+[Install]
+WantedBy=multi-user.target
+</code></pre>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> systemctl daemon-reload</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> systemctl enable <span class="at">--now</span> agents-server</span></code></pre></div></div><ul>
+<li><code>--bind 127.0.0.1</code> keeps the service off the network; put a reverse proxy
+(for TLS, or to publish it beyond this machine) in front of it, or add
+<code>--cors-origin</code> if a browser page on another origin on this machine needs
+to reach it directly (see <a href="#authentication">Authentication</a>).
+</li>
+<li><code>--auth-tokens</code> is strongly recommended for anything not strictly
+loopback-only: see the warning at the top of this document.
+</li>
+<li>The server writes one JSON object per line to stderr, with no other output
+on stdout; under <code>systemd</code> that means <code>journalctl -u agents-server -f</code>
+shows the log stream directly, one JSON line per entry, without extra
+timestamps or framing getting in the way of <code>jq</code>. <code>journalctl -u agents-server -o cat | jq .</code> is a convenient way to filter it.
+</li>
+<li>On <code>sudo systemctl stop agents-server</code> (or a redeploy), <code>systemd</code> sends
+<code>SIGTERM</code>: the server stops accepting new connections, ends event streams,
+answers waiting requests with their current state, and gives other open
+requests up to <code>--shutdown-grace</code> seconds before it cancels active runs
+(storing their sessions) and exits. Set <code>TimeoutStopSec</code> in the unit at
+least a few seconds above <code>--shutdown-grace</code>, or <code>systemd</code> may <code>SIGKILL</code>
+the process before the grace period elapses.
+</li>
+<li><code>Restart=on-failure</code> restarts the service if it exits non-zero (for
+example, a database it cannot open); it does not restart on a clean
+<code>systemctl stop</code>. <code>recoverOnStartup</code> then picks up sessions a crash left
+<code>running</code>, as described above.
+</li>
+</ul>
+<hr />
+<h3 id="logs">Logs</h3>
+<p>The server writes one JSON object per line on stderr, with <code>ts</code>, <code>kind</code>,
+and, when known, <code>session_id</code>:</p>
+<table>
+<tr><th><code>kind</code></th><th>Fields</th></tr>
+<tr><td><code>server.started</code></td><td><code>bind</code>, <code>port</code>, <code>agents</code>, <code>admin_owners</code>, <code>database</code>, <code>authentication</code> (<code>bearer</code> or <code>none</code>), <code>ui</code>, and <code>warning</code> when authentication is off</td></tr>
+<tr><td><code>http.request</code></td><td><code>method</code>, <code>path</code>, <code>status</code>, <code>ms</code> (when the response starts)</td></tr>
+<tr><td><code>run.started</code>, <code>session.updated</code>, <code>calls.deferred</code>, <code>run.stopped</code>, <code>session.failed</code>, <code>tool.started</code>, <code>tool.completed</code>, <code>tool.progressed</code>, <code>subcall.started</code>, <code>subcall.completed</code>, <code>subcall.failed</code>, <code>session.created</code>, <code>session.deleted</code>, <code>hook.failed</code></td><td><code>session_id</code></td></tr>
+<tr><td><code>llm.request</code> / <code>llm.response</code></td><td><code>bytes</code>, token counts</td></tr>
+<tr><td><code>llm.http</code></td><td><code>method</code>, <code>host</code>, <code>path</code>, <code>status</code></td></tr>
+<tr><td><code>sessions.recovered</code></td><td><code>session_ids</code></td></tr>
+<tr><td><code>agents.stored_skipped</code></td><td><code>slug</code>, <code>reason</code>: a stored agent hidden by an agent file</td></tr>
+<tr><td><code>agent_tree</code>, <code>tool</code>, <code>tool.portal</code></td><td><code>event</code>: what the agent loader and the tools reported</td></tr>
+<tr><td><code>llm.backoff</code></td><td><code>attempt</code>, <code>delay_seconds</code></td></tr>
+<tr><td><code>server.signal</code>, <code>server.stopping</code>, <code>server.stopped</code>, <code>server.failed</code></td><td></td></tr>
+</table>
+<p>Prompts, LLM payloads, HTTP headers, and API keys are never logged.</p>
+<hr />
+<h3 id="embedding-the-runner-in-your-own-program">Embedding the runner in your own program</h3>
+<p>The server is a thin layer over two library modules, which a Haskell
+program can use directly:</p>
+<ul>
+<li><code>System.Agents.Host.withHost</code> loads agent files and opens the database.
+</li>
+<li><code>System.Agents.Host.Runner</code> provides <code>createSession</code>, <code>postMessage</code>,
+<code>resume</code>, <code>completeCall</code>, <code>cancelRun</code>, <code>awaitRun</code>, <code>deleteSession</code>, and
+<code>subscribe</code> / <code>subscribeSTM</code> for events.
+</li>
+</ul>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">{-# LANGUAGE OverloadedRecordDot #-}</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">{-# LANGUAGE OverloadedStrings #-}</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">Prod.Tracer</span> (silent)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Host</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Host.Runner</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.SessionStore</span> (<span class="dt">SessionMeta</span> (<span class="op">..</span>))</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ot">main ::</span> <span class="dt">IO</span> ()</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>main <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> cfg <span class="ot">=</span> defaultHostConfig [<span class="st">&quot;weather.json&quot;</span>] <span class="st">&quot;keys.json&quot;</span> <span class="st">&quot;agents.db&quot;</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    withHost cfg silent <span class="op">$</span> <span class="op">\</span>host <span class="ot">-&gt;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        withSessionRunner host <span class="op">$</span> <span class="op">\</span>runner <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>            <span class="dt">Right</span> meta <span class="ot">&lt;-</span> createSession runner <span class="st">&quot;weather&quot;</span> (<span class="dt">NewMessage</span> <span class="st">&quot;Weather in Paris?&quot;</span> []) (<span class="dt">Just</span> <span class="dt">UntilBlocked</span>)</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>            <span class="dt">Right</span> (stopped, _) <span class="ot">&lt;-</span> awaitRun runner meta<span class="op">.</span>smSessionId <span class="dv">120</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>            <span class="fu">print</span> stopped<span class="op">.</span>smStatus</span></code></pre></div></div><p>The HTTP layer itself is in <code>examples/agents-server/src/AgentsServer/Api.hs</code>.</p>
+<h4 id="clients">Clients</h4>
+<p><code>System.Agents.Host.Client</code> (<code>todos/os-as-standalone-server.md</code> Phase 3a)
+gives the same operations as a <code>RunnerClient</code>: one <code>Command</code> in, one
+<code>Reply</code> (or a <code>RunnerError</code>) out, plus a live event feed, instead of a
+bag of separate <code>SessionRunner</code> functions. <code>System.Agents.Protocol</code> owns
+the <code>Command</code>/<code>Reply</code> sum types and their JSON, so a future HTTP or Unix
+socket client can speak the same wire shape <code>inProcessClient</code> already
+dispatches in-process:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">RunnerClient</span> <span class="ot">=</span> <span class="dt">RunnerClient</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> rcCommand   ::</span> <span class="dt">Command</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> <span class="dt">Reply</span>)</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> rcSubscribe ::</span> <span class="dt">SubscribeScope</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">EventSeq</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">ReplayUnavailable</span> <span class="dt">Subscription</span>)</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">inProcessClient ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">RunnerClient</span></span></code></pre></div></div><p>The <code>Maybe Text</code> is the client’s own identity (an owner, or <code>Nothing</code>),
+used for <code>CreateSession</code>, <code>SpawnSession</code>, <code>SendMail</code> and <code>ForkSession</code> –
+a <code>Command</code> never carries a caller-asserted owner of its own to trust.
+<code>System.Agents.Host.Client</code> also has a typed helper per operation
+(<code>createSession</code>, <code>postMessage</code>, <code>resumeSession</code>, <code>completeCall</code>,
+<code>cancelRun</code>, <code>cancelAttachedCalls</code>, <code>pauseSession</code>, <code>sendMail</code>, <code>listMail</code>,
+<code>forkSession</code>, <code>listSessions</code>, <code>getSession</code>, <code>listAgents</code>, <code>getAgent</code>,
+<code>deleteSession</code>, <code>awaitRun</code>, <code>stats</code>, <code>subscribeAll</code>) that builds the
+<code>Command</code> and unwraps the expected <code>Reply</code>, failing with <code>UnexpectedReply</code>
+(code <code>unexpected_reply</code>) on a mismatch – which only a bug in a
+<code>RunnerClient</code> implementation can provoke, <code>inProcessClient</code>’s dispatch
+being total over every <code>Command</code> constructor:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Host.Client</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">main ::</span> <span class="dt">IO</span> ()</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>main <span class="ot">=</span> withHost cfg silent <span class="op">$</span> <span class="op">\</span>host <span class="ot">-&gt;</span> withSessionRunner host <span class="op">$</span> <span class="op">\</span>runner <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> client <span class="ot">=</span> inProcessClient <span class="dt">Nothing</span> runner</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> meta <span class="ot">&lt;-</span> createSession client <span class="st">&quot;weather&quot;</span> (<span class="dt">Just</span> (<span class="dt">NewMessage</span> <span class="st">&quot;Weather in Paris?&quot;</span> [] <span class="dt">False</span>)) (<span class="dt">Just</span> <span class="dt">UntilBlocked</span>) <span class="fu">mempty</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> (stopped, _) <span class="ot">&lt;-</span> awaitRun client meta<span class="op">.</span>smSessionId <span class="dv">120</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">print</span> stopped<span class="op">.</span>smStatus</span></code></pre></div></div><p><code>System.Agents.Host.Client.Http.httpClient</code> is the second implementation:
+the same <code>RunnerClient</code> over this server’s HTTP API, so the program above
+runs unchanged against a server started elsewhere:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Host.Client.Http</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">main ::</span> <span class="dt">IO</span> ()</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>main <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    endpoint <span class="ot">&lt;-</span> <span class="fu">either</span> <span class="fu">fail</span> <span class="fu">pure</span> (parseEndpoint <span class="st">&quot;http://127.0.0.1:8080&quot;</span>)  <span class="co">-- or &quot;unix:///run/agents.sock&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    client <span class="ot">&lt;-</span> httpClient (defaultHttpClientConfig endpoint){hccToken <span class="ot">=</span> <span class="dt">Just</span> <span class="st">&quot;alice-token&quot;</span>}</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> meta <span class="ot">&lt;-</span> createSession client <span class="st">&quot;weather&quot;</span> (<span class="dt">Just</span> (<span class="dt">NewMessage</span> <span class="st">&quot;Weather in Paris?&quot;</span> [] <span class="dt">False</span>)) (<span class="dt">Just</span> <span class="dt">UntilBlocked</span>) <span class="fu">mempty</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Right</span> (stopped, _) <span class="ot">&lt;-</span> awaitRun client meta<span class="op">.</span>smSessionId <span class="dv">120</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">print</span> stopped<span class="op">.</span>smStatus</span></code></pre></div></div><p>Each <code>Command</code> maps onto one route of the table above (<code>SpawnSession</code> and
+<code>createSessionAsChild</code> onto <code>POST /v1/sessions</code> with <code>parent</code>, <code>AwaitRun</code>
+onto <code>GET /v1/sessions/:id?wait=true</code>, <code>Stats</code> onto <code>/healthz</code>,
+<code>ListSessions</code> onto as many <code>GET /v1/sessions</code> pages as its <code>limit</code> needs).
+An error answer decodes into the <code>RunnerError</code> its code names, with the
+session, token, agent or turn the command named put back; one that is not
+a runner error (<code>unauthorized</code>, <code>bad_request</code>, …), a connection failure,
+or an undecodable answer is <code>TransportError</code> (code <code>transport_error</code>).
+<code>rcSubscribe</code> follows <code>GET /v1/events</code> (or one session’s stream), answers
+<code>ReplayUnavailable</code> from the <code>Agents-Replay</code> header exactly when the
+in-process runner would, and reconnects a dropped or stalled stream on its
+own with <code>Last-Event-ID</code>, never delivering an event twice. <code>AllSessions</code>
+falls back to <code>scope=owner</code> when the server refuses <code>scope=all</code> (a
+non-admin token). The token goes in <code>Authorization</code> on commands and in
+<code>?access_token=</code> on streams.</p>
+<h3 id="not-yet-supported">Not yet supported</h3>
+<ul>
+<li>Per-owner API keys: all owners share the server’s keys.
+</li>
+<li>Coordinating runs between several servers sharing a Postgres database.
+</li>
+</ul>
+<p>See <code>todos/web-server-embedding.md</code> for the design and the planned work.</p>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>
