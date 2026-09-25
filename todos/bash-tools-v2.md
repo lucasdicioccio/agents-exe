@@ -37,12 +37,13 @@ protocol change is small, and this document is mostly the protocol.
 
 A v2 tool adds `"protocol": 2` to its `describe` output. Everything v1
 defines keeps its meaning (`slug`, `description`, `args`, `empty-result`).
-Three optional objects are new.
+Three optional objects and one flag (`check`, §1.5) are new.
 
 ```json
 {
   "protocol": 2,
   "slug": "log_watcher",
+  "check": true,
   "description": "Follows a log file and reports matching lines",
   "args": [ { "name": "path", "type": "string", "backing_type": "string",
               "arity": "single", "mode": "dashdashspace",
@@ -104,6 +105,16 @@ the process group).
 | `on_exit` | For a `service`: `report` (default: the model is told, the handle becomes final), `restart` (bring it back, bounded by a small backoff; every restart is an event), `fail` (the call that started it fails if it has not completed yet). |
 | `cancel` | The signal sent first on cancel/stop: `SIGTERM` (default), `SIGINT`, or a JSON event `{"send": {...}}` written to stdin before the signal, for tools that prefer a polite request. |
 
+### 1.3 `commands` and `help`: several actions in one binary (from #539)
+
+Out of scope of the process story but part of the same `describe` bump:
+`"commands": [ {"name", "description", "args"} ]` lets one binary expose
+several tools (`slug.name` each), and `help` (`./tool help [command]`)
+gives the runtime a longer text to disclose on demand rather than in every
+system prompt. A `setup` step (`./tool setup`) that provisions the tool's
+own dependencies is left for a later spec: it is an operator concern, not a
+runtime one.
+
 ### 1.4 `sandbox`: what the process may touch, without images
 
 A small declaration, no more: `fs.read` and `fs.write` are lists of paths
@@ -149,15 +160,69 @@ operator configured a mechanism; otherwise the tool loads with a
 `LoadingError` naming the field, the same way a `with` binding that names
 an undeclared parameter does today.
 
-### 1.3 `commands` and `help`: several actions in one binary (from #539)
+### 1.5 Health: a real probe, and ordered backends per capability
 
-Out of scope of the process story but part of the same `describe` bump:
-`"commands": [ {"name", "description", "args"} ]` lets one binary expose
-several tools (`slug.name` each), and `help` (`./tool help [command]`)
-gives the runtime a longer text to disclose on demand rather than in every
-system prompt. A `setup` step (`./tool setup`) that provisions the tool's
-own dependencies is left for a later spec: it is an operator concern, not a
-runtime one.
+The pattern comes from Agent-Reach (a "capability layer" that selects and
+health-checks the upstream tools an agent uses, MIT): the same capability
+can be served by several tools, and whether one *works here, now* is found
+by running a cheap command, never by looking the binary up on `PATH` (a
+stale shim passes `which` and cannot execute).
+
+**`check`, a third verb.** A v2 tool may say `"check": true` in `describe`
+and then answers `./tool check`: a cheap, **read-only** self-test (no
+writes, no login, no remote mutation, no long-lived process; a `service`
+is not started) that prints one JSON document and exits 0 when the tool is
+usable:
+
+```json
+{ "ok": false, "detail": "jina reader answered 429", "fix": "set JINA_API_KEY in the envdir" }
+```
+
+`detail` and `fix` are for the operator, `fix` is a prescription. The
+runtime runs `check` exactly as it would run the tool (same `runtime`:
+`run_as`, `sandbox`, `envdir`, timeouts), so a probe that passes proves the
+sandbox and the user work too. A tool that cannot be checked without side
+effects omits `check`; it is then `unverified` (it loaded and `describe`
+answered, nothing more) and is never reported `ok`.
+
+**A capability is an ordered list of backends.** The model sees one tool,
+`web_read`; the agent configuration says which tool binaries can serve it,
+preferred first:
+
+```json
+{ "capability": "web_read", "backends": ["tools/web/read-jina", "tools/web/read-curl"] }
+```
+
+All backends of a capability must declare the same `args` (checked at load,
+a `LoadingError` otherwise) so the model's schema does not depend on which
+one is active. Switching backends is reordering the list, or an operator
+override `--backend web_read=read-curl` that moves the named backend first
+(an unknown name is ignored, so a stale override never hides a working
+backend). The **active backend** is the first one whose probe is `ok`,
+else the first `unverified` one, else none (the capability fails to load
+when required, is omitted with a warning otherwise). Every tool result
+carries the backend that served it, so the model can say what it used.
+
+**A failed call does not silently retry the next backend.** The model sees
+the failure and which backend produced it; automatic fallback is left out of
+the first slice (open question).
+
+**`agents-exe check --probe [--json]`** runs every probe and reports, per
+capability, the active backend and every candidate:
+
+```json
+{ "capability": "web_read", "active": "read-jina",
+  "backends": [ { "name": "read-jina", "status": "ok", "ms": 310 },
+                { "name": "read-curl", "status": "unverified" } ] }
+```
+
+`status` is `ok`, `failed` (with `detail` and `fix`), `unverified` or
+`skipped` (a sandbox mechanism that cannot enforce a declared field, §1.4).
+Plain `check` keeps its meaning (configuration loads: exit 0 / 1); with
+`--probe` it exits 2 when the configuration loads but a required capability
+has no active backend. Do not confuse it with `ready` (§1.1): `ready` says a
+process that was started is up, `check` says a tool could work before
+anything is started.
 
 ## 2. The runtime side
 
@@ -275,7 +340,9 @@ process modes because a low-privilege `oneshot` tool is valuable alone;
 entity, mail delivery and `digest`, the typed `T.send` companions, the
 shared `processes` capability, and the `runtime` fields only a service
 uses (`timeout.idle`, `on_exit`). #539's `commands`/`help` are a fifth,
-independent slice.
+independent slice, and (§1.5) the `check` verb with `check --probe --json`
+is a sixth, small one that lands with (1); capabilities with ordered
+backends and the `--backend` override are a seventh, depending on it.
 
 D3. **Not durable across an agents-exe restart.** A service is lost with the
 process that started it and reported as such; supervising long-lived
@@ -308,6 +375,13 @@ bubblewrap or Landlock, chosen by the operator; agents-exe never builds,
 pulls or names an image. It composes with `run_as`, refuses rather than
 weakens, and is probed by `check`.
 
+D9. **Probe, don't look up.** Whether a tool works is found by running it
+(`check`, under its real `runtime`), read-only, reported as `ok`, `failed`,
+`unverified` or `skipped`; a tool that cannot be probed safely is
+`unverified`, never `ok`. Backends are an ordered list per capability, the
+first `ok` one is active, and the tool result names the backend used.
+Pattern from Agent-Reach (§1.5).
+
 ## Resolved in review (2026-09-25, PR #574 comments)
 
 * `send`: one tool per process family with a handle and a typed event; a
@@ -322,7 +396,20 @@ weakens, and is probed by `check`.
 * The generated `T.send` companion is optional per agent: an agent
   configuration may omit it for a service the model may start but never talk
   to, which saves the tool's tokens (owner's answer, 2026-09-25; D6).
-
-## Open questions
 * Isolation backend: bubblewrap and Landlock, no images; whoever wants podman
   calls it from the tool's own script (§1.4, D8).
+* Health: adopt Agent-Reach's doctor pattern (ordered backends, a real probe,
+  `--json`), but not Agent-Reach itself, which is deferred as heavy
+  (owner, 2026-09-25; §1.5, D9).
+
+## Open questions
+
+* Where is a capability's backend list declared: in the agent configuration
+  (as sketched), or in a manifest next to the tool directories so several
+  agents share it?
+* When are probes run and how long are they cached: once at load, lazily on
+  the first call, or with a TTL? A probe that costs a network call should
+  not run on every session start.
+* Automatic fallback to the next backend on a failed call: worth it for
+  transient failures if the tool declares which exit codes mean "try
+  another" (`fallback_on`), or is the model seeing the failure enough?
