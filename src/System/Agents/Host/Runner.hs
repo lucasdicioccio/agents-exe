@@ -98,6 +98,8 @@ import Control.Exception (Exception, SomeAsyncException, SomeException, bracket,
 import Control.Monad (filterM, forM, forM_, forever, unless, void, when)
 import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=))
+import Control.Applicative ((<|>))
+import Data.Dynamic (fromDynamic)
 import Data.Foldable (for_, toList)
 import Data.List (nub)
 import Data.Map.Strict (Map)
@@ -114,6 +116,8 @@ import System.Timeout (timeout)
 
 import System.Agents.AgentFactory (AgentDeps (..), AgentRole (..), buildAgent)
 import System.Agents.AgentTree (OSAgentNode (..))
+import qualified System.Agents.Tools.Bindings as Bindings
+import System.Agents.Tools.Bindings.Types (Binding (..), BindingValue (..), ScopedBinding (..), WhenUnbound (..))
 import qualified System.Agents.Base as Base
 import System.Agents.AgentStore (StoredAgent (..))
 import System.Agents.Host
@@ -238,6 +242,12 @@ data LiveSession = LiveSession
     -}
     , lsParamsHydrated :: TVar Bool
     -- ^ Whether 'hydrateParams' has run for this 'LiveSession'.
+    , lsNarrowed :: TVar Bool
+    {- ^ Whether 'lsAgent' is a narrowed helper (bindings or @with@ from a
+    @prompt_agent_*@ call, 'serverRunSubagent'). The narrowing lives only in
+    that agent, so an eviction, which would rebuild the agent from the
+    session's slug alone, is refused while this is set.
+    -}
     }
 
 -- | A versioned write lost to a writer outside this runner.
@@ -325,6 +335,7 @@ getLive runner sid = do
             <*> newTVarIO False
             <*> newTVarIO Map.empty
             <*> newTVarIO False
+            <*> newTVarIO False
 
 lookupLive :: SessionRunner -> SessionId -> IO (Maybe LiveSession)
 lookupLive runner sid = Map.lookup sid <$> readTVarIO runner.srLive
@@ -382,7 +393,8 @@ evictIdle runner = do
         let idle = diffUTCTime now touched > runner.srHost.hostLiveSessionTtl
             running = maybe False (hasRunningCalls . fst) latest
         evicted <- readTVarIO live.lsEvicted
-        when (idle && not running && not (isJust active) && not evicted) $ dropLive runner live
+        narrowed <- readTVarIO live.lsNarrowed
+        when (idle && not running && not (isJust active) && not evicted && not narrowed) $ dropLive runner live
   where
     hasRunningCalls :: Session -> Bool
     hasRunningCalls sess =
@@ -633,26 +645,49 @@ call, an already-real child session for a nested one), so lineage
 ('smParent') is correct at every depth.
 
 Reports the same failures an in-tool call would: an unknown helper, or the
-child's own run failing. A caller that has no such helper reachable (e.g.
-this call actually needs 'bindings'\/'with'\/'as' narrowing, which this path
-does not support -- see 'System.Agents.AgentTree.OneShotTool') is never
-offered this hook for that specific call in the first place; 'OneShotTool'
-falls back to running it in-tool.
+child's own run failing. The helper is the node the calling tool passed in
+'snNode' (so a helper wired into the tool but not declared under the root
+also runs as a session), else the one found by slug in the root's tree.
+
+A call's narrowing is applied the way the in-tool path applies it: bindings
+addressed at the helper wrap a copy of its tools, @with@ values join its
+parameters, and deeper bindings become its 'ctxInheritedBindings'. That
+agent is pinned to the session ('lsNarrowed'): it is never evicted, since a
+rebuild from the slug would drop the narrowing. After a process restart the
+narrowing is gone (only non-secret values could be persisted, and bindings
+may be secret), so a narrowed child resumed later runs un-narrowed.
 -}
-serverRunSubagent :: SessionRunner -> OSAgentNode -> SessionId -> Text -> Text -> IO (Either Text (SessionId, IO (Either Text Text)))
-serverRunSubagent runner rootNode parentSid slug prompt =
-    case findHelperNode rootNode slug of
+serverRunSubagent :: SessionRunner -> OSAgentNode -> SessionId -> Text -> SubagentNarrowing -> Text -> IO (Either Text (SessionId, IO (Either Text Text)))
+serverRunSubagent runner rootNode parentSid slug narrowing prompt =
+    case (narrowing.snNode >>= fromDynamic) <|> findHelperNode rootNode slug of
         Nothing -> pure $ Left ("no such helper: " <> slug)
-        Just node -> do
+        Just declared -> do
             mParent <- runner.srHost.hostBackend.sbLoadMeta parentSid
             let mOwner = mParent >>= (.smOwner) . snd
+                narrowed = not (null narrowing.snHere && null narrowing.snRest && Map.null narrowing.snWith)
+            -- Bindings addressed at the helper wrap its tools for this session
+            -- only; the shared, loaded toolboxes are never mutated.
+            node <-
+                if null narrowing.snHere
+                    then pure declared
+                    else do
+                        rawTools <- readTVarIO declared.osNodeTools
+                        let toolBindings = [Binding (sbTool sb) (sbArg sb) (Literal (sbValue sb)) Omit | sb <- narrowing.snHere]
+                        wrapped <- newTVarIO (map (Bindings.applyBindings toolBindings) rawTools)
+                        pure declared{osNodeTools = wrapped}
+            let adjust agent =
+                    agent
+                        { ctxParams = Map.union narrowing.snWith agent.ctxParams
+                        , ctxInheritedBindings = narrowing.snRest
+                        }
             result <-
-                createSessionForNode
+                createSessionForNodeWith
                     runner
                     (Just parentSid)
                     mOwner
                     slug
                     node
+                    (if narrowed then Just adjust else Nothing)
                     (Just (NewMessage prompt [] False))
                     (Just UntilBlocked)
                     Map.empty
@@ -1288,10 +1323,23 @@ it wants to run in hand, and must not go through 'lookupAgent', which only
 knows about root-registered agents, not a caller's own declared helpers.
 -}
 createSessionForNode :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> OSAgentNode -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
-createSessionForNode runner parent owner slug node message mode supplied = do
+createSessionForNode runner parent owner slug node = createSessionForNodeWith runner parent owner slug node Nothing
+
+{- | 'createSessionForNode' for a narrowed helper: the built agent is passed
+through the given adjustment (its parameter overlay and inherited bindings)
+and kept as the session's agent, which then may not be evicted
+('lsNarrowed').
+-}
+createSessionForNodeWith :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> OSAgentNode -> Maybe (RunnerAgent -> RunnerAgent) -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+createSessionForNodeWith runner parent owner slug node adjust message mode supplied = do
     sid <- newSessionId
-    withLive runner sid $ \live ->
-        prepareParams runner live node supplied >>= \case
+    withLive runner sid $ \live -> do
+      for_ adjust $ \f -> do
+        built <- newAgent runner live node
+        atomically $ do
+            writeTVar live.lsAgent (Just (f built))
+            writeTVar live.lsNarrowed True
+      prepareParams runner live node supplied >>= \case
             Left err -> pure (Left err)
             Right overlay -> do
                 now <- getCurrentTime

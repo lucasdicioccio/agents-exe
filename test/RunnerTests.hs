@@ -120,6 +120,7 @@ tests =
         , testCase "a sub-agent call reports subcall.started and subcall.completed on the parent's stream" subcallEventsTest
         , testCase "a sub-agent call to a declared helper runs it as a real session (smParent, tool result)" subcallAsSessionTest
         , testCase "cancelling the parent's run cancels the child session it started" subcallCancelChildTest
+        , testCase "a narrowed sub-agent call ('with') runs as a real session and binds the value" subcallNarrowedAsSessionTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
         , testCase "unwatch-session stops forwarding" unwatchSessionTest
@@ -1610,6 +1611,47 @@ subcallAsSessionTest = do
             other -> assertFailure ("expected an LLM turn over a user turn, got " <> show other)
   where
     childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+
+{- | A @prompt_agent_child@ call carrying @with@ (narrowing) used to fall back
+to running in-tool, with no child session. The child here requires a
+@tenant@ parameter that only the call's @with@ supplies: the call succeeds
+only if the runner built the child's agent with the value, and the child is
+a real session with 'smParent' set.
+-}
+subcallNarrowedAsSessionTest :: Assertion
+subcallNarrowedAsSessionTest = do
+    child <-
+        testNode
+            "{\"slug\": \"child\", \"parameters\": [{\"name\": \"tenant\", \"scope\": \"session\", \"required\": true}]}"
+    parent0 <-
+        testNode
+            "{\"slug\": \"parent\", \"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}}"
+    let parent = parent0{osNodeChildren = [child]}
+    host <-
+        testHost [parent] $ \node c ->
+            if Base.slug node.osNodeConfig == "child"
+                then mockCompletion c
+                else firstThen [childCall] c
+    agentId <- AgentId <$> nextRandom
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child "parent" agentId Nothing True]
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "parent" (message "delegate") Nothing
+        let sid = meta.smSessionId
+        _ <- expectRight =<< resume runner sid UntilBlocked Map.empty
+        (final, _) <- expectRight =<< awaitRun runner sid 5
+        final.smStatus @?= StatusIdle
+        children <- listSessions runner allSessionsQuery{sqParent = Just sid}
+        case children of
+            [childMeta] -> childMeta.smParent @?= Just sid
+            other -> assertFailure ("expected exactly one child session, got " <> show other)
+        Just (parentSess, _) <- getSession runner sid
+        case parentSess.turns of
+            (_ : UserTurn content _ : _) -> case map snd content.userToolResponses of
+                [TextResponse resp] -> assertBool ("tool result is the child's own answer, got " <> show resp) ("done" `Text.isInfixOf` resp)
+                other -> assertFailure ("expected one text tool response, got " <> show other)
+            other -> assertFailure ("expected an LLM turn over a user turn, got " <> show other)
+  where
+    childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\", \"with\": {\"tenant\": {\"tag\": \"Literal\", \"contents\": \"acme\"}}}"
 
 {- | Phase 5 (@todos/os-as-standalone-server.md@ G10): cancelling the
 parent's run cancels the child session it started -- the same 'cancelRun'

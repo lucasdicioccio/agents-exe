@@ -563,7 +563,12 @@ why it is last.
 
 ## Remaining after Phase 5
 
-* G10 residue: narrowed or undeclared `prompt_agent_*` calls run in-tool.
+* G10 residue: done. Narrowed (`bindings`, `with`, `as`, own or inherited) and
+  undeclared-helper `prompt_agent_*` calls now run as runner sessions: the hook
+  gets a `SubagentNarrowing` and the tool's own node (as a `Dynamic`, which
+  avoids the module cycle). A narrowed child is pinned live (never evicted);
+  the narrowing is not persisted, so after a restart a resumed narrowed child
+  runs un-narrowed (bindings may be secret).
 * `mailInToolResult`: partial-turn placeholders lack the round's mail.
 * G11: secret params, watches and the run handle are volatile (D7 stands);
   since 2026-09-25 `recoverOnStartup` fails the running calls of a session

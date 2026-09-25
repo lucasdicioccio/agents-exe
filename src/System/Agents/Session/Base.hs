@@ -195,6 +195,8 @@ module System.Agents.Session.Base (
     withEmit,
     SpawnSession,
     RunSubagent,
+    SubagentNarrowing (..),
+    noNarrowing,
 ) where
 
 import System.Agents.Base (ConversationId)
@@ -209,6 +211,8 @@ import System.Agents.Session.Mailbox (
     MailRouter (..),
     SpawnSession,
     RunSubagent,
+    SubagentNarrowing (..),
+    noNarrowing,
     UnwatchSession,
     WatchRequest (..),
     WatchSession,

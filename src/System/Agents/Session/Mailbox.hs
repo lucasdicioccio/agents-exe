@@ -29,6 +29,8 @@ module System.Agents.Session.Mailbox (
     newMailRouter,
     SpawnSession,
     RunSubagent,
+    SubagentNarrowing (..),
+    noNarrowing,
     WatchRequest (..),
     WatchSession,
     UnwatchSession,
@@ -39,10 +41,14 @@ import Control.Monad (when)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, retry, writeTVar)
 import qualified Data.Foldable as Foldable
 import qualified Data.Map.Strict as Map
+import Data.Dynamic (Dynamic)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import Data.Time (getCurrentTime)
+
+import System.Agents.Tools.Bindings.Types (ScopedBinding)
+import System.Agents.Tools.Params.Types (ParamName, ParamValue)
 
 import System.Agents.Session.Types (
     Cursor,
@@ -306,13 +312,37 @@ paired with an action that waits for the child's run to stop and reports
 its final text, exactly as an in-tool call would, and cancels the child
 (the runner's own @cancelRun@) if interrupted while waiting.
 
-Only installed for a helper reachable from the calling agent's own
-declared tree with no per-call narrowing ('bindings'\/'with'\/'as'):
-'System.Agents.AgentTree.OneShotTool' falls back to in-tool execution
-otherwise, since reproducing a narrowed node through a fresh session build
-is not yet supported.
+A call's narrowing ('bindings'\/'with'\/'as', own or inherited) travels in
+the 'SubagentNarrowing'; the runner builds the child's agent with it.
+'System.Agents.AgentTree.OneShotTool' still falls back to in-tool execution
+when the hook is absent or cannot resolve the helper.
 -}
-type RunSubagent = SessionId -> Text -> Text -> IO (Either Text (SessionId, IO (Either Text Text)))
+type RunSubagent = SessionId -> Text -> SubagentNarrowing -> Text -> IO (Either Text (SessionId, IO (Either Text Text)))
+
+{- | What a @prompt_agent_*@ call adds to its helper, handed to 'RunSubagent'
+so the runner can build the child session's agent the way the in-tool path
+would: the resolved bindings and @with@ values of the call (never the
+caller's own secrets beyond what the call already resolved), and the exact
+node the tool closure holds.
+
+'snNode' is an opaque 'Dynamic' carrying the tool's @OSAgentNode@ (this
+module cannot name that type without a module cycle); the runner unwraps it
+and, failing that, resolves the helper by slug in its own tree.
+-}
+data SubagentNarrowing = SubagentNarrowing
+    { snNode :: Maybe Dynamic
+    -- ^ The helper's node as the calling tool sees it, if it can be passed.
+    , snHere :: [ScopedBinding]
+    -- ^ Bindings addressed at the helper itself: wrap its tools for this session.
+    , snRest :: [ScopedBinding]
+    -- ^ Bindings addressed below the helper: its own 'ctxInheritedBindings'.
+    , snWith :: Map.Map ParamName ParamValue
+    -- ^ Resolved @with@ values, overlaid on the helper's own parameters.
+    }
+
+-- | No narrowing at all: a plain declared helper.
+noNarrowing :: SubagentNarrowing
+noNarrowing = SubagentNarrowing Nothing [] [] Map.empty
 
 {- | A @watch-session@ request (@todos/session-mailbox.md@, Phase 6, §7): the
 target session, an optional filter on 'SessionEvent' kinds (as their
