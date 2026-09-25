@@ -370,7 +370,7 @@ A request whose `params` do not check out is refused before anything runs:
 | `422 unknown_params` | A name the agent does not declare. |
 | `403 forbidden_params` | A `process`-scope parameter, or one pinned with `--pin`/`--pin-json` at server start: only the operator may set it. |
 | `422 invalid_params` | A `secret` parameter's value was not given as a string. |
-| `422 params_required` | A required parameter has no value once this request's `params` are applied — process value or default, session value, and message value combined. |
+| `422 params_required` | A required parameter has no value once this request's `params` are applied — process value or default, session value, and message value combined. On a message or resume to an existing session (whose values lapsed, e.g. after a restart) the status is `409` instead: supply them with `PUT /v1/sessions/:id/params` or in the request's `params`. |
 
 `--set NAME=VALUE`, `--set-json NAME=JSON`, `--pin NAME=VALUE`, and
 `--pin-json NAME=JSON` on `agents-server` itself set process-scope values
@@ -565,7 +565,8 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `POST /v1/sessions/:id/pause` | | `200` session metadata | 404 |
 | `POST /v1/sessions/:id/mail` | `{body, priority?}` | `202` mail `Receipt`: `{id, seq, duplicate}` | 404, see [Mail](#mail) |
 | `GET /v1/sessions/:id/mail?unread=` | | `200 {mail: [Envelope]}` | 404 |
-| `POST /v1/sessions/:id/fork` | `{at_turn?, agent?}` | `201` new session, with a `Location` header | 404 `unknown_session` / `unknown_turn` / `unknown_agent` |
+| `POST /v1/sessions/:id/fork` | `{at_turn?, agent?, params?}` | `201` new session, with a `Location` header | 404 `unknown_session` / `unknown_turn` / `unknown_agent`, see [Parameters](#parameters) |
+| `PUT /v1/sessions/:id/params` | `{params}` | `200` session | 404, 409 `run_in_progress`, 422/403 as in [Parameters](#parameters); `message`-scope names are `422 invalid_params` |
 | `GET /v1/sessions/:id/pending` | | `200 {calls}` | 404 |
 | `GET /v1/sessions/:id/events?after=` | | `200 text/event-stream` | 404 |
 | `GET /v1/events?scope=&after=` | | `200 text/event-stream` | 403 `forbidden` (`scope=all` without authentication off or an admin owner) |
@@ -593,7 +594,7 @@ first** (`turns[0]` is the most recent turn): the fork keeps that turn and
 every older one, dropping anything newer. Absent, the whole session is
 copied. `agent` rebinds the fork to another agent's slug (also how to
 "continue with another agent": fork with no `at_turn`, or `at_turn: 0`, and
-an `agent`). The fork gets a fresh `session_id`, `forkedFromSessionId` set
+an `agent`). `params` on a fork are overlaid on the source's persisted, non-secret session values and validated like any request's; secrets are never inherited and have to be given again. `PUT /v1/sessions/:id/params` sets session-scope values (a `null` clears one) without starting a run, e.g. to rotate a credential or re-supply secrets after a restart. The fork gets a fresh `session_id`, `forkedFromSessionId` set
 to the source, the source's parent link and non-secret parameters, and
 `status` derived from the turns it kept -- never the source's own status,
 and it starts no run, so it never picks up a later change to the source.
