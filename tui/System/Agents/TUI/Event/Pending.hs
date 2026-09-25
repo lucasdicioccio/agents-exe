@@ -27,15 +27,18 @@ import Brick.Widgets.Edit (getEditContents)
 import Control.Lens (to, use, (.=), (^.))
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Text as Text
+import Control.Monad (forM_, when)
 
 import qualified Brick.Widgets.List as List
 import qualified System.Agents.Host.Client as Client
-import System.Agents.Session.Base (DeferredCallView (..), UserToolResponse (..))
+import System.Agents.Base (ConversationId)
+import System.Agents.Session.Base (ContinuationToken, DeferredCallView (..), UserToolResponse (..))
 import System.Agents.TUI.Event.Conversation (
     clearEditorAndAttachments,
     handleSendMessage,
     reportRunnerResult,
     readCore,
+    setConversationPending,
  )
 import System.Agents.TUI.Types (
     AppEvent (..),
@@ -48,6 +51,7 @@ import System.Agents.TUI.Types (
     conversationList,
     conversationName,
     coreClient,
+    coreConversations,
     coreParams,
     eventChan,
     failedCallText,
@@ -89,6 +93,18 @@ handleAnswerPending = do
                     tuiUI . answeringPendingCall .= Just (conv.conversationId, call)
                     showStatus StatusInfo $
                         "Answering " <> call.dcvToolName <> ": type the result, then send"
+
+{- | Forget a call the runner has just accepted a result for. The panel's list
+is otherwise only replaced by the next @calls.deferred@, which never comes
+while other calls are still pending (nothing can progress, so no run starts):
+without this the completed call would stay listed, and selected.
+-}
+dropPendingCall :: ConversationId -> ContinuationToken -> EventM N TuiState ()
+dropPendingCall convId token = do
+    core <- readCore
+    forM_ [c | c <- core ^. coreConversations, conversationId c == convId] $ \conv ->
+        setConversationPending convId (filter ((/= Just token) . dcvToken) conv.conversationPending)
+    tuiUI . selectedPendingToken .= Nothing
 
 {- | Move the Pending panel's selection to the next call that can be
 completed, wrapping around; answer-pending and fail-pending act on it.
@@ -139,7 +155,7 @@ handleFailPending = do
                                     True
                                     (core ^. coreParams)
                         tuiUI . answeringPendingCall .= Nothing
-                        tuiUI . selectedPendingToken .= Nothing
+                        when (either (const False) (const True) result) $ dropPendingCall conv.conversationId token
                         clearEditorAndAttachments conv
                         reportRunnerResult ("Failed " <> call.dcvToolName <> " for " <> conversationName conv) result
 
@@ -169,6 +185,7 @@ handleSendOrAnswer = do
                             True
                             (core ^. coreParams)
                 tuiUI . answeringPendingCall .= Nothing
+                when (either (const False) (const True) result) $ dropPendingCall convId token
                 mConv <- getFocusedConversation
                 mapM_ clearEditorAndAttachments mConv
                 reportRunnerResult ("Answered " <> call.dcvToolName <> " for " <> convName convId mConv) result
