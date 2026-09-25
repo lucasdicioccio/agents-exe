@@ -565,7 +565,9 @@ why it is last.
 
 * G10 residue: narrowed or undeclared `prompt_agent_*` calls run in-tool.
 * `mailInToolResult`: partial-turn placeholders lack the round's mail.
-* G11: secret params, watches and the run handle are volatile (D7 stands).
+* G11: secret params, watches and the run handle are volatile (D7 stands);
+  since 2026-09-25 `recoverOnStartup` fails the running calls of a session
+  whose required params were lost, with a `params_required` detail.
 * TUI: no selection among several pending calls; no view for `hook.failed`.
 * Service packaging: docs only, no unit file shipped, no `bundling/` entry.
 * `checks/` fake endpoint cannot script multi-turn answers, so sub-agent

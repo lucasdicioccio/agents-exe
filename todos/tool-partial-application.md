@@ -28,9 +28,11 @@ document's request/response schemas (`AgentsServer/Types.hs`/`Routes.hs`
 are a separate hand-maintained layer used only for `/openapi.json` and
 were not updated with the new fields — the real handlers in `Api.hs` are
 fully wired and correct; this is a documentation-only gap).
-`recoverOnStartup` also does not yet mark a running call as failed when
-it needed a secret parameter that a restart lost (§5's documented
-recovery behaviour).
+`recoverOnStartup` marks the running calls of a session whose required
+parameters are no longer bound as failed with a `params_required` message
+(§5's documented recovery behaviour; done 2026-09-25, which also made the
+persisted non-secret session values seed the live session back after a
+restart or an eviction, as §5 always said they would).
 
 Phase 5 (sub-agents and MCP over HTTP) done, checked live with `agents-exe
 check` against fixture agents and with an `agents-server` integration

@@ -227,11 +227,15 @@ data LiveSession = LiveSession
     , lsLastTouched :: TVar UTCTime
     , lsEvicted :: TVar Bool
     , lsParams :: TVar Params
-    {- ^ Session-scope parameter values, secret and non-secret, kept only in
-    this process's memory. Lost on restart or eviction; a client must
-    resupply them, or the next run that needs one fails with
+    {- ^ Session-scope parameter values, secret and non-secret, kept in this
+    process's memory. The non-secret ones are also persisted
+    ('SessionMeta.smParams') and seeded back by 'hydrateParams' after a
+    restart or an eviction; the secret ones are lost then, and a client
+    must resupply them, or the next run that needs one fails with
     'MissingRequiredParams' (@todos/tool-partial-application.md@, Phase 4).
     -}
+    , lsParamsHydrated :: TVar Bool
+    -- ^ Whether 'hydrateParams' has run for this 'LiveSession'.
     }
 
 -- | A versioned write lost to a writer outside this runner.
@@ -318,6 +322,7 @@ getLive runner sid = do
             <*> newTVarIO now
             <*> newTVarIO False
             <*> newTVarIO Map.empty
+            <*> newTVarIO False
 
 lookupLive :: SessionRunner -> SessionId -> IO (Maybe LiveSession)
 lookupLive runner sid = Map.lookup sid <$> readTVarIO runner.srLive
@@ -336,8 +341,23 @@ withLive runner sid action = do
             else do
                 now <- getCurrentTime
                 atomically $ writeTVar live.lsLastTouched now
+                hydrateParams runner live
                 Just <$> action live
     maybe (withLive runner sid action) pure result
+
+{- | Once per 'LiveSession', under its lock: seed 'lsParams' with the
+session's persisted, non-secret session-scope values, so they survive a
+restart or an eviction as documented. Secret values are never persisted and
+stay lost. Values already set in memory win (a fresh session has none).
+-}
+hydrateParams :: SessionRunner -> LiveSession -> IO ()
+hydrateParams runner live = do
+    hydrated <- readTVarIO live.lsParamsHydrated
+    unless hydrated $ do
+        persisted <- maybe Map.empty ((.smParams) . snd) <$> runner.srHost.hostBackend.sbLoadMeta live.lsSessionId
+        atomically $ do
+            modifyTVar' live.lsParams (\m -> Map.union m (Map.map (\v -> ParamValue v False) persisted))
+            writeTVar live.lsParamsHydrated True
 
 -- | Forget a session's in-memory state (under its lock).
 dropLive :: SessionRunner -> LiveSession -> IO ()
@@ -980,11 +1000,27 @@ prepareParams runner live node supplied = do
 
 -- | Required parameters still unbound once 'prepareParams' overlay is merged in.
 missingRequiredParams :: OSAgentNode -> RunnerAgent -> Params -> [ParamName]
-missingRequiredParams node agent overlay =
-    [d.paramName | d <- decls, d.paramRequired, not (Map.member d.paramName resolved)]
-  where
-    decls = nodeParameterDecls node
-    resolved = Map.union overlay agent.ctxParams :: Params
+missingRequiredParams node agent overlay = unboundRequiredParams node (Map.union overlay agent.ctxParams)
+
+-- | Required parameters of an agent with no value among the given ones.
+unboundRequiredParams :: OSAgentNode -> Params -> [ParamName]
+unboundRequiredParams node bound =
+    [d.paramName | d <- nodeParameterDecls node, d.paramRequired, not (Map.member d.paramName bound)]
+
+{- | Required parameters of a session's agent with no value left after a
+restart: neither a process value or default ('osNodeParams'), nor a
+session value still in memory (the persisted, non-secret ones are seeded
+back by 'hydrateParams'; the secret ones are gone). Empty when the agent
+is unknown: the next run reports that instead.
+-}
+lostRequiredParams :: SessionRunner -> LiveSession -> SessionMeta -> IO [ParamName]
+lostRequiredParams runner live meta =
+    agentNodeFor runner meta >>= \case
+        Left _ -> pure []
+        Right node -> do
+            resolved <- readTVarIO node.osNodeParams
+            overlay <- readTVarIO live.lsParams
+            pure $ unboundRequiredParams node (Map.union overlay resolved)
 
 -------------------------------------------------------------------------------
 -- Runs
@@ -1882,8 +1918,14 @@ awaitRun runner sid limit = do
 
 {- | Mark sessions left running by a previous process as they are.
 
-Their interrupted step is lost; background calls they were running are
-resolved as orphaned on the next run. Nothing is resumed.
+Their interrupted step is lost. Background calls they were running are
+resolved as orphaned on the next run, except when the session's required
+parameters are no longer all bound (secret values live only in memory, so
+a restart loses them): those calls are failed right away with a
+@params_required@ message naming the parameters, and the session's status
+detail says the same, so a client resupplies them through @params@ on its
+next message or resume instead of retrying blind
+(@todos/tool-partial-application.md@ §5). Nothing is resumed.
 -}
 recoverOnStartup :: SessionRunner -> IO [SessionId]
 recoverOnStartup runner = do
@@ -1896,12 +1938,24 @@ recoverOnStartup runner = do
             else
                 loadLatest runner live >>= \case
                     Just (sess, meta) | meta.smStatus == StatusRunning -> do
-                        result <- store runner live meta sess (sessionStatusOf sess) Nothing
+                        lost <- lostRequiredParams runner live meta
+                        let (failedSess, failedIds) = failRunningCalls (TextResponse (lostParamsMessage lost)) sess
+                            (stored, detail)
+                                | null lost || null failedIds = (sess, Nothing)
+                                | otherwise = (failedSess, Just ("params_required: " <> Text.intercalate ", " lost))
+                        result <- store runner live meta stored (sessionStatusOf stored) detail
+                        for_ detail $ \_ ->
+                            runTracer runner.srHost.hostTracer $ HostRecoveredParamsRequired meta.smSessionId lost
                         pure $ either (const Nothing) (const (Just meta.smSessionId)) result
                     _ -> pure Nothing
     let sids = [sid | Just sid <- recovered]
     unless (null sids) $ runTracer runner.srHost.hostTracer $ HostRecoveredSessions sids
     pure sids
+  where
+    lostParamsMessage lost =
+        "tool call orphaned by a restart: its result is lost, and the session's required parameter(s) "
+            <> Text.intercalate ", " lost
+            <> " are no longer bound (secret values are never persisted). Supply them again in \"params\" with the next message or resume before retrying."
 
 {- | Delete a session with all its sub-sessions and their continuations.
 
