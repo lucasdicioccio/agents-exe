@@ -367,6 +367,19 @@ agents as individual tools. It works with Claude Desktop and other MCP clients.
 
 Tool names are deterministic across runs when using the same `--agent-file` arguments in the same order.
 
+## Website
+
+The site in [`website/`](website) is a [Kitchen-Sink](https://kitchensink-tech.github.io/)
+project, the same shape as tramaj's and salmon's: `website/src/` is the
+source, and the guides under `docs/`, the specs under `todos/` and the command
+reference above are mirrored into it by a script rather than copied by hand.
+To regenerate and preview it:
+
+```sh
+./website/scripts/sync-repo-docs.sh     # docs/, todos/ and the README's command reference -> website/src/*.cmark
+kitchen-sink serve --srcDir website/src --outDir website/www --servMode DEV --httpPort 7655
+```
+
 ## Using as a Library
 
 The code is designed to be usable as a Haskell library.

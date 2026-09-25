@@ -1,0 +1,15 @@
+=base:build-info.json
+{"layout":"topics"
+}
+
+=base:main-css.tramaj-json
+{ "format": "css"
+, "contents":
+  [ "@import \"`$ctx.pathPrefix`/css/dev.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/colors.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/articles-listing.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/topics.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/navigation.css\";"
+  ]
+}
+

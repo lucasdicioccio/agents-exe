@@ -1,0 +1,142 @@
+=base:build-info.json
+{"layout":"article"
+,"publicationStatus":"Public"
+}
+
+=base:preamble.json
+{"author": "Lucas DiCioccio"
+,"date": "2026-09-25T12:00:00Z"
+,"title": "Getting started with agents-exe"
+}
+
+=base:topic.json
+{"topics":["how-to"]
+,"keywords":["getting started", "build", "cabal", "init", "api keys", "run", "tui", "serve"]
+}
+
+=base:social.json
+{"twitter": "lucasdicioccio"
+,"linkedin": "lucasdicioccio"
+,"github": "lucasdicioccio"
+,"mastodon": "https://fosstodon.org/@lucasdicioccio"
+}
+
+=base:summary.cmark
+Build the executables, write a first agent with init, store an API key, and run the agent one-shot, in the TUI, as a server and as an MCP server.
+
+=base:main-content.cmark
+
+# Getting started with agents-exe
+
+agents-exe is a command-line tool, and a Haskell library underneath it. This
+page gets you from a checkout to an agent answering a prompt in each of the
+modes it supports.
+
+## Build
+
+```sh
+git clone https://github.com/lucasdicioccio/agents-exe
+cd agents-exe
+cabal build
+cabal install exe:agents-exe exe:agents-server    # into ~/.cabal/bin
+cabal test agents-tests                           # the main test suite
+```
+
+The repository is one cabal package: the `agents` library, the `agents-exe`
+executable, `agents-server` (the HTTP server, see
+[agents-server](/docs-agents-server.html)), `agq` (a query tool over stored
+sessions) and `durable-workflow-demo`, which runs without any API key:
+
+```sh
+cabal run durable-workflow-demo
+```
+
+## Write a first agent
+
+```sh
+agents-exe init
+```
+
+walks you through writing an `agent.json` and its tools directory. The
+result looks like this:
+
+```json
+{
+  "slug": "my-agent",
+  "apiKeyId": "openai",
+  "flavor": "openai",
+  "modelUrl": "https://api.openai.com/v1",
+  "modelName": "gpt-4",
+  "announce": "A helpful assistant",
+  "systemPrompt": ["You are a helpful assistant."],
+  "toolDirectory": "tools",
+  "mcpServers": [],
+  "extraAgents": []
+}
+```
+
+An agent is a repeatable, parameterized LLM: an endpoint, a model, a system
+prompt, a directory of command-line tools, MCP servers, and helper agents it
+can prompt. Tools and helpers are both exposed to the model as functions;
+when the model asks for several at once, agents-exe runs them concurrently.
+[Tools](/docs-tools.html) explains how an executable describes itself, and
+[the command reference](/commands.html) lists what `init` and the other
+commands accept.
+
+## Store an API key
+
+Agents authenticate against their LLM endpoint with a key looked up by id in
+`~/.config/agents-exe/secret-keys` (or the file given with `--api-keys`):
+
+```json
+{
+  "keys": [
+    {
+      "id": "openai",
+      "value": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    }
+  ]
+}
+```
+
+The `id` must match the agent's `apiKeyId`.
+
+## Run it
+
+```sh
+agents-exe check --agent-file agent.json                     # validate the agent, its tools and helpers
+agents-exe run --agent-file agent.json --prompt "Hello!"     # one shot, answer on stdout
+agents-exe tui --agent-file agent.json                       # the terminal UI
+agents-exe mcp-server --agent-file agent.json                # a stdio MCP server exposing the agent as a tool
+agents-exe serve --agent-file agent.json                     # sessions over HTTP, with a chat page
+```
+
+`--agent-file` can be given several times, and is auto-discovered from
+`agent.json` when omitted; a project can also list its agents in
+`agents-exe.cfg.json` (see [advanced configuration](/docs-advanced-configuration.html)).
+
+## Where next
+
+- [The TUI](/docs-tui.html): keys, views, and how it shows tool calls and
+  helper agents at work.
+- [agents-server](/docs-agents-server.html): the HTTP API, durable
+  sessions, event streams and running it as a service.
+- [Sessions](/docs-sessions.html) and
+  [asynchronous tool calls](/docs-async-tool-calls.html): what a session
+  stores, and how a run stops on a deferred or background call and resumes.
+- [Parameters, bindings and narrowing](/docs-parameters-and-bindings.html):
+  pre-bound arguments, operator- and client-supplied parameters, and
+  narrowed helpers for sub-agents.
+- [Docs](/docs.html): every guide and reference, and
+  [Specs](/specs.html) for the design documents.
+
+=base:main-css.tramaj-json
+{ "format": "css"
+, "contents":
+  [ ""
+  , "@import \"`$ctx.pathPrefix`/css/dev.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/colors.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/article.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/navigation.css\";"
+  ]
+}

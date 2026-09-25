@@ -1,0 +1,7 @@
+{ "title": "agents-exe"
+, "publishURL": "https://lucasdicioccio.github.io"
+, "basePath": "/agents-exe"
+, "twitterLogin": "lucasdicioccio"
+, "commands": []
+, "api": {"tag":"NoProxying"}
+}

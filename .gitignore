@@ -8,3 +8,14 @@ conv.*.json
 dist-newstyle/
 salvaged/
 localdev-agents/
+
+# Kitchen-Sink site build output. website/src/ is source and stays tracked.
+website/www/
+
+# Mirrored pages written by website/scripts/sync-repo-docs.sh from docs/,
+# todos/ and README.md: mechanical output, not source.
+website/src/docs-*.cmark
+website/src/specs-*.cmark
+website/src/specs.cmark
+website/src/commands.cmark
+website/scripts/__pycache__/

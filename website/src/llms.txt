@@ -1,0 +1,19 @@
+agents-exe: a command-line LLM-agent tool. An agent is a JSON file (endpoint, model, system prompt, command-line tools, MCP servers, helper agents); it runs one-shot, in a terminal UI, as an MCP server, or behind an HTTP server with durable sessions.
+
+Overview: https://lucasdicioccio.github.io/agents-exe/
+Getting started: https://lucasdicioccio.github.io/agents-exe/getting-started.html
+Command reference: https://lucasdicioccio.github.io/agents-exe/commands.html
+Architecture: https://lucasdicioccio.github.io/agents-exe/docs-architecture.html
+Tools: https://lucasdicioccio.github.io/agents-exe/docs-tools.html
+Parameters, bindings and narrowing: https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html
+agents-server (HTTP): https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html
+Docs index: https://lucasdicioccio.github.io/agents-exe/docs.html
+Specs index (design documents, each with a Status line): https://lucasdicioccio.github.io/agents-exe/specs.html
+
+Canonical sources, on GitHub:
+- Repository: https://github.com/lucasdicioccio/agents-exe
+- docs/: https://github.com/lucasdicioccio/agents-exe/tree/main/docs
+- todos/ (the specs): https://github.com/lucasdicioccio/agents-exe/tree/main/todos
+
+Every article on this site is also served as plain text, at
+https://lucasdicioccio.github.io/agents-exe/text/<page>.cmark.text
