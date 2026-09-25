@@ -299,13 +299,13 @@ lives in one generated `T.send` tool present from load, while `list`,
 `status`, `tail` and `stop` are shared so the session's tool list does not
 grow with the number of families' management surfaces.
 
+D7. **Explicit envdir root.** Secrets are provisioned where the operator
+says (`--envdir-root`), never found by convention next to the tool.
+
 D8. **Process isolation, not image isolation.** `sandbox` is enforced by
 bubblewrap or Landlock, chosen by the operator; agents-exe never builds,
 pulls or names an image. It composes with `run_as`, refuses rather than
 weakens, and is probed by `check`.
-
-D7. **Explicit envdir root.** Secrets are provisioned where the operator
-says (`--envdir-root`), never found by convention next to the tool.
 
 ## Resolved in review (2026-09-25, PR #574 comments)
 
