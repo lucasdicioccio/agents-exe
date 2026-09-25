@@ -257,7 +257,7 @@ curl -sS localhost:8080/v1/sessions \
     -d '{"agent": "invoices-agent", "prompt": "how many invoices are overdue?", "params": {"tenant": "acme-corp"}}'
 ```
 
-`params` is an object of parameter name to value; a `null` value clears a previously-set session-scope value. A `session`-scope value is kept in this process's memory for the life of the session — a client must resupply it after a restart or an idle eviction, or the next run that needs it fails with `params_required`. A `message`-scope value applies to that one run only and is never stored. A secret value is never returned by any endpoint: `GET /v1/sessions/:id`'s own `params` field only ever holds the non-secret session-scope values (the current, actual values); `GET /v1/agents/:slug`'s `parameters` field describes the agent's own declarations generically — one entry per parameter, with `bound` and `pinned` flags, never a value.
+`params` is an object of parameter name to value; a `null` value clears a previously-set session-scope value. A `session`-scope value is kept for the life of the session: a non-secret one is stored with the session and comes back after a restart or an idle eviction; a secret one lives only in this process's memory, so a client must resupply it after either, or the next run that needs it fails with `params_required`. A `message`-scope value applies to that one run only and is never stored. A secret value is never returned by any endpoint: `GET /v1/sessions/:id`'s own `params` field only ever holds the non-secret session-scope values (the current, actual values); `GET /v1/agents/:slug`'s `parameters` field describes the agent's own declarations generically — one entry per parameter, with `bound` and `pinned` flags, never a value.
 
 A request whose `params` do not check out is refused before anything runs:
 
@@ -562,6 +562,8 @@ On `SIGTERM` or `SIGINT`, the server:
 
 On start, sessions left `running` by a crash are stored with the status their turns imply. Their interrupted step is lost, and background tool calls they were running are reported to the LLM as orphaned on the next run. Nothing is resumed automatically: `resume` them.
 
+One exception is decided at startup rather than on the next run: when such a session's agent has a required parameter with no value left (a secret `session`-scope value is memory-only, so the restart lost it), its running calls are failed right away with a message naming the parameters, the session's `status_detail` reads `params_required: <names>`, and the log carries a `sessions.params_required` line. A `resume` or message without those `params` is refused with `422 params_required`; one that carries them goes on, and the LLM sees why the calls failed. Non-secret session values are stored with the session and need no resupply.
+
 Background tool calls (`runAsync`) live in the server process. They survive between runs of a session, but not a restart. A session is not dropped at the TTL while one of its background calls is still running: it is kept until they finish. Deferred calls are the durable kind: their tokens stay valid across restarts.
 
 -----------------------------
@@ -631,6 +633,7 @@ The server writes one JSON object per line on stderr, with `ts`, `kind`, and, wh
 <tr><td><code>llm.request</code> / <code>llm.response</code></td><td><code>bytes</code>, token counts</td></tr>
 <tr><td><code>llm.http</code></td><td><code>method</code>, <code>host</code>, <code>path</code>, <code>status</code></td></tr>
 <tr><td><code>sessions.recovered</code></td><td><code>session_ids</code></td></tr>
+<tr><td><code>sessions.params_required</code></td><td><code>session_id</code>, <code>params</code>: a recovered session whose running calls were failed because these required parameters are no longer bound</td></tr>
 <tr><td><code>agents.stored_skipped</code></td><td><code>slug</code>, <code>reason</code>: a stored agent hidden by an agent file</td></tr>
 <tr><td><code>agent_tree</code>, <code>tool</code>, <code>tool.portal</code></td><td><code>event</code>: what the agent loader and the tools reported</td></tr>
 <tr><td><code>llm.backoff</code></td><td><code>attempt</code>, <code>delay_seconds</code></td></tr>
