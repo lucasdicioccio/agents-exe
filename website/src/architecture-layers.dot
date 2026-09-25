@@ -1,0 +1,33 @@
+// The layers of agents-exe, from the user's entry points down to the foundation.
+digraph layers {
+  rankdir=TB;
+  bgcolor="transparent";
+  node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#e3f2fd", color="#1565c0"];
+  edge [fontname="Helvetica", fontsize=10, color="#555555"];
+  subgraph cluster_if { label="Interface layer"; style="rounded"; color="#1565c0";
+    cli [label="CLI: run, check,\nsession, describe"];
+    tui [label="tui"];
+    mcp [label="mcp-server"];
+    http [label="agents-server\n(HTTP + chat page)"];
+  }
+  runner [label="SessionRunner (Host.Runner)\nthe one owner of live sessions", fillcolor="#fff3e0", color="#ef6c00"];
+  subgraph cluster_os { label="OS model"; style="rounded"; color="#2e7d32";
+    os [label="entities, resources,\nconversations, concurrent access", fillcolor="#e8f5e9", color="#2e7d32"];
+  }
+  tree [label="Agent tree\nroot agent, helper agents,\nreference and cycle validation", fillcolor="#f3e5f5", color="#6a1b9a"];
+  subgraph cluster_f { label="Foundation"; style="rounded"; color="#555555";
+    sessions [label="sessions\n(turns, mail, storage)", fillcolor="#eeeeee", color="#555555"];
+    tools [label="tools\n(bash, MCP, OpenAPI, ...)", fillcolor="#eeeeee", color="#555555"];
+    llm [label="LLM endpoints", fillcolor="#eeeeee", color="#555555"];
+  }
+  tui -> runner [label="RunnerClient"];
+  http -> runner [label="RunnerClient"];
+  cli -> tree;
+  mcp -> tree;
+  runner -> os;
+  runner -> tree;
+  os -> tree [style=dashed];
+  tree -> sessions;
+  tree -> tools;
+  tree -> llm;
+}

@@ -43,11 +43,6 @@ The framework now uses an Entity-Component-System (ECS) pattern at its core:
 <tr><td><code>System.Agents.OS.Conversation</code></td><td>Conversation and turn management</td></tr>
 <tr><td><code>System.Agents.OS.Conversation.Types</code></td><td>Turn, Message, Conversation components</td></tr>
 <tr><td><code>System.Agents.OS.Conversation.Lineage</code></td><td>Call chain tracking</td></tr>
-<tr><td><code>System.Agents.OS.Persistence</code></td><td>Component persistence layer</td></tr>
-<tr><td><code>System.Agents.OS.Persistence.Types</code></td><td>Backend abstractions</td></tr>
-<tr><td><code>System.Agents.OS.Persistence.Sqlite</code></td><td>SQLite persistence backend</td></tr>
-<tr><td><code>System.Agents.OS.Persistence.File</code></td><td>File-based persistence</td></tr>
-<tr><td><code>System.Agents.OS.Persistence.Schema</code></td><td>Database schema</td></tr>
 <tr><td><code>System.Agents.OS.Compat</code></td><td>Compatibility layer exports</td></tr>
 <tr><td><code>System.Agents.OS.Compat.Runtime</code></td><td>Runtime-to-OS bridge</td></tr>
 <tr><td><code>System.Agents.OS.Interfaces</code></td><td>Interface layer</td></tr>
@@ -148,7 +143,6 @@ PhaseOldOnly (REMOVED) ──> PhaseDual ──> PhaseNewOnly
 <tr><td><code>test/OS/ConcurrentTests.hs</code></td><td>Concurrent access patterns</td></tr>
 <tr><td><code>test/OS/ResourcesTests.hs</code></td><td>Resource management</td></tr>
 <tr><td><code>test/OS/ConversationTests.hs</code></td><td>Conversation/lineage</td></tr>
-<tr><td><code>test/OS/PersistenceTests.hs</code></td><td>Persistence layer</td></tr>
 <tr><td><code>test/OS/CompatTests.hs</code></td><td>Compatibility layer</td></tr>
 <tr><td><code>test/OS/InterfaceTests.hs</code></td><td>Interface layer</td></tr>
 </table>

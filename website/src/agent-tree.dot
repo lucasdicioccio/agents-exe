@@ -1,0 +1,23 @@
+// What an agent can call: everything reaches the model as a function.
+digraph agenttree {
+  rankdir=LR;
+  bgcolor="transparent";
+  node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#e3f2fd", color="#1565c0"];
+  edge [fontname="Helvetica", fontsize=10, color="#555555"];
+  model [label="LLM", shape=ellipse, fillcolor="#fff3e0", color="#ef6c00"];
+  root [label="root agent\n(agent.json)", fillcolor="#e8f5e9", color="#2e7d32"];
+  helper [label="helper agent\nprompt_agent_<slug>", fillcolor="#e8f5e9", color="#2e7d32"];
+  sub [label="its own helpers", fillcolor="#e8f5e9", color="#2e7d32"];
+  bash [label="executable tools\n(describe themselves)", fillcolor="#f3e5f5", color="#6a1b9a"];
+  mcp [label="MCP servers", fillcolor="#f3e5f5", color="#6a1b9a"];
+  api [label="OpenAPI operations\nPostgREST, SQLite, Lua", fillcolor="#f3e5f5", color="#6a1b9a"];
+  builtin [label="builtin toolboxes\n(system, developer)", fillcolor="#f3e5f5", color="#6a1b9a"];
+  model -> root [label="tool calls", dir=both];
+  root -> helper [label="prompt"];
+  helper -> sub;
+  root -> bash;
+  root -> mcp;
+  root -> api;
+  root -> builtin;
+  helper -> bash [style=dashed, label="its own"];
+}

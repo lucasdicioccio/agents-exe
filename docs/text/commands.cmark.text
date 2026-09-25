@@ -2,6 +2,8 @@ _Generated from [`README.md`](https://github.com/lucasdicioccio/agents-exe/blob/
 
 # Command reference
 
+The exact help text of each command, as printed by the binary this site was produced with: [agents-exe --help](/gen/out/commands.cmark__help-agents-exe.txt ), [check](/gen/out/commands.cmark__help-check.txt ), [config](/gen/out/commands.cmark__help-config.txt ), [init](/gen/out/commands.cmark__help-init.txt ), [run](/gen/out/commands.cmark__help-run.txt ), [tui](/gen/out/commands.cmark__help-tui.txt ), [serve](/gen/out/commands.cmark__help-serve.txt ), [mcp-server](/gen/out/commands.cmark__help-mcp-server.txt ), [session](/gen/out/commands.cmark__help-session.txt ), [describe](/gen/out/commands.cmark__help-describe.txt ), [new](/gen/out/commands.cmark__help-new.txt ).
+
 ## Command Reference
 
 ### Global Options

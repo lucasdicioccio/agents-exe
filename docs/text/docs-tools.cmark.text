@@ -2,6 +2,8 @@ _Generated from [`documentation/tools.md`](https://github.com/lucasdicioccio/age
 
 # Tool System
 
+![What an agent can call: helper agents, executable tools, MCP servers and OpenAPI operations all reach the model as functions.](/gen/images/agent-tree.dot.png )
+
 The tool system provides agents with the ability to execute external commands, call APIs, and interact with other agents. Tools are dynamically registered and exposed to the LLM via the OpenAI function calling API.
 
 ## Overview

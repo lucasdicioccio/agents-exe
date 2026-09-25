@@ -1,0 +1,4 @@
+Usage: agents-exe init 
+
+Available options:
+  -h,--help                Show this help text

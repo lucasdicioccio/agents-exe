@@ -1,0 +1,16 @@
+Usage: agents-exe session COMMAND
+
+  Operate durable sessions: start, step, pause, resume, pending, complete,
+  run-isolated
+
+Available options:
+  -h,--help                Show this help text
+
+Available commands:
+  start                    Create a new durable session from a prompt
+  step                     Run exactly one scheduling step on a session
+  pause                    Run one async step and yield
+  resume                   Continue execution until completion or next yield
+  pending                  List deferred calls and continuation tokens
+  complete                 Inject an external result for a continuation token
+  run-isolated             Execute deferred RunIsolated calls

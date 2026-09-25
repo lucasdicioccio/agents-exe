@@ -2,6 +2,10 @@
 
 These pages are generated straight from the `documentation/` directory of the [agents-exe repository](https://github.com/lucasdicioccio/agents-exe/tree/main/documentation ): the repository is always the canonical source, and may be ahead of what is published here.
 
+The map below shows how the documents and the modules they describe relate, to help you choose where to start.
+
+![How the guides relate to each other and to the modules they describe](/gen/images/module-docs-graph.dot.png )
+
 ## Using agents-exe
 
 - [**Command reference**](/commands.html ): the global options and every command, from the README.

@@ -297,7 +297,6 @@ wrappedCallTool ctx tool args = do
 <tr><td>(new)</td><td><code>System.Agents.OS.Resources</code></td><td>Resource management</td></tr>
 <tr><td>(new)</td><td><code>System.Agents.OS.Concurrent</code></td><td>Concurrent access</td></tr>
 <tr><td>(new)</td><td><code>System.Agents.OS.Events</code></td><td>OS event system</td></tr>
-<tr><td>(new)</td><td><code>System.Agents.OS.Persistence</code></td><td>Persistence layer</td></tr>
 </table>
 ```
 

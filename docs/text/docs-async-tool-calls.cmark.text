@@ -2,6 +2,8 @@ _Generated from [`documentation/async-tool-calls.md`](https://github.com/lucasdi
 
 # Asynchronous Tool Calls
 
+![One tool call in asynchronous mode: a placeholder while it runs, a notice when it finishes.](/gen/images/async-tool-call.dot.png )
+
 By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run, and it can ask about, wait for, or cancel them.
 
 This is useful when a turn issues several slow calls (builds, test runs, HTTP requests), and when you want the model (or the user) to keep working while a long call finishes.

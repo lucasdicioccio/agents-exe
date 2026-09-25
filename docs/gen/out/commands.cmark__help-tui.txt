@@ -1,0 +1,18 @@
+Usage: agents-exe tui [-k|--keymap KEYMAPFILE] [--db PATH] [--attach URL|PATH] 
+                      [--token TOKEN] [--token-file FILE]
+
+  Interactive terminal UI, over an embedded runner or, with --attach, a running
+  server
+
+Available options:
+  -k,--keymap KEYMAPFILE   Path to keymap configuration JSON file
+  --db PATH                SQLite database for the TUI's embedded session runner
+                           (default: next to the resolved sessions directory);
+                           not with --attach
+  --attach URL|PATH        Drive a running `agents-exe serve`/agents-server
+                           instead of an embedded runner: http://HOST:PORT,
+                           https://..., unix:///PATH/TO.sock, or a socket path
+  --token TOKEN            Bearer token for --attach (a server started with
+                           --auth-tokens)
+  --token-file FILE        Read the --attach bearer token from FILE
+  -h,--help                Show this help text
