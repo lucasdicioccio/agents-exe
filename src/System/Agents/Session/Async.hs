@@ -101,7 +101,7 @@ import System.Agents.Session.Types (
     UserToolResponse (..),
     newContinuationToken,
  )
-import System.Agents.Tools.Cache (CacheKey (..), CachedResult (..), ToolCache (..), computeCacheKey)
+import System.Agents.Tools.Cache (CacheKey (..), CachedResult (..), ToolCache (..), cacheScopeOf, computeCacheKey, computeScopedCacheKey, isUncacheableKey, scopedCacheKey)
 import System.Agents.Tools.Context (ToolExecutionContext (..), ToolExecutionContextSnapshot, contextSnapshot)
 -------------------------------------------------------------------------------
 -- Async Tool Response
@@ -231,7 +231,7 @@ mkToolContinuationSnapshot token now tc disp ctx =
         , tcsSessionId = ctx.ctxSessionId
         , tcsToolCallId = tc.tcId
         , tcsToolCall = tc.tcCall
-        , tcsCacheKey = computeCacheKey tc.tcCall
+        , tcsCacheKey = scopedCacheKey (cacheScopeOf ctx.ctxParams ctx.ctxInheritedBindings) tc.tcCall
         , tcsPolicy = AppliedPolicy disp Nothing
         , tcsContextSnapshot = contextSnapshot ctx
         , tcsCreatedAt = now
@@ -331,15 +331,17 @@ executeAsyncToolCall ::
 executeAsyncToolCall exec ctx call mCache = do
     -- Check cache first
     case mCache of
-        Just cache -> do
-            let cacheKey = computeCacheKey call
-            mCached <- cache.cacheLookup cacheKey
-            case mCached of
-                Just cached -> pure $ ToolComplete $ crResult cached
-                Nothing -> do
-                    -- Not in cache, execute normally
-                    result <- exec ctx call
-                    pure $ ToolComplete result
+        Just cache
+            -- A call under a secret value is never cached (G8).
+            | Just cacheKey <- computeScopedCacheKey (cacheScopeOf ctx.ctxParams ctx.ctxInheritedBindings) call -> do
+                mCached <- cache.cacheLookup cacheKey
+                case mCached of
+                    Just cached -> pure $ ToolComplete $ crResult cached
+                    Nothing -> do
+                        -- Not in cache, execute normally
+                        result <- exec ctx call
+                        pure $ ToolComplete result
+            | otherwise -> ToolComplete <$> exec ctx call
         Nothing -> do
             -- No cache configured, execute directly
             result <- exec ctx call
@@ -365,9 +367,11 @@ resumeAsyncToolCall store cache token result = do
         then do
             mSnap <- csLoad store token
             case mSnap of
-                Just snap -> do
-                    now <- getCurrentTime
-                    cache.cacheStore (tcsCacheKey snap) $ CachedResult result now Nothing
+                Just snap
+                    | not (isUncacheableKey (tcsCacheKey snap)) -> do
+                        now <- getCurrentTime
+                        cache.cacheStore (tcsCacheKey snap) $ CachedResult result now Nothing
+                    | otherwise -> pure ()
                 Nothing -> pure ()
         else pure ()
     pure completed

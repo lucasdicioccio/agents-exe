@@ -1031,9 +1031,10 @@ applyContinuationMail agent envelopes sess =
             Just token -> case lookup token results of
                 Nothing -> pure tc
                 Just result -> do
-                    forM_ agent.ctxToolCache $ \cache -> do
-                        now <- Data.Time.getCurrentTime
-                        cache.cacheStore (Cache.computeCacheKey tc.tcCall) $ CachedResult result now Nothing
+                    forM_ agent.ctxToolCache $ \cache ->
+                        forM_ (Cache.computeScopedCacheKey (Cache.cacheScopeOf agent.ctxParams agent.ctxInheritedBindings) tc.tcCall) $ \key -> do
+                            now <- Data.Time.getCurrentTime
+                            cache.cacheStore key $ CachedResult result now Nothing
                     forM_ agent.ctxContinuationStore $ \store -> void $ csComplete store token result
                     pure tc{tcState = Completed, tcResult = Just result}
 
@@ -1345,17 +1346,18 @@ result. Otherwise executes the tool and optionally stores the result.
 executeTrackedCallWithCache :: Agent r -> ToolExecutionContext -> TrackedToolCall -> IO UserToolResponse
 executeTrackedCallWithCache agent ctx tc = do
     case agent.ctxToolCache of
-        Just cache -> do
-            let key = Cache.computeCacheKey tc.tcCall
-            mCached <- cache.cacheLookup key
-            case mCached of
-                Just cached -> pure cached.crResult
-                Nothing -> do
-                    result <- executeCall agent ctx tc.tcCall
-                    now <- getCurrentTime
-                    cache.cacheStore key $ CachedResult result now Nothing
-                    pure result
-        Nothing -> executeCall agent ctx tc.tcCall
+        Just cache
+            -- A call under a secret value is never cached (G8).
+            | Just key <- Cache.computeScopedCacheKey (Cache.cacheScopeOf ctx.ctxParams ctx.ctxInheritedBindings) tc.tcCall -> do
+                mCached <- cache.cacheLookup key
+                case mCached of
+                    Just cached -> pure cached.crResult
+                    Nothing -> do
+                        result <- executeCall agent ctx tc.tcCall
+                        now <- getCurrentTime
+                        cache.cacheStore key $ CachedResult result now Nothing
+                        pure result
+        _ -> executeCall agent ctx tc.tcCall
 
 {- | Execute a single tool call using the agent's configured executor or toolCall.
 When a 'DeploymentRunner' is configured but no explicit 'ToolExecutor' is set,

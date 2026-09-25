@@ -2,7 +2,7 @@
 
 Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done
 (`97961e0`). Phase 2 done
-except the tool-cache key (G8) and MCP server `env` (G4) (`03783fb`,
+except MCP server `env` (G4); the tool-cache key (G8) is done too, see below (`03783fb`,
 `b0c53a5`): parameters, `ctxParams` (now actually wired at runtime, not
 just in tests), `--set`/`--set-json`/`--pin`/`--pin-json`/`--params-file`,
 process-scope resolution, secret-argv-mode load-time guard (G7).
@@ -776,7 +776,16 @@ One list, because they are scattered over the sections above:
    that echoes its token sends it to the LLM. That is the tool author's
    responsibility and the docs say so.
 
-**Tool cache (G8).** `computeCacheKey` takes the bound values of the call:
+**Tool cache (G8), done.** Implemented as `CacheScope`/`cacheScopeOf` in
+`Tools/Cache.hs`: a call's key also depends on the digest of the agent's
+non-secret parameter values and inherited narrowing bindings (the context's
+`ctxParams`/`ctxInheritedBindings`, at every cache call site), and a call
+with any secret one is not cached. Deviation: this looks at *all* the agent's
+parameters, not only those a tool binds (the registrations' bindings are closed
+over in the tools and invisible where the cache is consulted), so it can only
+cost hits, never share a result across bound values. Argument hashes are now
+SHA-256 (the old length + 60-character prefix could collide). As designed:
+`computeCacheKey` takes the bound values of the call:
 non-secret values are hashed into `ckArgumentsHash` together with the LLM
 arguments. A call with any secret binding is **not cached at all**: hashing a
 token into a persisted key is a needless oracle, and results obtained with

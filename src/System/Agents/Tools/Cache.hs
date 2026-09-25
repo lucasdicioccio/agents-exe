@@ -22,6 +22,12 @@ module System.Agents.Tools.Cache (
     -- * Cache Key
     CacheKey (..),
     computeCacheKey,
+    CacheScope (..),
+    cacheScopeOf,
+    scopedCacheKey,
+    computeScopedCacheKey,
+    uncacheableKey,
+    isUncacheableKey,
     hashArguments,
     extractToolInfo,
 
@@ -41,9 +47,12 @@ module System.Agents.Tools.Cache (
 ) where
 
 import Control.Monad (forM_)
+import Crypto.Hash (Digest, SHA256 (..), hashWith)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -54,6 +63,8 @@ import Database.SQLite.Simple.QQ (sql)
 import GHC.Generics (Generic)
 
 import System.Agents.Session.Types (LlmToolCall (..), UserToolResponse)
+import System.Agents.Tools.Bindings.Types (ScopedBinding (..))
+import System.Agents.Tools.Params.Types (ParamValue (..), Params)
 
 -------------------------------------------------------------------------------
 -- Cache Key
@@ -151,19 +162,88 @@ normalizeArguments val = case val of
     sortByKey :: [(KeyMap.Key, Aeson.Value)] -> [(KeyMap.Key, Aeson.Value)]
     sortByKey = sortBy (\(a, _) (b, _) -> compare a b)
 
-{- | Compute hash of arguments.
+{- | Compute hash of arguments: the SHA-256 (hex) of their canonical JSON.
 
-Uses a simple hash based on the canonical JSON representation.
-Returns a string suitable for use as a database key.
+(It used to be the length and a 60-character prefix of the bytes, which two
+different calls could share.)
 -}
 hashArguments :: Aeson.Value -> Text
-hashArguments val =
-    let jsonBytes = LBS.toStrict $ Aeson.encode val
-        -- Simple hash: use the length and first 60 chars of base64
-        -- This provides sufficient uniqueness for cache keys
-        len = Text.pack $ show $ LBS.length $ Aeson.encode val
-        prefix = Text.take 60 $ Text.pack $ show jsonBytes
-     in len <> ":" <> prefix
+hashArguments = hexDigest . LBS.toStrict . Aeson.encode
+
+hexDigest :: BS.ByteString -> Text
+hexDigest = Text.pack . show . (hashWith SHA256 :: BS.ByteString -> Digest SHA256)
+
+-------------------------------------------------------------------------------
+-- Scoping by bound values (@todos/tool-partial-application.md@, G8)
+-------------------------------------------------------------------------------
+
+{- | What a call's cache key must additionally depend on. The LLM's arguments
+are not all a tool receives: parameter bindings merge session values into
+the call (tenant, project...) just before dispatch, so a cached result is
+only valid for the values it was computed with.
+-}
+data CacheScope
+    = -- | No bound values at all: the key depends on the call alone, as before.
+      Unscoped
+    | -- | The digest of the (non-secret) bound values in play.
+      Scoped Text
+    | {- | A secret value is in play: results obtained with one credential must
+      not be replayed for another, and a hash of a secret in a persisted key
+      is an oracle, so the call is not cached at all.
+      -}
+      Uncacheable
+    deriving (Show, Eq)
+
+{- | The scope of a call made under these parameter values and inherited
+narrowing bindings (the context's 'ctxParams' and 'ctxInheritedBindings').
+
+This looks at every parameter of the agent, not only those a tool binds:
+the registrations' bindings are closed over inside the tools and are not
+visible where the cache is consulted. That can only cost hits (two sessions
+differing in an unrelated parameter do not share results), never share a
+result across values a tool binds.
+-}
+cacheScopeOf :: Params -> [ScopedBinding] -> CacheScope
+cacheScopeOf params inherited
+    | any (.pvSecret) (Map.elems params) || any (.sbSecret) inherited = Uncacheable
+    | Map.null params && null inherited = Unscoped
+    | otherwise =
+        Scoped $
+            hexDigest $
+                LBS.toStrict $
+                    Aeson.encode $
+                        Aeson.object
+                            [ "params" Aeson..= Map.map (.pvValue) params
+                            , "inherited" Aeson..= [(Aeson.toJSON (sbAddress b), sbTool b, sbArg b, sbValue b) | b <- inherited]
+                            ]
+
+-- | A tool call's key under a scope; 'Nothing' when it must not be cached.
+computeScopedCacheKey :: CacheScope -> LlmToolCall -> Maybe CacheKey
+computeScopedCacheKey scope call = case scope of
+    Uncacheable -> Nothing
+    _ -> Just (scopedCacheKey scope call)
+
+{- | Like 'computeScopedCacheKey' for callers that need a key even when the
+call is not cached (a continuation snapshot): an 'Uncacheable' call gets a
+key that no other call can have and that 'isUncacheableKey' recognizes, so
+its result is never stored.
+-}
+scopedCacheKey :: CacheScope -> LlmToolCall -> CacheKey
+scopedCacheKey scope call@(LlmToolCall val) = case scope of
+    Uncacheable -> uncacheableKey (fst (extractToolInfo val)) call
+    Unscoped -> computeCacheKey call
+    Scoped digest ->
+        let (toolName, args) = extractToolInfo val
+         in CacheKey toolName (hashArguments (Aeson.toJSON [Aeson.String digest, normalizeArguments args]))
+
+-- | The placeholder key of a call that is not cached.
+uncacheableKey :: Text -> LlmToolCall -> CacheKey
+uncacheableKey toolName (LlmToolCall val) =
+    CacheKey toolName ("uncacheable:" <> hashArguments val)
+
+-- | Whether a key stands for a call that must not be cached ('uncacheableKey').
+isUncacheableKey :: CacheKey -> Bool
+isUncacheableKey key = "uncacheable:" `Text.isPrefixOf` key.ckArgumentsHash
 
 -------------------------------------------------------------------------------
 -- Cached Result

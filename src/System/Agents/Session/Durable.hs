@@ -264,7 +264,7 @@ interpretDecorator env dec next ctx call = case dec of
             BeforeDeny message -> pure $ ToolComplete $ TextResponse message
             BeforeDefer _reason -> do
                 token <- newContinuationToken
-                pure $ ToolYield token (Cache.computeCacheKey call)
+                pure $ ToolYield token (Cache.scopedCacheKey (Cache.cacheScopeOf ctx.ctxParams ctx.ctxInheritedBindings) call)
             BeforeAnswer result -> pure $ ToolComplete result
     WithAfterHook target -> do
         startedAt <- getCurrentTime
@@ -609,30 +609,37 @@ both 'execSync' and 'execAsync'.
 cachingExecutor :: ToolCache -> ToolExecutor -> ToolExecutor
 cachingExecutor cache inner =
     ToolExecutor
-        { execSync = \ctx call -> do
-            let key = Cache.computeCacheKey call
-            mCached <- cache.cacheLookup key
-            case mCached of
-                Just cached -> pure cached.crResult
-                Nothing -> do
-                    result <- inner.execSync ctx call
-                    now <- getCurrentTime
-                    cache.cacheStore key $ CachedResult result now Nothing
-                    pure result
-        , execAsync = \ctx call -> do
-            let key = Cache.computeCacheKey call
-            mCached <- cache.cacheLookup key
-            case mCached of
-                Just cached -> pure $ ToolComplete cached.crResult
-                Nothing -> do
-                    response <- inner.execAsync ctx call
-                    case response of
-                        ToolComplete result -> do
-                            now <- getCurrentTime
-                            cache.cacheStore key $ CachedResult result now Nothing
-                            pure response
-                        ToolYield{} -> pure response
+        { execSync = \ctx call -> case scopedKey ctx call of
+            Nothing -> inner.execSync ctx call
+            Just key -> do
+                mCached <- cache.cacheLookup key
+                case mCached of
+                    Just cached -> pure cached.crResult
+                    Nothing -> do
+                        result <- inner.execSync ctx call
+                        now <- getCurrentTime
+                        cache.cacheStore key $ CachedResult result now Nothing
+                        pure result
+        , execAsync = \ctx call -> case scopedKey ctx call of
+            Nothing -> inner.execAsync ctx call
+            Just key -> do
+                mCached <- cache.cacheLookup key
+                case mCached of
+                    Just cached -> pure $ ToolComplete cached.crResult
+                    Nothing -> do
+                        response <- inner.execAsync ctx call
+                        case response of
+                            ToolComplete result -> do
+                                now <- getCurrentTime
+                                cache.cacheStore key $ CachedResult result now Nothing
+                                pure response
+                            ToolYield{} -> pure response
         }
+  where
+    -- Keyed on the call and the bound values in play; 'Nothing' (not cached)
+    -- under a secret value (G8).
+    scopedKey :: ToolExecutionContext -> LlmToolCall -> Maybe Cache.CacheKey
+    scopedKey ctx = Cache.computeScopedCacheKey (Cache.cacheScopeOf ctx.ctxParams ctx.ctxInheritedBindings)
 
 -------------------------------------------------------------------------------
 -- Isolated execution
