@@ -47,7 +47,7 @@ More of this exists than the issues assume. They predate `Session/Async*`,
 
 * Background calls: `RunAsync`, the async engine, OS tool-call entities,
   placeholder tool messages (`partialToolMessages`), progress, cancellation of
-  the whole process group (`docs/async-tool-calls.md`).
+  the whole process group (`documentation/async-tool-calls.md`).
 * `get-tool-call-status` (with `wait_for_completion` + `timeout_seconds`),
   `list-running-tool-calls`, `cancel-tool-call`.
 * Deferred calls, continuation tokens, `wakeSessionWith`.
@@ -579,6 +579,6 @@ only thing the server adds.
 
 ## Related docs
 
-`docs/async-tool-calls.md`, `docs/durable-workflows-howto.md`,
-`docs/agents-server.md`, `todos/async-tool-calls.md`,
+`documentation/async-tool-calls.md`, `documentation/durable-workflows-howto.md`,
+`documentation/agents-server.md`, `todos/async-tool-calls.md`,
 `todos/tool-partial-application.md` (bindings, §5.2 fork).

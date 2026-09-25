@@ -151,7 +151,7 @@ type SessionsAPI =
                                     \resume, cancel calls, stop the run) -- from any sender. A stored, \
                                     \not-currently-live session still accepts it (its durable mailbox), \
                                     \and a paused session may wake on it (see the Mail section of \
-                                    \docs/agents-server.md)."
+                                    \documentation/agents-server.md)."
                                 :> "mail"
                                 :> ReqBody '[JSON] MailPostBody
                                 :> Post '[JSON] RawJson

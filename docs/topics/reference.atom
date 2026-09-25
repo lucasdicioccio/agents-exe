@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-09-25T13:05:36Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/commands.html</id><title type="text">Command reference</title><updated>2026-09-25T13:05:36Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/README.md"&gt;&lt;code&gt;README.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;h2 id="command-reference"&gt;Command reference&lt;/h2&gt;
+&lt;h3 id="command-reference-1"&gt;Command Reference&lt;/h3&gt;
+&lt;h4 id="global-options"&gt;Global Options&lt;/h4&gt;
+&lt;p&gt;These options apply to all commands:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Option&lt;/th&gt;&lt;th&gt;Default&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--api-keys FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;~/.config/agents-exe/secret-keys&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Path to JSON file containing API keys&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--log-file LOGFILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;agents-logfile&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Raw log file for debugging&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--log-http URL&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;HTTP endpoint for JSON log sink&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--log-json-file FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Local JSON file log sink&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--session-json-file-prefix PREFIX&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Prefix for session JSON files&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--agent-file AGENTFILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(auto-discovered)&lt;/td&gt;&lt;td&gt;Root agent description file(s). Can be specified multiple times. Defaults to &lt;code&gt;agent.json&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;h4 id="commands"&gt;Commands&lt;/h4&gt;
+&lt;h5 id="check"&gt;&lt;code&gt;check&lt;/code&gt;&lt;/h5&gt;
+&lt;p&gt;Validates agent configuration files.&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-console"&gt;agents-exe check
+agents-exe check --agent-file custom-agent.json
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h5 id="init"&gt;&lt;code&gt;init&lt;/code&gt;&lt;/h5&gt;
+&lt;p&gt;Initializes a new agent project with a sample &lt;code&gt;agent.json&lt;/code&gt; and tools directory structure.&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-console"&gt;agents-exe init
+agents-exe init --agent-file my-agent.json
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h5 id="tui---terminal-user-interface"&gt;&lt;code&gt;tui&lt;/code&gt; - Terminal User Interface&lt;/h5&gt;
+&lt;p&gt;Launches an interactive terminal UI for chatting with agents.&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-console"&gt;agents-exe tui
+agents-exe tui --agent-file my-agent.json
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h5 id="run---execute-a-one-shot-command"&gt;&lt;code&gt;run&lt;/code&gt; - Execute a One-Shot Command&lt;/h5&gt;
+&lt;p&gt;Runs a single prompt through an agent and outputs the result.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Prompt Options:&lt;/strong&gt;&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Option&lt;/th&gt;&lt;th&gt;Short&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--prompt TEXT&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;-p&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Add a text paragraph to the prompt&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--file FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;-f&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Include contents of a file in the prompt&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--shell CMD&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td&gt;Include stdout of a shell command in the prompt&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--sep4 SEP&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;-s&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Add a short separator (4 repetitions)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--sep40 SEP&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;-S&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Add a long separator (40 repetitions)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--session-file FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td&gt;Resume from or save to a session file&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;&lt;strong&gt;Examples:&lt;/strong&gt;&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-console"&gt;# Simple prompt
+agents-exe run --prompt &amp;quot;Hello, how are you?&amp;quot;
+
+# Include file contents
+agents-exe run --prompt &amp;quot;Summarize this:&amp;quot; --file README.md
+
+# Include command output
+agents-exe run -p &amp;quot;Explain this diff:&amp;quot; -s &amp;quot;---&amp;quot; --shell &amp;quot;git diff&amp;quot;
+
+# Multiple prompts (concatenated with newlines)
+agents-exe run -p &amp;quot;First part&amp;quot; -p &amp;quot;Second part&amp;quot;
+
+# Resume a session
+agents-exe run --session-file previous.json -p &amp;quot;Continue where we left off&amp;quot;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h5 id="echo-prompt"&gt;&lt;code&gt;echo-prompt&lt;/code&gt;&lt;/h5&gt;
+&lt;p&gt;Echoes the constructed prompt without sending it to the agent. Useful for debugging prompt construction.&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-console"&gt;agents-exe echo-prompt -p &amp;quot;Hello&amp;quot; -f README.md
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h5 id="describe"&gt;&lt;code&gt;describe&lt;/code&gt;&lt;/h5&gt;
+&lt;p&gt;Outputs a JSON self-description of the tool interface. Useful when agents-exe is used as a sub-tool.&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-console"&gt;agents-exe describe
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h5 id="mcp-server"&gt;&lt;code&gt;mcp-server&lt;/code&gt;&lt;/h5&gt;
+&lt;p&gt;Runs agents-exe as an MCP (Model Context Protocol) server, exposing agents as tools via stdin/stdout.&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-console"&gt;agents-exe mcp-server
+agents-exe mcp-server --agent-file agent1.json --agent-file agent2.json
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The MCP server exposes each configured agent as a callable tool to MCP clients like Claude Desktop.&lt;/p&gt;
+&lt;h5 id="session-print"&gt;&lt;code&gt;session-print&lt;/code&gt;&lt;/h5&gt;
+&lt;p&gt;Prints a session file in human-readable markdown format.&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Option&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--show-tool-call-results&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Show the results of tool calls&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--n-turns N&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Limit output to first N turns&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--repeat-system-prompt&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Repeat system prompt at each turn&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--repeat-tools&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Repeat available tools at each turn&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--antichronological&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Display newest turns first (default: oldest first)&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;&lt;strong&gt;Examples:&lt;/strong&gt;&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-console"&gt;# Print entire session
+agents-exe session-print my-session.json
+
+# Print with tool results
+agents-exe session-print --show-tool-call-results my-session.json
+
+# Print last 10 turns only, newest first
+agents-exe session-print --n-turns 10 --antichronological my-session.json
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/commands.html" rel="alternate"/><summary type="text">The global options and every agents-exe command, as the README lists them.</summary></entry></feed>

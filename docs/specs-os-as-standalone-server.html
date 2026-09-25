@@ -1,0 +1,596 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: proposal, 2026-09-23, revised the same day after checking service"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: proposal, 2026-09-23, revised the same day after checking service"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html"><meta property="og:description" content="Status: proposal, 2026-09-23, revised the same day after checking service"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/specs-os-as-standalone-server.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-os-as-standalone-server.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"Status: proposal, 2026-09-23, revised the same day after checking service","headline":"Spec: the OS as a standalone server (TUI and web UI as clients)","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: the OS as a standalone server (TUI and web UI as clients)</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 3518 words, 2 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">3/11</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"><code>todos/os-as-standalone-server.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="spec-the-os-as-a-standalone-server-tui-and-web-ui-as-clients">Spec: the OS as a standalone server (TUI and web UI as clients)</h2>
+<p>Status: proposal, 2026-09-23, revised the same day after checking service
+readiness. Phases 0 and 1 done on branch <code>feature/os-standalone-server</code>
+(commits 8de2a64..dc01dc8); All phases landed (8de2a64..771c988), with the open items listed
+under “Remaining after Phase 5”. Builds on
+<code>todos/web-server-embedding.md</code> (done) and <code>todos/session-mailbox.md</code> (done).</p>
+<h3 id="goal">Goal</h3>
+<p>One long-running <code>agents-exe</code> process hosts the agents and their sessions. It
+loads agents files the way the TUI does today (<code>agents-exe.cfg.json</code>,
+<code>agentsFiles</code>, <code>agentsDirectories</code>, <code>--agent-file</code>, <code>--agent</code>). Clients attach
+to it and drive it:</p>
+<ul>
+<li>the TUI, in the same process or over a socket, with no loss of features;
+</li>
+<li>the web chat page, as today;
+</li>
+<li>any program, through the HTTP API: create and message sessions, wake them
+(continuations, mail), interrupt them, cancel them, follow their events.
+</li>
+</ul>
+<p>The end state: <code>agents-exe serve</code> runs standalone; <code>agents-exe tui</code> either
+embeds the runner (today’s single-process experience) or attaches to a
+running server with <code>--attach URL</code>; both TUI modes are the same code.</p>
+<h3 id="the-os-picture">The OS picture</h3>
+<table>
+<tr><th>OS</th><th>here</th></tr>
+<tr><td>kernel</td><td><code>Host</code> + <code>Host.Runner</code> (<code>SessionRunner</code>)</td></tr>
+<tr><td>process table</td><td>the <code>sessions</code> table, <code>srLive</code> for the resident ones</td></tr>
+<tr><td>syscall interface</td><td>the runner's operations, serialized as <code>Command</code></td></tr>
+<tr><td>kernel log / netlink</td><td>the <code>SessionEvent</code> broadcast, serialized as <code>Event</code></td></tr>
+<tr><td>terminal</td><td>the TUI: a client that only renders and issues commands</td></tr>
+<tr><td><code>init</code></td><td><code>agents-exe serve</code>: config loading, then the runner</td></tr>
+</table>
+<p>The ECS <code>System.Agents.OS.*</code> layer (World, components, <code>OS.Persistence</code>) is
+<strong>not</strong> the kernel in this picture. In production it only tracks async
+tool-call entities and subcall visibility for the TUI. The kernel’s state
+model is sessions, mail and continuations, and its source of truth is the
+persisted session.</p>
+<h3 id="current-state">Current state</h3>
+<p>Two runtimes exist and share only the agent tree loader and
+<code>AgentFactory.buildAgent</code>.</p>
+<table>
+<tr><th></th><th>TUI (<code>tui/</code>)</th><th>agents-server (<code>examples/agents-server</code>, <code>src/System/Agents/Host*</code>)</th></tr>
+<tr><td>loop</td><td><code>Session.Loop.runUntilBlocked</code>, one forked thread per conversation (<code>TUI/Event/Conversation.hs</code>, <code>spawnConversationIO</code>)</td><td><code>Host.Runner.runLoop</code>, one run at a time per session, under a lock</td></tr>
+<tr><td>agent build</td><td><code>OneShot.nodeToAgent</code>, then the TUI rewrites <code>step</code> and <code>usrQuery</code></td><td><code>Runner.newAgent</code> (<code>buildAgent … RootAgent</code>, durable mailbox, router, spawn and watch hooks)</td></tr>
+<tr><td>mail</td><td><code>newInMemoryMailbox</code> + one process-local <code>MailRouter</code> in <code>Core</code></td><td><code>newDurableMailbox</code>, <code>session_mail</code> table, <code>serverMailRouter</code></td></tr>
+<tr><td>user input</td><td>a <code>BChan</code> per conversation plus a <code>TVar</code> of buffered messages</td><td><code>postMessage</code>, which becomes <code>UserMessage</code> mail when the session is busy</td></tr>
+<tr><td>pause</td><td><code>Control Pause</code> mail since b62e2a6</td><td><code>pauseSession</code> → <code>Control Pause</code>, <code>POST /v1/sessions/:id/pause</code></td></tr>
+<tr><td>sessions</td><td>file store, <code>conv.&lt;uuid&gt;.json</code>, <code>SessionStore.listSessions</code> once at startup</td><td><code>SessionBackend</code> (SQLite or Postgres), versioned <code>sbCompareAndStore</code>, <code>sbQuery</code></td></tr>
+<tr><td>config</td><td><code>agents-exe.cfg.json</code>, <code>agentsDirectories</code>, <code>--agent</code>, <code>--params-file</code> (all in <code>app/Main.hs</code>)</td><td>flags only: <code>--agent-file</code> (repeatable), <code>--db</code>, <code>--set</code>/<code>--pin</code></td></tr>
+<tr><td>events out</td><td><code>TQueue OSEvent</code> bridged to Brick; a whole-<code>Session</code> progress callback; heartbeat polling of TVars</td><td><code>SessionEvent</code> broadcast <code>TChan</code>, per-session <code>subscribe</code>, SSE</td></tr>
+<tr><td>identity</td><td><code>ConversationId</code> generated independently of <code>SessionId</code></td><td><code>ConversationId</code> derived from <code>SessionId</code></td></tr>
+</table>
+<h4 id="what-we-can-reuse-as-is">What we can reuse as-is</h4>
+<ul>
+<li><code>Host.withHost</code> / <code>withHostStores</code>: multi-file loading keyed by slug, plus
+agents stored in the database.
+</li>
+<li><code>Host.Runner</code>: <code>createSession[As[WithParent]]</code>, <code>spawnSession</code>,
+<code>postMessage</code> (with <code>nmInterrupt</code>), <code>resume</code>, <code>completeCall</code>, <code>cancelRun</code>,
+<code>cancelAttachedCalls</code>, <code>pauseSession</code>, <code>getSession</code>, <code>awaitRun</code>,
+<code>deleteSession</code>, <code>recoverOnStartup</code>, <code>subscribe</code>/<code>subscribeSTM</code>.
+</li>
+<li>The HTTP API and SSE stream (<code>AgentsServer.Api</code>), MCP over HTTP, auth,
+<code>/openapi.json</code>, the chat page.
+</li>
+<li>Mail: <code>Envelope</code>, <code>MailBody</code>, <code>Sender</code>, <code>Priority</code>, <code>ControlMsg</code> all have
+JSON. Every client-facing thing is addressed by a UUID (<code>SessionId</code>,
+<code>ContinuationToken</code>, <code>ToolCallId</code>, <code>MessageId</code>).
+</li>
+<li><code>Session</code> and <code>SessionMeta</code> have JSON; the TUI’s usage, signals and
+trajectory views are pure functions over a <code>Session</code>, so they run on a
+client unchanged.
+</li>
+</ul>
+<h4 id="gaps">Gaps</h4>
+<p>G1. <strong>The TUI is the host, not a client.</strong> <code>spawnConversationIO</code> builds the
+agent, overrides <code>step</code> (pause polling, progress callback, <code>Stop</code> →
+<code>AskUserPrompt</code> rewrite) and <code>usrQuery</code> (blocks on the <code>BChan</code>), forks
+<code>Loop.runUntilBlocked</code>, and owns the World, the OSEvent queue and the
+<code>MailRouter</code>. Quit is <code>killThread</code> on every conversation. None of this goes
+through the runner.</p>
+<p>G2. <strong>The runner needs a first message.</strong> <code>createSession</code> takes a
+<code>NewMessage</code>; the TUI creates an empty conversation and waits for input.</p>
+<p>G3. <strong>Event shape.</strong> The TUI renders from full <code>Session</code> snapshots (the
+<code>OnSessionProgress</code> callback) and from <code>OSEvent_Subcall*</code> and
+<code>OSEvent_ToolCallActivity</code>. The runner emits <code>SessionEvent</code> (meta plus head
+turn, deferred calls, run start/stop, text deltas, tool start/stop) and
+<code>AgentFactory</code> sets <code>ctxEventQueue = Nothing</code>, so subcall progress and
+tool-call activity never reach the server or its clients. Nine of the fifteen
+<code>OSEvent</code> constructors are never emitted.</p>
+<p>G4. <strong>No JSON for commands and events.</strong> <code>SessionEvent</code>, <code>NewMessage</code>,
+<code>RunMode</code>, <code>RunnerError</code>, <code>OSEvent</code>, <code>ToolCallActivity</code>, <code>ToolCallPhase</code>,
+<code>SessionProgress</code>, <code>Outgoing</code>, <code>Receipt</code>, <code>SendError</code> have no codecs. The only
+encoder is <code>eventFrame</code> in the server’s <code>Api.hs</code>; the only decoders are its
+request parsers.</p>
+<p>G5. <strong>No replay, no global feed.</strong> Events carry no sequence number and are
+not persisted; a reconnecting client gets a fresh <code>snapshot</code>. Subscriptions
+are per <code>SessionId</code>; there is no owner-wide or server-wide feed, so a live
+session list cannot be kept up to date.</p>
+<p>G6. <strong>Runner and HTTP operations the TUI relies on are missing:</strong></p>
+<table>
+<tr><th>TUI feature</th><th>today</th><th>runner / HTTP</th></tr>
+<tr><td>fork at a turn (<code>handleForkAtTurn</code>)</td><td>local <code>Session</code> copy with <code>forkedFromSessionId</code></td><td>none</td></tr>
+<tr><td>continue a stored session with the currently selected agent</td><td><code>handleRestoredConversation</code></td><td><code>smAgent</code> is fixed per session</td></tr>
+<tr><td>edit / delete queued messages (<code>TUI/Event/Queue.hs</code>)</td><td>shared <code>TVar</code> of discrete messages read by the runtime</td><td>not needed: becomes a TUI-local draft (§5)</td></tr>
+<tr><td>list sessions</td><td><code>SessionStore.listSessions</code></td><td><code>sbQuery</code> directly on the backend, not a runner call</td></tr>
+<tr><td>generic mail (send <code>AgentMessage</code>, <code>StopRun</code>, <code>CancelCalls [ids]</code>, <code>Resume</code>)</td><td>n/a</td><td><code>sendControlMail</code> is internal; no route</td></tr>
+<tr><td>complete a deferred call</td><td>not supported in the TUI</td><td><code>completeCall</code>, <code>POST /v1/continuations/:token</code></td></tr>
+<tr><td>agent details (model, prompt, activation flags) for the Agents tab</td><td>live <code>OSAgentNode</code> TVars</td><td><code>GET /v1/agents</code> has slug, description, tool names only</td></tr>
+</table>
+<p>G7. <strong>Config parity.</strong> <code>locateAgentsExeConfig</code>, <code>initArgParserArgs</code>,
+<code>resolveAgentFiles</code>, <code>--params-file</code> handling and the default-directory
+fallback live in <code>app/Main.hs</code> and are not in a library. The server cannot
+load agents “like the TUI does”.</p>
+<p>G8. <strong>Identity.</strong> The TUI’s <code>ConversationId</code> is independent of its
+<code>SessionId</code> (see the comment in <code>spawnConversationIO</code>); the server derives
+one from the other. <code>AgentId</code> is random per load; the slug is the stable
+name. There are two <code>ConversationId</code> types (<code>Base</code> and <code>OS.Core.Types</code>).</p>
+<p>G9. <strong>Spawn semantics differ.</strong> The TUI’s <code>spawn-session</code> hook resolves a
+slug against the roster of root agents; the server resolves helpers of the
+calling node.</p>
+<p>G10. <strong>Sub-agent runs are not sessions.</strong> A <code>prompt_agent_*</code> call runs its
+child inside the tool call, so the child produces no <code>SessionEvent</code> and
+cannot be <code>cancelRun</code>’d or subscribed to on its own. Only the TUI sees it,
+through <code>OSEvent_Subcall*</code>.</p>
+<p>G11. <strong>Volatile per-session state.</strong> Secret params (<code>lsParams</code>), watches and
+the run <code>Async</code> are lost on restart or eviction. A client protocol needs a
+“resupply secrets” step, or durable encrypted storage.</p>
+<p>G12. <strong>No CORS.</strong> <code>checkOrigin</code> in <code>AgentsServer.Api</code> refuses non-loopback
+<code>Origin</code>s when auth is off and lets everything through when it is on, but
+the server never emits <code>Access-Control-Allow-*</code> headers and does not answer
+preflight <code>OPTIONS</code>. A browser page served by another local web app (a
+different port is a different origin) cannot call the API or open the SSE
+stream directly; it has to proxy through its own backend.</p>
+<p>G13. <strong>Service packaging.</strong> The server itself is service-ready: SIGTERM and
+SIGINT trigger a graceful stop with <code>--shutdown-grace</code>, logs are JSON lines
+on stderr, every path is a flag, <code>recoverOnStartup</code> runs at boot. But there
+is no unit file, no install target, no <code>bundling/</code> entry and no
+documentation for running it under systemd.</p>
+<h4 id="integration-modes-as-of-2026-09-23">Integration modes, as of 2026-09-23</h4>
+<table>
+<tr><th>Mode</th><th>Status</th></tr>
+<tr><td>server-side web app calls the API and renders its own chat</td><td>works</td></tr>
+<tr><td>browser chat UI on another origin talks to the service directly</td><td>blocked by G12</td></tr>
+<tr><td>web app proxies the API under its own origin</td><td>works</td></tr>
+<tr><td>MCP client (<code>ask_&lt;slug&gt;</code> tools, blocking, no session continuity)</td><td>works, coarse</td></tr>
+<tr><td>another agents-exe agent uses it as an OpenAPI toolbox</td><td>works</td></tr>
+<tr><td>deferred tool calls executed by the web app's own workers</td><td>works</td></tr>
+<tr><td>TUI attached from elsewhere</td><td>not started</td></tr>
+</table>
+<h3 id="design">Design</h3>
+<h4 id="1-the-protocol-module">1. The protocol module</h4>
+<p>A library module, <code>System.Agents.Protocol</code>, owning two sum types with JSON
+instances. The HTTP layer, the SSE encoder, the in-process client and the
+socket client all speak these; nothing else defines a wire format.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Command</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">CreateSession</span>   {<span class="ot"> agent ::</span> <span class="dt">Text</span>,<span class="ot"> message ::</span> <span class="dt">Maybe</span> <span class="dt">NewMessage</span>,<span class="ot"> run ::</span> <span class="dt">Maybe</span> <span class="dt">RunMode</span>,<span class="ot"> params ::</span> <span class="dt">Map</span> <span class="dt">ParamName</span> <span class="dt">Value</span>,<span class="ot"> parent ::</span> <span class="dt">Maybe</span> <span class="dt">SessionId</span> }</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">PostMessage</span>     {<span class="ot"> session ::</span> <span class="dt">SessionId</span>,<span class="ot"> message ::</span> <span class="dt">NewMessage</span>,<span class="ot"> run ::</span> <span class="dt">Maybe</span> <span class="dt">RunMode</span>,<span class="ot"> params ::</span> <span class="dt">Map</span> <span class="dt">ParamName</span> <span class="dt">Value</span> }</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Resume</span>          {<span class="ot"> session ::</span> <span class="dt">SessionId</span>,<span class="ot"> mode ::</span> <span class="dt">RunMode</span>,<span class="ot"> params ::</span> <span class="dt">Map</span> <span class="dt">ParamName</span> <span class="dt">Value</span> }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">CompleteCall</span>    {<span class="ot"> token ::</span> <span class="dt">ContinuationToken</span>,<span class="ot"> result ::</span> <span class="dt">UserToolResponse</span>,<span class="ot"> resume ::</span> <span class="dt">Bool</span>,<span class="ot"> params ::</span> <span class="dt">Map</span> <span class="dt">ParamName</span> <span class="dt">Value</span> }</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">CancelRun</span>       <span class="dt">SessionId</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">CancelAttached</span>  <span class="dt">SessionId</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Pause</span>           <span class="dt">SessionId</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SendMail</span>        {<span class="ot"> session ::</span> <span class="dt">SessionId</span>,<span class="ot"> body ::</span> <span class="dt">MailBody</span>,<span class="ot"> priority ::</span> <span class="dt">Priority</span> }   <span class="co">-- StopRun, CancelCalls, Resume, AgentMessage, …</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ForkSession</span>     {<span class="ot"> session ::</span> <span class="dt">SessionId</span>,<span class="ot"> atTurn ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span>,<span class="ot"> agent ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span> }   <span class="co">-- newest-first index; turns have no id</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ListSessions</span>    <span class="dt">SessionQuery</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">GetSession</span>      <span class="dt">SessionId</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ListAgents</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">GetAgent</span>        <span class="dt">Text</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">DeleteSession</span>   {<span class="ot"> session ::</span> <span class="dt">SessionId</span>,<span class="ot"> mode ::</span> <span class="dt">DeleteMode</span> }</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Subscribe</span>       {<span class="ot"> scope ::</span> <span class="dt">SubscribeScope</span>,<span class="ot"> after ::</span> <span class="dt">Maybe</span> <span class="dt">EventSeq</span> }</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Event</span> <span class="ot">=</span> <span class="dt">Event</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> evSeq     ::</span> <span class="dt">EventSeq</span>          <span class="co">-- total order per server</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> evSession ::</span> <span class="dt">Maybe</span> <span class="dt">SessionId</span>   <span class="co">-- Nothing for server-wide events</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> evBody    ::</span> <span class="dt">EventBody</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">EventBody</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">RunStarted</span> <span class="dt">RunMode</span> <span class="op">|</span> <span class="dt">RunStopped</span> <span class="dt">SessionStatus</span> <span class="op">|</span> <span class="dt">SessionFailed</span> <span class="dt">Text</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionUpdated</span> <span class="dt">SessionMeta</span> (<span class="dt">Maybe</span> <span class="dt">Turn</span>)</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">CallsDeferred</span> [<span class="dt">DeferredCallView</span>]</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TextDelta</span> <span class="dt">Text</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolCallStarted</span> … <span class="op">|</span> <span class="dt">ToolCallProgressed</span> <span class="dt">ToolCallActivity</span> <span class="op">|</span> <span class="dt">ToolCallCompleted</span> …</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SubcallStarted</span> {<span class="ot"> parent ::</span> <span class="dt">SessionId</span>,<span class="ot"> child ::</span> <span class="dt">SessionId</span>,<span class="ot"> slug ::</span> <span class="dt">Text</span>,<span class="ot"> depth ::</span> <span class="dt">Int</span> }</span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SubcallCompleted</span> … <span class="op">|</span> <span class="dt">SubcallFailed</span> …</span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionCreated</span> <span class="dt">SessionMeta</span> <span class="op">|</span> <span class="dt">SessionDeleted</span> <span class="dt">SessionId</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">MailAccepted</span> <span class="dt">Envelope</span> <span class="op">|</span> <span class="dt">MailRejected</span> <span class="dt">SendError</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AgentsChanged</span></span></code></pre></div></div><p>Notes:</p>
+<ul>
+<li><code>NewMessage</code> gains <code>Maybe</code> semantics through <code>CreateSession.message</code>:
+<code>Nothing</code> creates an idle session with no turn (G2). The runner stores it
+with status <code>ready</code> and no run.
+</li>
+<li><code>ForkSession</code> is new runner work (G6): copy the session up to <code>atTurn</code>,
+set <code>forkedFromSessionId</code>, optionally rebind <code>smAgent</code>. This also covers
+“continue with another agent”: a fork at the head with a new agent.
+</li>
+<li><code>SendMail</code> generalizes <code>sendControlMail</code>. It is how the TUI posts
+<code>StopRun</code> on quit instead of <code>killThread</code>, and how a client sends
+<code>AgentMessage</code> mail on behalf of another session.
+</li>
+<li><code>OSEvent</code> is retired as a public type. <code>ToolCallActivity</code> and the
+<code>Subcall*</code> payloads move into <code>EventBody</code>; the unused constructors are
+dropped. <code>Session.Async.Engine</code> and <code>OneShotTool</code> emit through a runner
+hook (<code>ctxEmit :: Maybe (EventBody -&gt; IO ())</code>) instead of <code>ctxEventQueue</code>,
+and the runner sets it (G3). <code>SubcallProgress</code> no longer carries a whole
+<code>Session</code>: a child that is a real session (see §4) emits its own
+<code>SessionUpdated</code>.
+</li>
+</ul>
+<h4 id="2-sequence-numbers-and-replay-g5">2. Sequence numbers and replay (G5)</h4>
+<ul>
+<li>The runner stamps every event with a monotonically increasing <code>EventSeq</code>
+and keeps a bounded in-memory ring (say the last 4096 events).
+</li>
+<li><code>Subscribe { after = Just n }</code> replays from the ring when <code>n</code> is inside
+it. When it is not, the server answers with a <code>snapshot</code> per session in
+scope (as today) followed by live events, and the client re-fetches
+<code>GetSession</code> for anything it cares about. This is the SSE <code>Last-Event-ID</code>
+contract.
+</li>
+<li><code>SubscribeScope = OneSession SessionId | Owner (Maybe Text) | All</code>. <code>All</code>
+needs an admin owner when auth is on.
+</li>
+<li>Persisting the event log is deferred (see Decisions). The stored session
+plus <code>session_mail</code> already lets a client rebuild state; the ring only
+needs to cover reconnection hiccups.
+</li>
+</ul>
+<h4 id="3-runnerclient-one-interface-two-implementations">3. <code>RunnerClient</code>: one interface, two implementations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">RunnerClient</span> <span class="ot">=</span> <span class="dt">RunnerClient</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> rcCommand   ::</span> <span class="dt">Command</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> <span class="dt">Reply</span>)</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> rcSubscribe ::</span> <span class="dt">SubscribeScope</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">EventSeq</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">IO</span> <span class="dt">Event</span>, <span class="dt">IO</span> ())   <span class="co">-- next, close</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">inProcessClient ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">RunnerClient</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ot">httpClient      ::</span> <span class="dt">BaseUrl</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">BearerToken</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">RunnerClient</span>   <span class="co">-- HTTP + SSE</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">socketClient    ::</span> <span class="dt">FilePath</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">RunnerClient</span>                       <span class="co">-- Unix socket, same framing</span></span></code></pre></div></div><p>The TUI depends only on <code>RunnerClient</code>. <code>agents-exe tui</code> builds
+<code>inProcessClient</code> over a runner it starts itself; <code>agents-exe tui --attach</code>
+builds <code>httpClient</code> or <code>socketClient</code>. No TUI code knows which.</p>
+<h4 id="4-the-tui-as-a-client-g1-g6-g8-g9-g10">4. The TUI as a client (G1, G6, G8, G9, G10)</h4>
+<ul>
+<li><code>Conversation</code> in the TUI becomes: <code>SessionId</code>, the latest <code>Session</code> and
+<code>SessionMeta</code> (from <code>GetSession</code> and <code>SessionUpdated</code>), derived views
+(tool-call views, signals, usage), unread markers. No <code>ThreadId</code>, no
+<code>BChan</code>, no callbacks, no <code>TuiAgent</code> with TVars.
+</li>
+<li><code>Core</code> loses <code>coreWorld</code>, <code>coreOSEventQueue</code>, <code>coreMailRouter</code>,
+<code>coreBufferedMessages</code>, <code>corePausedConversations</code>. The agent list is
+<code>ListAgents</code> plus <code>AgentsChanged</code>.
+</li>
+<li>Send = <code>PostMessage</code> when the session is idle. While a run is active, send
+appends to a TUI-local draft (§5) rather than posting a discrete queued
+message; the draft is posted as one message when the run stops. “Send
+now” posts the draft at once (it becomes mail, folded at the next R1);
+an interrupt (<code>PostMessage</code> with <code>nmInterrupt</code>) bypasses the draft as
+today. Unread mail from other senders is shown read-only next to it (see
+Decisions, D3).
+</li>
+<li>Pause = <code>Pause</code>; unpause = <code>SendMail Control Resume</code>. <code>Paused</code> becomes a
+<code>SessionStatus</code> detail the server reports, not a TUI-local flag.
+</li>
+<li>Interrupt and hard cancel are already commands (<code>PostMessage</code> with
+<code>nmInterrupt</code>, <code>CancelAttached</code>). Quit = <code>SendMail StopRun</code> for every
+session the TUI started in embedded mode, and nothing when attached.
+</li>
+<li>Fork = <code>ForkSession</code>. Continue with another agent = fork at the head.
+</li>
+<li>Subcall visibility: a <code>prompt_agent_*</code> call spawns a real child session via
+<code>spawnSession</code> (the server already links <code>smParent</code>), so the child shows
+up through <code>SessionCreated</code> + its own events. The TUI’s spawn-roster
+question (G9) goes away: the server resolves helpers, and <code>CreateSession</code>
+with a <code>parent</code> covers the “spawn any root as a child” case the TUI has
+today.
+</li>
+<li>Deferred calls: the TUI gains a pending-calls view and <code>CompleteCall</code>,
+which the server already supports.
+</li>
+<li>Sessions history tab = <code>ListSessions</code>, refreshed by <code>SessionCreated</code>,
+<code>SessionUpdated</code>, <code>SessionDeleted</code>.
+</li>
+<li><code>ConversationId</code> in the TUI = <code>sessionIdToConversationId sid</code>, as on the
+server (G8).
+</li>
+</ul>
+<p>The <code>OS.*</code> ECS layer is left in place for tool-call entities inside the
+engine; the TUI stops constructing a <code>World</code>.</p>
+<h4 id="5-the-draft-buffer-g6-queued-messages-a-ui-concern">5. The draft buffer (G6, queued messages): a UI concern</h4>
+<p>Three messages typed in a row while the LLM is busy are almost always one
+message being elaborated. So the TUI keeps, per conversation, <strong>one editable
+draft with append semantics</strong> instead of a queue of discrete messages, and
+posts it whole when it is the user’s turn. The kernel never sees a draft: it
+only ever receives real messages (<code>PostMessage</code>) and interrupts.</p>
+<ul>
+<li><strong>Where it lives:</strong> in the TUI’s <code>Conversation</code> state only. It is not
+persisted and does not survive a detach; a second client attached to the
+same session does not see it. That is fine: it is unsent text, like the
+contents of the composer.
+</li>
+<li><strong>Editing:</strong> the queue tab becomes a draft editor. Collapsed, it shows the
+draft’s first line and size; expanded, it is a text editor over the whole
+draft. Sending while busy appends a paragraph; the user can rewrite or
+clear it at will.
+</li>
+<li><strong>When it ships:</strong> on <code>RunStopped</code> with a status that accepts input, the
+TUI posts the draft as one <code>PostMessage</code> and clears it. “Send now” from
+the editor posts it immediately; the server turns it into <code>UserMessage</code>
+mail and R1 folds it into the next user turn, which fires after each round
+of tool results too, so an elaboration typed during a tool call reaches
+the model at the next completion. A paused session keeps the draft until
+it is resumed.
+</li>
+<li><strong>What the LLM sees:</strong> unchanged from the mailbox spec. R1 emits one tool
+message per call, then a user message with the folded mail. For a
+provider that rejects a user message directly after tool results, the
+agent opts into <code>mailInToolResult: true</code>: R1 then appends the folded
+mail as a trailing text block of the last tool result of that round, with
+the same <code>[mail …]</code> header. This is a property of mail folding, not of
+drafts, and applies to attached (sync) calls; detached and deferred
+results already arrive as mail of their own.
+</li>
+</ul>
+<h4 id="6-agents-exe-serve-and-config-parity-g7">6. <code>agents-exe serve</code> and config parity (G7)</h4>
+<ul>
+<li>Move from <code>app/Main.hs</code> into a library module (<code>System.Agents.CLI.Config</code>
+or similar): <code>locateAgentsExeConfig</code>, config parsing, <code>agentsFiles</code> plus
+<code>agentsDirectories</code> expansion, the default-directory fallback,
+<code>resolveAgentFiles</code> for <code>--agent</code>, <code>--params-file</code>, and the sessions-store
+choice.
+</li>
+<li><code>HostConfig</code> gains a constructor from that config, so <code>withHost</code> can be
+fed either explicit <code>--agent-file</code>s or the resolved config.
+</li>
+<li><code>agents-exe serve</code> = the current <code>agents-server</code> main, with config
+loading in front. <code>agents-server</code> keeps working as the same code with
+flags only. The SQLite session backend becomes the default for the TUI
+too; the file store stays readable through a composite backend for old
+<code>conv.*.json</code> history.
+</li>
+<li><code>--socket PATH</code> on <code>serve</code> for a local, token-free attach; <code>--bind</code>/<code>--port</code>
+as today for HTTP.
+</li>
+</ul>
+<h4 id="7-http-surface-additions">7. HTTP surface additions</h4>
+<table>
+<tr><th>Route</th><th>Command</th></tr>
+<tr><td><code>POST /v1/sessions</code> with no <code>prompt</code></td><td><code>CreateSession { message = Nothing }</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/fork</code></td><td><code>ForkSession</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/pause</code></td><td><code>Pause</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/mail</code></td><td><code>SendMail</code></td></tr>
+<tr><td><code>GET /v1/sessions/:id/mail?unread=</code></td><td>inbox listing</td></tr>
+<tr><td><code>GET /v1/events?scope=&amp;after=</code></td><td><code>Subscribe</code> across sessions, with <code>Last-Event-ID</code></td></tr>
+<tr><td><code>GET /v1/agents/:slug</code></td><td>extended with model, system prompt, tool activation</td></tr>
+</table>
+<p><code>GET /v1/sessions/:id/events</code> stays, gains <code>Last-Event-ID</code>.</p>
+<h3 id="phases">Phases</h3>
+<p>Phases 0 and 1 need nothing and make the service usable from a local web
+app on their own. Phase 2 needs nothing either. Phase 3 needs Phase 2.
+Phase 4 needs 1, 2 and 3. Phase 5 needs only Phase 2.</p>
+<h4 id="phase-0-service-readiness-g12-g13--done">Phase 0: service readiness (G12, G13) — done</h4>
+<p><code>--cors-origin ORIGIN</code> on <code>agents-server</code>, repeatable, <code>*</code> allowed only
+without auth: emits <code>Access-Control-Allow-Origin</code> (echoing the matched
+origin), <code>-Allow-Methods</code>, <code>-Allow-Headers</code> (<code>Authorization</code>,
+<code>Content-Type</code>), <code>-Expose-Headers</code> (<code>Location</code>), <code>-Max-Age</code>, and answers
+preflight <code>OPTIONS</code> with 204 before auth and before <code>checkOrigin</code>. An
+origin listed here passes <code>checkOrigin</code> even with auth off. The SSE route
+keeps working cross-origin through <code>?access_token=</code> since <code>EventSource</code>
+cannot set headers. Docs: a “Running as a service” section in
+<code>documentation/agents-server.md</code> with a systemd unit, and the CORS flag in the flag
+table and the authentication section. Also add the undocumented
+<code>cancel-attached</code>, <code>pause</code>, <code>interrupt</code>, <code>tool.started</code> and
+<code>tool.completed</code> to the same doc. Tests: preflight, allowed and refused
+origins, SSE with <code>access_token</code> from an allowed origin.</p>
+<h4 id="phase-1-agents-exe-serve-and-config-parity-g7--done">Phase 1: <code>agents-exe serve</code> and config parity (G7) — done</h4>
+<p>Landed as <code>System.Agents.CLI.ConfigLoader</code> (not <code>CLI.Config</code>: the TUI
+library already owns that module name), <code>hostConfigFromResolved</code>,
+<code>agents-exe serve</code> reusing the global <code>--agent-file</code>/<code>--agent</code>/<code>--params-file</code>
+flags, and <code>--socket</code>. The Unix listener stops accepting on SIGTERM and
+unlinks its file but does not drain in-flight requests through
+<code>--shutdown-grace</code>; only the TCP listener does.</p>
+<p>Original scope:</p>
+<p>Config loading into the library (§6); <code>serve</code> subcommand on <code>agents-exe</code>;
+<code>--socket</code>. The <code>agents-server</code> executable stays as the flags-only entry
+point over the same code. Docs: <code>documentation/agents-server.md</code> gains the config
+section; <code>documentation/cli-commands.md</code> gains <code>serve</code>.</p>
+<h4 id="phase-2-the-protocol-in-the-library">Phase 2: the protocol, in the library</h4>
+<p>Split in three sequential steps: 2a the <code>Protocol</code> types with JSON, event
+sequence numbers, the ring and replay, the cross-session feed, and the
+server re-implemented on them; 2b the missing runner operations
+(<code>listSessions</code>, <code>sendMail</code>, create with no message, <code>forkSession</code>) and
+their routes; 2c <code>ctxEmit</code> replacing <code>ctxEventQueue</code> so subcall and
+tool-activity events reach the runner stream, and <code>mailInToolResult</code>.</p>
+<p>2a landed as <code>System.Agents.Protocol</code> (<code>Event { seq, session_id, owner, body }</code>, <code>EventBody</code> with the old <code>SessionEvent</code> kinds plus
+<code>session.created</code> / <code>session.deleted</code>, JSON for <code>NewMessage</code>, <code>RunMode</code>,
+<code>RunnerError</code>, <code>DeleteMode</code>, <code>DeletionPlan</code>, <code>SubscribeScope</code>), a 4096-event
+ring in the runner, <code>subscribe</code>/<code>subscribeSTM</code> taking a scope and an
+<code>after</code>, <code>Last-Event-ID</code> and <code>?after=</code> on the session stream, and
+<code>GET /v1/events?scope=owner|all</code>. Deviations from the sketch: <code>evSession</code>
+and <code>evOwner</code> are always set, also on the server-wide events, because the
+JSON merges them with the embedded <code>SessionMeta</code> fields; <code>RunnerError</code>’s
+decoder is lossy (only the code survives, by design of the existing
+<code>{error, message}</code> shape); the snapshot fallback on an unavailable replay
+keeps the pre-existing tiny gap between snapshot and re-subscribe.</p>
+<p>2b landed: <code>createSessionAs*</code> take <code>Maybe NewMessage</code> (promptless
+<code>POST /v1/sessions</code> creates an idle <code>ready</code> session), <code>listSessions</code> on
+the runner, <code>sendMail</code>/<code>listMail</code> with <code>POST</code>/<code>GET /v1/sessions/:id/mail</code>,
+and <code>forkSession</code> with <code>POST /v1/sessions/:id/fork</code>. Deviation: <code>Turn</code> has
+no id of its own, so forks are addressed by a 0-based newest-first turn
+index (<code>at_turn</code>), exactly as the TUI’s <code>handleForkAtTurn</code> does, and the
+error is <code>UnknownTurn SessionId Int</code> (<code>unknown_turn</code>). The <code>Command</code>
+sketch’s <code>atTurn :: TurnId</code> is wrong until turns get ids.</p>
+<p>2c landed: <code>ctxEmit :: Maybe (OSEmission -&gt; IO ())</code> next to <code>ctxEventQueue</code>
+(an intermediate <code>OSEmission</code> type avoids a <code>Session.Base</code> → <code>Protocol</code>
+import cycle; the runner converts it to <code>EventBody</code>), the four kinds
+<code>subcall.started</code> / <code>subcall.completed</code> / <code>subcall.failed</code> /
+<code>tool.progressed</code>, the nine dead <code>OSEvent</code> constructors deleted, and
+<code>mailInToolResult</code>. Deviations: subcall events are stamped with the
+<em>parent</em> as <code>session_id</code> (so a subscriber of the parent sees them) and
+carry the child as <code>child_session_id</code>. <strong>Open gap:</strong> <code>mailInToolResult</code> is
+implemented in the synchronous step path only; the server always runs
+agents asynchronously, so it has no effect on server sessions until the
+async path (<code>runStepMAsync</code>) folds mail the same way. Tracked for Phase 5.</p>
+<p><code>System.Agents.Protocol</code> with <code>Command</code>, <code>Event</code>, <code>EventBody</code>, JSON
+instances, and codecs for <code>NewMessage</code>, <code>RunMode</code>, <code>RunnerError</code>,
+<code>UserToolResponse</code> views. <code>AgentsServer.Api</code> re-implemented on top of it (no
+behaviour change; <code>eventFrame</code> goes away). Runner gains <code>EventSeq</code> stamping
+and the ring, <code>listSessions</code>, <code>sendMail</code>, <code>createSession</code> with no message,
+<code>forkSession</code>. <code>ctxEmit</code> replaces <code>ctxEventQueue</code>; <code>Engine</code> and
+<code>OneShotTool</code> emit through it. <code>mailInToolResult</code> folding at R1 (§5). Tests: JSON round trips, replay from
+the ring, fork, empty create, <code>mailInToolResult</code> folding.</p>
+<h4 id="phase-3-the-tui-on-the-in-process-runner">Phase 3: the TUI on the in-process runner</h4>
+<p>Split in three sequential steps: 3a <code>RunnerClient</code> and <code>inProcessClient</code>
+in the library plus a serializable agent descriptor (<code>ListAgents</code> /
+<code>GetAgent</code> with model, prompt and tool activation, which also fixes the
+<code>GET /v1/agents</code> gap); 3b the TUI’s startup, Agents tab, History tab and
+conversation layer rewritten on <code>RunnerClient</code> (the large step); 3c
+subcall visibility and tool-call activity from runner events, the
+pending-calls view with <code>CompleteCall</code>, and retiring <code>OSEvent</code>,
+<code>ctxEventQueue</code> and the TUI’s event bridge.</p>
+<p>3a landed (a78d280..bb4e003): <code>AgentDescriptor</code> (model, prompt, tools with
+<code>Activation</code>, parameters, helpers) served by <code>GET /v1/agents</code>; <code>Command</code>
+and <code>Reply</code>; <code>System.Agents.Host.Client</code> with <code>RunnerClient</code>,
+<code>Subscription</code>, <code>inProcessClient owner runner</code> and one typed helper per
+operation. The owner is the client’s identity, not a <code>Command</code> field, so a
+command cannot spoof another owner.</p>
+<p>3b is itself split in four, because Brick’s single <code>TuiState</code>/<code>AppEvent</code>
+means old and new conversation models cannot coexist: 3b-i the new
+<code>Conversation</code>/<code>Core</code>/<code>AppEvent</code> types and the startup on <code>Host</code> +
+<code>SessionRunner</code> + <code>inProcessClient</code>, with handlers stubbed so the shape
+compiles; 3b-ii the event bridge (<code>subscribeAll</code> → <code>AppEvent</code>) and the
+command dispatch; 3b-iii the draft buffer and the History tab; 3b-iv
+render and keymap cleanup, unit tests, smoke test. Known regression to
+accept until Phase 5: <code>AppEvent_SubcallProgress</code> carried the child’s whole
+<code>Session</code>; the runner stream has no equivalent, so a subcall shows start,
+completion and failure only.</p>
+<p>3b landed (f73c018..d2887c6). The TUI is a <code>RunnerClient</code> over an
+in-process runner: promptless <code>createSession</code> then <code>postMessage</code>; one
+<code>subscribeAll</code> bridge thread feeding Brick; pause/resume, interrupt,
+hard cancel, fork, restore (fork when the selected agent differs), F5 and
+quit (<code>StopRun</code> mail, no <code>killThread</code>) all go through the client; the
+draft buffer replaces the queue (Ctrl+A edit, Ctrl+G send now, Ctrl+D
+clear; “edit” pulls the draft back into the composer); History refreshes
+from events with a per-session cache and Loading/error states;
+<code>HostConfig.hcLegacySessionDirs</code> composites old <code>conv.*.json</code> directories
+as a read fallback for both the TUI and <code>serve</code>. Runner fix along the
+way: <code>postMessage</code> accepts the first message of an empty <code>ready</code> session.
+An end-to-end pty script against a fake OpenAI endpoint lives in
+<code>checks/phase3b-iv-e2e/</code>.</p>
+<p>3c landed (c5f017f, 5eeb4b0): <code>OSEvent</code> and <code>ctxEventQueue</code> are gone;
+<code>OSEmission</code> + <code>ctxEmit</code> is the one emission mechanism, with
+<code>queueEmitter</code> for local consumers; new event kind <code>hook.failed</code>; the
+per-step subcall progress snapshot is gone with no successor until Phase
+5. The TUI has a Pending panel and <code>answer-pending</code> (Ctrl+Y) that
+completes the oldest deferred call through <code>completeCall</code> with
+auto-resume. <code>UserToolResponse</code> has no error form, so there is no
+<code>fail-pending</code>. Open: no selection among several pending calls; no UI
+for <code>hook.failed</code>.</p>
+<p><code>inProcessClient</code>; the TUI conversation layer rewritten on <code>RunnerClient</code>
+(§4). <code>agents-exe tui</code> starts a <code>Host</code> + <code>SessionRunner</code> over the SQLite
+backend chosen from config (Phase 1), with the file store composited in for history.
+Feature parity checklist: new, continue, fork, send, draft editor (§5), pause,
+interrupt, hard cancel, quit, subcall visibility, tool-call activity, F5
+tools refresh, export, attachments, plus the new pending-calls view. Remove
+<code>coreWorld</code>, <code>coreOSEventQueue</code>, <code>coreMailRouter</code>, <code>coreBufferedMessages</code>,
+<code>corePausedConversations</code>, <code>Loop</code> usage, <code>OneShot.nodeToAgent</code> usage in the
+TUI.</p>
+<h4 id="phase-4-attach--done">Phase 4: attach — done</h4>
+<p>Landed (20522f2..4e03ec9): <code>System.Agents.Host.Client.Http.httpClient</code>
+over <code>http(s)://</code> and <code>unix://</code> URLs with bearer token, SSE parsing,
+transparent reconnect with <code>Last-Event-ID</code> (backoff 100 ms to 5 s, 45 s
+stall timeout, duplicates dropped), <code>AllSessions</code> falling back to the
+owner scope on 403; <code>agents-exe tui --attach URL|PATH</code> with <code>--token</code> /
+<code>--token-file</code>; <code>POST /v1/sessions</code> takes <code>parent</code>; <code>GET /v1/sessions/:id</code>
+takes <code>wait</code>/<code>timeout</code>; streams send an <code>Agents-Replay</code> header and flush
+headers at once (a warp header-buffering bug had hung the attached TUI);
+the chat page follows <code>GET /v1/events</code>. Open: with <code>--attach</code>, <code>app/Main.hs</code>
+still resolves local agent files, so <code>--agent SLUG</code> can fail when the slug
+is unknown locally.</p>
+<p>Original scope:</p>
+<p><code>httpClient</code> (HTTP + SSE with <code>Last-Event-ID</code>) and <code>socketClient</code>;
+<code>agents-exe tui --attach URL|PATH</code>. The chat page moves to <code>GET /v1/events</code>
+for its session list. Tests: a TUI-less client test that runs the server,
+attaches, creates, interrupts, forks and replays after a dropped stream.</p>
+<h4 id="phase-5-sub-agents-as-sessions--done-with-two-documented-gaps">Phase 5: sub-agents as sessions — done, with two documented gaps</h4>
+<p>Landed (d7850d0..771c988): <code>ctxRunSubagent</code> hook, installed by
+<code>Runner.newAgent</code>, runs <code>prompt_agent_*</code> as a real child session
+(<code>createSessionForNode</code>, <code>parent</code> = the calling session, helper resolved
+by slug anywhere under the calling root) and awaits it; cancelling the
+parent’s call cancels the child; <code>subcall.started</code> carries the real
+child id, so live progress is the child’s own <code>session.updated</code>.
+<code>mailInToolResult</code> now folds on the async path too. <code>tui --attach</code> no
+longer resolves local agent files or creates the default config.
+Gaps: (1) a <code>prompt_agent_*</code> call with any narrowing (<code>bindings</code>,
+<code>with</code>, <code>as</code>, own or inherited) or whose helper is not declared under
+the root still runs in-tool, because <code>ToolExecutionContext</code> cannot name
+a narrowed <code>OSAgentNode</code> without a module cycle; (2) a <code>PartialUserTurn</code>
+shown mid-round does not yet carry that round’s mail in its placeholder
+when <code>mailInToolResult</code> is on. The fake endpoint in <code>checks/</code> is a fixed
+responder, so no end-to-end test exercises a sub-agent through the TUI.</p>
+<p>Original scope:</p>
+<p><code>prompt_agent_*</code> spawns through <code>spawnSession</code> and waits on the child’s
+<code>RunStopped</code> (or its mail), so children are cancellable and observable on
+their own and <code>SubcallProgress</code> with an embedded <code>Session</code> disappears. This
+touches <code>OneShotTool</code> and the async engine; it is the riskiest phase and is
+why it is last.</p>
+<h3 id="remaining-after-phase-5">Remaining after Phase 5</h3>
+<ul>
+<li>G10 residue: narrowed or undeclared <code>prompt_agent_*</code> calls run in-tool.
+</li>
+<li><code>mailInToolResult</code>: partial-turn placeholders lack the round’s mail.
+</li>
+<li>G11: secret params, watches and the run handle are volatile (D7 stands);
+since 2026-09-25 <code>recoverOnStartup</code> fails the running calls of a session
+whose required params were lost, with a <code>params_required</code> detail.
+</li>
+<li>TUI: no selection among several pending calls; no view for <code>hook.failed</code>.
+</li>
+<li>Service packaging: docs only, no unit file shipped, no <code>bundling/</code> entry.
+</li>
+<li><code>checks/</code> fake endpoint cannot script multi-turn answers, so sub-agent
+and tool-call flows have no pty end-to-end test.
+</li>
+<li>D8’s out-of-scope items: multi-server Postgres, mid-<code>RunAsync</code> durability,
+per-owner API keys.
+</li>
+</ul>
+<h3 id="decisions-proposed">Decisions (proposed)</h3>
+<p>D1. <strong>The runner is the OS.</strong> The ECS <code>World</code> is an engine-internal detail
+for tool-call entities. <code>OS.Persistence</code>, <code>OS.Interfaces</code> remnants and the
+unused <code>OSEvent</code> constructors are deleted rather than wired.</p>
+<p>D2. <strong>One wire format, defined once, in the library.</strong> No JSON in
+<code>examples/agents-server</code> beyond what the servant routes need to reference
+the <code>Protocol</code> types.</p>
+<p>D3. <strong>Drafts are a UI concern; the kernel only knows messages and
+interrupts.</strong> Mail stays append-only and immutable. The TUI keeps one
+editable draft per conversation with append semantics (§5), posted as one
+<code>PostMessage</code> when it is the user’s turn. Nothing about drafts crosses the
+wire or is stored. Discrete queued messages, and deleting or reordering
+them, are dropped: successive messages while the model is busy are treated
+as one message being elaborated. Mail from other sessions and tool results
+are shown read-only.</p>
+<p>D4. <strong><code>SessionId</code> is the conversation.</strong> <code>ConversationId</code> is always derived
+from it, in every front-end.</p>
+<p>D5. <strong>The event ring is in memory; the event log is not persisted.</strong>
+Replay covers reconnects; a client that is behind by more than the ring
+refetches sessions. Revisit only if a use case needs an audit trail (then
+persist <code>Event</code> rows in the store, keyed by <code>EventSeq</code>).</p>
+<p>D6. <strong>Embedded mode is the same code as attached mode.</strong> The TUI never gets
+a privileged path to runtime internals again; anything it needs is a
+<code>Command</code> or an <code>Event</code>, which keeps the web page and API clients at parity.</p>
+<p>D7. <strong>Secrets are resupplied by the client.</strong> No durable secret storage in
+this spec; <code>lsParams</code> stays volatile and the TUI resupplies from its
+<code>--params-file</code> on <code>CreateSession</code>/<code>PostMessage</code>, as the web page does today.</p>
+<p>D8. <strong>Out of scope:</strong> several servers on one Postgres, mid-tool-call
+durability for <code>RunAsync</code> calls, per-owner API keys. They are documented as
+unsupported in <code>documentation/agents-server.md</code> and are not needed for attach.</p>
+<h3 id="related-docs">Related docs</h3>
+<ul>
+<li><code>todos/web-server-embedding.md</code>, <code>.progress.md</code>: the Host/Runner and the
+HTTP server this builds on.
+</li>
+<li><code>todos/session-mailbox.md</code>: mail, interrupts, control messages, watches.
+</li>
+<li><code>documentation/agents-server.md</code>: the current API; sections to update are marked in
+Phases 0 and 1.
+</li>
+<li><code>documentation/tui.md</code>: TUI features that form the parity checklist of Phase 2.
+</li>
+<li><code>documentation/OS-API.md</code>: the ECS layer; its <code>OS.Interfaces</code> section is stale and
+goes with D1.
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

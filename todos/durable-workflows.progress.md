@@ -439,7 +439,7 @@ without writing custom code first.
   * resumes the session and prints the final LLM response.
   * Uses a mock LLM, so it needs no API keys and runs deterministically.
 
-* `docs/durable-workflows-howto.md` — guide covering:
+* `documentation/durable-workflows-howto.md` — guide covering:
   * how to run the demonstrator;
   * core durable-workflow concepts (execution mode, policy, executor,
     persistence, wake/resume);
@@ -448,7 +448,7 @@ without writing custom code first.
   * how to build a custom durable agent in Haskell;
   * how to add durable storage, caching, and isolated execution.
 
-* `docs/README.md` — updated the documentation index to link to the new how-to
+* `documentation/README.md` — updated the documentation index to link to the new how-to
   and mention durable workflows in the overview and quick-start sections.
 
 * `agents.cabal` — registered the new `durable-workflow-demo` executable and
@@ -475,7 +475,7 @@ Implementing all eight phases of the durable-workflows plan turned agents-exe fr
 * **Pluggable executors**: `ToolExecutor`, `DeploymentRunner`, and concrete runners (`localProcessRunner`, `dockerRunner`) make *how* a call runs independent of the session loop.
 * **Durable session storage**: `SessionBackend` abstracts file, SQLite, and composite backends so sessions can survive process restarts and be shared across machines.
 * **Operator CLI**: `agents session pause|resume|pending|complete|run-isolated` gives operators direct control over durable executions.
-* **Runnable demonstrator and how-to**: users can exercise the canonical flow immediately with `cabal run durable-workflow-demo` and follow `docs/durable-workflows-howto.md` to build their own durable agents.
+* **Runnable demonstrator and how-to**: users can exercise the canonical flow immediately with `cabal run durable-workflow-demo` and follow `documentation/durable-workflows-howto.md` to build their own durable agents.
 
 ### Architectural gains
 
@@ -491,7 +491,7 @@ Implementing all eight phases of the durable-workflows plan turned agents-exe fr
 * `System.Agents.CLI.SessionDurable` — operator CLI
 * `test/DurableWorkflowTests.hs`, `test/SessionDurableTests.hs`, `test/DurableWorkflowDeterminismTests.hs`
 * `examples/durable-workflow-demo/Main.hs` — runnable mock-LLM demonstrator
-* `docs/durable-workflows-howto.md` — user-facing how-to guide
+* `documentation/durable-workflows-howto.md` — user-facing how-to guide
 
 The codebase now supports the requested example flow end-to-end: an agent issues three tool calls, executes one and defers two, yields, persists, wakes with the two results, and resumes to completion.
 

@@ -1,0 +1,331 @@
+body, html {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg);
+  color: var(--ink);
+}
+
+.main {
+  max-width: 70ch;
+  padding: 3em 1em;
+  margin: auto;
+  line-height: 1.75;
+  font-size: 1.15em;
+  font-family: var(--font-sans);
+}
+
+h1,h2,h3,h4,h5,h6 {
+  margin: 1.4em 0 0.5em;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+h1 {
+  font-size: 1.9em;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+a:hover {
+  color: var(--code-accent);
+}
+
+p,ul,ol {
+  margin-bottom: 1.5em;
+  font-family: var(--font-sans);
+  color: var(--ink-soft);
+}
+
+code {
+  font-family: var(--font-mono);
+}
+
+pre {
+  background-color: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1em;
+  overflow-x: auto;
+  box-shadow: var(--shadow-sm);
+}
+
+/*~~ header ~~~~~~~~~~~~~~~~~~~~*/
+
+header {
+  margin-bottom: 2.5em;
+  margin-left: auto;
+  width: 100%;
+}
+
+header p {
+  margin-bottom: 0.2em;
+  font-style: italic;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+/*~~ footer ~~~~~~~~~~~~~~~~~~~~*/
+
+footer {
+  margin-top: 2em;
+  padding-top: 1.5em;
+  border-top: 1px solid var(--border);
+}
+
+/*~~ topiclist ~~~~~~~~~~~~~~~~~~~~*/
+
+div.topiclist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+}
+
+div.topic {
+  display: flex;
+  align-items: stretch;
+  margin-right: 0;
+  background-color: var(--accent-soft);
+  border-radius: 999px;
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+div.topic:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+a.topic-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.3em 0.7em;
+  text-decoration: none;
+  font-size: 0.75em;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+a.topic-link:hover {
+  text-decoration: none;
+}
+
+span.topic-name {
+   text-transform: uppercase;
+}
+
+span.topic-count {
+  margin-left: 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/*~~ topic prev/next pagination arrows ~~~~~~~~~~~~~*/
+
+span.topic-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6em;
+  flex-shrink: 0;
+}
+
+a.topic-nav-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0.3em 0;
+  text-decoration: none;
+  font-size: 0.95em;
+  font-weight: 700;
+  color: var(--accent);
+  background-color: var(--surface);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+a.topic-nav-link:hover {
+  color: var(--surface);
+  background-color: var(--accent);
+}
+
+span.topic-nav-boundary {
+  font-size: 0.85em;
+  color: var(--border);
+}
+
+/*~~ callouts / admonitions ~~~~~~~~~~~~~*/
+
+div.callout {
+  margin: 1.5em 0;
+  padding: 0.9em 1.15em;
+  border-left: 4px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background-color: var(--surface-alt);
+}
+
+p.callout-title {
+  margin: 0 0 0.3em;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.8em;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+}
+
+p.callout-body {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+div.callout-tip {
+  border-left-color: #2e8b57;
+}
+div.callout-tip > p.callout-title {
+  color: #2e8b57;
+}
+
+div.callout-warning {
+  border-left-color: #c98a1b;
+}
+div.callout-warning > p.callout-title {
+  color: #c98a1b;
+}
+
+div.callout-important, div.callout-danger {
+  border-left-color: #c0392b;
+}
+div.callout-important > p.callout-title, div.callout-danger > p.callout-title {
+  color: #c0392b;
+}
+
+/*~~ faq / accordion ~~~~~~~~~~~~~*/
+
+div.faq {
+  margin: 1.5em 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+details.faq-item {
+  padding: 0.7em 1em;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+summary.faq-question {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--ink);
+  list-style: none;
+}
+summary.faq-question::-webkit-details-marker {
+  display: none;
+}
+summary.faq-question::before {
+  content: "+";
+  display: inline-block;
+  width: 1.2em;
+  color: var(--accent);
+  font-weight: 700;
+}
+details[open] > summary.faq-question::before {
+  content: "\2212";
+}
+
+p.faq-answer {
+  margin: 0.6em 0 0;
+  color: var(--ink-soft);
+}
+
+/*~~ pricing / comparison table ~~~~~~~~~~~~~*/
+
+table.pricing-table {
+  width: 100%;
+  margin: 1.5em 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+table.pricing-table th, table.pricing-table td {
+  padding: 0.7em 1em;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+
+table.pricing-table th.pricing-feature-header {
+  border-right: 1px solid var(--border);
+}
+
+table.pricing-table td.pricing-feature-name {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  border-right: 1px solid var(--border);
+  background-color: var(--surface-alt);
+}
+
+th.pricing-plan-header {
+  background-color: var(--surface-alt);
+}
+
+div.pricing-plan-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+div.pricing-plan-price {
+  margin-top: 0.2em;
+  font-size: 0.85em;
+  color: var(--accent);
+}
+
+table.pricing-table td.pricing-value {
+  color: var(--ink-soft);
+}
+
+table.pricing-table tr:last-child th, table.pricing-table tr:last-child td {
+  border-bottom: none;
+}
+
+/*~~ social links ~~~~~~~~~~~~~~~*/
+
+div.social-links {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.75em;
+}
+
+div.social-links a {
+  margin: 0;
+  padding: 0.4em 0.9em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--ink-soft);
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+div.social-links a:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background-color: var(--accent-soft);
+}
+
+/*~~ hash tags ~~~~~~~~~~~~~~~*/
+
+span.hashtag {
+  color: var(--accent);
+  font-weight: 600;
+}

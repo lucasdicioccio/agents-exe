@@ -1,0 +1,298 @@
+_Generated from [`documentation/CHANGELOG-OS-MIGRATION.md`](https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/CHANGELOG-OS-MIGRATION.md ), the repository is the canonical source and may be ahead of this page._
+
+# Changelog: OS Model Migration
+
+**Date:** March 2026--------------------------------------------**Commits:** `0eb5263` to `cb52af7`
+
+## Summary
+
+This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS) based OS model**.
+
+## Major Changes
+
+### New Architecture: ECS-Based OS Model
+
+The framework now uses an Entity-Component-System (ECS) pattern at its core:
+
+- **Entities**: Lightweight UUID-based identifiers (AgentId, ToolboxId, ConversationId, etc.)
+
+- **Components**: Pure, serializable data attached to entities (AgentConfig, AgentState, ToolboxConfig)
+
+- **Systems**: Functions that operate on entities with specific component combinations
+
+
+### New Modules (27 OS Modules Added)
+
+```html
+<table>
+<tr><th>Module</th><th>Purpose</th></tr>
+<tr><td><code>System.Agents.OS</code></td><td>Main OS module, exports all OS functionality</td></tr>
+<tr><td><code>System.Agents.OS.Core</code></td><td>Core ECS types and World operations</td></tr>
+<tr><td><code>System.Agents.OS.Core.Types</code></td><td>Component typeclass and entity ID types</td></tr>
+<tr><td><code>System.Agents.OS.Core.World</code></td><td>World storage with STM-based component stores</td></tr>
+<tr><td><code>System.Agents.OS.Agents</code></td><td>OS-native agent creation and management</td></tr>
+<tr><td><code>System.Agents.OS.AgentTree</code></td><td>OS-native agent tree initialization</td></tr>
+<tr><td><code>System.Agents.OS.Concurrent</code></td><td>Concurrent access patterns</td></tr>
+<tr><td><code>System.Agents.OS.Concurrent.Types</code></td><td>Access pattern types (Exclusive, Read-Write, Pool)</td></tr>
+<tr><td><code>System.Agents.OS.Concurrent.Locks</code></td><td>STM-based locking primitives</td></tr>
+<tr><td><code>System.Agents.OS.Resources</code></td><td>Resource lifecycle management</td></tr>
+<tr><td><code>System.Agents.OS.Resources.Types</code></td><td>Resource scope definitions</td></tr>
+<tr><td><code>System.Agents.OS.Resources.Sqlite</code></td><td>SQLite resource management</td></tr>
+<tr><td><code>System.Agents.OS.Resources.Lua</code></td><td>Lua interpreter resources</td></tr>
+<tr><td><code>System.Agents.OS.Resources.Http</code></td><td>HTTP connection pool resources</td></tr>
+<tr><td><code>System.Agents.OS.Conversation</code></td><td>Conversation and turn management</td></tr>
+<tr><td><code>System.Agents.OS.Conversation.Types</code></td><td>Turn, Message, Conversation components</td></tr>
+<tr><td><code>System.Agents.OS.Conversation.Lineage</code></td><td>Call chain tracking</td></tr>
+<tr><td><code>System.Agents.OS.Persistence</code></td><td>Component persistence layer</td></tr>
+<tr><td><code>System.Agents.OS.Persistence.Types</code></td><td>Backend abstractions</td></tr>
+<tr><td><code>System.Agents.OS.Persistence.Sqlite</code></td><td>SQLite persistence backend</td></tr>
+<tr><td><code>System.Agents.OS.Persistence.File</code></td><td>File-based persistence</td></tr>
+<tr><td><code>System.Agents.OS.Persistence.Schema</code></td><td>Database schema</td></tr>
+<tr><td><code>System.Agents.OS.Compat</code></td><td>Compatibility layer exports</td></tr>
+<tr><td><code>System.Agents.OS.Compat.Runtime</code></td><td>Runtime-to-OS bridge</td></tr>
+<tr><td><code>System.Agents.OS.Interfaces</code></td><td>Interface layer</td></tr>
+<tr><td><code>System.Agents.OS.Interfaces.TUI</code></td><td>TUI adaptation for OS</td></tr>
+<tr><td><code>System.Agents.OS.Interfaces.OneShot</code></td><td>OneShot adaptation for OS</td></tr>
+</table>
+```
+
+### Migration Phases
+
+The migration follows a phased approach:
+
+```
+PhaseOldOnly (REMOVED) ──> PhaseDual ──> PhaseNewOnly
+    (Legacy only)          (Both)        (OS only)
+```
+
+**March 2026 Update:** PhaseOldOnly has been removed. The system now operates in:
+
+- **PhaseDual** (default): Both Runtime and OS available
+
+- **PhaseNewOnly**: OS only, Runtime deprecated
+
+
+### Key New Capabilities
+
+- .1 **Shared Toolboxes**: Multiple agents can share the same SQLite database, HTTP connection pool, or other resources
+
+- .1 **Better Resource Management**: Explicit lifecycle scopes (Program, Agent, Toolbox, Conversation, Turn, ToolCall)
+
+- .1 **Concurrent Access**: STM-based synchronization with multiple patterns:
+- .1 - `ExclusiveAccess`: Single accessor (TMVar) - for Lua interpreters
+
+- `ReadWriteAccess`: Multiple readers/single writer (RWLock) - for SQLite
+
+- `PoolAccess`: Bounded pool (TBQueue) - for HTTP connections
+
+- `StatelessAccess`: No synchronization needed
+
+
+
+- .1 **Durable Persistence**: Pluggable backends (SQLite, PostgreSQL, file-based)
+
+- .1 **Complete Lineage Tracking**: Full call chains for debugging and accounting
+
+- .1 **Foundation for Web API**: Centralized state enables HTTP server interface
+
+
+### Component Type IDs
+
+```html
+<table>
+<tr><th>ID</th><th>Component</th></tr>
+<tr><td>1</td><td>AgentConfig</td></tr>
+<tr><td>2</td><td>AgentState</td></tr>
+<tr><td>3</td><td>ToolboxConfig</td></tr>
+<tr><td>4</td><td>ToolboxState</td></tr>
+<tr><td>5</td><td>ToolboxBinding</td></tr>
+<tr><td>30</td><td>ConversationConfig</td></tr>
+<tr><td>31</td><td>ConversationState</td></tr>
+<tr><td>32</td><td>AgentConversation</td></tr>
+<tr><td>33</td><td>TurnConfig</td></tr>
+<tr><td>34</td><td>TurnState</td></tr>
+<tr><td>35</td><td>ToolCallConfig</td></tr>
+<tr><td>36</td><td>ToolCallState</td></tr>
+<tr><td>38</td><td>Message</td></tr>
+</table>
+```
+
+### New CLI Modules
+
+- `System.Agents.CLI.Export` - Export tools and agents
+
+- `System.Agents.CLI.Import` - Import tools and agents
+
+
+### New Documentation
+
+```html
+<table>
+<tr><th>Document</th><th>Purpose</th></tr>
+<tr><td><code>documentation/architecture.md</code></td><td>Updated with OS model architecture</td></tr>
+<tr><td><code>documentation/OS-API.md</code></td><td>Complete API reference for OS model</td></tr>
+<tr><td><code>documentation/MIGRATION-OS.md</code></td><td>Migration guide from Runtime to OS</td></tr>
+<tr><td><code>documentation/MIGRATION-GUIDE.md</code></td><td>General migration guidance</td></tr>
+<tr><td><code>documentation/advanced-configuration.md</code></td><td>Advanced configuration options</td></tr>
+</table>
+```
+
+### New Tests
+
+```html
+<table>
+<tr><th>Test Module</th><th>Purpose</th></tr>
+<tr><td><code>test/OS/IntegrationTests.hs</code></td><td>End-to-end OS scenarios</td></tr>
+<tr><td><code>test/OS/CompatibilityTests.hs</code></td><td>Runtime/OS compatibility tests</td></tr>
+<tr><td><code>test/OS/CoreTests.hs</code></td><td>ECS core functionality</td></tr>
+<tr><td><code>test/OS/ConcurrentTests.hs</code></td><td>Concurrent access patterns</td></tr>
+<tr><td><code>test/OS/ResourcesTests.hs</code></td><td>Resource management</td></tr>
+<tr><td><code>test/OS/ConversationTests.hs</code></td><td>Conversation/lineage</td></tr>
+<tr><td><code>test/OS/PersistenceTests.hs</code></td><td>Persistence layer</td></tr>
+<tr><td><code>test/OS/CompatTests.hs</code></td><td>Compatibility layer</td></tr>
+<tr><td><code>test/OS/InterfaceTests.hs</code></td><td>Interface layer</td></tr>
+</table>
+```
+
+### New Benchmarks
+
+```html
+<table>
+<tr><th>Benchmark</th><th>Purpose</th></tr>
+<tr><td><code>bench/OSBenchmarks.hs</code></td><td>OS model performance benchmarks</td></tr>
+</table>
+```
+
+## API Changes
+
+### Old (Still Supported via Compatibility Layer)
+
+```haskell
+-- Legacy Runtime approach
+runtime <- newRuntime props agent tracer
+result <- runWithRuntime runtime $ do
+    tools <- listTools
+    callTool "my-tool" args
+```
+
+### New (OS Model)
+
+```haskell
+-- OS model approach
+import System.Agents.OS
+
+-- Initialize world
+world <- atomically $ do
+    w <- newWorld
+    w' <- registerComponentStore w (Proxy @AgentConfig)
+    registerComponentStore w' (Proxy @AgentState)
+
+-- Create agent
+let config = AgentConfig
+    { agentName = "my-agent"
+    , agentModel = ModelConfig "openai" "url" "gpt-4" "key"
+    , agentSystemPrompt = "You are helpful"
+    , agentToolboxBindings = []
+    }
+agentId <- createAgent world config
+```
+
+## Migration Path
+
+- .1 **Current (PhaseDual)**: Use `System.Agents.OS.Compat.Runtime` for gradual migration
+
+- .1 **Future (PhaseNewOnly)**: Direct OS model usage
+
+
+See `documentation/MIGRATION-OS.md` for detailed migration instructions.
+
+## Build Changes
+
+### New Dependencies
+
+- `deepseq` - For benchmark strictness
+
+- `criterion` - Benchmarking framework
+
+- `async` - Concurrent test execution
+
+- `mtl` - Monad transformers
+
+
+### Cabal Updates
+
+- Added 27 new OS modules to library
+
+- Added new test modules
+
+- Added benchmark section
+
+
+## Benefits
+
+- .1 **Shared Resources**: Multiple agents sharing toolboxes
+
+- .1 **Resource Pooling**: HTTP connections pooled across agents
+
+- .1 **Better Lifecycle**: Explicit cleanup with scopes
+
+- .1 **Web API Ready**: Centralized state for HTTP interface
+
+- .1 **Durable Persistence**: Multiple backend options
+
+- .1 **Lineage Tracking**: Complete call chains
+
+
+## Tradeoffs
+
+- .1 **ECS Complexity**: Adds indirection but enables flexible composition
+
+- .1 **STM Overhead**: Slight performance cost for composability
+
+- .1 **Dual Mode**: Maintenance burden during transition
+
+- .1 **Storage Overhead**: More memory than direct fields
+
+
+## Backward Compatibility
+
+- Full compatibility layer provided
+
+- Old Runtime interface still works
+
+- Gradual migration supported
+
+- Breaking changes documented in migration guide
+
+
+## Related Issues
+
+- &#35;348 - Core Entity and Component Types
+
+- &#35;349 - Resource Management
+
+- &#35;350 - Concurrent Access
+
+- &#35;351 - Conversation and Lineage Tracking
+
+- &#35;352 - OS Monad
+
+- &#35;353 - Runtime Compatibility
+
+- &#35;354 - TUI and OneShot Adaptation
+
+- &#35;355 - Persistence Layer
+
+- &#35;356 - Documentation and Integration (this release)
+
+
+## Contributors
+
+- Lucas DiCioccio
+
+
+-----------------------------
+
+For questions about the migration, see `documentation/MIGRATION-OS.md` or file an issue with the "migration" label.
+
+

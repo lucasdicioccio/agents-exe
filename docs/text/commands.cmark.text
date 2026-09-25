@@ -1,0 +1,144 @@
+_Generated from [`README.md`](https://github.com/lucasdicioccio/agents-exe/blob/main/README.md ), the repository is the canonical source and may be ahead of this page._
+
+# Command reference
+
+## Command Reference
+
+### Global Options
+
+These options apply to all commands:
+
+```html
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--api-keys FILE</code></td><td><code>~/.config/agents-exe/secret-keys</code></td><td>Path to JSON file containing API keys</td></tr>
+<tr><td><code>--log-file LOGFILE</code></td><td><code>agents-logfile</code></td><td>Raw log file for debugging</td></tr>
+<tr><td><code>--log-http URL</code></td><td>(none)</td><td>HTTP endpoint for JSON log sink</td></tr>
+<tr><td><code>--log-json-file FILE</code></td><td>(none)</td><td>Local JSON file log sink</td></tr>
+<tr><td><code>--session-json-file-prefix PREFIX</code></td><td>(none)</td><td>Prefix for session JSON files</td></tr>
+<tr><td><code>--agent-file AGENTFILE</code></td><td>(auto-discovered)</td><td>Root agent description file(s). Can be specified multiple times. Defaults to <code>agent.json</code></td></tr>
+</table>
+```
+
+### Commands
+
+#### `check`
+
+Validates agent configuration files.
+
+```console
+agents-exe check
+agents-exe check --agent-file custom-agent.json
+```
+
+#### `init`
+
+Initializes a new agent project with a sample `agent.json` and tools directory structure.
+
+```console
+agents-exe init
+agents-exe init --agent-file my-agent.json
+```
+
+#### `tui` - Terminal User Interface
+
+Launches an interactive terminal UI for chatting with agents.
+
+```console
+agents-exe tui
+agents-exe tui --agent-file my-agent.json
+```
+
+#### `run` - Execute a One-Shot Command
+
+Runs a single prompt through an agent and outputs the result.
+
+**Prompt Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Short</th><th>Description</th></tr>
+<tr><td><code>--prompt TEXT</code></td><td><code>-p</code></td><td>Add a text paragraph to the prompt</td></tr>
+<tr><td><code>--file FILE</code></td><td><code>-f</code></td><td>Include contents of a file in the prompt</td></tr>
+<tr><td><code>--shell CMD</code></td><td></td><td>Include stdout of a shell command in the prompt</td></tr>
+<tr><td><code>--sep4 SEP</code></td><td><code>-s</code></td><td>Add a short separator (4 repetitions)</td></tr>
+<tr><td><code>--sep40 SEP</code></td><td><code>-S</code></td><td>Add a long separator (40 repetitions)</td></tr>
+<tr><td><code>--session-file FILE</code></td><td></td><td>Resume from or save to a session file</td></tr>
+</table>
+```
+
+**Examples:**
+
+```console
+# Simple prompt
+agents-exe run --prompt "Hello, how are you?"
+
+# Include file contents
+agents-exe run --prompt "Summarize this:" --file README.md
+
+# Include command output
+agents-exe run -p "Explain this diff:" -s "---" --shell "git diff"
+
+# Multiple prompts (concatenated with newlines)
+agents-exe run -p "First part" -p "Second part"
+
+# Resume a session
+agents-exe run --session-file previous.json -p "Continue where we left off"
+```
+
+#### `echo-prompt`
+
+Echoes the constructed prompt without sending it to the agent. Useful for debugging prompt construction.
+
+```console
+agents-exe echo-prompt -p "Hello" -f README.md
+```
+
+#### `describe`
+
+Outputs a JSON self-description of the tool interface. Useful when agents-exe is used as a sub-tool.
+
+```console
+agents-exe describe
+```
+
+#### `mcp-server`
+
+Runs agents-exe as an MCP (Model Context Protocol) server, exposing agents as tools via stdin/stdout.
+
+```console
+agents-exe mcp-server
+agents-exe mcp-server --agent-file agent1.json --agent-file agent2.json
+```
+
+The MCP server exposes each configured agent as a callable tool to MCP clients like Claude Desktop.
+
+#### `session-print`
+
+Prints a session file in human-readable markdown format.
+
+```html
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--show-tool-call-results</code></td><td>Show the results of tool calls</td></tr>
+<tr><td><code>--n-turns N</code></td><td>Limit output to first N turns</td></tr>
+<tr><td><code>--repeat-system-prompt</code></td><td>Repeat system prompt at each turn</td></tr>
+<tr><td><code>--repeat-tools</code></td><td>Repeat available tools at each turn</td></tr>
+<tr><td><code>--antichronological</code></td><td>Display newest turns first (default: oldest first)</td></tr>
+</table>
+```
+
+**Examples:**
+
+```console
+# Print entire session
+agents-exe session-print my-session.json
+
+# Print with tool results
+agents-exe session-print --show-tool-call-results my-session.json
+
+# Print last 10 turns only, newest first
+agents-exe session-print --n-turns 10 --antichronological my-session.json
+```
+
+

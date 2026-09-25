@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-09-25T12:00:00Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/getting-started.html</id><title type="text">Getting started with agents-exe</title><updated>2026-09-25T12:00:00Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="getting-started-with-agents-exe"&gt;Getting started with agents-exe&lt;/h2&gt;
+&lt;p&gt;agents-exe is a command-line tool, and a Haskell library underneath it. This
+page gets you from a checkout to an agent answering a prompt in each of the
+modes it supports.&lt;/p&gt;
+&lt;h3 id="build"&gt;Build&lt;/h3&gt;
+&lt;pre&gt;&lt;code class="language-sh"&gt;git clone https://github.com/lucasdicioccio/agents-exe
+cd agents-exe
+cabal build
+cabal install exe:agents-exe exe:agents-server    # into ~/.cabal/bin
+cabal test agents-tests                           # the main test suite
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The repository is one cabal package: the &lt;code&gt;agents&lt;/code&gt; library, the &lt;code&gt;agents-exe&lt;/code&gt;
+executable, &lt;code&gt;agents-server&lt;/code&gt; (the HTTP server, see
+&lt;a href="/agents-exe/docs-agents-server.html"&gt;agents-server&lt;/a&gt;), &lt;code&gt;agq&lt;/code&gt; (a query tool over stored
+sessions) and &lt;code&gt;durable-workflow-demo&lt;/code&gt;, which runs without any API key:&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-sh"&gt;cabal run durable-workflow-demo
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h3 id="write-a-first-agent"&gt;Write a first agent&lt;/h3&gt;
+&lt;pre&gt;&lt;code class="language-sh"&gt;agents-exe init
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;walks you through writing an &lt;code&gt;agent.json&lt;/code&gt; and its tools directory. The
+result looks like this:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;slug&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;my-agent&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;apiKeyId&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;openai&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;flavor&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;openai&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;modelUrl&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;https://api.openai.com/v1&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;modelName&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;gpt-4&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;announce&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;A helpful assistant&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;systemPrompt&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;You are a helpful assistant.&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;toolDirectory&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;tools&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="10"&gt;&lt;a href="#10" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;mcpServers&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="11"&gt;&lt;a href="#11" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;extraAgents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[]&lt;/span&gt;&lt;/span&gt;
+&lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;An agent is a repeatable, parameterized LLM: an endpoint, a model, a system
+prompt, a directory of command-line tools, MCP servers, and helper agents it
+can prompt. Tools and helpers are both exposed to the model as functions;
+when the model asks for several at once, agents-exe runs them concurrently.
+&lt;a href="/agents-exe/docs-tools.html"&gt;Tools&lt;/a&gt; explains how an executable describes itself, and
+&lt;a href="/agents-exe/commands.html"&gt;the command reference&lt;/a&gt; lists what &lt;code&gt;init&lt;/code&gt; and the other
+commands accept.&lt;/p&gt;
+&lt;h3 id="store-an-api-key"&gt;Store an API key&lt;/h3&gt;
+&lt;p&gt;Agents authenticate against their LLM endpoint with a key looked up by id in
+&lt;code&gt;~/.config/agents-exe/secret-keys&lt;/code&gt; (or the file given with &lt;code&gt;--api-keys&lt;/code&gt;):&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;keys&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="dt"&gt;&amp;quot;id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;openai&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="dt"&gt;&amp;quot;value&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX&amp;quot;&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="ot"&gt;]&lt;/span&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;The &lt;code&gt;id&lt;/code&gt; must match the agent’s &lt;code&gt;apiKeyId&lt;/code&gt;.&lt;/p&gt;
+&lt;h3 id="run-it"&gt;Run it&lt;/h3&gt;
+&lt;pre&gt;&lt;code class="language-sh"&gt;agents-exe check --agent-file agent.json                     # validate the agent, its tools and helpers
+agents-exe run --agent-file agent.json --prompt &amp;quot;Hello!&amp;quot;     # one shot, answer on stdout
+agents-exe tui --agent-file agent.json                       # the terminal UI
+agents-exe mcp-server --agent-file agent.json                # a stdio MCP server exposing the agent as a tool
+agents-exe serve --agent-file agent.json                     # sessions over HTTP, with a chat page
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;code&gt;--agent-file&lt;/code&gt; can be given several times, and is auto-discovered from
+&lt;code&gt;agent.json&lt;/code&gt; when omitted; a project can also list its agents in
+&lt;code&gt;agents-exe.cfg.json&lt;/code&gt; (see &lt;a href="/agents-exe/docs-advanced-configuration.html"&gt;advanced configuration&lt;/a&gt;).&lt;/p&gt;
+&lt;h3 id="where-next"&gt;Where next&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href="/agents-exe/docs-tui.html"&gt;The TUI&lt;/a&gt;: keys, views, and how it shows tool calls and
+helper agents at work.
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="/agents-exe/docs-agents-server.html"&gt;agents-server&lt;/a&gt;: the HTTP API, durable
+sessions, event streams and running it as a service.
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="/agents-exe/docs-sessions.html"&gt;Sessions&lt;/a&gt; and
+&lt;a href="/agents-exe/docs-async-tool-calls.html"&gt;asynchronous tool calls&lt;/a&gt;: what a session
+stores, and how a run stops on a deferred or background call and resumes.
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="/agents-exe/docs-parameters-and-bindings.html"&gt;Parameters, bindings and narrowing&lt;/a&gt;:
+pre-bound arguments, operator- and client-supplied parameters, and
+narrowed helpers for sub-agents.
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="/agents-exe/docs.html"&gt;Docs&lt;/a&gt;: every guide and reference, and
+&lt;a href="/agents-exe/specs.html"&gt;Specs&lt;/a&gt; for the design documents.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/getting-started.html" rel="alternate"/><summary type="text">Build the executables, write a first agent with init, store an API key, and run the agent one-shot, in the TUI, as a server and as an MCP server.</summary></entry></feed>

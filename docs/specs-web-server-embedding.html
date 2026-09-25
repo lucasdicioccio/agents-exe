@@ -1,0 +1,1086 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: embedding agents-exe in a web server</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: proposed (2026-09-18)"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: embedding agents-exe in a web server"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: proposed (2026-09-18)"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: embedding agents-exe in a web server"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html"><meta property="og:description" content="Status: proposed (2026-09-18)"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/specs-web-server-embedding.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-web-server-embedding.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"Status: proposed (2026-09-18)","headline":"Spec: embedding agents-exe in a web server","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: embedding agents-exe in a web server</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 5552 words, 12 code snippets, 4 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-web-server-embedding.progress.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">7/11</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-async-tool-calls.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.md"><code>todos/web-server-embedding.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="spec-embedding-agents-exe-in-a-web-server">Spec: embedding agents-exe in a web server</h2>
+<p>Status: proposed (2026-09-18)</p>
+<h3 id="goal">Goal</h3>
+<p>Run agents from a long-lived HTTP server, with no TUI and no CLI, where:</p>
+<ul>
+<li>every session lives in a database, not in <code>conv.&lt;uuid&gt;.json</code> files;
+</li>
+<li>a client can start a session, send follow-up messages, watch progress live,
+list and complete deferred tool calls, resume, and cancel;
+</li>
+<li>the server can restart at any time without losing or corrupting sessions.
+</li>
+</ul>
+<p>The deliverable is:</p>
+<ol>
+<li>a small library API in <code>agents-lib</code> for hosting agents, with no HTTP
+dependencies;
+</li>
+<li>a reference HTTP server, <code>agents-server</code>, built on that API.
+</li>
+</ol>
+<h3 id="non-goals-for-this-spec">Non-goals (for this spec)</h3>
+<ul>
+<li>Multi-tenancy: per-user isolation, per-user API keys, and sandboxing of bash
+or MCP tools. The data model reserves an <code>owner</code> column so this can come
+later without a migration (see <a href="#milestone-2-the-later-work">Milestone 2</a>).
+</li>
+<li>A Postgres backend. The interfaces below are designed so it can be added as
+a separate backend.
+</li>
+<li>Streaming LLM tokens. Clients get updates at step granularity.
+</li>
+<li>Agent definitions stored in the database. Agents still come from JSON files
+loaded at startup.
+</li>
+<li>Splitting the library to drop the <code>brick</code>/<code>vty</code> dependencies.
+</li>
+</ul>
+<hr />
+<h3 id="current-state">Current state</h3>
+<h4 id="what-we-can-reuse-as-is">What we can reuse as-is</h4>
+<table>
+<tr><th>Piece</th><th>Where</th><th>Notes</th></tr>
+<tr><td>Loading the agent tree once, sharing it across concurrent runs</td><td><code>AgentTree.withAgentTree</code>; used by <code>MCP/Server.hs:127</code> and <code>:222</code></td><td>The MCP server already runs one <code>async</code> per request over a shared tree.</td></tr>
+<tr><td>Stepping a session</td><td><code>Session.Step.runStepM</code>, <code>Session.Loop.runUntilBlocked</code> (<code>Loop.hs:105</code>), <code>Session.Wake.resumeSession</code></td><td><code>runUntilBlocked</code> returns the session when it waits only on deferred calls.</td></tr>
+<tr><td>Injecting external results</td><td><code>Session.Wake.wakeSession</code></td><td>Pure load, modify, return.</td></tr>
+<tr><td>Session storage interface</td><td><code>SessionStore.SessionBackend</code> (<code>SessionStore.hs:97</code>)</td><td>store / load / list / delete; file, SQLite, and composite versions.</td></tr>
+<tr><td>Continuation index</td><td><code>Session.Async.ContinuationStore</code> (<code>Async.hs:248</code>), SQLite table <code>tool_continuations</code></td><td>Written by the scheduler (<code>Step.hs:490</code>, <code>:728</code>).</td></tr>
+<tr><td>Declarative policy per agent</td><td><code>toolCallPolicyConfig</code>, <code>executionMode</code>, etc.; applied by <code>Session.AgentConfig.applyAgentDurableConfig</code></td><td></td></tr>
+<tr><td>Progress hook</td><td><code>Combinators.StoreSessionProgress.agentWithSessionProgress</code></td><td>Fires <code>SessionUpdated</code> before every step.</td></tr>
+<tr><td>Restart handling for background calls</td><td><code>Step.pollRunningCall</code> (<code>Step.hs:505</code>)</td><td>A <code>Running</code> call whose process is gone becomes <code>Failed</code> ("orphaned").</td></tr>
+<tr><td>Background execution</td><td><code>Session.Base.withAsyncEngine</code>; on-demand World at <code>Step.hs:917</code></td><td>Needs an OS <code>World</code> plus an <code>AsyncEngine</code>.</td></tr>
+</table>
+<h4 id="gaps">Gaps</h4>
+<p><strong>G1. A backend set on an agent after construction is ignored for progress
+storage.</strong> <code>OneShot.nodeToAgent</code> wraps the agent with <code>agentStoreSession</code>
+while <code>ctxSessionBackend = Nothing</code>. <code>agentStoreSession</code>
+(<code>StoreSessionProgress.hs:130</code>) checks <code>ctxSessionBackend</code> on the agent it
+receives when it wraps, not at store time. So
+<code>withSessionBackend backend =&lt;&lt; nodeToAgent …</code> still writes every step to the
+file store.</p>
+<p><strong>G2. Agent construction is copied three times</strong> with small differences:
+<code>OneShot.nodeToAgentWithThinking</code> (<code>OneShot.hs:293</code>),
+<code>AgentTree.OneShotTool.nodeToAgent</code> (<code>OneShotTool.hs:511</code>, used for
+sub-agents), and the MCP server (<code>MCP/Server.hs:~300</code>). The one-shot copy also
+prints thinking to stdout/stderr. Progressive-disclosure tool filtering
+(<code>agentEvaluateActiveTools</code>) is applied only on the one-shot path.</p>
+<p><strong>G3. Sub-agent sessions always go to the file store.</strong> <code>OneShotTool.nodeToAgent</code>
+takes the file <code>SessionStore</code>, generates a fresh <code>ConversationId</code>, and records
+no link to the parent session.</p>
+<p><strong>G4. Session-reading tools and search read only the file store</strong> (tools
+fixed in Phase 3; the search index is CLI-only and stays on files). The
+<code>SystemToolbox</code> session tools (<code>Tools/SystemToolbox/Session.hs</code>, via
+<code>SessionIntrospectionConfig.introspectionStore</code>) and the search index
+(<code>Session/Search/Index.hs</code>, via <code>indexSessionStore</code>) call
+<code>SessionStore.listSessions</code> / <code>readSession</code> directly. <code>Props.sessionStore</code>
+passes this down from <code>AgentTree</code>.</p>
+<p><strong>G5. Sessions have two keys.</strong> The file store is keyed by <code>ConversationId</code>,
+durable commands by <code>SessionId</code>, and the two are generated separately
+(<code>SessionDurable.hs</code> <code>handleStart</code>). <code>runOneShotWithConfig</code> stores a paused
+session under both.</p>
+<p><strong>G6. No concurrency control.</strong> Every mutation is load, modify, store. Two
+concurrent requests on one session (two <code>complete</code> calls, or <code>complete</code> during
+a run) silently lose an update.</p>
+<p><strong>G7. Continuation table and sessions drift apart.</strong> <code>wakeSession</code> never calls
+<code>csComplete</code>, so <code>tool_continuations</code> rows stay pending forever. Finding a
+session from a token scans every session (<code>findSessionForToken</code> in
+<code>SessionDurable.hs</code>) even though <code>tool_continuations.session_id</code> already maps
+it.</p>
+<p><strong>G8. Background calls only live as long as one loop call.</strong> The loops
+create an engine on demand and shut it down on exit (<code>withEngineShutdown</code>,
+<code>Loop.hs:88</code>). A server that pauses and resumes over several HTTP requests
+needs a World and engine per live session that outlive a single request.</p>
+<p><strong>G9. No metadata beyond the JSON blob.</strong> The <code>sessions</code> table has only
+<code>session_id</code>, <code>created_at</code>, <code>updated_at</code>, <code>json</code>. Listing sessions by agent or
+status, or finding ones interrupted by a restart, means decoding every blob.</p>
+<p><strong>G10. The prompt-to-first-turn code lives in the CLI.</strong> <code>handleStart</code> builds
+the initial <code>UserTurn</code> inside <code>CLI/SessionDurable.hs</code>, so the library has no
+reusable version.</p>
+<hr />
+<h3 id="design">Design</h3>
+<h4 id="overview">Overview</h4>
+<pre><code>                 +-------------------------------------------+
+  HTTP / SSE --&gt; | agents-server (wai + warp)                |   examples/agents-server/
+                 +---------------------+---------------------+
+                                       |
+                 +---------------------v---------------------+
+                 | System.Agents.Host.Runner                 |   per-session lock, live runs,
+                 |   SessionRunner                           |   events, cancellation, recovery
+                 +---------+-------------------+-------------+
+                           |                   |
+        +------------------v-----+     +-------v----------------------+
+        | System.Agents.Host     |     | SessionBackend (extended)    |
+        |   Host, on top of      |     | ContinuationStore            |
+        |   AgentFactory         |     | SQLite, one database file    |
+        +------------------------+     +------------------------------+
+</code></pre>
+<p>The library adds three modules:</p>
+<ul>
+<li><code>System.Agents.AgentFactory</code>: the single agent factory (done).
+</li>
+<li><code>System.Agents.Host</code>: loaded agents, database, and stores.
+</li>
+<li><code>System.Agents.Host.Runner</code>: session lifecycle on top of a <code>Host</code>.
+</li>
+</ul>
+<p>None of them imports anything HTTP-related. The HTTP layer is a new executable.</p>
+<h4 id="1-keys-one-id-per-session">1. Keys: one id per session</h4>
+<p><strong>Rule:</strong> a session’s <code>SessionId</code> is its only key. Wherever a
+<code>ConversationId</code> is needed for the same session, it is
+<code>sessionIdToConversationId sid</code>. The Host API never generates a separate
+<code>ConversationId</code> for a session.</p>
+<p>Sub-agent sessions get their own <code>SessionId</code> and record their parent (§3).</p>
+<h4 id="2-the-agent-factory-and-the-host">2. The agent factory and the Host</h4>
+<h5 id="21-systemagentsagentfactory-implemented-phases-12">2.1 <code>System.Agents.AgentFactory</code> (implemented, Phases 1–2)</h5>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentDeps</span> <span class="ot">=</span> <span class="dt">AgentDeps</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> adApiKeys           ::</span> <span class="dt">LoadedApiKeys</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> adSessionSink       ::</span> <span class="dt">SessionSink</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> adContinuationStore ::</span> <span class="dt">Maybe</span> <span class="dt">ContinuationStore</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> adToolCache         ::</span> <span class="dt">Maybe</span> <span class="dt">ToolCache</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> adCompletion        ::</span> <span class="dt">Maybe</span> (<span class="dt">OSAgentNode</span> <span class="ot">-&gt;</span> <span class="dt">Completion</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Replaces the LLM call (tests pass a mock).</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ot">defaultAgentDeps ::</span> <span class="dt">LoadedApiKeys</span> <span class="ot">-&gt;</span> <span class="dt">AgentDeps</span>               <span class="co">-- SinkNone</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="ot">fileAgentDeps    ::</span> <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> <span class="dt">LoadedApiKeys</span> <span class="ot">-&gt;</span> <span class="dt">AgentDeps</span>  <span class="co">-- SinkFiles</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentRole</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">RootAgent</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SubAgent</span> {<span class="ot"> subParentConversation ::</span> <span class="dt">ConversationId</span>,<span class="ot"> subCallStack ::</span> [<span class="dt">CallStackEntry</span>] }</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- | The only way to turn an OSAgentNode into a runnable Agent.</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ot">buildAgent ::</span> <span class="dt">Tracer</span> <span class="dt">IO</span> <span class="dt">Trace</span> <span class="ot">-&gt;</span> <span class="dt">AgentDeps</span> <span class="ot">-&gt;</span> <span class="dt">AgentRole</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">OSAgentNode</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>           <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Agent</span> (<span class="dt">LlmTurnContent</span>, <span class="dt">Session</span>))</span></code></pre></div></div><p><code>buildAgent</code> takes a <code>ConversationId</code>, not a <code>SessionId</code>: the CLI and TUI key
+their file store by conversation ID, and changing that is not part of this
+work. Callers that follow the §1 rule pass <code>sessionIdToConversationId sid</code>.</p>
+<p>What <code>buildAgent</code> does, in this order:</p>
+<ol>
+<li>
+<p>Builds the base <code>Agent</code> record: prompt, tools, <code>toolCall</code>, <code>toolPortal</code>,
+and <code>complete</code> (from <code>adCompletion</code>, or else the agent’s OpenAI config).</p>
+</li>
+<li>
+<p>Applies <code>applyAgentDurableConfig</code> for the node’s JSON config, and installs
+<code>adContinuationStore</code>, <code>adToolCache</code>, and (for <code>SinkBackend</code>) the backend.</p>
+</li>
+<li>
+<p>Applies <code>agentEvaluateActiveTools</code> (progressive disclosure) to every agent.</p>
+</li>
+<li>
+<p>Wraps the agent with <code>agentPersistSession adSessionSink convId</code> <strong>last</strong>
+(fixes G1). <code>SessionSink</code> lives in <code>Combinators.StoreSessionProgress</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionSink</span> <span class="ot">=</span> <span class="dt">SinkBackend</span> <span class="dt">SessionBackend</span> <span class="op">|</span> <span class="dt">SinkFiles</span> <span class="dt">SessionStore</span> <span class="op">|</span> <span class="dt">SinkNone</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">agentPersistSession ::</span> <span class="dt">SessionSink</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">Agent</span> r <span class="ot">-&gt;</span> <span class="dt">Agent</span> r</span></code></pre></div></div><p><code>agentStoreSession</code> keeps its old behaviour for existing callers.</p>
+</li>
+<li>
+<p>Never writes to stdout or stderr. <code>OneShot.nodeToAgentWithThinking</code> adds
+the thinking printer, the media injection, and the extra <code>--session-file</code>
+copy as decorators on the result.</p>
+</li>
+</ol>
+<p>All front-ends use it: one-shot <code>run</code> and the TUI (through
+<code>OneShot.nodeToAgent</code>), sub-agent tools, the MCP server, and the durable
+<code>session</code> commands.</p>
+<p><strong>Sub-agents:</strong> <code>turnAgentRuntimeIntoIOTool</code> takes an <code>AgentDeps</code> instead of a
+<code>SessionStore</code> and API keys. It builds the sub-agent with
+<code>SubAgent parentConvId stack</code> and the same conversation ID it uses for the
+call stack and the OS World entity. That ID now also names the stored
+sub-session; it used to be an unrelated random ID. The parent link is kept at
+runtime (<code>ctxParentConversation</code>), and backends store it as
+<code>parent_session_id</code> (Phase 3).</p>
+<h5 id="22-systemagentshost-implemented-phase-5">2.2 <code>System.Agents.Host</code> (implemented, Phase 5)</h5>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Host</span> <span class="ot">=</span> <span class="dt">Host</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> hostAgents         ::</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">OSAgentNode</span>   <span class="co">-- root agents, by slug</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> hostDeps           ::</span> <span class="dt">AgentDeps</span>              <span class="co">-- root agents: SinkNone, the runner stores</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> hostSubAgentDeps   ::</span> <span class="dt">AgentDeps</span>              <span class="co">-- sub-agents: SinkBackend hostBackend</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> hostBackend        ::</span> <span class="dt">SessionBackend</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> hostContinuations  ::</span> <span class="dt">ContinuationStore</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> hostTracer         ::</span> <span class="dt">Tracer</span> <span class="dt">IO</span> <span class="dt">HostTrace</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> hostLiveSessionTtl ::</span> <span class="dt">NominalDiffTime</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">HostConfig</span> <span class="ot">=</span> <span class="dt">HostConfig</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> hcAgentFiles ::</span> [<span class="dt">FilePath</span>],<span class="ot"> hcApiKeysFile ::</span> <span class="dt">FilePath</span>,<span class="ot"> hcDatabasePath ::</span> <span class="dt">FilePath</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> hcCompletion ::</span> <span class="dt">Maybe</span> (<span class="dt">OSAgentNode</span> <span class="ot">-&gt;</span> <span class="dt">Completion</span>),<span class="ot"> hcLiveSessionTtl ::</span> <span class="dt">NominalDiffTime</span> }</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ot">defaultHostConfig ::</span> [<span class="dt">FilePath</span>] <span class="ot">-&gt;</span> <span class="dt">FilePath</span> <span class="ot">-&gt;</span> <span class="dt">FilePath</span> <span class="ot">-&gt;</span> <span class="dt">HostConfig</span>   <span class="co">-- TTL 15 minutes</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="ot">withHost ::</span> <span class="dt">HostConfig</span> <span class="ot">-&gt;</span> <span class="dt">Tracer</span> <span class="dt">IO</span> <span class="dt">HostTrace</span> <span class="ot">-&gt;</span> (<span class="dt">Host</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> a) <span class="ot">-&gt;</span> <span class="dt">IO</span> a</span></code></pre></div></div><p><code>withHost</code> opens the database with <code>journal_mode = WAL</code> and
+<code>busy_timeout = 5000</code>, runs the session and continuation migrations, loads
+each agent file (sub-agent tools get <code>hostSubAgentDeps</code>, and session tools a
+<code>backendCatalog</code>), and refuses duplicate root slugs (<code>HostError</code>). Both
+dependency sets share the continuation store and the completion override.
+The bundled SQLite is built with <code>THREADSAFE=1</code> (serialized), so one
+connection is shared by all threads; no statement sequence relies on
+<code>changes()</code>.</p>
+<h4 id="3-storage">3. Storage</h4>
+<h5 id="31-extended-sessionbackend-implemented-phase-3">3.1 Extended <code>SessionBackend</code> (implemented, Phase 3)</h5>
+<p><code>SessionStatus</code>, <code>sessionStatusOf</code>, <code>isBlockedOnDeferredCalls</code>, and
+<code>hasBackgroundCalls</code> live in <code>Session.Types</code> (pure, re-exported by
+<code>Session.Base</code>); the metadata types live in <code>SessionStore</code>.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionStatus</span> <span class="ot">=</span> <span class="dt">StatusIdle</span> <span class="op">|</span> <span class="dt">StatusReady</span> <span class="op">|</span> <span class="dt">StatusRunning</span> <span class="op">|</span> <span class="dt">StatusWaitingExternal</span> <span class="op">|</span> <span class="dt">StatusFailed</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionLabels</span> <span class="ot">=</span> <span class="dt">SessionLabels</span>   <span class="co">-- Nothing keeps the stored value</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> slAgent ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span>,<span class="ot"> slParent ::</span> <span class="dt">Maybe</span> <span class="dt">SessionId</span>,<span class="ot"> slOwner ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span> }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionMeta</span> <span class="ot">=</span> <span class="dt">SessionMeta</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> smSessionId    ::</span> <span class="dt">SessionId</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> smAgent        ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> smParent       ::</span> <span class="dt">Maybe</span> <span class="dt">SessionId</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> smOwner        ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span>          <span class="co">-- reserved, unused for now</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> smStatus       ::</span> <span class="dt">SessionStatus</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> smStatusDetail ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span>          <span class="co">-- why it failed</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> smVersion      ::</span> <span class="dt">Int</span>                 <span class="co">-- incremented on every write; 0 = never stored</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    , smCreatedAt,<span class="ot"> smUpdatedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionQuery</span> <span class="ot">=</span> <span class="dt">SessionQuery</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> sqAgent ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span>,<span class="ot"> sqStatuses ::</span> <span class="dt">Maybe</span> [<span class="dt">SessionStatus</span>],<span class="ot"> sqParent ::</span> <span class="dt">Maybe</span> <span class="dt">SessionId</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sqUpdatedBefore ::</span> <span class="dt">Maybe</span> <span class="dt">UTCTime</span>,<span class="ot"> sqLimit ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span> }</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">VersionConflict</span> <span class="ot">=</span> <span class="dt">VersionConflict</span> {<span class="ot"> vcSessionId ::</span> <span class="dt">SessionId</span>, vcExpected,<span class="ot"> vcActual ::</span> <span class="dt">Int</span> }</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionBackend</span> <span class="ot">=</span> <span class="dt">SessionBackend</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> sbStore  ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()     <span class="co">-- unconditional</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sbLoad   ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> <span class="dt">Session</span>)</span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sbList   ::</span> <span class="dt">IO</span> [(<span class="dt">SessionId</span>, <span class="dt">UTCTime</span>)]</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sbDelete ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sbStoreLabelled   ::</span> <span class="dt">SessionLabels</span> <span class="ot">-&gt;</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sbLoadMeta        ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> (<span class="dt">Session</span>, <span class="dt">SessionMeta</span>))</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sbCompareAndStore ::</span> <span class="dt">SessionMeta</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">VersionConflict</span> <span class="dt">SessionMeta</span>)</span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sbQuery           ::</span> <span class="dt">SessionQuery</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> [<span class="dt">SessionMeta</span>]</span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><p>Unconditional stores (<code>sbStore</code>, <code>sbStoreLabelled</code>) increment the version,
+keep stored labels where the new ones are <code>Nothing</code>, and set the status from
+<code>sessionStatusOf</code>, unless the stored status is <code>StatusRunning</code>.
+<code>sbCompareAndStore</code> writes the given metadata exactly, only if the stored
+version equals <code>smVersion</code> (a missing session counts as 0).</p>
+<p>Backend implementations:</p>
+<ul>
+<li><strong>SQLite</strong>: compare-and-store is one conditional statement
+(<code>UPDATE … WHERE version = ? RETURNING …</code>, or an upsert with
+<code>DO UPDATE … WHERE sessions.version = 0</code> for version 0), so it is atomic
+without a lock. Rows from before the migration have version 0.
+</li>
+<li><strong>File</strong>: metadata in a sidecar <code>meta.&lt;uuid&gt;.json</code> (not <code>conv.*</code>, so session
+listings ignore it). A session file without a sidecar reads as version 0.
+Compare-and-store is read-compare-write, not atomic across processes.
+</li>
+<li><strong>Composite</strong>: writes and queries go to the primary backend; loads fall
+back in order.
+</li>
+</ul>
+<p><code>AgentFactory</code> stores through <code>sbStoreLabelled</code> with the agent’s slug and,
+for sub-agents, the parent session. A sub-agent’s session ID is its
+conversation ID, so its own sub-agents name it correctly as their parent.</p>
+<h5 id="32-sqlite-schema-and-migrations-implemented-phase-3">3.2 SQLite schema and migrations (implemented, Phase 3)</h5>
+<p><code>SessionStore.runMigrations conn component migrations</code> applies each
+not-yet-applied <code>Migration</code> in a transaction and records it in
+<code>schema_migrations(component, version, applied_at)</code>, so the continuation
+store and tool cache can have their own migration lists later.
+<code>initializeSessionSchema</code> (called by <code>mkSqliteSessionStore</code>) runs the
+<code>sessions</code> migrations:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- migration 1: the original table and index (CREATE IF NOT EXISTS)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co">-- migration 2</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">ALTER</span> <span class="kw">TABLE</span> sessions <span class="kw">ADD</span> <span class="kw">COLUMN</span> agent_slug TEXT;</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">ALTER</span> <span class="kw">TABLE</span> sessions <span class="kw">ADD</span> <span class="kw">COLUMN</span> parent_session_id TEXT;</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">ALTER</span> <span class="kw">TABLE</span> sessions <span class="kw">ADD</span> <span class="kw">COLUMN</span> owner TEXT;</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">ALTER</span> <span class="kw">TABLE</span> sessions <span class="kw">ADD</span> <span class="kw">COLUMN</span> status TEXT <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">DEFAULT</span> <span class="st">&#39;ready&#39;</span>;</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">ALTER</span> <span class="kw">TABLE</span> sessions <span class="kw">ADD</span> <span class="kw">COLUMN</span> status_detail TEXT;</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">ALTER</span> <span class="kw">TABLE</span> sessions <span class="kw">ADD</span> <span class="kw">COLUMN</span> version <span class="dt">INTEGER</span> <span class="kw">NOT</span> <span class="kw">NULL</span> <span class="kw">DEFAULT</span> <span class="dv">0</span>;</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">INDEX</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> idx_sessions_status <span class="kw">ON</span> sessions(status, updated_at);</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">INDEX</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> idx_sessions_parent <span class="kw">ON</span> sessions(parent_session_id);</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- then each existing row&#39;s status is derived from its JSON</span></span></code></pre></div></div><p>The <code>tool_continuations(session_id, completed_at)</code> index belongs to the
+continuation store’s migrations (Phase 4). Connection settings
+(<code>journal_mode=WAL</code>, <code>busy_timeout</code>) are set by <code>withHost</code>
+when it opens the database (Phase 5), not by the library backends, which
+work on connections their callers own.</p>
+<h5 id="33-reading-sessions-from-tools-g4-implemented-phase-3">3.3 Reading sessions from tools (G4, implemented, Phase 3)</h5>
+<p>A read-only interface both stores implement:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">CatalogEntry</span> <span class="ot">=</span> <span class="dt">CatalogEntry</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> ceConversationId ::</span> <span class="dt">ConversationId</span>,<span class="ot"> ceUpdatedAt ::</span> <span class="dt">Maybe</span> <span class="dt">UTCTime</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ceSession ::</span> <span class="dt">Maybe</span> <span class="dt">Session</span>   <span class="co">-- Nothing when unreadable (locked file)</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ceBusy ::</span> <span class="dt">Bool</span> }             <span class="co">-- locked file, or status running</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionCatalog</span> <span class="ot">=</span> <span class="dt">SessionCatalog</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> catList ::</span> <span class="dt">IO</span> [<span class="dt">CatalogEntry</span>],<span class="ot"> catRead ::</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> <span class="dt">Session</span>) }</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ot">fileCatalog    ::</span> <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> <span class="dt">SessionCatalog</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">backendCatalog ::</span> <span class="dt">SessionBackend</span> <span class="ot">-&gt;</span> <span class="dt">SessionCatalog</span></span></code></pre></div></div><p>Entries are keyed by conversation ID, the vocabulary of the session tools
+(and the same UUID as the session ID in a backend).
+<code>SessionIntrospectionConfig.introspectionCatalog</code> and
+<code>AgentTree.Props.sessionCatalog</code> take a catalog; the CLI and TUI pass
+<code>fileCatalog store</code>, and the Host will pass <code>backendCatalog</code>.</p>
+<p>The search index (<code>Session/Search</code>) stays on the file <code>SessionStore</code>: only
+the <code>session-index</code> and <code>session-search</code> CLI commands use it, and it is built
+around file paths and modification times.</p>
+<h5 id="34-continuations-stay-consistent-g7-implemented-phase-4">3.4 Continuations stay consistent (G7, implemented, Phase 4)</h5>
+<p>The session JSON is the source of truth. <code>tool_continuations</code> is an index
+from token to session.</p>
+<ul>
+<li><code>ContinuationStore.csFindSession :: ContinuationToken -&gt; IO (Maybe SessionId)</code>
+answers for pending and completed tokens (<code>csLoad</code> only returns pending
+ones, so it cannot tell a completed token from an unknown one).
+</li>
+<li><code>Session.Wake.wakeSessionWith :: Maybe ContinuationStore -&gt; Maybe ToolCache -&gt; Session -&gt; [(ContinuationToken, UserToolResponse)] -&gt; IO WakeOutcome</code>
+reports, per token, whether it was applied, already completed, or unknown,
+and calls <code>csComplete</code> for the applied ones. A token is already completed
+when a call of the session still carries it but is no longer deferred, or
+when the store knows it for this session (once a turn is complete, the
+session no longer holds its tokens). <code>wakeSession</code> and
+<code>wakeSessionWithCache</code> are wrappers returning the session.
+</li>
+<li><code>Session.Wake.findSessionForToken :: Maybe ContinuationStore -&gt; SessionBackend -&gt; ContinuationToken -&gt; IO (Maybe SessionId)</code>
+asks <code>csFindSession</code> first and scans the backend’s sessions only for tokens
+the store does not know.
+</li>
+<li><code>csComplete</code> uses <code>UPDATE … RETURNING</code> instead of <code>SELECT changes()</code>, which
+another user of the same connection could change in between.
+</li>
+<li>The continuation table’s schema goes through <code>runMigrations</code> (component
+<code>continuations</code>); migration 2 adds the <code>(session_id, completed_at)</code> index.
+</li>
+</ul>
+<p>The CLI <code>complete</code> command keeps its scan over the file store: CLI agents
+have no continuation store. The runner (§4.3) uses <code>findSessionForToken</code> and
+<code>wakeSessionWith</code>.</p>
+<p>Agents store their session before each step, so the session a run stops in
+is not stored by the agent: callers store it (the session commands and
+one-shot <code>run</code> do; the runner stores after every step, §4.2).</p>
+<h4 id="4-systemagentshostrunner-session-lifecycle-implemented-phase-5">4. <code>System.Agents.Host.Runner</code>: session lifecycle (implemented, Phase 5)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionRunner</span>  <span class="co">-- opaque</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">newSessionRunner      ::</span> <span class="dt">Host</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">SessionRunner</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ot">shutdownSessionRunner ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()   <span class="co">-- cancels active runs, stores their sessions</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">withSessionRunner     ::</span> <span class="dt">Host</span> <span class="ot">-&gt;</span> (<span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> a) <span class="ot">-&gt;</span> <span class="dt">IO</span> a</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">runnerStats           ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">RunnerStats</span>   <span class="co">-- live sessions, active runs</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">RunMode</span> <span class="ot">=</span> <span class="dt">StepOnce</span> <span class="op">|</span> <span class="dt">UntilBlocked</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="ot">createSession ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">NewMessage</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">RunMode</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> <span class="dt">SessionMeta</span>)</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">postMessage   ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">NewMessage</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">RunMode</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> <span class="dt">SessionMeta</span>)</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ot">resume        ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">RunMode</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> <span class="dt">SessionMeta</span>)</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="ot">completeCall  ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">ContinuationToken</span> <span class="ot">-&gt;</span> <span class="dt">UserToolResponse</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span> <span class="co">{- auto-resume -}</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> <span class="dt">SessionMeta</span>)</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ot">cancelRun     ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> <span class="dt">SessionMeta</span>)</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="ot">getSession    ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> (<span class="dt">Session</span>, <span class="dt">SessionMeta</span>))</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="ot">awaitRun      ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">NominalDiffTime</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> (<span class="dt">SessionMeta</span>, <span class="dt">Bool</span> <span class="co">{- run still active -}</span>))</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ot">deleteSession ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">DeleteMode</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">RunnerError</span> <span class="dt">DeletionPlan</span>)</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="ot">subscribe     ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">IO</span> <span class="dt">SessionEvent</span>)   <span class="co">-- blocking &quot;next event&quot;</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="ot">recoverOnStartup ::</span> <span class="dt">SessionRunner</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> [<span class="dt">SessionId</span>]</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">NewMessage</span> <span class="ot">=</span> <span class="dt">NewMessage</span> {<span class="ot"> nmText ::</span> <span class="dt">Text</span>,<span class="ot"> nmMedia ::</span> [<span class="dt">MediaAttachment</span>] }</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">DeleteMode</span> <span class="ot">=</span> <span class="dt">DryRun</span> <span class="op">|</span> <span class="dt">DeleteForReal</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">DeletionPlan</span> <span class="ot">=</span> <span class="dt">DeletionPlan</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> dpSessions      ::</span> [<span class="dt">SessionId</span>]   <span class="co">-- ^ the session and all descendants, deepest first</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> dpContinuations ::</span> <span class="dt">Int</span>           <span class="co">-- ^ continuation rows removed (or that would be)</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> dpDryRun        ::</span> <span class="dt">Bool</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">RunnerError</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">UnknownAgent</span> <span class="dt">Text</span> <span class="op">|</span> <span class="dt">UnknownSession</span> <span class="dt">SessionId</span> <span class="op">|</span> <span class="dt">UnknownToken</span> <span class="dt">ContinuationToken</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TokenAlreadyCompleted</span> <span class="dt">ContinuationToken</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">RunInProgress</span> <span class="dt">SessionId</span>          <span class="co">-- ^ a run owns the session (on delete: one of the tree, or an ancestor)</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">NoActiveRun</span> <span class="dt">SessionId</span>            <span class="co">-- ^ cancel without a run (HTTP 409 no_active_run)</span></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">NotAcceptingMessages</span> <span class="dt">SessionId</span> <span class="dt">SessionStatus</span></span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Conflict</span> <span class="dt">VersionConflict</span></span></code></pre></div></div><p>Agents built by the runner always run asynchronously
+(<code>withExecutionMode Asynchronous</code>), like the CLI <code>session</code> commands, so that
+runs can stop and resume.</p>
+<h5 id="41-per-session-state">4.1 Per-session state</h5>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">LiveSession</span> <span class="ot">=</span> <span class="dt">LiveSession</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> lsLock        ::</span> <span class="dt">MVar</span> ()                          <span class="co">-- serialises every change</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> lsRun         ::</span> <span class="dt">TVar</span> (<span class="dt">Maybe</span> (<span class="dt">Async</span> ()))          <span class="co">-- the active run, if any</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> lsAgent       ::</span> <span class="dt">TVar</span> (<span class="dt">Maybe</span> (<span class="dt">Agent</span> …))           <span class="co">-- kept between runs (G8)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> lsLatest      ::</span> <span class="dt">TVar</span> (<span class="dt">Maybe</span> (<span class="dt">Session</span>, <span class="dt">SessionMeta</span>))  <span class="co">-- last version stored or loaded</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> lsInbox       ::</span> <span class="dt">TVar</span> [(<span class="dt">ContinuationToken</span>, <span class="dt">UserToolResponse</span>)]  <span class="co">-- see 4.3</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> lsLastTouched ::</span> <span class="dt">TVar</span> <span class="dt">UTCTime</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> lsEvicted     ::</span> <span class="dt">TVar</span> <span class="dt">Bool</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- held in: TVar (Map SessionId LiveSession)</span></span></code></pre></div></div><ul>
+<li>The runner creates a <code>LiveSession</code> on first access. A reaper thread (every
+half TTL, between 50 ms and 60 s) evicts sessions idle for longer than
+<code>hostLiveSessionTtl</code> that have no active run and no <code>Running</code> call, and
+shuts their engine down. An operation that took a <code>LiveSession</code> just before
+it was evicted notices <code>lsEvicted</code> once it holds the lock, and retries with
+a fresh one.
+</li>
+<li>The first run of a session builds its agent with <code>buildAgent</code> and keeps it
+in <code>lsAgent</code>. <code>runStepM</code> installs a World and an engine on demand and
+returns the agent holding them; the runner keeps that agent, so the engine
+survives between runs. The runner has its own loop over <code>runStepM</code>, with
+the stop conditions of <code>runUntilBlocked</code>, and shuts the engine down only on
+cancel, eviction, deletion, or runner shutdown.
+</li>
+<li><code>Running</code> calls whose engine was lost (restart or eviction) are resolved as
+orphaned by <code>pollRunningCall</code> on the next step. No new code is needed.
+</li>
+</ul>
+<h5 id="42-mutation-protocol">4.2 Mutation protocol</h5>
+<p>Every operation that changes a session:</p>
+<ol>
+<li>Takes <code>lsLock</code>.
+</li>
+<li>If a run is active and the operation is not <code>cancelRun</code>, returns
+<code>RunInProgress</code>. <code>completeCall</code> is the exception: see 4.3.
+</li>
+<li><code>sbLoadMeta</code>, then applies the change (<code>wakeSessionWith</code>, or pushes a
+<code>UserTurn</code>), then <code>sbCompareAndStore</code>.
+</li>
+<li>Emits a <code>SessionEvent</code>, then releases the lock.
+</li>
+</ol>
+<p>A run takes the lock for each step’s store, not for the whole run. Inside the
+run loop each step: <code>runStepM</code>, then <code>sbCompareAndStore</code> under <code>lsLock</code>, then
+emit <code>session.updated</code>. A <code>VersionConflict</code> inside a run stops it with
+<code>StatusFailed</code> with detail “concurrent modification”. That cannot happen with a single
+server process; it guards against a second process or the CLI writing to the
+same database.</p>
+<p>The runner sets <code>status = running</code> when a run starts and <code>sessionStatusOf s</code>
+when it ends. On an exception it sets <code>StatusFailed</code> with <code>displayException e</code> as detail.
+Progress storage installed by <code>buildAgent</code> (§2.5) is <strong>disabled</strong> for
+runner-built agents (<code>SinkNone</code>),
+because the runner does the versioned stores itself.</p>
+<h5 id="43-completing-a-deferred-call-during-a-run">4.3 Completing a deferred call during a run</h5>
+<p><code>runUntilBlocked</code> only stops once nothing can progress in-process, so an
+active run and a pending deferred call can coexist. For example, a deferred
+call waits while a background call is still running.</p>
+<p>Writing the woken session while the run is in a step would make the run’s
+next versioned store conflict. So <code>completeCall</code> on a session with an active
+run, under the lock:</p>
+<ul>
+<li>checks the token against the run’s latest version (and the queue), and
+answers <code>UnknownToken</code> or <code>TokenAlreadyCompleted</code> right away;
+</li>
+<li>otherwise appends the result to <code>lsInbox</code> and returns.
+</li>
+</ul>
+<p>Before each step and before deciding to stop, the run, under the lock,
+applies the queued results with <code>wakeSessionWith</code> (which also marks the
+continuations completed) and stores the result. A run that was about to
+stop on deferred calls therefore carries on when their results are queued.
+<code>cancelRun</code> applies the queue too.</p>
+<p>Without an active run, <code>completeCall</code> applies the result and stores it at
+once, and with auto-resume starts an <code>UntilBlocked</code> run when the session is
+<code>ready</code>. Two concurrent completions of one turn are serialised by the lock:
+the first stores, the second sees the first’s version (tested).</p>
+<h5 id="44-follow-up-messages">4.4 Follow-up messages</h5>
+<p><code>postMessage</code> is valid only when the status is <code>StatusIdle</code> (head is a final
+<code>LlmTurn</code>). It pushes</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="dt">UserTurn</span> (<span class="dt">UserTurnContent</span> sysPrompt sysTools (<span class="dt">Just</span> (<span class="dt">UserQuery</span> text media)) []) <span class="dt">Nothing</span></span></code></pre></div></div><p>onto <code>turns</code> (newest first, as <code>handleStart</code> does), taking <code>sysPrompt</code> and
+<code>sysTools</code> from the live agent. <code>naiveTilNoToolCallStep</code> then sends it to the
+LLM on the next step (<code>Step.hs:1081</code>). Agents built by the runner keep
+<code>usrQuery = pure Nothing</code>.</p>
+<p>The code that builds the first turn from a prompt moves out of
+<code>CLI/SessionDurable.handleStart</code> into
+<code>Session.Types.newSessionFromPrompt :: SystemPrompt -&gt; [SystemTool] -&gt; NewMessage -&gt; IO Session</code>
+(fixes G10). <code>createSession</code> and <code>handleStart</code> both use it.</p>
+<h5 id="45-events">4.5 Events</h5>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionEvent</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">RunStarted</span>   <span class="dt">SessionId</span> <span class="dt">RunMode</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionUpdated</span> <span class="dt">SessionId</span> <span class="dt">SessionMeta</span> <span class="dt">Turn</span>   <span class="co">-- ^ the new head turn</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">CallsDeferred</span> <span class="dt">SessionId</span> [<span class="dt">DeferredCallView</span>]</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">RunStopped</span>   <span class="dt">SessionId</span> <span class="dt">SessionStatus</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionFailed</span> <span class="dt">SessionId</span> <span class="dt">Text</span></span></code></pre></div></div><p><code>DeferredCallView</code> is the same data <code>agents-exe session pending</code> prints: tool
+name, call id, token, disposition, and the call with its arguments. It lives
+in <code>Session.Types</code> with <code>pendingDeferredCalls :: Session -&gt; [DeferredCallView]</code>;
+the CLI’s <code>extractDeferredCalls</code> wraps it.</p>
+<p>Every stored version emits <code>SessionUpdated</code> (with the head turn), including
+the stores at the start and end of a run. Events go through one runner-wide
+broadcast channel: <code>subscribe</code> returns an action yielding the next event of
+one session, so a subscriber keeps its stream when the session is evicted
+and loaded again. <code>subscribeSTM</code> gives the same stream as a transaction that
+consumes one event of any session and yields <code>Nothing</code> for another session’s,
+to combine with timers or flags (the HTTP events stream uses it). Filtering
+must consume other sessions’ events one transaction at a time: a <code>retry</code>
+after <code>readTChan</code> rolls the read back, which in the first version of
+<code>subscribe</code> blocked a subscriber for good on another session’s event. Each
+event is also traced as <code>HostRunnerTrace kind sid</code>.</p>
+<h5 id="46-startup-recovery">4.6 Startup recovery</h5>
+<p><code>recoverOnStartup</code> queries <code>status = running</code>. For each session found that
+this runner is not running itself:</p>
+<ol>
+<li>Load it.
+</li>
+<li>Set its status to <code>sessionStatusOf s</code>.
+</li>
+<li>Emit nothing, since no subscribers exist yet.
+</li>
+</ol>
+<p>It does <strong>not</strong> resume automatically. Rows left <code>running</code> mean the process
+died mid-step. The partially started step is lost, and any <code>Running</code> calls
+become orphaned on the next resume. The server logs how many sessions it
+recovered. Automatic resume can be added later as <code>--resume-interrupted</code>.</p>
+<h5 id="47-cancellation">4.7 Cancellation</h5>
+<p><code>cancelRun</code> cancels the run’s <code>Async</code> without holding the lock (the run takes
+it to store its steps), then, under the lock and only if that run still
+owns the session:</p>
+<ol>
+<li>shuts the engine down, which marks background calls cancelled in the
+World, and keeps the agent (and World) with no engine, so the next run
+gets a fresh engine on the same World;
+</li>
+<li>applies queued external results;
+</li>
+<li>refreshes the head partial turn from the World, so its cancelled calls
+become <code>Failed &quot;async tool call was cancelled&quot;</code>;
+</li>
+<li>stores the session with the status its turns imply, and emits
+<code>RunStopped</code>.
+</li>
+</ol>
+<p>Background calls below the head (the LLM already got a placeholder for them)
+stay <code>Running</code> in the stored session. The next run’s late-result collection
+finds them cancelled in the kept World and tells the LLM, in a user message,
+as for any late result (tested). If the session is evicted first, they are
+reported as orphaned instead. Sub-agent runs execute inside the parent’s
+tool call, so cancelling the parent cancels them.</p>
+<h5 id="48-waiting-for-a-run">4.8 Waiting for a run</h5>
+<p><code>awaitRun</code> blocks until the session’s active run stops or the timeout
+expires, whichever comes first. It returns the current meta and whether a run
+is still active. With no active run it returns at once. It watches
+<code>lsRun</code> (STM <code>waitCatch</code> on the <code>Async</code>, raced against a timer), so waiting
+never holds <code>lsLock</code>. A waiter going away (for example an HTTP client
+disconnecting) never cancels the run.</p>
+<h5 id="49-deleting-sessions">4.9 Deleting sessions</h5>
+<p>Deletion always cascades: a session goes together with every descendant
+(sub-agent sessions, found recursively through <code>sbQuery</code> on <code>parent</code>) and
+their continuation rows. <code>deleteSession</code>:</p>
+<ol>
+<li>Collects the tree and builds a <code>DeletionPlan</code>, deepest sessions first.
+</li>
+<li>Returns <code>RunInProgress</code> if any session in the tree has an active run. This
+applies in both modes, so a dry run shows whether the real delete would
+succeed.
+</li>
+<li>With <code>DryRun</code>, returns the plan and changes nothing.
+</li>
+<li>With <code>DeleteForReal</code>, walks the plan in order. For each session it takes
+that session’s <code>lsLock</code>, deletes its continuation rows, calls <code>sbDelete</code>,
+drops its <code>LiveSession</code> (shutting down its engine), and releases the lock.
+</li>
+</ol>
+<p>Deleting leaves first means a crash part-way through never leaves a
+sub-session whose parent is gone; running the delete again finishes the job.
+This needs two new <code>ContinuationStore</code> fields:
+<code>csCountSession :: SessionId -&gt; IO Int</code> for dry runs, and
+<code>csDeleteSession :: SessionId -&gt; IO Int</code>, which deletes every row of a session
+(pending or completed) and returns the count. Deletion is also refused while
+an <em>ancestor</em> of the session has an active run: its sub-agent calls write
+into the tree, and would recreate what was deleted. The runner does the cascade,
+not SQL foreign keys, so the file backend behaves the same.</p>
+<h4 id="5-http-api-agents-server-implemented-phase-6">5. HTTP API (<code>agents-server</code>) (implemented, Phase 6)</h4>
+<p>The server lives in <code>examples/agents-server/</code>, on <code>wai</code> and <code>warp</code>. The
+application code is a private sub-library, <code>agents-server-internal</code>
+(<code>AgentsServer.Api</code>, <code>AgentsServer.Log</code>, <code>AgentsServer.Server</code>), shared by the
+<code>agents-server</code> executable and its <code>agents-server-tests</code> suite; <code>agents-lib</code>
+does not depend on wai or warp. SSE is written by hand with <code>responseStream</code>
+(no <code>wai-extra</code>). All bodies are JSON. Session objects embed the raw
+<code>Session</code> JSON that is already stored, so clients can reuse <code>session-print</code>
+logic. The user guide is <code>documentation/agents-server.md</code>.</p>
+<pre><code>agents-server --agent-file a.json [--agent-file b.json …] --api-keys keys.json \
+              [--db ./agents-server.db] [--port 8080] [--bind 127.0.0.1] \
+              [--live-session-ttl 900] [--shutdown-grace 10]
+</code></pre>
+<p>The server binds to <code>127.0.0.1</code> by default. There is no authentication in
+milestone 1 (see non-goals); the <code>server.started</code> log line says so.</p>
+<table>
+<tr><th>Method &amp; path</th><th>Body</th><th>Success</th><th>Errors</th></tr>
+<tr><td><code>GET /v1/agents</code></td><td></td><td><code>200 [{slug, description, tools:[name]}]</code></td><td></td></tr>
+<tr><td><code>POST /v1/sessions?wait=&amp;timeout=</code></td><td><code>{agent, prompt, media?:[{mime, base64, filename?}], run?: "none"\|"step"\|"until_blocked"}</code> (default <code>until_blocked</code>)</td><td><code>201 SessionView</code>, <code>Location</code> header</td><td>404 <code>unknown_agent</code>, 400 <code>bad_request</code></td></tr>
+<tr><td><code>GET /v1/sessions?agent=&amp;status=&amp;parent=&amp;limit=&amp;before=</code></td><td></td><td><code>200 {sessions:[SessionMetaView], next_before}</code></td><td>400</td></tr>
+<tr><td><code>GET /v1/sessions/:id</code></td><td></td><td><code>200 SessionView</code></td><td>404 <code>unknown_session</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/messages?wait=&amp;timeout=</code></td><td><code>{prompt, media?, run?}</code></td><td><code>202</code>/<code>200 SessionView</code></td><td>404, 409 <code>run_in_progress</code>, 409 <code>not_accepting_messages</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/resume?wait=&amp;timeout=</code></td><td><code>{mode?: "step"\|"until_blocked"}</code> or no body</td><td><code>202</code>/<code>200 SessionView</code></td><td>404, 409 <code>run_in_progress</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/cancel</code></td><td></td><td><code>200 SessionMetaView</code></td><td>404, 409 <code>no_active_run</code></td></tr>
+<tr><td><code>GET /v1/sessions/:id/pending</code></td><td></td><td><code>200 {calls:[DeferredCallView]}</code></td><td>404</td></tr>
+<tr><td><code>POST /v1/continuations/:token?wait=&amp;timeout=</code></td><td><code>{result: UserToolResponse \| string, resume?: bool}</code> (default <code>true</code>)</td><td><code>202</code>/<code>200 SessionView</code></td><td>404 <code>unknown_token</code>, 409 <code>token_already_completed</code>, 409 <code>conflict</code></td></tr>
+<tr><td><code>GET /v1/sessions/:id/events</code></td><td></td><td><code>200 text/event-stream</code></td><td>404</td></tr>
+<tr><td><code>DELETE /v1/sessions/:id?dry_run=</code></td><td></td><td><code>200 {sessions:[id], continuations, dry_run}</code></td><td>404, 409 <code>run_in_progress</code> (also for a dry run, when the real delete would fail)</td></tr>
+<tr><td><code>GET /healthz</code></td><td></td><td><code>200 {ok:true, live_sessions, active_runs}</code></td><td></td></tr>
+</table>
+<p>Other errors: 404 <code>not_found</code> (unknown path), 405 <code>method_not_allowed</code>, 413
+<code>payload_too_large</code> (bodies over 32 MiB), 500 <code>internal_error</code>. A malformed
+session id answers 404 <code>unknown_session</code>, a malformed token 404
+<code>unknown_token</code>.</p>
+<p><code>SessionMetaView</code> is the <code>SessionMeta</code> JSON: <code>{session_id, agent, parent_session_id, owner, status, status_detail, version, created_at, updated_at}</code> (<code>owner</code> is always null in milestone 1).
+<code>SessionView</code> = <code>SessionMetaView</code> + <code>{session: &lt;Session JSON&gt;, pending: [DeferredCallView]}</code>.
+Errors are <code>{error: &quot;&lt;code&gt;&quot;, message: &quot;&lt;text&gt;&quot;}</code>.</p>
+<p><strong>Listing.</strong> Newest first by <code>updated_at</code>. <code>status</code> takes a comma-separated
+list; <code>limit</code> is 1–500, default 50. When a page is full, <code>next_before</code> is the
+<code>updated_at</code> of its last session, used as <code>before=</code> (strictly older) for the
+next page. A session with exactly the boundary’s <code>updated_at</code> would be
+skipped; timestamps have nanosecond precision, so that takes two writes in
+the same instant.</p>
+<p><strong>Waiting.</strong> Every endpoint that can start a run (create, messages, resume,
+continuations) takes the same two query parameters:</p>
+<ul>
+<li><code>wait=true|false</code>, default <code>false</code> (<code>?wait</code> alone means true). With
+<code>false</code>, the server answers as soon as the run has started. With <code>true</code>, it
+answers when the run stops (idle, blocked on deferred calls, or failed),
+using <code>awaitRun</code>.
+</li>
+<li><code>timeout=&lt;seconds&gt;</code>, only used with <code>wait=true</code>. Default 120, maximum 600;
+larger values are clamped. If it expires, the server answers with the
+current state (<code>status: &quot;running&quot;</code>) and the run carries on. Clients then
+follow it through the events stream or by polling.
+</li>
+</ul>
+<p>The response body is always the <code>SessionView</code> at the time of answering, so a
+waiting client gets the final turn and any pending deferred calls in one
+round trip. A client disconnecting while waiting does not cancel the run.
+Creation always answers <code>201</code>. The other endpoints answer <code>202</code> when the
+stored status is <code>running</code> at the time of answering (a run is still going,
+including a continuation queued into an active run) and <code>200</code> otherwise.
+On shutdown, waiting requests answer at once with the current state.</p>
+<p><strong>Deleting.</strong> <code>dry_run=true</code> returns the same body as a real delete,
+listing every session and the number of continuation rows that would be
+removed, and changes nothing.</p>
+<p><strong>SSE stream.</strong> Each <code>SessionEvent</code> becomes <code>event: &lt;kind&gt;</code> plus one
+<code>data: &lt;json&gt;</code> line, where kind is <code>run.started</code> (<code>{session_id, mode}</code>),
+<code>session.updated</code> (<code>SessionMetaView</code> + <code>head_turn</code>), <code>calls.deferred</code>
+(<code>{session_id, calls}</code>), <code>run.stopped</code> (<code>{session_id, status}</code>), or
+<code>session.failed</code> (<code>{session_id, message}</code>). On connect the server first sends
+<code>event: snapshot</code> with the <code>SessionMetaView</code>, so clients never need a
+separate GET to sync; it subscribes before loading the snapshot, so no event
+falls in between. A run’s <code>session.updated</code> for the running version comes
+just before its <code>run.started</code>. The server sends a <code>: keepalive</code> comment
+after 15 s without events (warp pauses its idle timeout while the handler
+runs, so quiet streams and long waits are not cut). Streams end on shutdown.
+Events are not replayed on reconnect. The stream reads events with
+<code>subscribeSTM</code>, combined with the keepalive timer and the shutdown flag in
+one transaction, so a timer firing never drops an event.</p>
+<p><strong>Shutdown.</strong> On SIGTERM or SIGINT: stop accepting connections, end event
+streams and release waiting requests, give open requests
+<code>--shutdown-grace</code> seconds, then <code>shutdownSessionRunner</code> (cancels active runs,
+storing their sessions) and close the database.</p>
+<h4 id="6-tracing-and-logs-implemented-phase-6">6. Tracing and logs (implemented, Phase 6)</h4>
+<p><code>HostTrace</code> wraps the existing traces (<code>OneShot.Trace</code>, tool registration,
+OpenAI) plus runner events. The server prints them as JSON lines on stderr,
+one object per line with <code>ts</code>, <code>kind</code>, and <code>session_id</code> when known.
+<code>AgentsServer.Log</code> summarises each trace field by field instead of <code>show</code>ing
+it: LLM traces give byte and token counts, the HTTP client trace gives
+method, host, path, and status only (its request carries the API key in a
+header), and tool and agent-tree traces give their constructor name. Prompts,
+payloads, headers, and API keys are never printed; a smoke test with a fake
+key checked the log. Each HTTP request logs method, path, status, and time
+to first byte.</p>
+<hr />
+<h3 id="phases">Phases</h3>
+<p>Each phase leaves <code>cabal build all</code> and <code>cabal test agents-tests</code> passing with
+<code>-Wall -Werror</code>, and gets its own entry in a <code>todos/web-server-embedding.progress.md</code>
+tracker.</p>
+<h4 id="phase-1-storage-wiring-fix-g1-g5-white_check_mark">Phase 1: storage wiring fix (G1, G5) ✅</h4>
+<ul>
+<li><code>SessionSink</code> and <code>agentPersistSession</code>; keep <code>agentStoreSession</code> as a
+wrapper.
+</li>
+<li><code>session start</code> derives its conversation ID from the session ID.
+</li>
+<li>Tests: an agent built with a SQLite backend and a mock LLM runs to
+completion and writes <strong>no</strong> files under a temp session directory; the row
+is keyed by the session’s <code>SessionId</code>.
+</li>
+</ul>
+<h4 id="phase-2-single-agent-factory-g2-g3-g10-white_check_mark">Phase 2: single agent factory (G2, G3, G10) ✅</h4>
+<ul>
+<li><code>System.Agents.AgentFactory</code> with <code>AgentDeps</code>, <code>buildAgent</code>, and
+<code>AgentRole</code>; the three copies moved onto it; sub-agents get their parent
+and call stack from <code>SubAgent</code>.
+</li>
+<li><code>newSessionFromPrompt</code> in the library.
+</li>
+<li>Tests: the existing suite unchanged; new <code>AgentFactoryTests</code>.
+</li>
+</ul>
+<h4 id="phase-3-metadata-versions-migrations-catalog-g4-g9-white_check_mark">Phase 3: metadata, versions, migrations, catalog (G4, G9) ✅</h4>
+<ul>
+<li>Extended <code>SessionBackend</code>, <code>SessionLabels</code>, <code>SessionMeta</code>,
+<code>sessionStatusOf</code>, SQLite migrations, and the file sidecar.
+</li>
+<li><code>SessionCatalog</code>; the session tools and <code>Props</code> switched to it.
+</li>
+<li>Sub-agents store their agent slug and <code>parent_session_id</code>.
+</li>
+<li>Tests (<code>SessionMetadataTests</code>): status derivation; version increments;
+labels kept; CAS success and conflicts (stale, and version 0 twice);
+running status kept by unconditional stores; <code>sbQuery</code> filters and limit;
+composite fallback; migrating a database from before metadata; migrations
+run once; file sidecar and legacy files; file and backend catalogs;
+list-sessions over a backend catalog; a parent agent calling a sub-agent
+tool (mock LLM) leaves a sub-session row naming the parent.
+</li>
+</ul>
+<h4 id="phase-4-continuation-consistency-g7-white_check_mark">Phase 4: continuation consistency (G7) ✅</h4>
+<ul>
+<li><code>csFindSession</code>, <code>wakeSessionWith</code> / <code>WakeOutcome</code>, <code>findSessionForToken</code>,
+continuation migrations, <code>RETURNING</code> in <code>csComplete</code>.
+</li>
+<li>Tests (<code>ContinuationConsistencyTests</code>, on a real paused run: async agent,
+defer policy, mock LLM, one SQLite database): a wake marks the continuation
+completed; a second wake reports the token as already completed and leaves
+the session unchanged; an unknown token is reported; the woken session
+resumes to a final answer; a token lookup through the index loads no
+session; without an index the sessions are searched; migrations run once.
+</li>
+</ul>
+<h4 id="phase-5-sessionrunner-g6-g8-white_check_mark">Phase 5: <code>SessionRunner</code> (G6, G8) ✅</h4>
+<ul>
+<li><code>System.Agents.Host</code> (<code>withHost</code>) and <code>System.Agents.Host.Runner</code> (§4).
+</li>
+<li><code>DeferredCallView</code> / <code>pendingDeferredCalls</code>; <code>csCountSession</code> and
+<code>csDeleteSession</code>.
+</li>
+<li>Tests (<code>RunnerTests</code>, mock LLM through the host’s completion override):
+deferred call completed with auto-resume, with the event sequence; two
+concurrent completions of one turn both land; messages refused during a
+run and accepted after, giving a second LLM turn; a background call
+started in one run picked up by the next; cancel during a background call,
+then the cancellation reported on the next run; recovery of a session left
+running, its call orphaned on resume; <code>awaitRun</code> with timeout and
+completion; delete cascade (refused during the parent’s run, also for the
+sub-session; dry run changes nothing; real delete removes sessions and
+continuation rows); idle eviction and reload; <code>withHost</code> over agent and
+database files.
+</li>
+</ul>
+<h4 id="phase-6-agents-server-executable-white_check_mark">Phase 6: <code>agents-server</code> executable ✅</h4>
+<ul>
+<li>wai/warp app, routes, SSE, CLI flags, graceful shutdown on SIGTERM (stop
+accepting, <code>shutdownSessionRunner</code>, close the database).
+</li>
+<li><code>documentation/agents-server.md</code> user guide, plus links from
+<code>documentation/durable-workflows-howto.md</code>.
+</li>
+<li>Tests (<code>agents-server-tests</code>, threaded, the application on a random port
+with a mock LLM): the demo flow over SSE (snapshot, then per run
+<code>run.started</code> … <code>calls.deferred</code>, <code>run.stopped</code>, then the continuation’s
+run ending <code>idle</code>); the same flow with <code>wait=true</code> and no events stream
+(the create call returns the blocked session with its pending call, the
+continuation call the final answer); keepalives; listing pages and filters;
+delete with dry run; agents and health; error codes; shutdown releasing
+waiting requests and ending streams.
+</li>
+</ul>
+<hr />
+<h3 id="milestone-2-the-later-work">Milestone 2: the later work</h3>
+<p>Recorded 2026-09-19, when the user asked to continue with the later work.
+Each item becomes a phase, in this order: each phase is useful on its own,
+and the riskier ones come after the ones they build on. Choices marked
+<em>default</em> were made without asking; they are listed again under Decisions.</p>
+<h4 id="phase-7-authentication-and-owners-white_check_mark">Phase 7: authentication and owners ✅</h4>
+<ul>
+<li><code>agents-server --auth-tokens tokens.json</code>: <code>{&quot;tokens&quot;: [{&quot;owner&quot;: &quot;alice&quot;, &quot;sha256&quot;: &quot;&lt;hex&gt;&quot;}, {&quot;owner&quot;: &quot;bob&quot;, &quot;token&quot;: &quot;&lt;plain&gt;&quot;}]}</code>. With it, every
+endpoint but <code>/healthz</code> needs <code>Authorization: Bearer &lt;token&gt;</code> (401
+<code>unauthorized</code> otherwise, with <code>WWW-Authenticate: Bearer</code>). Without it,
+nothing changes. Tokens are compared by SHA-256 digest (<em>default</em>: a
+static file, like the API keys file; no token issuing or expiry).
+</li>
+<li>Sessions created by a caller record its owner (<code>createSessionAs</code>).
+Sub-sessions record none: a session belongs to the owner of its <strong>root</strong>
+session (<code>sessionOwner</code> walks up <code>parent_session_id</code>). This needs no
+change to how sub-agents store themselves.
+</li>
+<li>Another owner’s session answers 404, as if it did not exist, for every
+endpoint including continuations (404 <code>unknown_token</code>). Listing filters by
+owner (<code>SessionQuery.sqOwner</code>, index <code>(owner, updated_at)</code>, migration 3);
+<code>?parent=</code> lists the sub-sessions of an owned session.
+</li>
+<li>Sessions stored before authentication was turned on have no owner and are
+invisible to every caller (<em>default</em>).
+</li>
+<li>Not in this phase: per-owner API keys and a default <code>runIsolated</code> policy
+for bash and MCP tools. Both need agents built per owner, including
+sub-agent tools, which the host builds once at load time today. They stay
+in <a href="#remaining-later-work">Remaining later work</a>.
+</li>
+</ul>
+<h4 id="phase-8-mcp-over-http-white_check_mark">Phase 8: MCP over HTTP ✅</h4>
+<ul>
+<li><code>POST /mcp</code> on <code>agents-server</code> (<code>AgentsServer.Mcp</code>) speaks MCP’s Streamable
+HTTP transport. It handles JSON-RPC with aeson directly and reuses the
+<code>MCP/Base.hs</code> types for tools, tool lists, and the initialize result;
+tool results are written by hand, because <code>TextContentImpl</code> always
+writes <code>&quot;annotations&quot;: null</code>. Each request, or batch, gets a plain JSON
+response. Messages that need no answer (notifications, client responses)
+get 202. <code>GET /mcp</code> answers 405: there are no server-initiated messages.
+Protocol versions 2025-06-18, 2025-03-26, and 2024-11-05: the client’s is
+echoed when supported, else the latest.
+</li>
+<li>Methods: <code>initialize</code>, <code>ping</code>, <code>tools/list</code>, <code>tools/call</code>, and empty
+<code>resources/list</code> and <code>prompts/list</code>. Anything else is -32601; a bad
+or unknown tool is -32602; malformed JSON answers 400 with -32700.
+</li>
+<li>Tools: one <code>ask_&lt;slug&gt;</code> per root agent, input <code>{prompt}</code>. A call creates a
+session through the runner, owned by the caller, and waits up to 120 s.
+The result carries <code>_meta.session_id</code>. An idle session gives the final
+answer; <code>waiting_external</code> gives a sentence plus the pending calls as JSON
+(not an error); a run still going gives the session id; <code>failed</code> gives
+<code>isError: true</code>.
+</li>
+<li>The same bearer tokens and owners apply. <code>Mcp-Session-Id</code> is not used.
+</li>
+<li>The Streamable HTTP transport requires validating <code>Origin</code> against DNS
+rebinding. Without authentication, every endpoint (not only <code>/mcp</code>) refuses
+an <code>Origin</code> other than localhost, 127.0.0.1, or [::1] with 403
+<code>forbidden_origin</code>. With authentication, origins are not checked.
+</li>
+</ul>
+<h4 id="phase-9-tui-out-of-the-core-library-white_check_mark">Phase 9: TUI out of the core library ✅</h4>
+<ul>
+<li>New public sub-library <code>agents-tui</code> (source directory <code>tui/</code>) with the 25
+modules that need brick or vty, or import them: <code>System.Agents.TUI.*</code>
+(except <code>TUI.ToolCallActivity</code>, which is pure and used by the tests),
+<code>System.Agents.CLI.TUI</code>, <code>System.Agents.CLI.Config</code>, and <code>System.Agents.CLI</code>.
+Module names do not change. Only <code>agents-exe</code> imports them.
+</li>
+<li><code>agents-lib</code> drops <code>brick</code>, <code>vty</code>, <code>text-zipper</code>, and the unused
+<code>data-clist</code>; nothing in its dependency closure pulls brick or vty any
+more. <code>agents-exe</code> depends on both libraries.
+</li>
+<li>The moved files live in their own source directory: with a shared <code>src/</code>,
+GHC would compile core modules again inside <code>agents-tui</code> instead of using
+<code>agents-lib</code>.
+</li>
+<li><em>Default</em>: <code>agents-lib</code> itself is the core instead of a new <code>agents-core</code>
+name, so nothing that depends on <code>agents-lib</code> breaks.
+</li>
+</ul>
+<h4 id="phase-10-postgres-backend-white_check_mark">Phase 10: Postgres backend ✅</h4>
+<ul>
+<li>Public sub-library <code>agents-postgres</code> (<code>postgres/System/Agents/Postgres.hs</code>,
+on <code>postgresql-simple</code> and the <code>resource-pool</code> already used by
+<code>agents-lib</code>): <code>withPostgresStores</code>, <code>openPostgresPool</code> (10 connections),
+<code>mkPostgresSessionStore</code>, <code>mkPostgresContinuationStore</code>, <code>isPostgresUrl</code>,
+<code>runPostgresMigrations</code>.
+</li>
+<li>Same schema and semantics as SQLite. Postgres starts at migration 1 with the
+full current schema: <code>TIMESTAMPTZ</code>, and session JSON as <code>TEXT</code>, not <code>JSONB</code>,
+which rejects <code>\u0000</code>. CAS is <code>INSERT … ON CONFLICT DO UPDATE … WHERE version = 0 RETURNING</code> or <code>UPDATE … WHERE version = ? RETURNING</code>.
+Timestamps are truncated to microseconds, as Postgres stores them, so the
+metadata handed out matches what a query returns.
+</li>
+<li>Migrations run in one transaction per component, under a
+<code>pg_advisory_xact_lock</code>, with <code>client_min_messages = warning</code> so that
+Postgres notices do not reach stderr.
+</li>
+<li><code>System.Agents.Host.withHostStores</code> takes <code>HostStores</code> from the caller;
+<code>withHost</code> is the SQLite case. <code>agents-server --db</code> takes a
+<code>postgres://</code>/<code>postgresql://</code> URL; the startup log drops its user and
+password.
+</li>
+<li>Tests (<code>agents-postgres-tests</code>, threaded): a throwaway cluster
+(<code>initdb</code> + <code>pg_ctl</code> from <code>pg_config --bindir</code>, a free port on
+127.0.0.1), one fresh database per test; <code>AGENTS_TEST_POSTGRES_URL</code> uses an
+existing server instead, and without either the suite skips. They cover
+migrations running once; CAS with conflicts, labels, and the kept
+running status; queries (agent, owner, parent, status, limit, before); 16
+concurrent CAS with exactly one winner; and a runner flow (deferred call,
+completion, token already completed, cascade delete).
+</li>
+<li>Not done: coordinating runs between servers (lease column).
+</li>
+</ul>
+<h4 id="phase-11-token-streaming-white_check_mark">Phase 11: token streaming ✅</h4>
+<ul>
+<li><code>System.Agents.LLMs.OpenAIStream</code>: reads a streamed chat completion
+(server-sent events, <code>data: [DONE]</code>) and folds the chunks back into the
+JSON of a non-streamed completion. It handles content, reasoning, tool calls
+assembled by <code>index</code> from name and argument pieces, <code>finish_reason</code>, the
+final <code>usage</code> chunk, and an <code>error</code> object sent mid-stream. Parsing, tool
+calls, and storage do not change. Each non-empty text delta goes to a
+callback.
+</li>
+<li><code>HttpClient.Runtime.postStream</code>: POST with a body reader for successful
+answers (others are read whole, so the overloaded-retry check still
+works). <code>OpenAI.callLLMPayloadStreaming</code> shares the retry logic
+(<code>withOverloadedRetry</code>) with <code>callLLMPayload</code>.
+</li>
+<li><code>OpenAICompletionConfig.cfgOnTextDelta</code> switches a completion to streaming
+and adds <code>&quot;stream&quot;: true</code> (plus <code>stream_options.include_usage</code> for the
+<code>OpenAIv1</code> flavor only, as other providers may refuse it).
+<code>AgentDeps.adOnTextDelta</code> passes it through <code>buildAgent</code>.
+</li>
+<li><code>HostConfig.hcStreamTokens</code> / <code>hostStreamTokens</code>; the runner gives each
+session’s agent a callback emitting <code>TextDelta sid text</code>, which is not
+traced (one per token, and it is content). <code>agents-server --stream-tokens</code>;
+<code>event: text.delta</code> with <code>{session_id, text}</code>.
+</li>
+<li>Tests: five unit tests of the fold (text, tool call pieces, null content,
+a body read in 7-byte pieces with CRLF, comments and <code>[DONE]</code>, a stream
+error), and an end-to-end server test against a fake streaming endpoint
+(warp) that checks the deltas, the stored answer, and the request’s
+<code>stream</code> fields.
+</li>
+</ul>
+<h4 id="phase-12-agents-from-the-database-white_check_mark">Phase 12: agents from the database ✅</h4>
+<ul>
+<li><code>System.Agents.AgentStore</code>: <code>StoredAgent</code> (config, <code>updated_at</code>,
+<code>updated_by</code>), <code>AgentStore</code> (<code>asList</code>, <code>asPut</code>, <code>asDelete</code>),
+<code>mkSqliteAgentStore</code> (table <code>agents</code>, component <code>agents</code>),
+<code>fileBasedFields</code>. <code>agents-postgres</code> has <code>mkPostgresAgentStore</code>.
+<code>HostStores.hsAgents :: Maybe AgentStore</code>; <code>withHost</code> and
+<code>withPostgresStores</code> provide one.
+</li>
+<li><code>AgentTree.loadAgentTreeFromConfig</code>: a tree of one agent from an in-memory
+<code>Agent</code>, reusing the loader’s later phases (create, wire tools, build) on a
+one-node graph, with no file discovery.
+</li>
+<li><code>Host</code>: <code>hostStoredAgents</code> (loaded stored agents in a <code>TVar</code>, the store, a
+loader, and a lock serialising edits); <code>hostAllAgents</code>, <code>lookupAgent</code>,
+<code>putStoredAgent</code>, <code>deleteStoredAgent</code>, <code>AgentEditError</code>. The runner looks
+agents up through <code>lookupAgent</code>, so new sessions see changes at once.
+</li>
+<li><code>agents-server</code>: <code>GET/PUT/DELETE /v1/agents/:slug</code>, <code>source</code> in listings,
+MCP <code>tools/list</code> includes stored agents, and <code>--admin-owners</code>.
+</li>
+<li>Differences from the plan:
+<ul>
+<li><strong><code>extraAgents</code> is refused</strong>, like the other file-based fields: stored
+agents have no sub-agents yet.
+</li>
+<li><strong>Editing needs <code>--admin-owners</code>, which needs <code>--auth-tokens</code></strong>. The
+plan let anyone edit agents without authentication. An agent definition
+can start MCP servers, which are commands on the server’s machine, so
+edits are off by default.
+</li>
+<li><strong>A file agent hides a stored agent with its slug</strong>: the stored one is
+skipped at startup, and the skip is logged. Refusing to start instead
+would leave no way to fix the database through the API.
+</li>
+</ul>
+</li>
+<li>Known limitation: replacing or deleting a stored agent does not stop MCP
+servers it started (the tree loader has no cleanup); they end with the
+server.
+</li>
+<li>Tests:
+<ul>
+<li>runner level: store, replace, and refuse (file-based fields, a file
+agent’s slug); run a session on a stored agent; reload after a restart;
+a file agent hiding a stored one, with the skip traced; delete persists;
+</li>
+<li>server: admin and non-admin, 201 and then 200, listing with sources,
+refusals, sessions and MCP on a stored agent, delete, and edits disabled
+by default;
+</li>
+<li>Postgres: put, replace, list, and delete.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="phase-13-self-description-and-a-chat-page-white_check_mark">Phase 13: self-description and a chat page ✅</h4>
+<p>The server answered <code>404</code> at <code>/</code> and published nothing a client could read:
+the only reference was <code>documentation/agents-server.md</code>, which a caller holding just a
+URL does not have.</p>
+<ul>
+<li><strong>Routes as a servant type</strong> (<code>AgentsServer.Routes</code>). Every endpoint whose
+shape OpenAPI can express is now described by <code>DocumentedAPI</code>, and
+<code>GET /openapi.json</code> is generated from it, so the published document cannot
+drift from the routes. The event stream and <code>POST /mcp</code> stay hand-written
+(<code>AgentsServer.OpenApi</code>): neither server-sent events nor JSON-RPC is
+expressible, and a wrong schema would be worse than a described one.
+</li>
+<li><strong>Bodies as types</strong> (<code>AgentsServer.Types</code>), carrying both the JSON encoding
+the API already used and an OpenAPI schema, with per-field descriptions and
+enums added by hand because openapi3 does not read Haddock. The turn tree
+stays an opaque object: it belongs to the library, not to the protocol.
+</li>
+<li><strong>A chat page</strong> at <code>/</code> (<code>AgentsServer.UI</code>): one self-contained HTML
+document, no build step, no assets. It is served on a loopback bind, or
+when <code>--auth-tokens</code> is on; <code>--no-ui</code> turns it off.
+</li>
+<li><strong><code>access_token</code> on the event stream only</strong>, because <code>EventSource</code> cannot
+set headers. The request log records no query strings, so the token does
+not reach the logs.
+</li>
+</ul>
+<p>Deviations from the plan:</p>
+<ul>
+<li>The rewrite is staged. The servant types describe and generate the
+document; the wai router still dispatches. Moving dispatch onto servant
+needs <code>UVerb</code> for the 200/201/202 answers and <code>Raw</code> for the stream, and
+would rewrite 646 tested lines for no change a client can see. A test
+asserts the document’s paths are exactly the router’s, so the two cannot
+drift in the meantime.
+</li>
+<li><code>openapi3</code> needed the freeze’s <code>index-state</code> bumped: 3.2.4 caps QuickCheck
+below the pinned 2.16, and 3.2.5 (which allows it) was published after the
+pinned index date. Every previously pinned version is unchanged.
+</li>
+</ul>
+<h3 id="remaining-later-work">Remaining later work</h3>
+<ul>
+<li><strong>Per-owner API keys and isolation</strong>: build agents per owner, including
+sub-agent tools; default policy <code>runIsolated</code> for bash and MCP tools, backed
+by <code>dockerRunner</code>.
+</li>
+<li><strong>Several server processes on one Postgres database</strong>: live-run ownership
+through a lease column (<code>run_owner</code>, <code>run_lease_until</code>).
+</li>
+<li><strong>Database agents with files or sub-agents</strong>: tool directories stored with
+the agent; <code>extraAgents</code> naming other stored agents.
+</li>
+<li><strong>Stopping a stored agent’s MCP servers</strong> when it is replaced or deleted.
+</li>
+<li><strong>Dispatching through servant</strong>, replacing the wai router (see Phase 13).
+</li>
+</ul>
+<h3 id="decisions">Decisions</h3>
+<p>Recorded 2026-09-18.</p>
+<ol>
+<li><strong>Waiting for a run is chosen per request</strong> with the <code>wait</code> and <code>timeout</code>
+query parameters (§5), on every endpoint that can start a run. The default
+is not to wait. The body’s <code>run</code> field still controls how far the run goes.
+</li>
+<li><strong>Deleting cascades</strong> to sub-sessions and continuation rows, and supports
+a dry run (<code>?dry_run=true</code>) that reports what would be deleted (§4.9).
+</li>
+<li><strong>Idle live sessions keep their engine for 15 minutes</strong>
+(<code>hcLiveSessionTtl</code>, configurable). A background call still running when
+its session is evicted ends up orphaned.
+</li>
+<li><strong>The MCP server over HTTP is wanted, but later</strong> (see
+<a href="#phase-8-mcp-over-http">Phase 8</a>).
+</li>
+</ol>
+<p>Recorded 2026-09-19 (defaults taken when the user asked to continue with the
+later work; see <a href="#milestone-2-the-later-work">Milestone 2</a>):</p>
+<ol start="5">
+<li><strong>Authentication is a static bearer-tokens file</strong> mapping tokens (or their
+SHA-256) to owners. A session belongs to the owner of its root session;
+other owners get 404. Sessions without an owner are invisible once
+authentication is on.
+</li>
+<li><strong>MCP over HTTP answers each request with plain JSON</strong> and does not use
+MCP sessions.
+</li>
+<li><strong><code>agents-lib</code> becomes the core</strong> by moving the TUI into a new
+<code>agents-tui</code> library, rather than creating an <code>agents-core</code> library.
+</li>
+<li><strong>Postgres lives in its own <code>agents-postgres</code> library</strong>; the host takes
+its stores from the caller.
+</li>
+<li><strong>Token streaming is opt-in</strong> (<code>--stream-tokens</code>).
+</li>
+<li><strong>Database agents cannot use file-based tools</strong> in their first version,
+nor <code>extraAgents</code>. Storing agents needs <code>--admin-owners</code> (and so
+authentication). A file agent hides a stored agent with the same slug.
+</li>
+</ol>
+<p>Recorded 2026-09-20:</p>
+<ol start="11">
+<li><strong>The OpenAPI document is generated from servant types</strong>, rather than
+hand-written or derived from a full servant rewrite of the dispatcher.
+</li>
+<li><strong>The chat page is loopback-only by default</strong> and off with <code>--no-ui</code>.
+It is plain HTML and JavaScript in one document, with no build step.
+</li>
+</ol>
+<h3 id="related-docs">Related docs</h3>
+<ul>
+<li><code>todos/durable-workflows.md</code>, <code>todos/durable-workflows.progress.md</code>
+</li>
+<li><code>todos/async-tool-calls.md</code>
+</li>
+<li><code>documentation/durable-workflows-howto.md</code>, <code>documentation/async-tool-calls.md</code>, <code>documentation/sessions.md</code>
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

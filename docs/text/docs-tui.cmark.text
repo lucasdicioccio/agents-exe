@@ -1,0 +1,1468 @@
+_Generated from [`documentation/tui.md`](https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tui.md ), the repository is the canonical source and may be ahead of this page._
+
+# Terminal UI (TUI)
+
+The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tabbed interface for organizing different views.
+
+## Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Agents │ Chats │ History │ Help                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  Agents                                                         │
+│  ─────────────────────────────────────────────────────────────  │
+│  file-assistant                                                 │
+│  code-reviewer                                                  │
+│  documenter                                                     │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  # Slug: file-assistant                                         │
+│  # Announce: A helpful file assistant                           │
+│  # Model: claude-sonnet-4-20250514                              │
+│                                                                 │
+│  # Tools:                                                       │
+│  - [A] read_file                                               │
+│  - [A] write_file                                              │
+│  - [D:bash] bash_command                                       │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ [Tab] Switch  [Enter] Send  [Ctrl+C] Quit  [Ctrl+[|]] Prev/Next │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Tabbed Interface
+
+The TUI features a tabbed interface with four main tabs:
+
+```html
+<table>
+<tr><th>Tab</th><th>Description</th><th>Content</th></tr>
+<tr><td><strong>Agents</strong></td><td>Browse and select agents</td><td>Agent list and detailed agent information</td></tr>
+<tr><td><strong>Chats</strong></td><td>Active conversations</td><td>Conversation list and message interface</td></tr>
+<tr><td><strong>History</strong></td><td>Past sessions</td><td>Session list and history view</td></tr>
+<tr><td><strong>Help</strong></td><td>Keyboard shortcuts</td><td>Command reference and key bindings</td></tr>
+</table>
+```
+
+### Tab Navigation
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+[</code></td><td>Switch to previous tab</td></tr>
+<tr><td><code>Ctrl+]</code></td><td>Switch to next tab</td></tr>
+</table>
+```
+
+### Agents Tab
+
+The Agents tab displays:
+
+- **Left sidebar**: List of available agents
+
+- **Main area**: Detailed agent information including:
+- - Slug and announce text
+
+- Model name
+
+- Tools with activation status
+
+- System prompt
+
+
+
+
+### Chats Tab
+
+The Chats tab is for active conversations:
+
+- **Left sidebar**: List of ongoing conversations with status indicators:
+- - `⟳` - Active (agent is processing)
+
+- `●` - Waiting for input (unread)
+
+- `⏸` - Paused
+
+- `📎` - Has file attachments
+
+
+
+- **Main area**: Message editor, attachment list, the draft panel (when the conversation has unsent draft text), and conversation history
+
+
+#### Draft (unsent text while the session is busy)
+
+Typing a message while a conversation is active, paused, or blocked on deferred calls does not post it right away: it is appended to that conversation's **draft**, one editable, unsent buffer per conversation (`todos/os-as-standalone-server.md` §5, D3). Three messages sent in a row while the model is thinking are almost always one message being elaborated, so each send appends a new paragraph to the draft instead of queuing a discrete message.
+
+- **Collapsed view** (default, shown below the message editor whenever the focused conversation has a non-empty draft): the draft's first line plus a size indicator (`N chars, M paragraphs`).
+
+- **Edit** (`Ctrl+A`): loads the draft into the message editor (its attachments join the composer's) and clears it -- the editor is a full text editor over the whole draft text; further sends fold right back into a draft, or post, the normal way.
+
+- **Send now** (`Ctrl+G`): posts the draft immediately, as one message, and clears it.
+
+- **Clear** (`Ctrl+D`): discards the draft.
+
+- **Ships automatically**: once the session's run stops with a status that accepts input (idle or ready -- not paused, not blocked on deferred calls, not failed), the TUI posts the whole draft as a single message and clears it. A paused conversation keeps its draft until it is resumed and stops again.
+
+
+The kernel never sees a draft: it only ever receives real messages and interrupts. An interrupt (`Ctrl+U`) always bypasses the draft and posts straight through.
+
+### History Tab
+
+The History tab shows saved sessions, across every backend the runner is configured with:
+
+- **Left sidebar**: List of sessions (`Client.listSessions`, newest updated first), refreshed live as sessions are created, updated, or deleted elsewhere -- a burst of updates during a run coalesces into at most one refresh per heartbeat, and the current selection is kept by session id across a refresh.
+
+- **Main area**: the selected session's full turn history (fetched once via `Client.getSession` and cached by id), with the same usage summary, signal metrics, and turn navigation/forking as the Chats tab.
+
+
+### Help Tab
+
+The Help tab displays keyboard shortcuts and command reference for quick access to all TUI functionality.
+
+## Architecture
+
+The TUI is a client of the in-process runner (`System.Agents.Host.Runner.SessionRunner`), not a second agent runtime: `agents-exe tui` opens a `System.Agents.Host.Host` the same way `agents-exe serve` does and drives it through an in-process `System.Agents.Host.Client.RunnerClient` — every conversation action (new message, pause, fork, cancel, ...) is a `Command` sent to the runner, and every screen update comes from `Event`s the runner emits.
+
+**Embedded and attached.** `agents-exe tui` (embedded) builds that client over a runner in its own process. `agents-exe tui --attach URL|PATH` (attached) opens nothing locally and builds `System.Agents.Host.Client.Http.httpClient` instead: the same `RunnerClient`, over a running `agents-exe serve`'s HTTP API and SSE event feed, on TCP or its `--socket`. Everything above the client is the same code, so an attached TUI loses nothing: agents, chats, drafts, pause, interrupt, hard cancel, fork, History, pending calls. What it shows depends on the server version, though: `hook.failed` and the subcall events only reach it from a server that emits them. Differences that follow from where the runner lives: the agents, API keys and database are the server's (`--db` is refused with `--attach`, and `--agent-file` or `--agent` select nothing); `--params-file`/`--set` values are still sent with every create and message (secrets are resupplied by the client, D7); with `--auth-tokens` on the server, pass `--token`/`--token-file`, and the TUI then sees only that owner's sessions. Quitting an embedded TUI stops the runs it started (`StopRun` mail) since its runner dies with it; quitting an attached TUI leaves them running on the server. A dropped event stream reconnects on its own with `Last-Event-ID`, so nothing is missed across a short network hiccup.
+
+Sessions live in the SQLite database at `System.Agents.CLI.ConfigLoader.defaultServerDatabasePath` (next to the resolved sessions directory) unless overridden with `tui --db PATH`. Old sessions written by the pre-runner file store (`conv.<uuid>.json`, under the config's `sessions` read locations) stay readable: the host composites them in as a read-only fallback (`Host.hcLegacySessionDirs`) behind the SQLite backend.
+
+Sub-agent calls (`prompt_agent_*`) run as real sessions of their own (`todos/os-as-standalone-server.md`, Phase 5), so live progress for a child is its own `session.updated`/`text.delta`/`tool.*` stream, exactly like the parent conversation — not a separate "subcall progress" event. The TUI still gets `subcall.started`/`subcall.completed`/`subcall.failed` for the start/complete/fail transitions themselves (used to show the child in the conversation list and its hierarchy), but token-by-token and tool-by-tool progress in between now comes from subscribing to the child session directly, the same as any other session. A sub-agent call made with per-call narrowing (`bindings`/`with`/`as`) still runs in-tool, with no session and no live progress of its own, until that case is supported the same way.
+
+### Component Structure
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         TUI.Core                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+│  │   TUI.Types  │───>│  TUI.Render  │───>│  TUI.Event   │      │
+│  │   (state)    │    │  (display)   │    │  (input)     │      │
+│  └──────────────┘    └──────────────┘    └──────────────┘      │
+│         ▲                                            │          │
+│         └────────────────────────────────────────────┘          │
+│                      (event loop)                               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### State Management
+
+```haskell
+-- TUI.Types
+data Tab
+    = AgentsTab
+    | ChatsTab
+    | HistoryTab
+    | HelpTab
+    deriving (Show, Eq)
+
+data UIState = UIState
+    { _uiFocusRing :: FocusRing WidgetName
+    , _currentTab :: Tab           -- Current active tab
+    , _helpContent :: [Text]       -- Help text lines
+    , _turnNavigation :: Maybe TurnNavigationState
+    -- ^ When Just, we are in turn navigation mode
+    , _attachedFiles :: Map ConversationId [MediaAttachment]
+    -- ^ Media attachments per conversation
+    , _attachmentDialogState :: AttachmentDialogState
+    -- ^ File attachment dialog state
+    , _filePathInput :: Editor Text WidgetName
+    -- ^ Editor for file path input
+    , _selectedAttachmentIndex :: Maybe Int
+    -- ^ Selected attachment index
+    , ...
+    }
+
+data TUIState = TuiState
+    { _tuiCore :: TVar Core
+    , _tuiUI :: UIState
+    , _eventChan :: BChan AppEvent
+    , _sessionConfig :: SessionConfig
+    }
+```
+
+## Background Tool Calls
+
+Agents configured for asynchronous execution (see [async-tool-calls.md](/docs-async-tool-calls.html )) run tool calls in the background. The TUI shows what is running, with the latest progress each tool reports:
+
+```
+Background tool calls running: run_tests
+
+[Partial] > run the tests and the linter
+  ✓ lint (call_1): completed
+  ⏳ run_tests (call_2): running: 128 tests passed
+```
+
+Call states are `pending`, `deferred`, `running`, `completed`, `completed (delivered later)` and `failed`. "Delivered later" means the model had already been answered with a placeholder for that call, and got the result in a following message.
+
+While calls run in the background and the LLM has nothing to do, the conversation still accepts input: whichever comes first — your message or the results — is sent to the model.
+
+A conversation that waits on _deferred_ calls (completed by an external worker) stops with a status message instead of waiting; see "Pending calls" below to answer them from the TUI itself.
+
+## Pending calls
+
+When a run stops on deferred calls (`calls.deferred`), the conversation's status becomes "blocked on deferred" and a Pending panel appears below the Draft panel, listing each call's tool name, a prefix of its continuation token, and its arguments:
+
+```
+┌ Pending (1) ──────────────────────────────────────┐
+│ Ctrl+Y: answer oldest pending call, then send      │
+│                                                     │
+│ - bash_command (token a1b2c3d4): {"cmd": "ls"}     │
+└─────────────────────────────────────────────────────┘
+```
+
+`Ctrl+Y` (`answer-pending`) puts the message editor into "answer mode" for the oldest pending call with a continuation token; type the result and send it (`Ctrl+Enter`/the usual send trigger) the way you would any other message. That calls `completeCall` with `autoResume = true`, the same mechanism the server's own `GET /v1/sessions/:id/pending` workers use, so the run resumes on its own — a fresh `run.started`/`run.stopped` pair follows. The panel clears once the run starts again.
+
+There is no separate "fail this call" binding: `UserToolResponse` has no dedicated error form, so a call is always answered with a text (or JSON) result; report a failure as an ordinary text result that says so.
+
+## Subcall Conversation Visibility
+
+When agents call other agents as tools (via `prompt_agent_<slug>`), the subcall conversations are now visible in the TUI with visual distinction and hierarchy tracking.
+
+### Visual Hierarchy
+
+Subcall conversations are displayed with tree-branch styling to show parent-child relationships:
+
+```
+Conversations
+├─ @file-assistant (⟳)                    -- Root conversation
+│  ├─ @code-reviewer (⟳)                  -- Subcall depth 1
+│  │  └─ @syntax-checker (●)              -- Subcall depth 2
+│  └─ @documenter (●)                     -- Subcall depth 1
+└─ @helper-agent (●)                      -- Another root conversation
+```
+
+### Conversation Indicators
+
+```html
+<table>
+<tr><th>Visual</th><th>Meaning</th></tr>
+<tr><td><code>@slug</code></td><td>Root conversation (depth 0)</td></tr>
+<tr><td><code>├─ @slug</code></td><td>Subcall with siblings</td></tr>
+<tr><td><code>└─ @slug</code></td><td>Last subcall in branch</td></tr>
+<tr><td><code>│</code></td><td>Continuation line for parent with more children</td></tr>
+<tr><td>Dimmed text</td><td>Subcall conversation</td></tr>
+<tr><td>Normal text</td><td>Root conversation</td></tr>
+<tr><td><code>⟳</code></td><td>Active (processing)</td></tr>
+<tr><td><code>●</code></td><td>Waiting for input</td></tr>
+<tr><td><code>⏸</code></td><td>Paused</td></tr>
+</table>
+```
+
+### Subcall Event Flow
+
+```
+Parent Agent (TUI visible)
+       │
+       ▼ calls helper agent
+┌─────────────────────────┐
+│ turnAgentRuntimeIntoIOTool
+│ (OneShotTool.hs)        │
+│                         │
+│ 1. Insert into OS World │
+│    - ConversationConfig │
+│    - ConversationState  │
+│    - Lineage (parent)   │
+│                         │
+│ 2. Emit SubcallStarted  │◄── OSEvent
+│    (parentId, convId)   │
+│                         │
+│ 3. Run sub-agent        │
+│                         │
+│ 4. Emit SubcallProgress │◄── OSEvent (after each step)
+│                         │
+│ 5. Emit SubcallCompleted│◄── OSEvent (on success)
+│    or SubcallFailed     │◄── OSEvent (on error)
+└──────────┬──────────────┘
+           │
+           ▼ OS Event Queue
+┌─────────────────────────┐
+│   TUI Event Handler     │
+│   (Event.hs)            │
+│                         │
+│ - Create conversation   │
+│ - Show in list          │
+│ - Update on progress    │
+│ - Mark completed        │
+└─────────────────────────┘
+```
+
+### Subcall Event Types
+
+```haskell
+-- OS Events (from System.Agents.OS.Events)
+data OSEvent
+    = ...
+    | OSEvent_SubcallStarted
+        { subcallParentConversationId :: ConversationId
+        , subcallConversationId :: ConversationId
+        , subcallAgentSlug :: Text
+        , subcallDepth :: Int
+        }
+    | OSEvent_SubcallProgress
+        { subcallProgressConversationId :: ConversationId
+        , subcallProgressSession :: Session
+        }
+    | OSEvent_SubcallCompleted
+        { subcallCompletedConversationId :: ConversationId
+        , subcallCompletedResult :: Text
+        }
+    | OSEvent_SubcallFailed
+        { subcallFailedConversationId :: ConversationId
+        , subcallFailedError :: Text
+        }
+
+-- App Events (TUI internal)
+data AppEvent
+    = ...
+    | AppEvent_SubcallStarted ConversationId ConversationId Text Int
+    | AppEvent_SubcallProgress ConversationId Session
+    | AppEvent_SubcallCompleted ConversationId Text
+    | AppEvent_SubcallFailed ConversationId Text
+```
+
+### Conversation Types
+
+```haskell
+data Conversation = Conversation
+    { conversationId :: ConversationId
+    , conversationAgent :: TuiAgent
+    , conversationThreadId :: Maybe ThreadId
+    , conversationSession :: Maybe Session
+    , conversationName :: Text
+    , conversationChan :: BChan (Maybe UserQuery)
+    , conversationStatus :: ConversationStatus
+    , conversationOnProgress :: OnSessionProgress
+    , conversationIsSubcall :: Bool      -- ^ NEW: Is this a subcall?
+    , conversationParentId :: Maybe ConversationId  -- ^ NEW: Parent conversation
+    , conversationSubcallDepth :: Int    -- ^ NEW: Nesting depth (0 = root)
+    }
+```
+
+### Rendering Subcall Hierarchy
+
+```haskell
+-- Render conversations with tree structure
+renderConversationForest :: [ConversationTree] -> [Widget N]
+renderConversationForest trees =
+    concatMap (renderTreeNode [] False) trees
+
+-- Build tree from flat list
+buildConversationForest :: [Conversation] -> [ConversationTree]
+buildConversationForest convs =
+    let -- Find roots (no parent or orphaned)
+        isRoot c = conversationParentId c == Nothing
+                || conversationParentId c `notElem` map (Just . conversationId) convs
+        roots = filter isRoot convs
+        
+        -- Build recursively
+        buildTree conv = ConversationTree conv $
+            map buildTree (findChildren conv)
+        findChildren parent =
+            filter (\c -> conversationParentId c == Just (conversationId parent)) convs
+    in map buildTree roots
+
+-- Make prefix with tree branches
+makePrefix :: [Bool] -> Bool -> Text
+makePrefix ancestorIsLasts isLast
+    | null ancestorIsLasts = if isLast then "└─" else "├─"
+    | otherwise =
+        let continuation = mconcat $
+                map (\isLast' -> if isLast' then "  " else "│ ") ancestorIsLasts
+        in continuation <> (if isLast then "└─" else "├─")
+```
+
+### Visual Attributes
+
+```haskell
+tui_appAttrMap :: TuiState -> AttrMap
+tui_appAttrMap _ =
+    attrMap Vty.defAttr
+        [ ...
+        , -- Subcall visual distinction
+          (subcallAttr, fg white `withStyle` dim)
+        , (subcallSelectedAttr, fg black `on` brightWhite `withStyle` bold)
+        , (treeBranchAttr, fg white `withStyle` dim)
+        , (rootConversationAttr, defAttr)
+        ]
+```
+
+## File Attachments
+
+The TUI supports attaching files to messages for multi-modal LLM interactions.
+
+### Attaching Files
+
+**Via File Path Input:**
+
+- Press `Ctrl+F` to open the file path input dialog
+
+- Type or paste the absolute path to the file
+
+- Press `Enter` to attach, `Esc` to cancel
+
+
+**Supported file path formats:**
+
+```
+/path/to/image.png                    # Auto-detect MIME type
+image/png;/path/to/image.png          # Explicit MIME type
+```
+
+### Attachment Display
+
+Attached files are displayed below the message editor:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Message [2 attachments]                                     │
+├─────────────────────────────────────────────────────────────┤
+│ > Your message here...                                      │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Attachments (2) - Del/Backspace: remove | Ctrl+Shift+F: clear all│
+│   📎 screenshot.png (image/png, 245KB)                     │
+│ ▶ 📎 report.pdf (application/pdf, 1.2MB)                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Managing Attachments
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+F</code></td><td>Open file path input dialog</td></tr>
+<tr><td><code>Ctrl+Shift+F</code></td><td>Clear all attachments</td></tr>
+<tr><td><code>Del</code> / <code>Backspace</code></td><td>Remove selected attachment</td></tr>
+<tr><td><code>Up</code> / <code>Down</code></td><td>Select attachment (when focus is on attachment list)</td></tr>
+</table>
+```
+
+### Supported File Types
+
+The TUI can attach any file type. MIME type detection is automatic based on file extension:
+
+```html
+<table>
+<tr><th>Category</th><th>Extensions</th><th>MIME Types</th></tr>
+<tr><td><strong>Images</strong></td><td><code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.gif</code>, <code>.webp</code>, <code>.svg</code></td><td><code>image/png</code>, <code>image/jpeg</code>, <code>image/gif</code>, <code>image/webp</code>, <code>image/svg+xml</code></td></tr>
+<tr><td><strong>Documents</strong></td><td><code>.pdf</code>, <code>.txt</code>, <code>.md</code>, <code>.json</code>, <code>.xml</code></td><td><code>application/pdf</code>, <code>text/plain</code>, <code>text/markdown</code>, <code>application/json</code>, <code>application/xml</code></td></tr>
+<tr><td><strong>Audio</strong></td><td><code>.mp3</code>, <code>.wav</code>, <code>.ogg</code>, <code>.aac</code>, <code>.flac</code></td><td><code>audio/mp3</code>, <code>audio/wav</code>, <code>audio/ogg</code>, <code>audio/aac</code>, <code>audio/flac</code></td></tr>
+<tr><td><strong>Video</strong></td><td><code>.mp4</code>, <code>.webm</code>, <code>.mov</code>, <code>.avi</code></td><td><code>video/mp4</code>, <code>video/webm</code>, <code>video/quicktime</code>, <code>video/avi</code></td></tr>
+<tr><td><strong>Archives</strong></td><td><code>.zip</code></td><td><code>application/zip</code></td></tr>
+</table>
+```
+
+**Size Limit:** 50MB per file
+
+### Attachment State
+
+```haskell
+-- Attachments are stored per conversation
+type AttachedFiles = Map ConversationId [MediaAttachment]
+
+data MediaAttachment = MediaAttachment
+    { mediaMimeType :: Text        -- e.g., "image/png"
+    , mediaBase64Data :: Text      -- Base64-encoded content
+    , mediaFilename :: Maybe Text  -- Original filename
+    }
+
+-- Dialog state for file attachment
+data AttachmentDialogState
+    = AttachmentDialogClosed
+    | AttachmentDialogPathInput
+```
+
+### Attachment Flow
+
+```
+User presses Ctrl+F
+       │
+       ▼
+┌──────────────────┐
+│ Open path dialog │
+│ (text input)     │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ User enters path │
+│ Presses Enter    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Load file        │
+│ Detect MIME type │
+│ Base64 encode    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Add to           │
+│ attachedFiles    │
+│ map              │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Render in        │
+│ attachment list  │
+└──────────────────┘
+```
+
+## Clipboard Integration
+
+The TUI supports pasting content from the system clipboard, including images, file paths, and text.
+
+### Clipboard Pasting
+
+Press `Ctrl+V` to paste from clipboard:
+
+```html
+<table>
+<tr><th>Content Type</th><th>Action</th></tr>
+<tr><td><strong>Image</strong></td><td>Save to temp file and attach</td></tr>
+<tr><td><strong>File path</strong></td><td>Attach the file</td></tr>
+<tr><td><strong>Multiple file paths</strong></td><td>Attach all valid files</td></tr>
+<tr><td><strong>Text</strong></td><td>Insert into message editor</td></tr>
+</table>
+```
+
+### Platform Support
+
+```html
+<table>
+<tr><th>Platform</th><th>Backend</th><th>Required Tools</th></tr>
+<tr><td><strong>Linux (X11)</strong></td><td><code>xclip</code> or <code>xsel</code></td><td><code>xclip</code> or <code>xsel</code></td></tr>
+<tr><td><strong>Linux (Wayland)</strong></td><td><code>wl-clipboard</code></td><td><code>wl-paste</code></td></tr>
+<tr><td><strong>macOS</strong></td><td>Built-in</td><td><code>pbpaste</code> (included)</td></tr>
+<tr><td><strong>Windows</strong></td><td>PowerShell</td><td><code>powershell.exe</code></td></tr>
+</table>
+```
+
+### Smart Content Detection
+
+The clipboard module automatically detects content type:
+
+```haskell
+data ClipboardContent
+    = ClipboardImage ByteString Text    -- Image data with MIME type
+    | ClipboardFilePath FilePath        -- Single file path
+    | ClipboardText Text                -- Plain text
+    | ClipboardFilePaths [FilePath]     -- Multiple file paths
+    | ClipboardUnknown                  -- Unsupported content
+```
+
+Detection order:
+
+- .1 Check for image data (via magic bytes: PNG `\x89PNG`, JPEG `\xFF\xD8\xFF`, GIF `GIF87a/GIF89a`, WebP `RIFF`)
+
+- .1 Check for file paths (valid paths that exist)
+
+- .1 Check for multiple file paths (one per line)
+
+- .1 Fall back to plain text
+
+
+### Clipboard Module
+
+```haskell
+-- System.Agents.TUI.Clipboard
+
+-- Detect available backend
+detectBackend :: IO ClipboardBackend
+
+-- Read clipboard content
+readClipboard :: ClipboardBackend -> IO (Maybe ByteString)
+
+-- Detect content type
+detectClipboardContent :: IO (Maybe ClipboardContent)
+
+-- Analyze and convert to action
+analyzeContent :: ClipboardContent -> IO ContentAction
+
+data ContentAction
+    = AttachAsMedia MediaAttachment
+    | PasteAsText Text
+    | AttachMultipleFiles [MediaAttachment]
+    | IgnoreContent
+```
+
+### Image Pasting from Clipboard
+
+When an image is pasted from clipboard:
+
+- .1 Detect image format from magic bytes
+
+- .1 Save to temporary file with appropriate extension
+
+- .1 Create `MediaAttachment` with detected MIME type
+
+- .1 Attach to current conversation
+
+- .1 Show status: "Attached from clipboard: image.png"
+
+
+**Temporary file location:** `$TMPDIR/agents-exe-clipboard/clipboard-*.png`
+
+**Size limit:** 50MB for clipboard images
+
+### File Drop Support (Terminal Protocols)
+
+The clipboard module also supports file drop events from modern terminals:
+
+```html
+<table>
+<tr><th>Protocol</th><th>Terminal</th><th>Support</th></tr>
+<tr><td>iTerm2 File Drop</td><td>iTerm2 (macOS)</td><td>✅ Supported</td></tr>
+<tr><td>Kitty Graphics</td><td>Kitty</td><td>✅ Supported</td></tr>
+<tr><td>OSC 52</td><td>Various</td><td>✅ Read support</td></tr>
+</table>
+```
+
+## Rendering
+
+### Tab Bar Rendering
+
+```haskell
+-- TUI.Render
+renderTabBar :: Tab -> Widget N
+renderTabBar activeTab =
+    let tabs = [AgentsTab, ChatsTab, HistoryTab, HelpTab]
+        renderTab tab =
+            let tabName = case tab of
+                    AgentsTab -> " Agents "
+                    ChatsTab -> " Chats "
+                    HistoryTab -> " History "
+                    HelpTab -> " Help "
+                tabAttr = if tab == activeTab 
+                          then activeTabAttr 
+                          else inactiveTabAttr
+             in withAttr tabAttr $ txt tabName
+     in hBox (intersperse separator $ map renderTab tabs)
+```
+
+### Tab-Specific Content
+
+```haskell
+render_contentArea :: TuiState -> Widget N
+render_contentArea st =
+    case st ^. tuiUI . currentTab of
+        AgentsTab -> renderAgentsTab st
+        ChatsTab -> renderChatsTab st
+        HistoryTab -> renderHistoryTab st
+        HelpTab -> renderHelpTab st
+```
+
+### Attachment List Rendering
+
+```haskell
+render_attachmentPanel :: TuiState -> [MediaAttachment] -> Widget N
+render_attachmentPanel st attachments =
+    borderWithFocus
+        st
+        AttachmentListWidget
+        (" Attachments (" <> Text.pack (show $ length attachments) <> ") ")
+        $ vBox
+            [ txt "Del/Backspace: remove | Ctrl+Shift+F: clear all"
+            , txt ""
+            , vBox $ zipWith (render_attachment_item selectedIdx) [0 ..] attachments
+            ]
+
+render_attachment_item :: Maybe Int -> Int -> MediaAttachment -> Widget N
+render_attachment_item selectedIdx idx att =
+    let isSelected = selectedIdx == Just idx
+        marker = if isSelected then "▶ " else "  "
+        filename = maybe "unnamed" id att.mediaFilename
+        mimeType = att.mediaMimeType
+        sizeStr = formatAttachmentSize att.mediaBase64Data
+     in hBox
+         [ txt marker
+         , txt "📎 "
+         , txt filename
+         , txt " ("
+         , withAttr attachmentSizeAttr $ txt mimeType
+         , txt ", "
+         , withAttr attachmentSizeAttr $ txt sizeStr
+         , txt ")"
+         ]
+```
+
+### Conversation List with Nesting
+
+```haskell
+-- Render conversation list with subcall hierarchy
+render_conversationList :: TuiState -> Widget N
+render_conversationList st =
+    let convs = Vector.toList (listElements (st ^. tuiUI . conversationList))
+        forest = buildConversationForest convs
+        hasFocus = focusGetCurrent (st ^. tuiUI . uiFocusRing) == Just ConversationListWidget
+        selectedId = case listSelectedElement (st ^. tuiUI . conversationList) of
+            Just (_, conv) -> Just (conversationId conv)
+            Nothing -> Nothing
+     in borderWithFocus
+            st
+            ConversationListWidget
+            "Conversations"
+            ( viewport ConversationListWidget Both $
+                vBox $ renderConversationForest st selectedId hasFocus forest
+            )
+
+renderConversationForest :: TuiState -> Maybe ConversationId -> Bool -> [ConversationTree] -> [Widget N]
+renderConversationForest st selectedId hasFocus trees =
+    concatMap (\(idx, tree) -> renderTreeNode st selectedId hasFocus [] (idx == length trees - 1) tree) (zip [0 ..] trees)
+
+renderTreeNode :: TuiState -> Maybe ConversationId -> Bool -> [Bool] -> Bool -> ConversationTree -> [Widget N]
+renderTreeNode st selectedId hasFocus ancestorIsLasts isLast (ConversationTree conv children) =
+    let isSelected = selectedId == Just (conversationId conv)
+        nodeWidget = renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv
+        childWidgets = concatMap (\(idx, child) -> renderTreeNode st selectedId hasFocus (ancestorIsLasts ++ [isLast]) (idx == length children - 1) child) (zip [0 ..] children)
+     in nodeWidget : childWidgets
+```
+
+## Event Handling
+
+### Tab Switching
+
+```haskell
+-- TUI.Event
+tui_appHandleEvent tracer ev = do
+    case ev of
+        -- Tab switching
+        VtyEvent (Vty.EvKey (Vty.KChar '[') [Vty.MCtrl]) ->
+            cycleTabBackward
+        VtyEvent (Vty.EvKey (Vty.KChar ']') [Vty.MCtrl]) ->
+            cycleTabForward
+        -- ...
+
+cycleTabForward :: EventM N TuiState ()
+cycleTabForward = do
+    current <- use (tuiUI . currentTab)
+    let next = nextTab current
+    tuiUI . currentTab .= next
+    -- Update focus ring for the new tab
+    mCurrentFocus <- use (tuiUI . uiFocusRing . to focusGetCurrent)
+    tuiUI . uiFocusRing .= buildFocusRingForTabPreserving next mCurrentFocus
+```
+
+### Subcall Event Handling
+
+```haskell
+-- Handle subcall events in both normal and navigation mode
+handleNormalEvent tracer ev =
+    case ev of
+        AppEvent (AppEvent_SubcallStarted parentId subcallId slug depth) ->
+            handleSubcallStarted tracer parentId subcallId slug depth
+        AppEvent (AppEvent_SubcallProgress subcallId sess) ->
+            handleSubcallProgress subcallId sess
+        AppEvent (AppEvent_SubcallCompleted subcallId result) ->
+            handleSubcallCompleted subcallId result
+        AppEvent (AppEvent_SubcallFailed subcallId err) ->
+            handleSubcallFailed subcallId err
+        ...
+
+-- Create subcall conversation entry
+handleSubcallStarted :: Tracer IO Trace -> ConversationId -> ConversationId -> Text -> Int -> EventM N TuiState ()
+handleSubcallStarted _tracer parentId subcallId slug depth = do
+    agents <- use (tuiUI . agentList . to listElements)
+    case findAgentBySlug slug agents of
+        Just tuiAgent -> do
+            inChan <- liftIO $ newBChan 100
+            let conv = Conversation
+                    { conversationId = subcallId
+                    , conversationAgent = tuiAgent
+                    , conversationThreadId = Nothing
+                    , conversationSession = Nothing
+                    , conversationName = "@" <> tuiSlug tuiAgent
+                    , conversationChan = inChan
+                    , conversationStatus = ConversationStatus_Active
+                    , conversationOnProgress = \_ -> pure ()
+                    , conversationIsSubcall = True
+                    , conversationParentId = Just parentId
+                    , conversationSubcallDepth = depth
+                    }
+            coreRef <- use tuiCore
+            liftIO $ atomically $ modifyTVar coreRef $ appendConversation conv
+            tuiUI . conversationList %= listInsert 0 conv
+        Nothing -> showStatus StatusWarning $ "Agent not found for subcall: " <> slug
+
+-- Update subcall progress
+handleSubcallProgress :: ConversationId -> Session -> EventM N TuiState ()
+handleSubcallProgress subcallId sess = do
+    coreRef <- use tuiCore
+    liftIO $ atomically $ modifyTVar coreRef $ \c ->
+        c { coreConversations = updateConversationSession subcallId sess (coreConversations c) }
+
+-- Mark subcall completed
+handleSubcallCompleted :: ConversationId -> Text -> EventM N TuiState ()
+handleSubcallCompleted subcallId _result = do
+    updateConversationStatus subcallId ConversationStatus_WaitingForInput
+    showStatus StatusInfo "Subcall completed"
+```
+
+### Attachment Event Handling
+
+```haskell
+-- Handle Ctrl+F for file attachment
+VtyEvent (Vty.EvKey (Vty.KChar 'f') [Vty.MCtrl]) -> do
+    resetQuitConfirmation
+    openFilePathDialog
+
+-- Handle Ctrl+Shift+F to clear all attachments
+VtyEvent (Vty.EvKey (Vty.KChar 'F') [Vty.MCtrl, Vty.MShift]) -> do
+    resetQuitConfirmation
+    handleClearAllAttachments
+
+-- Handle clipboard paste
+VtyEvent (Vty.EvKey (Vty.KChar 'v') [Vty.MCtrl]) -> do
+    resetQuitConfirmation
+    handleClipboardPaste tracer
+```
+
+### Clipboard Paste Handler
+
+```haskell
+handleClipboardPaste :: Tracer IO Trace -> EventM N TuiState ()
+handleClipboardPaste _tracer = do
+    hasSupport <- liftIO hasClipboardSupport
+    if not hasSupport
+        then showStatus StatusError "Clipboard not available - install xclip, wl-clipboard, or pbpaste"
+        else do
+            mContent <- liftIO detectClipboardContent
+            case mContent of
+                Nothing ->
+                    showStatus StatusWarning "Clipboard is empty or inaccessible"
+                Just content -> do
+                    action <- liftIO $ analyzeContent content
+                    case action of
+                        IgnoreContent ->
+                            showStatus StatusWarning "No attachable content in clipboard"
+                        PasteAsText text -> do
+                            editorContents <- use (tuiUI . messageEditor . editContentsL)
+                            let newContents = TextZipper.insertMany text editorContents
+                            tuiUI . messageEditor . editContentsL .= newContents
+                            showStatus StatusInfo "Text pasted from clipboard"
+                        AttachAsMedia attachment -> do
+                            mConv <- getFocusedConversation
+                            case mConv of
+                                Nothing -> showStatus StatusError "No conversation selected"
+                                Just conv -> do
+                                    let convId = conversationId conv
+                                    tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
+                                    let filename = maybe "unnamed" id attachment.mediaFilename
+                                    showStatus StatusInfo $ "Attached from clipboard: " <> filename
+                        AttachMultipleFiles attachments -> do
+                            mConv <- getFocusedConversation
+                            case mConv of
+                                Nothing -> showStatus StatusError "No conversation selected"
+                                Just conv -> do
+                                    let convId = conversationId conv
+                                    tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId attachments
+                                    showStatus StatusInfo $ "Attached " <> Text.pack (show $ length attachments) <> " files from clipboard"
+```
+
+## Turn Navigation
+
+Turn navigation allows you to browse through conversation history turn-by-turn and fork new conversations from any point.
+
+### Entering Navigation Mode
+
+Press `Enter` when focused on the Conversation view or Session view to enter turn navigation mode:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Conversation - Turn Navigation (3/8) [Enter:exit F:fork]    │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ -----------------------                                 │ │
+│ │▶ < What is the best approach for...      ← SELECTED    │ │
+│ │  + ...                                                  │ │
+│ │                                                         │ │
+│ │ -----------------------                                 │ │
+│ │  < You could consider using...                          │ │
+│ └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Navigation Controls
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Up</code></td><td>Navigate to earlier turn</td></tr>
+<tr><td><code>Down</code></td><td>Navigate to later turn</td></tr>
+<tr><td><code>F</code></td><td>Fork conversation at selected turn</td></tr>
+<tr><td><code>Enter</code></td><td>Exit navigation mode</td></tr>
+<tr><td><code>Esc</code></td><td>Exit navigation mode</td></tr>
+</table>
+```
+
+### Forking Conversations
+
+Forking creates a new conversation starting from the selected turn, preserving only the turns before it:
+
+```
+Turn 0: User - "Hello!"
+Turn 1: Assistant - "Hi there!"
+Turn 2: User - "How do I..." ← Selected for fork
+Turn 3: Assistant - "You can..."
+
+Forking at Turn 2 creates new conversation with:
+Turn 0: User - "Hello!"
+Turn 1: Assistant - "Hi there!"
+(New conversation starts here)
+```
+
+The original session remains untouched. The forked session has `forkedFromSessionId` set to the original session's ID.
+
+### Turn Navigation Types
+
+```haskell
+-- | State for turn-by-turn navigation
+data TurnNavigationState = TurnNavigationState
+    { _navSession :: Session
+    -- ^ The session being navigated
+    , _navSelectedTurnIndex :: Int
+    -- ^ Currently selected turn index (0-based)
+    , _navTotalTurns :: Int
+    -- ^ Total number of turns for display
+    }
+
+-- | Widget name for turn navigation viewport
+data WidgetName
+    = ...
+    | TurnNavigationWidget
+    -- ^ For viewport scrolling during turn navigation
+```
+
+## Message Queue Management
+
+When a conversation is paused, you can manage queued messages - messages typed while the agent was processing.
+
+### Queue Management UI
+
+When paused with queued messages, the Chats tab shows a queue management panel:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Message                                                      │
+├─────────────────────────────────────────────────────────────┤
+│ > User's typed message...                                   │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Queued Messages (2) - Ctrl+D: clear  Del: delete selected │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ ▶ First queued message text...                          │ │
+│ │   Second queued message that is longer...               │ │
+│ └─────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────┤
+│ Conversation                                                 │
+│ ...existing conversation content...                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Queue Management Controls
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+D</code></td><td>Clear all queued messages</td></tr>
+<tr><td><code>Del</code> / <code>Backspace</code></td><td>Delete selected queued message</td></tr>
+<tr><td><code>Up</code></td><td>Select previous message</td></tr>
+<tr><td><code>Down</code></td><td>Select next message</td></tr>
+</table>
+```
+
+### Activation
+
+Queue management is only available when:
+
+- The conversation status is `ConversationStatus_Paused`
+
+- There are queued messages in the buffer
+
+
+To pause/unpause a conversation, press `Ctrl+E`.
+
+### Queue State
+
+```haskell
+data UIState = UIState
+    { ...
+    , _uiBufferedMessages :: Map ConversationId [Text]
+    -- ^ Copy of buffered messages from Core for UI rendering
+    , _queuedMessagesFocus :: Maybe Int
+    -- ^ Index of currently selected queued message (Nothing = none selected)
+    }
+
+-- The Core also maintains the source of truth
+data Core = Core
+    { ...
+    , coreBufferedMessages :: TVar (Map ConversationId [Text])
+    -- ^ Buffered messages per conversation
+    , corePausedConversations :: Set ConversationId
+    -- ^ Set of paused conversation IDs
+    }
+```
+
+## Keyboard Shortcuts
+
+### Navigation
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Tab</code></td><td>Cycle focus forward through widgets</td></tr>
+<tr><td><code>Shift+Tab</code></td><td>Cycle focus backward through widgets</td></tr>
+<tr><td><code>Ctrl+Z</code></td><td>Toggle zoom mode for current widget</td></tr>
+</table>
+```
+
+### Tabs
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+[</code></td><td>Switch to previous tab</td></tr>
+<tr><td><code>Ctrl+]</code></td><td>Switch to next tab</td></tr>
+</table>
+```
+
+### Conversations
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+N</code></td><td>Start new conversation with selected agent</td></tr>
+<tr><td><code>Ctrl+C</code></td><td>Continue restored session</td></tr>
+<tr><td><code>Meta+Enter</code></td><td>Send message</td></tr>
+<tr><td><code>Ctrl+E</code></td><td>Pause/unpause conversation</td></tr>
+</table>
+```
+
+### File Attachments
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+F</code></td><td>Open file path input dialog</td></tr>
+<tr><td><code>Ctrl+Shift+F</code></td><td>Clear all attachments</td></tr>
+<tr><td><code>Del</code> / <code>Backspace</code></td><td>Remove selected attachment</td></tr>
+<tr><td><code>Up</code> / <code>Down</code></td><td>Select attachment (when focused)</td></tr>
+</table>
+```
+
+### Clipboard
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+V</code></td><td>Paste from clipboard (images, files, text)</td></tr>
+</table>
+```
+
+### Turn Navigation
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Enter</code></td><td>Enter turn navigation mode (when on conversation)</td></tr>
+<tr><td><code>Up/Down</code></td><td>Navigate between turns (in navigation mode)</td></tr>
+<tr><td><code>F</code></td><td>Fork conversation at selected turn</td></tr>
+<tr><td><code>Enter/Esc</code></td><td>Exit turn navigation mode</td></tr>
+</table>
+```
+
+### Queue Management (when paused)
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+D</code></td><td>Clear all queued messages</td></tr>
+<tr><td><code>Del</code> / <code>Backspace</code></td><td>Delete selected queued message</td></tr>
+<tr><td><code>Up/Down</code></td><td>Select queued message</td></tr>
+</table>
+```
+
+### Session Export
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+P</code></td><td>Export session to markdown file</td></tr>
+<tr><td><code>Ctrl+T</code></td><td>View session in external viewer (chronological)</td></tr>
+<tr><td><code>Ctrl+R</code></td><td>View session in external viewer (reverse)</td></tr>
+</table>
+```
+
+### Session Search (History Tab)
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>/</code></td><td>Start search</td></tr>
+<tr><td><code>n</code></td><td>Next result</td></tr>
+<tr><td><code>N</code></td><td>Previous result</td></tr>
+<tr><td><code>Esc</code></td><td>Clear search</td></tr>
+</table>
+```
+
+### Other
+
+```html
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>F5</code></td><td>Refresh tools for selected agent</td></tr>
+<tr><td><code>Esc</code>, <code>Ctrl+Q</code></td><td>Quit application</td></tr>
+</table>
+```
+
+## Session Export and Viewing
+
+The TUI supports exporting and viewing session content in markdown format.
+
+### Export to Markdown
+
+Press `Ctrl+p` to export the current session to a markdown file:
+
+```haskell
+handleDumpSessionToMarkdown :: EventM N TuiState ()
+handleDumpSessionToMarkdown = do
+    mSession <- use (tuiCore . coreSession)
+    mConvId <- getFocusedConversationId
+    case (mSession, mConvId) of
+        (Just session, Just (ConversationId cid)) -> do
+            let markdown = formatSessionMarkdown Chronological session
+                fileName = "conv." <> show cid <.> "md"
+            liftIO $ TextIO.writeFile fileName markdown
+            showStatus StatusInfo $ "Exported to " <> Text.pack fileName
+        ...
+```
+
+### View with External Viewer
+
+The TUI can display session content using an external markdown viewer configured via the `AGENT_MD_VIEWER` environment variable.
+
+**Chronological Order (Oldest First):** Press `Ctrl+t` to view the session in chronological order (oldest messages first):
+
+```haskell
+VtyEvent (Vty.EvKey (Vty.KChar 't') [Vty.MCtrl]) ->
+    handleViewSessionWithExternalViewer Chronological
+```
+
+**Antichronological Order (Newest First):** Press `Ctrl+r` to view the session in reverse chronological order (newest messages first):
+
+```haskell
+VtyEvent (Vty.EvKey (Vty.KChar 'r') [Vty.MCtrl]) ->
+    handleViewSessionWithExternalViewer Antichronological
+```
+
+**Example:**
+
+```bash
+# Set viewer (e.g., glow, bat, less)
+export AGENT_MD_VIEWER="glow -p"
+
+# Or use a pager
+export AGENT_MD_VIEWER="less -R"
+
+# Then start TUI
+agents-exe tui --agent-file agent.json
+```
+
+### Order Preference
+
+```haskell
+data OrderPreference = Chronological | Antichronological
+
+formatSessionMarkdown :: OrderPreference -> Session -> Text.Text
+formatSessionMarkdown orderPref session =
+    let opts = SessionPrintOptions
+            { ...
+            , orderPreference = orderPref
+            , ...
+            }
+     in formatSessionAsMarkdown opts session
+```
+
+Use cases:
+
+- **Chronological (`Ctrl+t`)**: Best for reviewing the full conversation from start to finish
+
+- **Antichronological (`Ctrl+r`)**: Best when you care about recent changes and want to see the most recent messages first
+
+
+## Session Search
+
+The History tab includes session search functionality for finding past conversations.
+
+### Search Interface
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Sessions                                [Search: database] │
+│ ─────────────────────────────────────────────────────────  │
+│  ▶ 2024-01-15 10:30 - database migration                  │
+│    2024-01-14 15:20 - api design                          │
+│  ▶ 2024-01-13 09:00 - database schema review              │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Session View                                                 │
+│ ...selected session content...                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Search Features
+
+- **Real-time filtering**: Sessions are filtered as you type
+
+- **Full-text search**: Searches across session content
+
+- **Highlighting**: Matching terms are highlighted
+
+- **Keyboard navigation**: `n`/`N` to jump between results
+
+
+## Running the TUI
+
+### Main Entry Point
+
+```haskell
+-- TUI.Core
+runTUI :: Tracer IO Trace -> SessionStore -> LoadedApiKeys -> [Props] -> IO ()
+runTUI tracer store apiKeys propsList = do
+    let config = fileSessionConfig store apiKeys
+    runTUIWithConfig tracer config propsList
+
+runTUIWithConfig :: Tracer IO Trace -> SessionConfig -> [Props] -> IO ()
+runTUIWithConfig tracer config props = do
+    -- Load agent trees and create TuiAgents
+    trees <- traverse loadAgentTree props
+    let itrees = [tree | Initialized tree <- trees]
+
+    -- Create TUI agents from OS-native trees
+    let tuiAgents = map createTuiAgent itrees
+
+    -- Load existing session files
+    loadedSessions <- loadSessionFiles config.sessionStore
+
+    -- Collect tools from all agents
+    agentTools <- collectAgentTools tuiAgents
+
+    -- Create event channel
+    evChan <- newBChan 100
+
+    -- Create OS event queue for subcall visibility
+    osEventQueue <- newTQueueIO
+
+    -- Start the event bridge
+    startOSEventBridge osEventQueue evChan
+
+    -- Create and initialize the OS World
+    world <- atomically initWorld
+
+    -- Create core state with World and EventQueue
+    core0 <- initCore (Just world) (Just osEventQueue)
+    coreTVar <- newTVarIO core0
+
+    -- Create UI state
+    let ui0 = (initUIState defaultHelpContent tuiAgents [s | (_, Just s) <- loadedSessions])
+                { _uiAgentTools = agentTools }
+
+    -- Create TUI state
+    let st = TuiState coreTVar ui0 evChan config
+
+    -- Build and run the app
+    let app = App
+            { appDraw = tui_appDraw
+            , appChooseCursor = tui_appChooseCursor
+            , appHandleEvent = tui_appHandleEvent tracer
+            , appStartEvent = tui_appStartEvent
+            , appAttrMap = tui_appAttrMap
+            }
+
+    void $ customMainWithDefaultVty (Just evChan) app st
+```
+
+## Styling
+
+### Attributes
+
+```haskell
+tui_appAttrMap :: TuiState -> AttrMap
+tui_appAttrMap _ =
+    attrMap Vty.defAttr
+        [ (headerAttr, fg white `on` blue)
+        , (activeTabAttr, fg black `on` brightWhite `withStyle` bold)
+        , (inactiveTabAttr, fg white `on` blue)
+        , (userAttr, fg cyan)
+        , (agentAttr, fg green)
+        , (toolAttr, fg yellow)
+        , (toolSuccessAttr, fg green)
+        , (toolErrorAttr, fg red)
+        , (systemAttr, fg magenta)
+        , (inputAttr, fg white)
+        , (queuedMessageAttr, fg yellow)
+        , (queuedMessageSelectedAttr, bg blue `withStyle` bold)
+        , (selectedTurnAttr, bg blue `withStyle` bold)
+        , (attachmentAttr, fg cyan)
+        , (attachmentSelectedAttr, bg blue `withStyle` bold)
+        , (attachmentSizeAttr, fg white `withStyle` dim)
+        , -- Subcall conversation attributes
+          (subcallAttr, fg white `withStyle` dim)
+        , (subcallSelectedAttr, fg black `on` brightWhite `withStyle` bold)
+        , (treeBranchAttr, fg white `withStyle` dim)
+        , (rootConversationAttr, defAttr)
+        ]
+```
+
+## Status Bar
+
+```haskell
+render_statusBar :: Maybe StatusMessage -> Widget N
+render_statusBar Nothing = emptyWidget
+render_statusBar (Just msg) =
+    withAttr (statusAttr msg.statusSeverity) $
+        txt $ " " <> statusText msg
+
+data StatusSeverity
+    = StatusInfo
+    | StatusWarning
+    | StatusError
+    deriving (Show, Eq)
+```
+
+## Best Practices
+
+### Performance
+
+- .1 **Limit scrollback**: Keep only last N messages in memory
+
+- .1 **Lazy rendering**: Don't render off-screen content
+
+- .1 **Rate limiting**: Throttle UI updates during streaming
+
+
+### User Experience
+
+- .1 **Visual feedback**: Show typing indicators and tool calls
+
+- .1 **Error handling**: Display errors without crashing
+
+- .1 **Help text**: Always show keyboard shortcuts
+
+- .1 **Tab organization**: Group related functionality into logical tabs
+
+- .1 **Pause before queue management**: Queue management only works when paused to prevent accidental modifications
+
+
+### Multi-Agent UI
+
+- .1 **Clear indicators**: Show which agent is active
+
+- .1 **Separate contexts**: Each agent maintains its own conversation
+
+- .1 **Easy switching**: Tab between agents quickly
+
+- .1 **Subcall visibility**: Show nested agent calls with visual hierarchy
+
+
+### Conversation Forking
+
+- .1 **Non-destructive**: Original session always preserved
+
+- .1 **Clear lineage**: Forked sessions track their origin
+
+- .1 **Agent selection**: Current agent selection used for fork
+
+- .1 **Navigation mode**: Enter navigation to review before forking
+
+
+### File Attachments
+
+- .1 **Size limits**: Warn users about large files
+
+- .1 **MIME detection**: Automatic type detection from extensions
+
+- .1 **Visual feedback**: Show attachment count in UI
+
+- .1 **Temporary cleanup**: Clipboard images are temporary files
+
+
+### Clipboard Integration
+
+- .1 **Graceful degradation**: Handle missing clipboard tools gracefully
+
+- .1 **Security**: Validate file paths before attachment
+
+- .1 **Size limits**: Prevent memory issues with large clipboard content
+
+- .1 **Platform detection**: Auto-detect best clipboard backend
+
+
+### Subcall Visibility
+
+- .1 **Tree rendering**: Show parent-child relationships clearly
+
+- .1 **Visual distinction**: Use different attributes for subcalls vs root conversations
+
+- .1 **Event bridging**: Convert OS events to AppEvents for Brick integration
+
+- .1 **Orphan handling**: Handle async race conditions where child arrives before parent
+
+- .1 **Nesting depth**: Track and display recursion depth
+
+
+## Customization
+
+### Custom Event Handlers
+
+```haskell
+customHandleEvent :: TUIState -> BrickEvent () CustomEvent -> EventM () (Next TUIState)
+customHandleEvent state ev = case ev of
+    -- Add custom shortcuts
+    VtyEvent (EvKey (KChar 's') [MCtrl]) -> do
+        liftIO $ saveSession state
+        continue $ state { status = Ready }
+
+    VtyEvent (EvKey (KChar 'l') [MCtrl]) -> do
+        newState <- liftIO $ loadSession state
+        continue newState
+
+    _ -> handleEvent state ev  -- Fall through to default
+```
+
+### Custom Widgets
+
+```haskell
+customProgressBar :: Float -> Widget ()
+customProgressBar progress =
+    let width = 20
+        filled = round (progress * fromIntegral width)
+        bar = replicate filled '█' ++ replicate (width - filled) '░'
+    in withAttr progressAttr $ str $ "[" ++ bar ++ "]"
+```
+
+## Related Modules
+
+```html
+<table>
+<tr><th>Module</th><th>Purpose</th></tr>
+<tr><td><code>System.Agents.TUI.Core</code></td><td>Main TUI application</td></tr>
+<tr><td><code>System.Agents.TUI.Types</code></td><td>TUI state and types</td></tr>
+<tr><td><code>System.Agents.TUI.Render</code></td><td>Rendering functions</td></tr>
+<tr><td><code>System.Agents.TUI.Event</code></td><td>Event handling</td></tr>
+<tr><td><code>System.Agents.TUI.Clipboard</code></td><td>Clipboard and drag-and-drop support</td></tr>
+<tr><td><code>System.Agents.Media.Types</code></td><td>Media attachment types</td></tr>
+<tr><td><code>System.Agents.SessionPrint</code></td><td>Session formatting</td></tr>
+<tr><td><code>System.Agents.OS.Events</code></td><td>OS event types for subcall visibility</td></tr>
+<tr><td><code>System.Agents.AgentTree.OneShotTool</code></td><td>Subcall execution</td></tr>
+</table>
+```
+
+

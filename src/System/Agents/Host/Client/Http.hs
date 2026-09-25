@@ -10,7 +10,7 @@ Design §3, Phase 4), so the TUI can attach to a server exactly as it runs
 over an in-process runner (D6).
 
 Commands map one to one onto the documented routes
-(@docs/agents-server.md@); replies decode into the same 'Reply'
+(@documentation/agents-server.md@); replies decode into the same 'Reply'
 'inProcessClient' builds; an @{error, message}@ answer decodes into the
 'RunnerError' its code names. The event feed is the SSE stream
 (@GET \/v1\/events@, or @GET \/v1\/sessions\/:id\/events@ for one

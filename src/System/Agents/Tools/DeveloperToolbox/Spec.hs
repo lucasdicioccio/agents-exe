@@ -26,7 +26,7 @@ import System.Agents.Tools.DeveloperToolbox.Types (
 
 -- | Embedded bash-tools documentation
 bashToolsDocumentation :: Text
-bashToolsDocumentation = $(embedStringFile "docs/binary-tool.md")
+bashToolsDocumentation = $(embedStringFile "documentation/binary-tool.md")
 
 {- | Execute show spec.
 

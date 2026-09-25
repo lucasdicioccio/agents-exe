@@ -1,0 +1,286 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Adding New Executable-Program Tools</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="Executable-program tools (also called \&quot;bash tools\&quot;) are external programs that `agents-exe` can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, pro"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Adding New Executable-Program Tools"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Executable-program tools (also called \&quot;bash tools\&quot;) are external programs that `agents-exe` can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, pro"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Adding New Executable-Program Tools"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html"><meta property="og:description" content="Executable-program tools (also called \&quot;bash tools\&quot;) are external programs that `agents-exe` can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, pro"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-binary-tool.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-binary-tool.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"Executable-program tools (also called \\\"bash tools\\\") are external programs that `agents-exe` can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, pro","headline":"Adding New Executable-Program Tools","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Adding New Executable-Program Tools</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 552 words, 9 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-sqq-flow.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">12/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-README.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/binary-tool.md"><code>documentation/binary-tool.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="adding-new-executable-program-tools">Adding New Executable-Program Tools</h2>
+<p>Executable-program tools (also called “bash tools”) are external programs that <code>agents-exe</code> can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, probing the network, or interacting with external APIs.</p>
+<h3 id="tool-protocol-overview">Tool Protocol Overview</h3>
+<p>Bash tools must adhere to a simple protocol with two commands:</p>
+<h4 id="1-the-describe-command">1. The <code>describe</code> Command</h4>
+<p>When called with a single <code>describe</code> argument (no other parameters), the tool must return a JSON description of its interface:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> ./my-tool describe</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;slug&quot;</span><span class="ex">:</span> <span class="st">&quot;my_tool&quot;</span>,</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;description&quot;</span><span class="ex">:</span> <span class="st">&quot;What this tool does&quot;</span>,</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;args&quot;</span><span class="ex">:</span> [</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">{</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;name&quot;</span><span class="ex">:</span> <span class="st">&quot;arg_name&quot;</span>,</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;description&quot;</span><span class="ex">:</span> <span class="st">&quot;Argument description&quot;</span>,</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;type&quot;</span><span class="ex">:</span> <span class="st">&quot;string&quot;</span>,</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;backing_type&quot;</span><span class="ex">:</span> <span class="st">&quot;string&quot;</span>,</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;arity&quot;</span><span class="ex">:</span> <span class="st">&quot;single&quot;</span>,</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;mode&quot;</span><span class="ex">:</span> <span class="st">&quot;dashdashspace&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">}</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>  <span class="ex">],</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;empty-result&quot;</span><span class="ex">:</span> { <span class="st">&quot;tag&quot;</span>: <span class="st">&quot;AddMessage&quot;</span>, <span class="st">&quot;contents&quot;</span>: <span class="st">&quot;No results found&quot;</span> }</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="kw">}</span></span></code></pre></div></div><h4 id="2-the-run-command">2. The <code>run</code> Command</h4>
+<p>When called with <code>run</code> followed by arguments, the tool executes its function and <strong>must</strong> write output to stdout:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> ./my-tool run <span class="at">--arg-name</span> value</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">Tool</span> output here</span></code></pre></div></div><h3 id="json-description-format">JSON Description Format</h3>
+<h4 id="top-level-fields">Top-Level Fields</h4>
+<table>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+<tr><td><code>slug</code></td><td>String</td><td>Yes</td><td>Unique identifier for the tool (no spaces)</td></tr>
+<tr><td><code>description</code></td><td>String</td><td>Yes</td><td>Human-readable description for the LLM</td></tr>
+<tr><td><code>args</code></td><td>Array</td><td>Yes</td><td>List of argument definitions</td></tr>
+<tr><td><code>empty-result</code></td><td>Object</td><td>No</td><td>Behavior when tool returns empty output</td></tr>
+</table>
+<h4 id="argument-definition">Argument Definition</h4>
+<p>Each argument in the <code>args</code> array has the following fields:</p>
+<table>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+<tr><td><code>name</code></td><td>String</td><td>Yes</td><td>Argument name (used in JSON input)</td></tr>
+<tr><td><code>description</code></td><td>String</td><td>Yes</td><td>Description for the LLM</td></tr>
+<tr><td><code>type</code></td><td>String</td><td>Yes</td><td>Semantic type (e.g., "string", "number")</td></tr>
+<tr><td><code>backing_type</code></td><td>String</td><td>Yes</td><td>Implementation type (e.g., "string")</td></tr>
+<tr><td><code>arity</code></td><td>String</td><td>Yes</td><td>"single" or "optional"</td></tr>
+<tr><td><code>mode</code></td><td>String</td><td>Yes</td><td>How to pass the argument (see below)</td></tr>
+</table>
+<h4 id="argument-modes">Argument Modes</h4>
+<p>The <code>mode</code> field determines how arguments are passed to the script:</p>
+<table>
+<tr><th>Mode</th><th>Behavior</th><th>Example</th></tr>
+<tr><td><code>positional</code></td><td>Added as consecutive arguments</td><td><code>script run value</code></td></tr>
+<tr><td><code>dashdashspace</code></td><td>Added as <code>--name value</code> (two args)</td><td><code>script run --name value</code></td></tr>
+<tr><td><code>dashdashequal</code></td><td>Added as <code>--name=value</code> (one arg)</td><td><code>script run --name=value</code></td></tr>
+<tr><td><code>stdin</code></td><td>Concatenated to stdin with blank separators</td><td><code>echo "value" \| script run</code></td></tr>
+</table>
+<h3 id="empty-result-behavior">Empty Result Behavior</h3>
+<p>The optional <code>empty-result</code> field controls what happens when the tool produces no output:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="er">//</span> <span class="er">Do</span> <span class="er">nothing</span> <span class="er">(default</span> <span class="er">behavior)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;DoNothing&quot;</span> <span class="fu">}</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="er">//</span> <span class="er">Add</span> <span class="er">a</span> <span class="er">message</span> <span class="er">when</span> <span class="er">output</span> <span class="er">is</span> <span class="er">empty</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;AddMessage&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;No results found&quot;</span> <span class="fu">}</span></span></code></pre></div></div><h3 id="session-context-via-environment-variables">Session Context via Environment Variables</h3>
+<p>When a tool is executed within a session, <code>agents-exe</code> passes session context via environment variables. This allows tools to access session metadata without requiring the LLM to provide it as explicit arguments.</p>
+<h4 id="available-environment-variables">Available Environment Variables</h4>
+<table>
+<tr><th>Variable</th><th>Description</th><th>Example Value</th></tr>
+<tr><td><code>AGENT_SESSION_ID</code></td><td>UUID of the current session</td><td><code>550e8400-e29b-41d4-a716-446655440000</code></td></tr>
+<tr><td><code>AGENT_CONVERSATION_ID</code></td><td>UUID of the conversation</td><td><code>6ba7b810-9dad-11d1-80b4-00c04fd430c8</code></td></tr>
+<tr><td><code>AGENT_TURN_ID</code></td><td>UUID of the current turn</td><td><code>7c8b9d20-beef-22e2-91c5-11d15fe541d9</code></td></tr>
+<tr><td><code>AGENT_AGENT_ID</code></td><td>UUID of the executing agent (if available)</td><td><code>a1b2c3d4-e5f6-7890-abcd-ef1234567890</code></td></tr>
+<tr><td><code>AGENT_SESSION_JSON</code></td><td>Full session serialized as JSON (when requested)</td><td><code>{...}</code></td></tr>
+</table>
+<h4 id="use-cases-for-context">Use Cases for Context</h4>
+<p>Tools can use session context for:</p>
+<ul>
+<li><strong>Audit logging</strong>: Include session IDs in external API calls for traceability
+</li>
+<li><strong>Context-aware processing</strong>: Access conversation history to make smarter decisions
+</li>
+<li><strong>Correlation</strong>: Tag external telemetry with session identifiers
+</li>
+<li><strong>Agent-specific behavior</strong>: Adjust behavior based on which agent is executing the tool
+</li>
+</ul>
+<h4 id="example-tool-with-session-context">Example: Tool with Session Context</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/bin/bash</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="bu">[</span> <span class="st">&quot;</span><span class="va">$1</span><span class="st">&quot;</span> <span class="ot">==</span> <span class="st">&quot;describe&quot;</span> <span class="bu">]</span><span class="kw">;</span> <span class="cf">then</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">cat</span> <span class="op">&lt;&lt;&#39;EOF&#39;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="st">{</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;slug&quot;: &quot;session-aware-logger&quot;,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;description&quot;: &quot;Logs operations with session context for audit trails&quot;,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;args&quot;: [</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="st">    {</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;name&quot;: &quot;operation&quot;,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;description&quot;: &quot;The operation being logged&quot;,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;type&quot;: &quot;string&quot;,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;backing_type&quot;: &quot;string&quot;,</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;arity&quot;: &quot;single&quot;,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;mode&quot;: &quot;dashdashspace&quot;</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="st">    }</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="st">  ]</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="st">}</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="op">EOF</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="bu">exit</span> 0</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="cf">fi</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="co"># Access session context from environment (with defaults)</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="va">SESSION_ID</span><span class="op">=</span><span class="st">&quot;</span><span class="va">${AGENT_SESSION_ID</span><span class="op">:-</span>unknown<span class="va">}</span><span class="st">&quot;</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="va">CONVERSATION_ID</span><span class="op">=</span><span class="st">&quot;</span><span class="va">${AGENT_CONVERSATION_ID</span><span class="op">:-</span>unknown<span class="va">}</span><span class="st">&quot;</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="va">TURN_ID</span><span class="op">=</span><span class="st">&quot;</span><span class="va">${AGENT_TURN_ID</span><span class="op">:-</span>unknown<span class="va">}</span><span class="st">&quot;</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a><span class="va">AGENT_ID</span><span class="op">=</span><span class="st">&quot;</span><span class="va">${AGENT_AGENT_ID</span><span class="op">:-</span>unknown<span class="va">}</span><span class="st">&quot;</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a><span class="co"># Parse the operation argument (skipping &#39;run&#39;)</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a><span class="va">OPERATION</span><span class="op">=</span><span class="st">&quot;&quot;</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a><span class="cf">while</span> <span class="kw">[[</span> <span class="va">$#</span> <span class="ot">-gt</span> 0 <span class="kw">]];</span> <span class="cf">do</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="va">$1</span> <span class="kw">in</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>        <span class="ss">--operation</span><span class="kw">)</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>            <span class="va">OPERATION</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$2</span><span class="st">&quot;</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>            <span class="bu">shift</span> 2</span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>            <span class="cf">;;</span></span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a>        <span class="pp">*</span><span class="kw">)</span></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a>            <span class="bu">shift</span></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a>            <span class="cf">;;</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a>    <span class="cf">esac</span></span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="42"><a href="#42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="43"><a href="#43" aria-hidden="true" tabindex="-1"></a><span class="co"># Log with context</span></span>
+<span id="44"><a href="#44" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&quot;[session=</span><span class="va">$SESSION_ID</span><span class="st"> turn=</span><span class="va">$TURN_ID</span><span class="st">] Executing: </span><span class="va">$OPERATION</span><span class="st">&quot;</span></span>
+<span id="45"><a href="#45" aria-hidden="true" tabindex="-1"></a></span>
+<span id="46"><a href="#46" aria-hidden="true" tabindex="-1"></a><span class="co"># Optionally access full session JSON for complex operations</span></span>
+<span id="47"><a href="#47" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="bu">[</span> <span class="ot">-n</span> <span class="st">&quot;</span><span class="va">$AGENT_SESSION_JSON</span><span class="st">&quot;</span> <span class="bu">]</span><span class="kw">;</span> <span class="cf">then</span></span>
+<span id="48"><a href="#48" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Parse session JSON for additional context</span></span>
+<span id="49"><a href="#49" aria-hidden="true" tabindex="-1"></a>    <span class="va">TURN_COUNT</span><span class="op">=</span><span class="va">$(</span><span class="bu">echo</span> <span class="st">&quot;</span><span class="va">$AGENT_SESSION_JSON</span><span class="st">&quot;</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;.turns | length&#39;</span><span class="va">)</span></span>
+<span id="50"><a href="#50" aria-hidden="true" tabindex="-1"></a>    <span class="bu">echo</span> <span class="st">&quot;[session=</span><span class="va">$SESSION_ID</span><span class="st">] Turn </span><span class="va">$TURN_COUNT</span><span class="st">&quot;</span></span>
+<span id="51"><a href="#51" aria-hidden="true" tabindex="-1"></a><span class="cf">fi</span></span></code></pre></div></div><h4 id="note-on-session-json">Note on Session JSON</h4>
+<p>The <code>AGENT_SESSION_JSON</code> variable is only set when the full session context is available and requested. It contains the complete serialized session, which can be large. Tools should:</p>
+<ol>
+<li>Check if the variable is set before using it
+</li>
+<li>Handle potentially large JSON payloads efficiently
+</li>
+<li>Consider using <code>jq</code> or similar for parsing
+</li>
+</ol>
+<h3 id="complete-example-tool">Complete Example Tool</h3>
+<p>Here’s a complete example of a file-reading tool:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/bin/bash</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co"># File: tools/read-file.sh</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="bu">[</span> <span class="st">&quot;</span><span class="va">$1</span><span class="st">&quot;</span> <span class="ot">==</span> <span class="st">&quot;describe&quot;</span> <span class="bu">]</span><span class="kw">;</span> <span class="cf">then</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">cat</span> <span class="op">&lt;&lt;&#39;EOF&#39;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="st">{</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;slug&quot;: &quot;read_file&quot;,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;description&quot;: &quot;Reads the contents of a file at the specified path&quot;,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;args&quot;: [</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="st">    {</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;name&quot;: &quot;path&quot;,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;description&quot;: &quot;Absolute or relative path to the file to read&quot;,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;type&quot;: &quot;string&quot;,</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;backing_type&quot;: &quot;string&quot;,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;arity&quot;: &quot;single&quot;,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="st">      &quot;mode&quot;: &quot;dashdashspace&quot;</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="st">    }</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="st">  ],</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="st">  &quot;empty-result&quot;: { &quot;tag&quot;: &quot;AddMessage&quot;, &quot;contents&quot;: &quot;File is empty or could not be read&quot; }</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="st">}</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="op">EOF</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="bu">exit</span> 0</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="cf">fi</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="co"># Extract the path argument</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="va">FILE_PATH</span><span class="op">=</span><span class="st">&quot;&quot;</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a><span class="cf">while</span> <span class="kw">[[</span> <span class="va">$#</span> <span class="ot">-gt</span> 0 <span class="kw">]];</span> <span class="cf">do</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="va">$1</span> <span class="kw">in</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>        <span class="ss">--path</span><span class="kw">)</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>            <span class="va">FILE_PATH</span><span class="op">=</span><span class="st">&quot;</span><span class="va">$2</span><span class="st">&quot;</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>            <span class="bu">shift</span> 2</span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>            <span class="cf">;;</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>        <span class="pp">*</span><span class="kw">)</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>            <span class="bu">shift</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>            <span class="cf">;;</span></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>    <span class="cf">esac</span></span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="bu">[</span> <span class="ot">-z</span> <span class="st">&quot;</span><span class="va">$FILE_PATH</span><span class="st">&quot;</span> <span class="bu">]</span><span class="kw">;</span> <span class="cf">then</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a>    <span class="bu">echo</span> <span class="st">&quot;Error: No path specified&quot;</span> <span class="op">&gt;&amp;</span><span class="dv">2</span></span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a>    <span class="bu">exit</span> 1</span>
+<span id="42"><a href="#42" aria-hidden="true" tabindex="-1"></a><span class="cf">fi</span></span>
+<span id="43"><a href="#43" aria-hidden="true" tabindex="-1"></a></span>
+<span id="44"><a href="#44" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="bu">[</span> <span class="ot">!</span> <span class="ot">-f</span> <span class="st">&quot;</span><span class="va">$FILE_PATH</span><span class="st">&quot;</span> <span class="bu">]</span><span class="kw">;</span> <span class="cf">then</span></span>
+<span id="45"><a href="#45" aria-hidden="true" tabindex="-1"></a>    <span class="bu">echo</span> <span class="st">&quot;Error: File not found: </span><span class="va">$FILE_PATH</span><span class="st">&quot;</span> <span class="op">&gt;&amp;</span><span class="dv">2</span></span>
+<span id="46"><a href="#46" aria-hidden="true" tabindex="-1"></a>    <span class="bu">exit</span> 1</span>
+<span id="47"><a href="#47" aria-hidden="true" tabindex="-1"></a><span class="cf">fi</span></span>
+<span id="48"><a href="#48" aria-hidden="true" tabindex="-1"></a></span>
+<span id="49"><a href="#49" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> <span class="st">&quot;</span><span class="va">$FILE_PATH</span><span class="st">&quot;</span></span></code></pre></div></div><h3 id="tool-discovery">Tool Discovery</h3>
+<p>Tools are discovered from the <code>tools</code> directory relative to your <code>agent.json</code> file:</p>
+<pre><code>project/
+├── agent.json          # Agent definition
+└── tools/              # Tool directory
+    ├── read-file.sh    # Executable tool script
+    ├── git-helper      # Another tool
+    └── ...
+</code></pre>
+<p><code>agents-exe</code>:</p>
+<ol>
+<li>Lists all executable files in the tools directory
+</li>
+<li>Calls each with <code>describe</code> to load its interface
+</li>
+<li>Makes successfully loaded tools available to the agent
+</li>
+</ol>
+<h3 id="using-agents-exe-as-a-tool">Using <code>agents-exe</code> as a Tool</h3>
+<p><code>agents-exe</code> itself adheres to the same protocol, allowing you to nest agents:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># This allows agents-exe to be used as a tool by another agents-exe instance</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> describe</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--prompt</span> <span class="st">&quot;Hello&quot;</span></span></code></pre></div></div><p>This is useful for:</p>
+<ul>
+<li>Creating hierarchies of agents with different access rights
+</li>
+<li>Running agents across container boundaries
+</li>
+<li>Delegating to specialized sub-agents
+</li>
+</ul>
+<h3 id="best-practices">Best Practices</h3>
+<ol>
+<li><strong>Always validate arguments</strong> - Check for missing or invalid arguments before processing
+</li>
+<li><strong>Write to stdout</strong> - The LLM receives stdout; use stderr for errors
+</li>
+<li><strong>Return non-zero on errors</strong> - Use appropriate exit codes
+</li>
+<li><strong>Keep descriptions concise</strong> - LLMs work better with clear, brief descriptions
+</li>
+<li><strong>Use appropriate modes</strong> - Choose argument modes that make sense for your tool’s interface
+</li>
+<li><strong>Handle empty results gracefully</strong> - Consider using <code>empty-result</code> to provide helpful messages
+</li>
+<li><strong>Document context usage</strong> - If your tool uses environment variables, document it for users
+</li>
+<li><strong>Provide sensible defaults</strong> - Use bash parameter expansion for optional context variables: <code>${AGENT_SESSION_ID:-unknown}</code>
+</li>
+</ol>
+<h3 id="debugging-tools">Debugging Tools</h3>
+<p>Test your tool independently before using it with <code>agents-exe</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Test the describe command</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">./my-tool</span> describe <span class="kw">|</span> <span class="ex">jq</span> .</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Test the run command</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">./my-tool</span> run <span class="at">--arg-name</span> value</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Verify exit codes</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="va">$?</span>  <span class="co"># Should be 0 on success, non-zero on error</span></span></code></pre></div></div><p>Use <code>agents-exe check</code> to validate all tools in your agent configuration.</p>
+<h3 id="inspecting-tool-schemas">Inspecting Tool Schemas</h3>
+<p>The <code>check</code> command supports an optional <code>--tools</code> flag that allows you to inspect how tools are serialized for LLM calls. This is useful for debugging tool definition issues:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Default behavior - just validate and show tool counts</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># List tools with their names and descriptions</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check <span class="at">--tools</span><span class="op">=</span>list</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Show the internal agents-exe tool representation as JSON (wrapped in markdown details tags)</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check <span class="at">--tools</span><span class="op">=</span>agents-exe</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Show the OpenAI LLM tool representation as JSON (wrapped in markdown details tags)</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check <span class="at">--tools</span><span class="op">=</span>openai</span></code></pre></div></div><p>The <code>--tools</code> option accepts the following modes:</p>
+<table>
+<tr><th>Mode</th><th>Description</th></tr>
+<tr><td><code>none</code></td><td>Default. Only show agent names and tool counts.</td></tr>
+<tr><td><code>list</code></td><td>Print a markdown list of tool names and descriptions.</td></tr>
+<tr><td><code>agents-exe</code></td><td>Output the internal tool representation as JSON within <code>&lt;details&gt;</code> tags.</td></tr>
+<tr><td><code>openai</code></td><td>Output the OpenAI LLM tool schema (as sent to the API) within <code>&lt;details&gt;</code> tags.</td></tr>
+</table>
+<p>This feature is particularly useful when:</p>
+<ul>
+<li>Debugging why a tool isn’t being called by the LLM
+</li>
+<li>Verifying that tool schemas are correctly formed
+</li>
+<li>Documenting available tools for users
+</li>
+<li>Comparing internal vs. LLM-facing representations
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

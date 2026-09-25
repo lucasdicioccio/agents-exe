@@ -345,7 +345,7 @@ instance ToSchema MailPostBody where
                 ( "body"
                 , says
                     "A MailBody, tagged JSON ({tag, ...}); see the Mail section of \
-                    \docs/agents-server.md for the exact shapes (userMessage, \
+                    \documentation/agents-server.md for the exact shapes (userMessage, \
                     \agentMessage, control, ...)."
                 )
             , ("priority", oneOfValues "Whether this mail may pre-empt a wait." ["normal", "interrupt"])
@@ -372,7 +372,7 @@ instance ToSchema MailListBody where
                 ( "mail"
                 , says
                     "Each is an Envelope: {id, seq, from, priority, hops, sentAt, body}. \
-                    \See the Mail section of docs/agents-server.md."
+                    \See the Mail section of documentation/agents-server.md."
                 )
             ]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
@@ -451,7 +451,7 @@ instance ToSchema HealthBody where
 system prompt, tool activation and helpers included, not just slug,
 description, tool names and source). 'abTools' and 'abParameters' are kept
 as 'RawJson' here (each element is a tool\/parameter object -- see
-@docs/agents-server.md@'s API reference) rather than given their own
+@documentation/agents-server.md@'s API reference) rather than given their own
 schema types, since this module only documents the wire shape, not the
 library's own 'System.Agents.Protocol.ToolDescriptor'\/'System.Agents.Protocol.AgentParameter'.
 -}
@@ -590,7 +590,7 @@ instance ToSchema SessionBody where
                         Just "A session's metadata, its conversation, and the deferred calls it is waiting on."
                     , OpenApi._schemaProperties =
                         OpenApi._schemaProperties metaSchema
-                            <> [ ("session", OpenApi.Inline (opaqueObject "The conversation: a turn tree. See docs/sessions.md."))
+                            <> [ ("session", OpenApi.Inline (opaqueObject "The conversation: a turn tree. See documentation/sessions.md."))
                                , ("pending", pendingRef)
                                ]
                     }

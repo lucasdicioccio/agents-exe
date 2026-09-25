@@ -1,0 +1,93 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Command reference</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/commands.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="reference, cli, commands, options, check, init, tui, run, serve, mcp-server"><meta name="description" content="The global options and every agents-exe command, as the README lists them."><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Command reference"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="The global options and every agents-exe command, as the README lists them."><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Command reference"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/commands.html"><meta property="og:description" content="The global options and every agents-exe command, as the README lists them."><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/commands.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/commands.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"The global options and every agents-exe command, as the README lists them.","headline":"Command reference","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/commands.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="reference"><meta name="article:tag" content="cli"><meta name="article:tag" content="commands"><meta name="article:tag" content="options"><meta name="article:tag" content="check"><meta name="article:tag" content="init"><meta name="article:tag" content="tui"><meta name="article:tag" content="run"><meta name="article:tag" content="serve"><meta name="article:tag" content="mcp-server"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Command reference</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 260 words, 8 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><span class="topic-nav-boundary">|</span></span><a class="topic-link" href="/agents-exe/topics/reference.html"><span class="topic-name">reference</span><span class="topic-count">1/1</span></a><span class="topic-nav topic-next-link"><span class="topic-nav-boundary">|</span></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/README.md"><code>README.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="command-reference">Command reference</h2>
+<h3 id="command-reference-1">Command Reference</h3>
+<h4 id="global-options">Global Options</h4>
+<p>These options apply to all commands:</p>
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--api-keys FILE</code></td><td><code>~/.config/agents-exe/secret-keys</code></td><td>Path to JSON file containing API keys</td></tr>
+<tr><td><code>--log-file LOGFILE</code></td><td><code>agents-logfile</code></td><td>Raw log file for debugging</td></tr>
+<tr><td><code>--log-http URL</code></td><td>(none)</td><td>HTTP endpoint for JSON log sink</td></tr>
+<tr><td><code>--log-json-file FILE</code></td><td>(none)</td><td>Local JSON file log sink</td></tr>
+<tr><td><code>--session-json-file-prefix PREFIX</code></td><td>(none)</td><td>Prefix for session JSON files</td></tr>
+<tr><td><code>--agent-file AGENTFILE</code></td><td>(auto-discovered)</td><td>Root agent description file(s). Can be specified multiple times. Defaults to <code>agent.json</code></td></tr>
+</table>
+<h4 id="commands">Commands</h4>
+<h5 id="check"><code>check</code></h5>
+<p>Validates agent configuration files.</p>
+<pre><code class="language-console">agents-exe check
+agents-exe check --agent-file custom-agent.json
+</code></pre>
+<h5 id="init"><code>init</code></h5>
+<p>Initializes a new agent project with a sample <code>agent.json</code> and tools directory structure.</p>
+<pre><code class="language-console">agents-exe init
+agents-exe init --agent-file my-agent.json
+</code></pre>
+<h5 id="tui---terminal-user-interface"><code>tui</code> - Terminal User Interface</h5>
+<p>Launches an interactive terminal UI for chatting with agents.</p>
+<pre><code class="language-console">agents-exe tui
+agents-exe tui --agent-file my-agent.json
+</code></pre>
+<h5 id="run---execute-a-one-shot-command"><code>run</code> - Execute a One-Shot Command</h5>
+<p>Runs a single prompt through an agent and outputs the result.</p>
+<p><strong>Prompt Options:</strong></p>
+<table>
+<tr><th>Option</th><th>Short</th><th>Description</th></tr>
+<tr><td><code>--prompt TEXT</code></td><td><code>-p</code></td><td>Add a text paragraph to the prompt</td></tr>
+<tr><td><code>--file FILE</code></td><td><code>-f</code></td><td>Include contents of a file in the prompt</td></tr>
+<tr><td><code>--shell CMD</code></td><td></td><td>Include stdout of a shell command in the prompt</td></tr>
+<tr><td><code>--sep4 SEP</code></td><td><code>-s</code></td><td>Add a short separator (4 repetitions)</td></tr>
+<tr><td><code>--sep40 SEP</code></td><td><code>-S</code></td><td>Add a long separator (40 repetitions)</td></tr>
+<tr><td><code>--session-file FILE</code></td><td></td><td>Resume from or save to a session file</td></tr>
+</table>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-console"># Simple prompt
+agents-exe run --prompt &quot;Hello, how are you?&quot;
+
+# Include file contents
+agents-exe run --prompt &quot;Summarize this:&quot; --file README.md
+
+# Include command output
+agents-exe run -p &quot;Explain this diff:&quot; -s &quot;---&quot; --shell &quot;git diff&quot;
+
+# Multiple prompts (concatenated with newlines)
+agents-exe run -p &quot;First part&quot; -p &quot;Second part&quot;
+
+# Resume a session
+agents-exe run --session-file previous.json -p &quot;Continue where we left off&quot;
+</code></pre>
+<h5 id="echo-prompt"><code>echo-prompt</code></h5>
+<p>Echoes the constructed prompt without sending it to the agent. Useful for debugging prompt construction.</p>
+<pre><code class="language-console">agents-exe echo-prompt -p &quot;Hello&quot; -f README.md
+</code></pre>
+<h5 id="describe"><code>describe</code></h5>
+<p>Outputs a JSON self-description of the tool interface. Useful when agents-exe is used as a sub-tool.</p>
+<pre><code class="language-console">agents-exe describe
+</code></pre>
+<h5 id="mcp-server"><code>mcp-server</code></h5>
+<p>Runs agents-exe as an MCP (Model Context Protocol) server, exposing agents as tools via stdin/stdout.</p>
+<pre><code class="language-console">agents-exe mcp-server
+agents-exe mcp-server --agent-file agent1.json --agent-file agent2.json
+</code></pre>
+<p>The MCP server exposes each configured agent as a callable tool to MCP clients like Claude Desktop.</p>
+<h5 id="session-print"><code>session-print</code></h5>
+<p>Prints a session file in human-readable markdown format.</p>
+<table>
+<tr><th>Option</th><th>Description</th></tr>
+<tr><td><code>--show-tool-call-results</code></td><td>Show the results of tool calls</td></tr>
+<tr><td><code>--n-turns N</code></td><td>Limit output to first N turns</td></tr>
+<tr><td><code>--repeat-system-prompt</code></td><td>Repeat system prompt at each turn</td></tr>
+<tr><td><code>--repeat-tools</code></td><td>Repeat available tools at each turn</td></tr>
+<tr><td><code>--antichronological</code></td><td>Display newest turns first (default: oldest first)</td></tr>
+</table>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-console"># Print entire session
+agents-exe session-print my-session.json
+
+# Print with tool results
+agents-exe session-print --show-tool-call-results my-session.json
+
+# Print last 10 turns only, newest first
+agents-exe session-print --n-turns 10 --antichronological my-session.json
+</code></pre>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

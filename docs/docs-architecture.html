@@ -1,0 +1,481 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Architecture</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-architecture.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="This document describes the runtime architecture and core components of the Agents framework. ## Core Architecture The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Architecture"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="This document describes the runtime architecture and core components of the Agents framework. ## Core Architecture The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Architecture"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-architecture.html"><meta property="og:description" content="This document describes the runtime architecture and core components of the Agents framework. ## Core Architecture The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-architecture.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-architecture.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"This document describes the runtime architecture and core components of the Agents framework. ## Core Architecture The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and","headline":"Architecture","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-architecture.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Architecture</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1402 words, 13 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-CHANGELOG-OS-MIGRATION.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">21/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-sessions.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/architecture.md"><code>documentation/architecture.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="architecture">Architecture</h2>
+<p>This document describes the runtime architecture and core components of the Agents framework.</p>
+<h3 id="core-architecture">Core Architecture</h3>
+<p>The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and user interfaces.</p>
+<h4 id="layer-overview">Layer Overview</h4>
+<pre><code>┌────────────────────────────────────────────────────────────────┐
+│                    Interface Layer                              │
+│  (CLI commands, TUI, MCP server, HTTP endpoints)                │
+│  The TUI and the HTTP server (agents-server) are both clients   │
+│  of an in-process SessionRunner (Host.Runner), driven through   │
+│  the same RunnerClient interface -- see tui.md#architecture.    │
+├────────────────────────────────────────────────────────────────┤
+│                    OS Model Layer                               │
+│  (Entity-Component-System, Resource Management,                 │
+│   Conversation Tracking, Concurrent Access)                     │
+├────────────────────────────────────────────────────────────────┤
+│                    Agent Tree Layer                             │
+│  (multi-agent hierarchy, reference validation, cycle detection) │
+├────────────────────────────────────────────────────────────────┤
+│                    Foundation Layer                             │
+│  (sessions, tools, LLM integration, file loading)               │
+└────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="os-model-architecture">OS Model Architecture</h3>
+<p>The OS Model provides a centralized, ECS-based architecture for managing agents, toolboxes, and resources.</p>
+<h4 id="entity-component-system-ecs-pattern">Entity-Component-System (ECS) Pattern</h4>
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│                         World                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │  Component  │  │  Component  │  │  Component  │             │
+│  │   Store 1   │  │   Store 2   │  │   Store N   │             │
+│  │ (TVar Any)  │  │ (TVar Any)  │  │ (TVar Any)  │             │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │
+│         │                │                │                     │
+│         └────────────────┼────────────────┘                     │
+│                          │                                      │
+│                   HashMap ComponentTypeId                        │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+         ┌─────────────────┼─────────────────┐
+         │                 │                 │
+         ▼                 ▼                 ▼
+    ┌─────────┐      ┌─────────┐      ┌─────────┐
+    │ Entity  │      │ Entity  │      │ Entity  │
+    │   1     │      │   2     │      │   N     │
+    └────┬────┘      └────┬────┘      └────┬────┘
+         │                │                │
+    ┌────┴────┐      ┌────┴────┐      ┌────┴────┐
+    │ Agent   │      │Toolbox  │      │ Conv    │
+    │ Config  │      │ Config  │      │ Config  │
+    │ Agent   │      │Toolbox  │      │ Conv    │
+    │ State   │      │ State   │      │ State   │
+    └─────────┘      └─────────┘      └─────────┘
+</code></pre>
+<p><strong>Key Design Principles:</strong></p>
+<ol>
+<li><strong>Entities are just IDs</strong>: Lightweight identifiers with phantom types for type safety
+</li>
+<li><strong>Components are pure data</strong>: Serializable, immutable data structures
+</li>
+<li><strong>Systems are functions</strong>: Operate on entities with specific component combinations
+</li>
+<li><strong>Storage is heterogeneous</strong>: Uses <code>TVar Any</code> for type erasure with safe casting
+</li>
+</ol>
+<h4 id="component-types">Component Types</h4>
+<h5 id="agent-components">Agent Components</h5>
+<table>
+<tr><th>Component</th><th>ID</th><th>Purpose</th></tr>
+<tr><td><code>AgentConfig</code></td><td>1</td><td>Static agent configuration (name, model, system prompt)</td></tr>
+<tr><td><code>AgentState</code></td><td>2</td><td>Runtime state (status, current conversation)</td></tr>
+</table>
+<h5 id="toolbox-components">Toolbox Components</h5>
+<table>
+<tr><th>Component</th><th>ID</th><th>Purpose</th></tr>
+<tr><td><code>ToolboxConfig</code></td><td>3</td><td>Toolbox type and settings</td></tr>
+<tr><td><code>ToolboxState</code></td><td>4</td><td>Runtime state and resource reference</td></tr>
+<tr><td><code>ToolboxBinding</code></td><td>5</td><td>Agent-to-toolbox relationship</td></tr>
+</table>
+<h5 id="conversation-components">Conversation Components</h5>
+<table>
+<tr><th>Component</th><th>ID</th><th>Purpose</th></tr>
+<tr><td><code>ConversationConfig</code></td><td>30</td><td>Conversation metadata</td></tr>
+<tr><td><code>ConversationState</code></td><td>31</td><td>Runtime status and timestamps</td></tr>
+<tr><td><code>AgentConversation</code></td><td>32</td><td>Agent-conversation relationship</td></tr>
+<tr><td><code>TurnConfig</code></td><td>33</td><td>Turn structure (parent, conversation)</td></tr>
+<tr><td><code>TurnState</code></td><td>34</td><td>Turn execution state</td></tr>
+<tr><td><code>ToolCallConfig</code></td><td>35</td><td>Tool call specification</td></tr>
+<tr><td><code>ToolCallState</code></td><td>36</td><td>Tool call execution state</td></tr>
+<tr><td><code>Message</code></td><td>38</td><td>Chat messages</td></tr>
+</table>
+<h4 id="resource-lifecycle-flow">Resource Lifecycle Flow</h4>
+<pre><code>Program Startup
+      │
+      ▼
+┌─────────────┐
+│  Initialize │
+│    World    │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     ┌─────────────┐
+│   Create    │────&gt;│  Register   │
+│   Agents    │     │  Component  │
+└──────┬──────┘     │   Stores    │
+       │            └─────────────┘
+       ▼
+┌─────────────┐     ┌─────────────┐
+│   Create    │────&gt;│  Register   │
+│  Toolboxes  │     │  Resources  │
+└──────┬──────┘     └─────────────┘
+       │
+       ▼
+┌─────────────┐
+│    Bind     │
+│   Agents    │
+│  to Toolboxes│
+└──────┬──────┘
+       │
+       ▼
+    ┌────────┐
+    │ RUNTIME │
+    └────┬───┘
+         │
+    ┌────┴────┬──────────┬──────────┐
+    │         │          │          │
+    ▼         ▼          ▼          ▼
+┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐
+│ Agent │ │ Agent │ │Shared │ │ Shared│
+│   1   │ │   2   │ │SQLite │ │  HTTP │
+│       │ │       │ │  DB   │ │ Pool  │
+└───┬───┘ └───┬───┘ └───┬───┘ └───┬───┘
+    │         │         │         │
+    └─────────┴─────────┴─────────┘
+              │
+              ▼
+       ┌─────────────┐
+       │  Cleanup    │
+       │   Scope     │
+       │ (on destroy)│
+       └─────────────┘
+</code></pre>
+<p><strong>Resource Scopes:</strong></p>
+<ol>
+<li><strong>Program Scope</strong>: Global resources (HTTP connection pools, shared caches)
+</li>
+<li><strong>Agent Scope</strong>: Per-agent resources (sandbox directories, agent-specific state)
+</li>
+<li><strong>Toolbox Scope</strong>: Per-toolbox resources (SQLite connections, MCP clients)
+</li>
+<li><strong>Conversation Scope</strong>: Per-conversation resources (isolated Lua states, temp files)
+</li>
+<li><strong>Turn Scope</strong>: Temporary resources (single turn execution context)
+</li>
+<li><strong>ToolCall Scope</strong>: Single-use resources (tool call arguments, results)
+</li>
+</ol>
+<h4 id="concurrent-access-patterns">Concurrent Access Patterns</h4>
+<pre><code>┌──────────────────────────────────────────────────────────────┐
+│                    Access Patterns                            │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Exclusive Access (TMVar)                                     │
+│  ┌─────────┐     ┌─────────┐     ┌─────────┐                 │
+│  │  Lock   │────&gt;│ Execute │────&gt;│ Release │                 │
+│  └─────────┘     └─────────┘     └─────────┘                 │
+│  Use: Lua interpreters, process handles                      │
+│                                                               │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Read-Write Access (RWLock)                                   │
+│  ┌─────┐ ┌─────┐       ┌─────────┐      ┌─────┐ ┌─────┐      │
+│  │Read │ │Read │──────&gt;│  Data   │&lt;─────│Write│     │      │
+│  │  1  │ │  2  │       │         │      │     │     │      │
+│  └─────┘ └─────┘       └─────────┘      └─────┘     │      │
+│  Use: SQLite databases (especially WAL mode)                 │
+│                                                               │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Pool Access (TBQueue)                                        │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │  Pool: [Token] [Token] [Token] ... [Token]          │     │
+│  └─────────────────────────────────────────────────────┘     │
+│       ▲    │         ▲    │                                  │
+│       │    └─────────┘    │                                  │
+│    Acquire             Release                               │
+│  Use: HTTP connection pools, DB connection pools             │
+│                                                               │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Stateless Access (No Lock)                                   │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐                        │
+│  │ Access  │ │ Access  │ │ Access  │  (Concurrent, no sync) │
+│  └─────────┘ └─────────┘ └─────────┘                        │
+│  Use: Immutable data, thread-safe resources                  │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+</code></pre>
+<h4 id="conversation-and-lineage-tracking">Conversation and Lineage Tracking</h4>
+<pre><code>Conversation Tree Structure
+
+┌─────────────────┐
+│ Conversation 1  │
+│   (Entity)      │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌───────┐ ┌───────┐
+│ Turn 1│ │ Turn 2│
+│(Entity)│ │(Fork) │
+└───┬───┘ └───┬───┘
+    │         │
+    ▼         ▼
+┌───────┐ ┌───────┐
+│ Call 1│ │ Call 1│
+│       │ │       │
+└───┬───┘ └───┬───┘
+    │         │
+    ▼         ▼
+┌───────┐ ┌───────┐
+│ Call 2│ │ Call 2│
+│(Nested)│ │(Nested)│
+└───────┘ └───────┘
+
+Lineage Stack
+┌─────────────────────────────────────┐
+│ LineageFrame                        │
+│ ├─ frameType: ToolCallFrame         │
+│ ├─ frameEntityId: &lt;tool-call-id&gt;    │
+│ └─ frameTimestamp: &lt;time&gt;           │
+├─────────────────────────────────────┤
+│ LineageFrame                        │
+│ ├─ frameType: TurnFrame             │
+│ ├─ frameEntityId: &lt;turn-id&gt;         │
+│ └─ frameTimestamp: &lt;time&gt;           │
+├─────────────────────────────────────┤
+│ LineageFrame                        │
+│ ├─ frameType: ConversationFrame     │
+│ ├─ frameEntityId: &lt;conversation-id&gt; │
+│ └─ frameTimestamp: &lt;time&gt;           │
+└─────────────────────────────────────┘
+</code></pre>
+<p><strong>Lineage provides:</strong></p>
+<ul>
+<li>Complete call chain for debugging
+</li>
+<li>Recursion depth tracking
+</li>
+<li>Audit trail for accounting
+</li>
+<li>Context for subagent calls
+</li>
+</ul>
+<h4 id="persistence-layer">Persistence Layer</h4>
+<pre><code>┌──────────────────────────────────────────────────────────────┐
+│                    Persistence Backends                       │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
+│  │ In-Memory│  │   File   │  │  SQLite  │  │PostgreSQL│     │
+│  │ (Dev/Test)│  │(Compat) │  │ (Local)  │  │(Production)    │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘     │
+│       │             │             │             │            │
+│       └─────────────┴──────┬──────┴─────────────┘            │
+│                            │                                 │
+│                            ▼                                 │
+│                   ┌─────────────────┐                        │
+│                   │  Unified API    │                        │
+│                   │ (persist, load) │                        │
+│                   └─────────────────┘                        │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+
+SQLite Schema (simplified)
+┌──────────────────────────────────────────────────────────────┐
+│  entities (id, entity_type, created_at)                      │
+│  components (entity_id, component_type, data)                │
+│  events (id, timestamp, type, data, entity_id)               │
+│  messages (conversation_id, timestamp, role, content)        │
+│  tool_calls (turn_id, timestamp, name, input, output)        │
+└──────────────────────────────────────────────────────────────┘
+</code></pre>
+<h4 id="architecture-benefits">Architecture Benefits</h4>
+<ol>
+<li><strong>Shared Resources</strong>: Multiple agents can share toolboxes (e.g., same SQLite database)
+</li>
+<li><strong>Resource Pooling</strong>: HTTP connections pooled across all agents
+</li>
+<li><strong>Better Lifecycle Management</strong>: Explicit scopes with predictable cleanup
+</li>
+<li><strong>Foundation for Web API</strong>: Centralized state enables HTTP server interface
+</li>
+<li><strong>Durable Persistence</strong>: Built-in persistence layer with multiple backends
+</li>
+<li><strong>Thorough Lineage Tracking</strong>: Complete call chains for debugging
+</li>
+</ol>
+<h3 id="core-types">Core Types</h3>
+<h4 id="base-types-systemagentsbase">Base Types (<code>System.Agents.Base</code>)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Unique identifiers</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">AgentId</span> <span class="ot">=</span> <span class="dt">AgentId</span> <span class="dt">UUID</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ConversationId</span> <span class="ot">=</span> <span class="dt">ConversationId</span> <span class="dt">UUID</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">StepId</span> <span class="ot">=</span> <span class="dt">StepId</span> <span class="dt">UUID</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Agent configuration</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Agent</span> <span class="ot">=</span> <span class="dt">Agent</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> slug ::</span> <span class="dt">Text</span>                    <span class="co">-- Unique identifier</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> apiKeyId ::</span> <span class="dt">Text</span>                <span class="co">-- Reference to API key</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> flavor ::</span> <span class="dt">Text</span>                  <span class="co">-- LLM provider (openai, etc.)</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> modelUrl ::</span> <span class="dt">Text</span>                <span class="co">-- API endpoint</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> modelName ::</span> <span class="dt">Text</span>               <span class="co">-- Model identifier</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> announce ::</span> <span class="dt">Text</span>                <span class="co">-- User-facing description</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> systemPrompt ::</span> [<span class="dt">Text</span>]          <span class="co">-- System instructions</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolDirectory ::</span> <span class="dt">FilePath</span>       <span class="co">-- Path to tools</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mcpServers ::</span> <span class="dt">Maybe</span> [<span class="dt">McpServerDescription</span>]</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> extraAgents ::</span> <span class="dt">Maybe</span> [<span class="dt">ExtraAgentRef</span>]</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> builtinToolboxes ::</span> <span class="dt">Maybe</span> [<span class="dt">BuiltinToolboxDescription</span>]</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="os-types-systemagentsoscore">OS Types (<code>System.Agents.OS.Core</code>)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Phantom-typed entity IDs</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">AgentId</span> <span class="ot">=</span> <span class="dt">AgentId</span> <span class="dt">EntityId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ToolboxId</span> <span class="ot">=</span> <span class="dt">ToolboxId</span> <span class="dt">EntityId</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ConversationId</span> <span class="ot">=</span> <span class="dt">ConversationId</span> <span class="dt">EntityId</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Agent components</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentConfig</span> <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> agentName ::</span> <span class="dt">Text</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentModel ::</span> <span class="dt">ModelConfig</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentSystemPrompt ::</span> <span class="dt">Text</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentToolboxBindings ::</span> [<span class="dt">ToolboxBindingSpec</span>]</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentState</span> <span class="ot">=</span> <span class="dt">AgentState</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> agentStatus ::</span> <span class="dt">AgentStatus</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentCurrentConversation ::</span> <span class="dt">Maybe</span> <span class="dt">ConversationId</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentCreatedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h3 id="agent-tree-system">Agent Tree System</h3>
+<p>The <code>AgentTree</code> module manages multi-agent hierarchies and handles agent discovery, reference validation, and cycle detection.</p>
+<h4 id="tree-structure">Tree Structure</h4>
+<p>Agents form a directed graph where:</p>
+<ul>
+<li><strong>Parent-child edges</strong>: Discovered from tool directory hierarchy
+</li>
+<li><strong>Extra reference edges</strong>: Explicit references via <code>extraAgents</code>
+</li>
+</ul>
+<pre><code>┌─────────────┐
+│  root-agent │
+└──────┬──────┘
+       │
+   ┌───┴───┐
+   ▼       ▼
+┌──────┐ ┌──────┐
+│tool-a│ │tool-b│
+└──┬───┘ └──────┘
+   │
+   ▼
+┌──────┐
+│sub-1 │
+└──────┘
+</code></pre>
+<h4 id="subagent-wiring">Subagent Wiring</h4>
+<p>The Agent Tree system supports dynamic tool registration via STM TVars:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- OS-native agents use STM TVar for mutable tool storage</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">wireAgentTools ::</span> <span class="dt">Props</span> <span class="ot">-&gt;</span> <span class="dt">AgentConfigGraph</span> <span class="ot">-&gt;</span> <span class="dt">Map</span> <span class="dt">AgentSlug</span> <span class="dt">OSAgentNode</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span></code></pre></div></div><h3 id="conversation-flow">Conversation Flow</h3>
+<pre><code>┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   User      │────&gt;│   Session   │────&gt;│    LLM      │
+│   Input     │     │   (turns)   │     │   (tools)   │
+└─────────────┘     └──────┬──────┘     └──────┬──────┘
+                           │                     │
+                           │    ┌─────────────┐  │
+                           └───&gt;│ Tool Call   │&lt;─┘
+                                │ Execution   │
+                                └──────┬──────┘
+                                       │
+                           ┌───────────┴───────────┐
+                           ▼                       ▼
+                    ┌─────────────┐        ┌─────────────┐
+                    │  Bash Tool  │        │  MCP Tool   │
+                    └─────────────┘        └─────────────┘
+</code></pre>
+<h3 id="tool-registration">Tool Registration</h3>
+<p>Tools are registered with the LLM via the <code>ToolRegistration</code> type:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolRegistration</span> <span class="ot">=</span> <span class="dt">ToolRegistration</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> toolName ::</span> <span class="dt">Text</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolDescription ::</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolParameters ::</span> <span class="dt">Value</span>  <span class="co">-- JSON Schema</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolExecutor ::</span> <span class="dt">Value</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">ToolResult</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="tool-sources">Tool Sources</h4>
+<ol>
+<li><strong>BashToolbox</strong>: Executable scripts in the tool directory
+</li>
+<li><strong>McpToolbox</strong>: MCP servers providing dynamic tool lists
+</li>
+<li><strong>OpenAPIToolbox</strong>: REST API operations from OpenAPI specs
+</li>
+<li><strong>IOTools</strong>: Haskell functions embedded in the runtime
+</li>
+<li><strong>SystemToolbox</strong>: Builtin system information tools
+</li>
+<li><strong>Subagent Tools</strong>: Other agents exposed as callable tools
+</li>
+</ol>
+<h3 id="libraries-and-executables">Libraries and executables</h3>
+<p><code>agents.cabal</code> builds several components:</p>
+<table>
+<tr><th>Component</th><th>Source</th><th>Contents</th></tr>
+<tr><td><code>agents-lib</code> (public library)</td><td><code>src/</code></td><td>The core: agents, tools, sessions, storage, the OS layer, the MCP stdio server, CLI commands other than the TUI. No terminal-UI dependencies.</td></tr>
+<tr><td><code>agents-postgres</code> (public library)</td><td><code>postgres/</code></td><td>Session and continuation stores in Postgres, for <code>withHostStores</code>. Kept apart so that <code>agents-lib</code> does not need libpq.</td></tr>
+<tr><td><code>agents-tui</code> (public library)</td><td><code>tui/</code></td><td>The terminal UI (<code>System.Agents.TUI.*</code>, <code>CLI.TUI</code>, <code>CLI.Config</code>, <code>CLI</code>), on brick and vty.</td></tr>
+<tr><td><code>agents-exe</code></td><td><code>app/</code></td><td>The command-line tool, on both libraries.</td></tr>
+<tr><td><code>agents-server-internal</code>, <code>agents-server</code></td><td><code>examples/agents-server/</code></td><td>The HTTP server (wai, warp). See [agents-server.md](/docs-agents-server.html).</td></tr>
+<tr><td><code>agq</code>, <code>durable-workflow-demo</code></td><td><code>agq/</code>, <code>examples/durable-workflow-demo/</code></td><td>Other executables.</td></tr>
+</table>
+<p>Programs that embed agents depend on <code>agents-lib</code> only.</p>
+<h3 id="module-dependencies">Module Dependencies</h3>
+<pre><code>Main
+  ├── AgentTree
+  │     ├── Base
+  │     ├── FileLoader
+  │     └── OS.Core
+  ├── CLI.*
+  │     └── AgentTree
+  ├── TUI
+  │     ├── Host, Host.Runner, Host.Client (RunnerClient)
+  │     └── Session (pure views only: usage, signals, trajectory)
+  ├── MCP.Server
+  │     └── AgentTree
+  └── ExportImport.*
+  
+OS Layer
+  ├── OS.Core
+  │     ├── OS.Core.Types
+  │     └── OS.Core.World
+  ├── OS.Resources
+  │     ├── OS.Resources.Types
+  │     ├── OS.Resources.Sqlite
+  │     ├── OS.Resources.Lua
+  │     └── OS.Resources.Http
+  ├── OS.Concurrent
+  │     ├── OS.Concurrent.Types
+  │     └── OS.Concurrent.Locks
+  ├── OS.Conversation
+  │     ├── OS.Conversation.Types
+  │     └── OS.Conversation.Lineage
+  ├── OS.Persistence
+  │     ├── OS.Persistence.Types
+  │     ├── OS.Persistence.Sqlite
+  │     └── OS.Persistence.File
+  └── OS.Agents
+</code></pre>
+<h3 id="key-design-decisions">Key Design Decisions</h3>
+<ol>
+<li><strong>STM for Concurrency</strong>: Tool reloading and subagent wiring use STM for thread-safe updates
+</li>
+<li><strong>ECS Pattern</strong>: Enables flexible composition and powerful queries
+</li>
+<li><strong>Explicit Resource Management</strong>: Predictable cleanup with explicit scopes
+</li>
+<li><strong>Phantom Types</strong>: Type safety for entity IDs without runtime overhead
+</li>
+<li><strong>Type Erasure</strong>: <code>Any</code> for heterogeneous storage with safe casting via Component typeclass
+</li>
+<li><strong>Tracer Pattern</strong>: All side effects are traced for observability
+</li>
+<li><strong>Two-Phase Initialization</strong>: Agent shells created first, then wired together to support cycles
+</li>
+</ol>
+<h3 id="tradeoffs">Tradeoffs</h3>
+<ol>
+<li><strong>ECS Complexity</strong>: Adds indirection but enables powerful queries and flexible composition
+</li>
+<li><strong>STM Overhead</strong>: Slight performance cost for composability
+</li>
+<li><strong>Storage Overhead</strong>: Component storage uses more memory than direct fields but enables dynamic extension
+</li>
+<li><strong>Type Erasure</strong>: Using <code>Any</code> requires careful casting but enables heterogeneous storage
+</li>
+</ol>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

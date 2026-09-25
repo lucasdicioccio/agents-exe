@@ -1,0 +1,75 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Export/Import</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-export-import.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="**Status: Removed** The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we&#39;re taking another approach (see issue &amp;#35;339). ## Alternatives For sharing agents and tools, consider these alternati"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Export/Import"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="**Status: Removed** The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we&#39;re taking another approach (see issue &amp;#35;339). ## Alternatives For sharing agents and tools, consider these alternati"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Export/Import"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-export-import.html"><meta property="og:description" content="**Status: Removed** The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we&#39;re taking another approach (see issue &amp;#35;339). ## Alternatives For sharing agents and tools, consider these alternati"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-export-import.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-export-import.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"**Status: Removed** The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we're taking another approach (see issue &#35;339). ## Alternatives For sharing agents and tools, consider these alternati","headline":"Export/Import","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-export-import.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Export/Import</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 178 words, 5 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-README.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">14/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-mcp.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/export-import.md"><code>documentation/export-import.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="exportimport">Export/Import</h2>
+<p><strong>Status: Removed</strong></p>
+<p>The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we’re taking another approach (see issue #339).</p>
+<h3 id="alternatives">Alternatives</h3>
+<p>For sharing agents and tools, consider these alternatives:</p>
+<h4 id="1-direct-file-copy">1. Direct File Copy</h4>
+<p>Tools and agent configurations are just files. You can copy them directly:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Copy tools to another agent</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> ./source-agent/tools/<span class="pp">*</span> ./target-agent/tools/</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Copy entire agent configuration</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> <span class="at">-r</span> ./my-agent ./shared-agents/</span></code></pre></div></div><h4 id="2-git-submodules">2. Git Submodules</h4>
+<p>For team sharing, use git submodules:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Add shared tools as submodule</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> submodule add https://github.com/company/shared-tools.git tools/shared</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Update when needed</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> submodule update <span class="at">--remote</span></span></code></pre></div></div><h4 id="3-package-managers">3. Package Managers</h4>
+<p>Use standard package managers for your platform:</p>
+<ul>
+<li><strong>Nix</strong>: Package tools as nix derivations
+</li>
+<li><strong>Homebrew</strong>: Tap for macOS/Linux
+</li>
+<li><strong>Apt/Yum</strong>: System packages for tools
+</li>
+</ul>
+<h4 id="4-container-distribution">4. Container Distribution</h4>
+<p>Package agents with their tools in containers:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> agents-exe:latest</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">COPY</span> ./tools /app/tools/</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">COPY</span> ./agent.json /app/</span></code></pre></div></div><h3 id="historical-context">Historical Context</h3>
+<p>The original export/import system supported:</p>
+<ul>
+<li>Exporting agents, tools, and MCP servers to archives (tar.gz, zip)
+</li>
+<li>Git-based distribution with namespacing
+</li>
+<li>Tool installation with conflict resolution
+</li>
+<li>Namespace-based organization
+</li>
+</ul>
+<p>This functionality was removed because:</p>
+<ol>
+<li><strong>Complexity</strong>: The namespace and packaging system added significant complexity
+</li>
+<li><strong>Overlap</strong>: Functionality overlapped with standard tools (tar, git, cp)
+</li>
+<li><strong>Usage patterns</strong>: Users preferred direct file management
+</li>
+<li><strong>Maintenance burden</strong>: High effort to maintain relative to usage
+</li>
+</ol>
+<h3 id="migration">Migration</h3>
+<p>If you were using export/import, migrate to:</p>
+<ol>
+<li>
+<p><strong>Simple archives</strong>: Use <code>tar</code> directly</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Instead of: agents-exe export --output pkg.tar.gz</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">tar</span> czf pkg.tar.gz ./my-agent/</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Instead of: agents-exe import --from-file pkg.tar.gz</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">tar</span> xzf pkg.tar.gz <span class="at">-C</span> ./destination/</span></code></pre></div></div></li>
+<li>
+<p><strong>Git workflows</strong>: Use standard git workflows</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Clone and copy what you need</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/company/agents /tmp/agents</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> /tmp/agents/tools/<span class="pp">*</span> ./my-tools/</span></code></pre></div></div></li>
+<li>
+<p><strong>Configuration management</strong>: Use tools like Ansible, Chef, or simple shell scripts</p>
+</li>
+</ol>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

@@ -266,7 +266,7 @@ runnerErrorCodeTest = do
         fmap runnerErrorCode decoded @?= Just (runnerErrorCode e)
 
 -- | Every 'EventBody' constructor's 'eventKind' matches the SSE @event:@
--- name the server has always used (see @docs/agents-server.md@).
+-- name the server has always used (see @documentation/agents-server.md@).
 eventKindTest :: Assertion
 eventKindTest = do
     let sid = SessionId UUID.nil

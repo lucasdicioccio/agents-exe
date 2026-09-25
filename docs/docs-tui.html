@@ -1,0 +1,1231 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Terminal UI (TUI)</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-tui.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tab"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Terminal UI (TUI)"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tab"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Terminal UI (TUI)"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-tui.html"><meta property="og:description" content="The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tab"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-tui.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-tui.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tab","headline":"Terminal UI (TUI)","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-tui.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Terminal UI (TUI)</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 2494 words, 41 code snippets, 1 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-agents-server.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">3/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-sqq-dag.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tui.md"><code>documentation/tui.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="terminal-ui-tui">Terminal UI (TUI)</h2>
+<p>The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tabbed interface for organizing different views.</p>
+<h3 id="overview">Overview</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│ Agents │ Chats │ History │ Help                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  Agents                                                         │
+│  ─────────────────────────────────────────────────────────────  │
+│  file-assistant                                                 │
+│  code-reviewer                                                  │
+│  documenter                                                     │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  # Slug: file-assistant                                         │
+│  # Announce: A helpful file assistant                           │
+│  # Model: claude-sonnet-4-20250514                              │
+│                                                                 │
+│  # Tools:                                                       │
+│  - [A] read_file                                               │
+│  - [A] write_file                                              │
+│  - [D:bash] bash_command                                       │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ [Tab] Switch  [Enter] Send  [Ctrl+C] Quit  [Ctrl+[|]] Prev/Next │
+└─────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="tabbed-interface">Tabbed Interface</h3>
+<p>The TUI features a tabbed interface with four main tabs:</p>
+<table>
+<tr><th>Tab</th><th>Description</th><th>Content</th></tr>
+<tr><td><strong>Agents</strong></td><td>Browse and select agents</td><td>Agent list and detailed agent information</td></tr>
+<tr><td><strong>Chats</strong></td><td>Active conversations</td><td>Conversation list and message interface</td></tr>
+<tr><td><strong>History</strong></td><td>Past sessions</td><td>Session list and history view</td></tr>
+<tr><td><strong>Help</strong></td><td>Keyboard shortcuts</td><td>Command reference and key bindings</td></tr>
+</table>
+<h4 id="tab-navigation">Tab Navigation</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+[</code></td><td>Switch to previous tab</td></tr>
+<tr><td><code>Ctrl+]</code></td><td>Switch to next tab</td></tr>
+</table>
+<h4 id="agents-tab">Agents Tab</h4>
+<p>The Agents tab displays:</p>
+<ul>
+<li><strong>Left sidebar</strong>: List of available agents
+</li>
+<li><strong>Main area</strong>: Detailed agent information including:
+<ul>
+<li>Slug and announce text
+</li>
+<li>Model name
+</li>
+<li>Tools with activation status
+</li>
+<li>System prompt
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="chats-tab">Chats Tab</h4>
+<p>The Chats tab is for active conversations:</p>
+<ul>
+<li><strong>Left sidebar</strong>: List of ongoing conversations with status indicators:
+<ul>
+<li><code>⟳</code> - Active (agent is processing)
+</li>
+<li><code>●</code> - Waiting for input (unread)
+</li>
+<li><code>⏸</code> - Paused
+</li>
+<li><code>📎</code> - Has file attachments
+</li>
+</ul>
+</li>
+<li><strong>Main area</strong>: Message editor, attachment list, the draft panel (when the conversation has unsent draft text), and conversation history
+</li>
+</ul>
+<h5 id="draft-unsent-text-while-the-session-is-busy">Draft (unsent text while the session is busy)</h5>
+<p>Typing a message while a conversation is active, paused, or blocked on
+deferred calls does not post it right away: it is appended to that
+conversation’s <strong>draft</strong>, one editable, unsent buffer per conversation
+(<code>todos/os-as-standalone-server.md</code> §5, D3). Three messages sent in a row
+while the model is thinking are almost always one message being
+elaborated, so each send appends a new paragraph to the draft instead of
+queuing a discrete message.</p>
+<ul>
+<li><strong>Collapsed view</strong> (default, shown below the message editor whenever the
+focused conversation has a non-empty draft): the draft’s first line plus
+a size indicator (<code>N chars, M paragraphs</code>).
+</li>
+<li><strong>Edit</strong> (<code>Ctrl+A</code>): loads the draft into the message editor (its
+attachments join the composer’s) and clears it – the editor is a full
+text editor over the whole draft text; further sends fold right back
+into a draft, or post, the normal way.
+</li>
+<li><strong>Send now</strong> (<code>Ctrl+G</code>): posts the draft immediately, as one message,
+and clears it.
+</li>
+<li><strong>Clear</strong> (<code>Ctrl+D</code>): discards the draft.
+</li>
+<li><strong>Ships automatically</strong>: once the session’s run stops with a status that
+accepts input (idle or ready – not paused, not blocked on deferred
+calls, not failed), the TUI posts the whole draft as a single message
+and clears it. A paused conversation keeps its draft until it is resumed
+and stops again.
+</li>
+</ul>
+<p>The kernel never sees a draft: it only ever receives real messages and
+interrupts. An interrupt (<code>Ctrl+U</code>) always bypasses the draft and posts
+straight through.</p>
+<h4 id="history-tab">History Tab</h4>
+<p>The History tab shows saved sessions, across every backend the runner is
+configured with:</p>
+<ul>
+<li><strong>Left sidebar</strong>: List of sessions (<code>Client.listSessions</code>, newest
+updated first), refreshed live as sessions are created, updated, or
+deleted elsewhere – a burst of updates during a run coalesces into at
+most one refresh per heartbeat, and the current selection is kept by
+session id across a refresh.
+</li>
+<li><strong>Main area</strong>: the selected session’s full turn history (fetched once
+via <code>Client.getSession</code> and cached by id), with the same usage summary,
+signal metrics, and turn navigation/forking as the Chats tab.
+</li>
+</ul>
+<h4 id="help-tab">Help Tab</h4>
+<p>The Help tab displays keyboard shortcuts and command reference for quick access to all TUI functionality.</p>
+<h3 id="architecture">Architecture</h3>
+<p>The TUI is a client of the in-process runner (<code>System.Agents.Host.Runner.SessionRunner</code>),
+not a second agent runtime: <code>agents-exe tui</code> opens a <code>System.Agents.Host.Host</code>
+the same way <code>agents-exe serve</code> does and drives it through an in-process
+<code>System.Agents.Host.Client.RunnerClient</code> — every conversation action (new
+message, pause, fork, cancel, …) is a <code>Command</code> sent to the runner, and
+every screen update comes from <code>Event</code>s the runner emits.</p>
+<p><strong>Embedded and attached.</strong> <code>agents-exe tui</code> (embedded) builds that client
+over a runner in its own process. <code>agents-exe tui --attach URL|PATH</code>
+(attached) opens nothing locally and builds
+<code>System.Agents.Host.Client.Http.httpClient</code> instead: the same
+<code>RunnerClient</code>, over a running <code>agents-exe serve</code>’s HTTP API and SSE event
+feed, on TCP or its <code>--socket</code>. Everything above the client is the same
+code, so an attached TUI loses nothing: agents, chats, drafts, pause,
+interrupt, hard cancel, fork, History, pending calls. What it shows
+depends on the server version, though: <code>hook.failed</code> and the subcall
+events only reach it from a server that emits them. Differences that
+follow from where the runner lives: the agents, API keys and database are
+the server’s (<code>--db</code> is refused with <code>--attach</code>, and <code>--agent-file</code> or
+<code>--agent</code> select nothing); <code>--params-file</code>/<code>--set</code> values are still sent
+with every create and message (secrets are resupplied by the client, D7);
+with <code>--auth-tokens</code> on the server, pass <code>--token</code>/<code>--token-file</code>, and the
+TUI then sees only that owner’s sessions. Quitting an embedded TUI stops
+the runs it started (<code>StopRun</code> mail) since its runner dies with it;
+quitting an attached TUI leaves them running on the server. A dropped
+event stream reconnects on its own with <code>Last-Event-ID</code>, so nothing is
+missed across a short network hiccup.</p>
+<p>Sessions live in the SQLite database at
+<code>System.Agents.CLI.ConfigLoader.defaultServerDatabasePath</code> (next to the
+resolved sessions directory) unless overridden with <code>tui --db PATH</code>. Old
+sessions written by the pre-runner file store (<code>conv.&lt;uuid&gt;.json</code>, under
+the config’s <code>sessions</code> read locations) stay readable: the host composites
+them in as a read-only fallback (<code>Host.hcLegacySessionDirs</code>) behind the
+SQLite backend.</p>
+<p>Sub-agent calls (<code>prompt_agent_*</code>) run as real sessions of their own
+(<code>todos/os-as-standalone-server.md</code>, Phase 5), so live progress for a
+child is its own <code>session.updated</code>/<code>text.delta</code>/<code>tool.*</code> stream, exactly
+like the parent conversation — not a separate “subcall progress” event.
+The TUI still gets <code>subcall.started</code>/<code>subcall.completed</code>/<code>subcall.failed</code>
+for the start/complete/fail transitions themselves (used to show the child
+in the conversation list and its hierarchy), but token-by-token and
+tool-by-tool progress in between now comes from subscribing to the child
+session directly, the same as any other session. A sub-agent call made
+with per-call narrowing (<code>bindings</code>/<code>with</code>/<code>as</code>) still runs in-tool, with
+no session and no live progress of its own, until that case is supported
+the same way.</p>
+<h4 id="component-structure">Component Structure</h4>
+<pre><code>┌─────────────────────────────────────────────────────────────────┐
+│                         TUI.Core                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+│  │   TUI.Types  │───&gt;│  TUI.Render  │───&gt;│  TUI.Event   │      │
+│  │   (state)    │    │  (display)   │    │  (input)     │      │
+│  └──────────────┘    └──────────────┘    └──────────────┘      │
+│         ▲                                            │          │
+│         └────────────────────────────────────────────┘          │
+│                      (event loop)                               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h4 id="state-management">State Management</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- TUI.Types</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Tab</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">AgentsTab</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ChatsTab</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">HistoryTab</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">HelpTab</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">UIState</span> <span class="ot">=</span> <span class="dt">UIState</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> _uiFocusRing ::</span> <span class="dt">FocusRing</span> <span class="dt">WidgetName</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _currentTab ::</span> <span class="dt">Tab</span>           <span class="co">-- Current active tab</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _helpContent ::</span> [<span class="dt">Text</span>]       <span class="co">-- Help text lines</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _turnNavigation ::</span> <span class="dt">Maybe</span> <span class="dt">TurnNavigationState</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ When Just, we are in turn navigation mode</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _attachedFiles ::</span> <span class="dt">Map</span> <span class="dt">ConversationId</span> [<span class="dt">MediaAttachment</span>]</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Media attachments per conversation</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _attachmentDialogState ::</span> <span class="dt">AttachmentDialogState</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ File attachment dialog state</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _filePathInput ::</span> <span class="dt">Editor</span> <span class="dt">Text</span> <span class="dt">WidgetName</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Editor for file path input</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _selectedAttachmentIndex ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Selected attachment index</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    , <span class="op">...</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">TUIState</span> <span class="ot">=</span> <span class="dt">TuiState</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> _tuiCore ::</span> <span class="dt">TVar</span> <span class="dt">Core</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _tuiUI ::</span> <span class="dt">UIState</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _eventChan ::</span> <span class="dt">BChan</span> <span class="dt">AppEvent</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _sessionConfig ::</span> <span class="dt">SessionConfig</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h3 id="background-tool-calls">Background Tool Calls</h3>
+<p>Agents configured for asynchronous execution (see
+<a href="/agents-exe/docs-async-tool-calls.html">async-tool-calls.md</a>) run tool calls in the background.
+The TUI shows what is running, with the latest progress each tool reports:</p>
+<pre><code>Background tool calls running: run_tests
+
+[Partial] &gt; run the tests and the linter
+  ✓ lint (call_1): completed
+  ⏳ run_tests (call_2): running: 128 tests passed
+</code></pre>
+<p>Call states are <code>pending</code>, <code>deferred</code>, <code>running</code>, <code>completed</code>,
+<code>completed (delivered later)</code> and <code>failed</code>. “Delivered later” means the model
+had already been answered with a placeholder for that call, and got the result
+in a following message.</p>
+<p>While calls run in the background and the LLM has nothing to do, the
+conversation still accepts input: whichever comes first — your message or the
+results — is sent to the model.</p>
+<p>A conversation that waits on <em>deferred</em> calls (completed by an external
+worker) stops with a status message instead of waiting; see “Pending calls”
+below to answer them from the TUI itself.</p>
+<h3 id="pending-calls">Pending calls</h3>
+<p>When a run stops on deferred calls (<code>calls.deferred</code>), the conversation’s
+status becomes “blocked on deferred” and a Pending panel appears below the
+Draft panel, listing each call’s tool name, a prefix of its continuation
+token, and its arguments:</p>
+<pre><code>┌ Pending (1) ──────────────────────────────────────┐
+│ Ctrl+Y: answer oldest pending call, then send      │
+│                                                     │
+│ - bash_command (token a1b2c3d4): {&quot;cmd&quot;: &quot;ls&quot;}     │
+└─────────────────────────────────────────────────────┘
+</code></pre>
+<p><code>Ctrl+Y</code> (<code>answer-pending</code>) puts the message editor into “answer mode” for
+the oldest pending call with a continuation token; type the result and
+send it (<code>Ctrl+Enter</code>/the usual send trigger) the way you would any other
+message. That calls <code>completeCall</code> with <code>autoResume = true</code>, the same
+mechanism the server’s own <code>GET /v1/sessions/:id/pending</code> workers use, so
+the run resumes on its own — a fresh <code>run.started</code>/<code>run.stopped</code> pair
+follows. The panel clears once the run starts again.</p>
+<p>There is no separate “fail this call” binding: <code>UserToolResponse</code> has no
+dedicated error form, so a call is always answered with a text (or JSON)
+result; report a failure as an ordinary text result that says so.</p>
+<h3 id="subcall-conversation-visibility">Subcall Conversation Visibility</h3>
+<p>When agents call other agents as tools (via <code>prompt_agent_&lt;slug&gt;</code>), the subcall conversations are now visible in the TUI with visual distinction and hierarchy tracking.</p>
+<h4 id="visual-hierarchy">Visual Hierarchy</h4>
+<p>Subcall conversations are displayed with tree-branch styling to show parent-child relationships:</p>
+<pre><code>Conversations
+├─ @file-assistant (⟳)                    -- Root conversation
+│  ├─ @code-reviewer (⟳)                  -- Subcall depth 1
+│  │  └─ @syntax-checker (●)              -- Subcall depth 2
+│  └─ @documenter (●)                     -- Subcall depth 1
+└─ @helper-agent (●)                      -- Another root conversation
+</code></pre>
+<h4 id="conversation-indicators">Conversation Indicators</h4>
+<table>
+<tr><th>Visual</th><th>Meaning</th></tr>
+<tr><td><code>@slug</code></td><td>Root conversation (depth 0)</td></tr>
+<tr><td><code>├─ @slug</code></td><td>Subcall with siblings</td></tr>
+<tr><td><code>└─ @slug</code></td><td>Last subcall in branch</td></tr>
+<tr><td><code>│</code></td><td>Continuation line for parent with more children</td></tr>
+<tr><td>Dimmed text</td><td>Subcall conversation</td></tr>
+<tr><td>Normal text</td><td>Root conversation</td></tr>
+<tr><td><code>⟳</code></td><td>Active (processing)</td></tr>
+<tr><td><code>●</code></td><td>Waiting for input</td></tr>
+<tr><td><code>⏸</code></td><td>Paused</td></tr>
+</table>
+<h4 id="subcall-event-flow">Subcall Event Flow</h4>
+<pre><code>Parent Agent (TUI visible)
+       │
+       ▼ calls helper agent
+┌─────────────────────────┐
+│ turnAgentRuntimeIntoIOTool
+│ (OneShotTool.hs)        │
+│                         │
+│ 1. Insert into OS World │
+│    - ConversationConfig │
+│    - ConversationState  │
+│    - Lineage (parent)   │
+│                         │
+│ 2. Emit SubcallStarted  │◄── OSEvent
+│    (parentId, convId)   │
+│                         │
+│ 3. Run sub-agent        │
+│                         │
+│ 4. Emit SubcallProgress │◄── OSEvent (after each step)
+│                         │
+│ 5. Emit SubcallCompleted│◄── OSEvent (on success)
+│    or SubcallFailed     │◄── OSEvent (on error)
+└──────────┬──────────────┘
+           │
+           ▼ OS Event Queue
+┌─────────────────────────┐
+│   TUI Event Handler     │
+│   (Event.hs)            │
+│                         │
+│ - Create conversation   │
+│ - Show in list          │
+│ - Update on progress    │
+│ - Mark completed        │
+└─────────────────────────┘
+</code></pre>
+<h4 id="subcall-event-types">Subcall Event Types</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- OS Events (from System.Agents.OS.Events)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">OSEvent</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="op">...</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">OSEvent_SubcallStarted</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        {<span class="ot"> subcallParentConversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        ,<span class="ot"> subcallConversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        ,<span class="ot"> subcallAgentSlug ::</span> <span class="dt">Text</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        ,<span class="ot"> subcallDepth ::</span> <span class="dt">Int</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">OSEvent_SubcallProgress</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        {<span class="ot"> subcallProgressConversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        ,<span class="ot"> subcallProgressSession ::</span> <span class="dt">Session</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">OSEvent_SubcallCompleted</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        {<span class="ot"> subcallCompletedConversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        ,<span class="ot"> subcallCompletedResult ::</span> <span class="dt">Text</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">OSEvent_SubcallFailed</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>        {<span class="ot"> subcallFailedConversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>        ,<span class="ot"> subcallFailedError ::</span> <span class="dt">Text</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="co">-- App Events (TUI internal)</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AppEvent</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="op">...</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AppEvent_SubcallStarted</span> <span class="dt">ConversationId</span> <span class="dt">ConversationId</span> <span class="dt">Text</span> <span class="dt">Int</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AppEvent_SubcallProgress</span> <span class="dt">ConversationId</span> <span class="dt">Session</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AppEvent_SubcallCompleted</span> <span class="dt">ConversationId</span> <span class="dt">Text</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AppEvent_SubcallFailed</span> <span class="dt">ConversationId</span> <span class="dt">Text</span></span></code></pre></div></div><h4 id="conversation-types">Conversation Types</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Conversation</span> <span class="ot">=</span> <span class="dt">Conversation</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> conversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationAgent ::</span> <span class="dt">TuiAgent</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationThreadId ::</span> <span class="dt">Maybe</span> <span class="dt">ThreadId</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationSession ::</span> <span class="dt">Maybe</span> <span class="dt">Session</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationName ::</span> <span class="dt">Text</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationChan ::</span> <span class="dt">BChan</span> (<span class="dt">Maybe</span> <span class="dt">UserQuery</span>)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationStatus ::</span> <span class="dt">ConversationStatus</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationOnProgress ::</span> <span class="dt">OnSessionProgress</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationIsSubcall ::</span> <span class="dt">Bool</span>      <span class="co">-- ^ NEW: Is this a subcall?</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationParentId ::</span> <span class="dt">Maybe</span> <span class="dt">ConversationId</span>  <span class="co">-- ^ NEW: Parent conversation</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationSubcallDepth ::</span> <span class="dt">Int</span>    <span class="co">-- ^ NEW: Nesting depth (0 = root)</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="rendering-subcall-hierarchy">Rendering Subcall Hierarchy</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Render conversations with tree structure</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">renderConversationForest ::</span> [<span class="dt">ConversationTree</span>] <span class="ot">-&gt;</span> [<span class="dt">Widget</span> <span class="dt">N</span>]</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>renderConversationForest trees <span class="ot">=</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">concatMap</span> (renderTreeNode [] <span class="dt">False</span>) trees</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Build tree from flat list</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ot">buildConversationForest ::</span> [<span class="dt">Conversation</span>] <span class="ot">-&gt;</span> [<span class="dt">ConversationTree</span>]</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>buildConversationForest convs <span class="ot">=</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="co">-- Find roots (no parent or orphaned)</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        isRoot c <span class="ot">=</span> conversationParentId c <span class="op">==</span> <span class="dt">Nothing</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>                <span class="op">||</span> conversationParentId c <span class="ot">`notElem`</span> <span class="fu">map</span> (<span class="dt">Just</span> <span class="op">.</span> conversationId) convs</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        roots <span class="ot">=</span> <span class="fu">filter</span> isRoot convs</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- Build recursively</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        buildTree conv <span class="ot">=</span> <span class="dt">ConversationTree</span> conv <span class="op">$</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>            <span class="fu">map</span> buildTree (findChildren conv)</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        findChildren parent <span class="ot">=</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>            <span class="fu">filter</span> (<span class="op">\</span>c <span class="ot">-&gt;</span> conversationParentId c <span class="op">==</span> <span class="dt">Just</span> (conversationId parent)) convs</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">in</span> <span class="fu">map</span> buildTree roots</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="co">-- Make prefix with tree branches</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="ot">makePrefix ::</span> [<span class="dt">Bool</span>] <span class="ot">-&gt;</span> <span class="dt">Bool</span> <span class="ot">-&gt;</span> <span class="dt">Text</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>makePrefix ancestorIsLasts isLast</span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="fu">null</span> ancestorIsLasts <span class="ot">=</span> <span class="kw">if</span> isLast <span class="kw">then</span> <span class="st">&quot;└─&quot;</span> <span class="kw">else</span> <span class="st">&quot;├─&quot;</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="fu">otherwise</span> <span class="ot">=</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> continuation <span class="ot">=</span> <span class="fu">mconcat</span> <span class="op">$</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>                <span class="fu">map</span> (<span class="op">\</span>isLast&#39; <span class="ot">-&gt;</span> <span class="kw">if</span> isLast&#39; <span class="kw">then</span> <span class="st">&quot;  &quot;</span> <span class="kw">else</span> <span class="st">&quot;│ &quot;</span>) ancestorIsLasts</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>        <span class="kw">in</span> continuation <span class="op">&lt;&gt;</span> (<span class="kw">if</span> isLast <span class="kw">then</span> <span class="st">&quot;└─&quot;</span> <span class="kw">else</span> <span class="st">&quot;├─&quot;</span>)</span></code></pre></div></div><h4 id="visual-attributes">Visual Attributes</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">tui_appAttrMap ::</span> <span class="dt">TuiState</span> <span class="ot">-&gt;</span> <span class="dt">AttrMap</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>tui_appAttrMap _ <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    attrMap Vty.defAttr</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        [ <span class="op">...</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        , <span class="co">-- Subcall visual distinction</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>          (subcallAttr, fg white <span class="ot">`withStyle`</span> dim)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        , (subcallSelectedAttr, fg black <span class="ot">`on`</span> brightWhite <span class="ot">`withStyle`</span> bold)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        , (treeBranchAttr, fg white <span class="ot">`withStyle`</span> dim)</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        , (rootConversationAttr, defAttr)</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        ]</span></code></pre></div></div><h3 id="file-attachments">File Attachments</h3>
+<p>The TUI supports attaching files to messages for multi-modal LLM interactions.</p>
+<h4 id="attaching-files">Attaching Files</h4>
+<p><strong>Via File Path Input:</strong></p>
+<ul>
+<li>Press <code>Ctrl+F</code> to open the file path input dialog
+</li>
+<li>Type or paste the absolute path to the file
+</li>
+<li>Press <code>Enter</code> to attach, <code>Esc</code> to cancel
+</li>
+</ul>
+<p><strong>Supported file path formats:</strong></p>
+<pre><code>/path/to/image.png                    # Auto-detect MIME type
+image/png;/path/to/image.png          # Explicit MIME type
+</code></pre>
+<h4 id="attachment-display">Attachment Display</h4>
+<p>Attached files are displayed below the message editor:</p>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│ Message [2 attachments]                                     │
+├─────────────────────────────────────────────────────────────┤
+│ &gt; Your message here...                                      │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Attachments (2) - Del/Backspace: remove | Ctrl+Shift+F: clear all│
+│   📎 screenshot.png (image/png, 245KB)                     │
+│ ▶ 📎 report.pdf (application/pdf, 1.2MB)                   │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h4 id="managing-attachments">Managing Attachments</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+F</code></td><td>Open file path input dialog</td></tr>
+<tr><td><code>Ctrl+Shift+F</code></td><td>Clear all attachments</td></tr>
+<tr><td><code>Del</code> / <code>Backspace</code></td><td>Remove selected attachment</td></tr>
+<tr><td><code>Up</code> / <code>Down</code></td><td>Select attachment (when focus is on attachment list)</td></tr>
+</table>
+<h4 id="supported-file-types">Supported File Types</h4>
+<p>The TUI can attach any file type. MIME type detection is automatic based on file extension:</p>
+<table>
+<tr><th>Category</th><th>Extensions</th><th>MIME Types</th></tr>
+<tr><td><strong>Images</strong></td><td><code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.gif</code>, <code>.webp</code>, <code>.svg</code></td><td><code>image/png</code>, <code>image/jpeg</code>, <code>image/gif</code>, <code>image/webp</code>, <code>image/svg+xml</code></td></tr>
+<tr><td><strong>Documents</strong></td><td><code>.pdf</code>, <code>.txt</code>, <code>.md</code>, <code>.json</code>, <code>.xml</code></td><td><code>application/pdf</code>, <code>text/plain</code>, <code>text/markdown</code>, <code>application/json</code>, <code>application/xml</code></td></tr>
+<tr><td><strong>Audio</strong></td><td><code>.mp3</code>, <code>.wav</code>, <code>.ogg</code>, <code>.aac</code>, <code>.flac</code></td><td><code>audio/mp3</code>, <code>audio/wav</code>, <code>audio/ogg</code>, <code>audio/aac</code>, <code>audio/flac</code></td></tr>
+<tr><td><strong>Video</strong></td><td><code>.mp4</code>, <code>.webm</code>, <code>.mov</code>, <code>.avi</code></td><td><code>video/mp4</code>, <code>video/webm</code>, <code>video/quicktime</code>, <code>video/avi</code></td></tr>
+<tr><td><strong>Archives</strong></td><td><code>.zip</code></td><td><code>application/zip</code></td></tr>
+</table>
+<p><strong>Size Limit:</strong> 50MB per file</p>
+<h4 id="attachment-state">Attachment State</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Attachments are stored per conversation</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="dt">AttachedFiles</span> <span class="ot">=</span> <span class="dt">Map</span> <span class="dt">ConversationId</span> [<span class="dt">MediaAttachment</span>]</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">MediaAttachment</span> <span class="ot">=</span> <span class="dt">MediaAttachment</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> mediaMimeType ::</span> <span class="dt">Text</span>        <span class="co">-- e.g., &quot;image/png&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mediaBase64Data ::</span> <span class="dt">Text</span>      <span class="co">-- Base64-encoded content</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mediaFilename ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span>  <span class="co">-- Original filename</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- Dialog state for file attachment</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AttachmentDialogState</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">AttachmentDialogClosed</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AttachmentDialogPathInput</span></span></code></pre></div></div><h4 id="attachment-flow">Attachment Flow</h4>
+<pre><code>User presses Ctrl+F
+       │
+       ▼
+┌──────────────────┐
+│ Open path dialog │
+│ (text input)     │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ User enters path │
+│ Presses Enter    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Load file        │
+│ Detect MIME type │
+│ Base64 encode    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Add to           │
+│ attachedFiles    │
+│ map              │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ Render in        │
+│ attachment list  │
+└──────────────────┘
+</code></pre>
+<h3 id="clipboard-integration">Clipboard Integration</h3>
+<p>The TUI supports pasting content from the system clipboard, including images, file paths, and text.</p>
+<h4 id="clipboard-pasting">Clipboard Pasting</h4>
+<p>Press <code>Ctrl+V</code> to paste from clipboard:</p>
+<table>
+<tr><th>Content Type</th><th>Action</th></tr>
+<tr><td><strong>Image</strong></td><td>Save to temp file and attach</td></tr>
+<tr><td><strong>File path</strong></td><td>Attach the file</td></tr>
+<tr><td><strong>Multiple file paths</strong></td><td>Attach all valid files</td></tr>
+<tr><td><strong>Text</strong></td><td>Insert into message editor</td></tr>
+</table>
+<h4 id="platform-support">Platform Support</h4>
+<table>
+<tr><th>Platform</th><th>Backend</th><th>Required Tools</th></tr>
+<tr><td><strong>Linux (X11)</strong></td><td><code>xclip</code> or <code>xsel</code></td><td><code>xclip</code> or <code>xsel</code></td></tr>
+<tr><td><strong>Linux (Wayland)</strong></td><td><code>wl-clipboard</code></td><td><code>wl-paste</code></td></tr>
+<tr><td><strong>macOS</strong></td><td>Built-in</td><td><code>pbpaste</code> (included)</td></tr>
+<tr><td><strong>Windows</strong></td><td>PowerShell</td><td><code>powershell.exe</code></td></tr>
+</table>
+<h4 id="smart-content-detection">Smart Content Detection</h4>
+<p>The clipboard module automatically detects content type:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ClipboardContent</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ClipboardImage</span> <span class="dt">ByteString</span> <span class="dt">Text</span>    <span class="co">-- Image data with MIME type</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ClipboardFilePath</span> <span class="dt">FilePath</span>        <span class="co">-- Single file path</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ClipboardText</span> <span class="dt">Text</span>                <span class="co">-- Plain text</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ClipboardFilePaths</span> [<span class="dt">FilePath</span>]     <span class="co">-- Multiple file paths</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ClipboardUnknown</span>                  <span class="co">-- Unsupported content</span></span></code></pre></div></div><p>Detection order:</p>
+<ol>
+<li>Check for image data (via magic bytes: PNG <code>\x89PNG</code>, JPEG <code>\xFF\xD8\xFF</code>, GIF <code>GIF87a/GIF89a</code>, WebP <code>RIFF</code>)
+</li>
+<li>Check for file paths (valid paths that exist)
+</li>
+<li>Check for multiple file paths (one per line)
+</li>
+<li>Fall back to plain text
+</li>
+</ol>
+<h4 id="clipboard-module">Clipboard Module</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- System.Agents.TUI.Clipboard</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Detect available backend</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ot">detectBackend ::</span> <span class="dt">IO</span> <span class="dt">ClipboardBackend</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Read clipboard content</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ot">readClipboard ::</span> <span class="dt">ClipboardBackend</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> <span class="dt">ByteString</span>)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- Detect content type</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="ot">detectClipboardContent ::</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> <span class="dt">ClipboardContent</span>)</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co">-- Analyze and convert to action</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="ot">analyzeContent ::</span> <span class="dt">ClipboardContent</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">ContentAction</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ContentAction</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">AttachAsMedia</span> <span class="dt">MediaAttachment</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">PasteAsText</span> <span class="dt">Text</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AttachMultipleFiles</span> [<span class="dt">MediaAttachment</span>]</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">IgnoreContent</span></span></code></pre></div></div><h4 id="image-pasting-from-clipboard">Image Pasting from Clipboard</h4>
+<p>When an image is pasted from clipboard:</p>
+<ol>
+<li>Detect image format from magic bytes
+</li>
+<li>Save to temporary file with appropriate extension
+</li>
+<li>Create <code>MediaAttachment</code> with detected MIME type
+</li>
+<li>Attach to current conversation
+</li>
+<li>Show status: “Attached from clipboard: image.png”
+</li>
+</ol>
+<p><strong>Temporary file location:</strong> <code>$TMPDIR/agents-exe-clipboard/clipboard-*.png</code></p>
+<p><strong>Size limit:</strong> 50MB for clipboard images</p>
+<h4 id="file-drop-support-terminal-protocols">File Drop Support (Terminal Protocols)</h4>
+<p>The clipboard module also supports file drop events from modern terminals:</p>
+<table>
+<tr><th>Protocol</th><th>Terminal</th><th>Support</th></tr>
+<tr><td>iTerm2 File Drop</td><td>iTerm2 (macOS)</td><td>✅ Supported</td></tr>
+<tr><td>Kitty Graphics</td><td>Kitty</td><td>✅ Supported</td></tr>
+<tr><td>OSC 52</td><td>Various</td><td>✅ Read support</td></tr>
+</table>
+<h3 id="rendering">Rendering</h3>
+<h4 id="tab-bar-rendering">Tab Bar Rendering</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- TUI.Render</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">renderTabBar ::</span> <span class="dt">Tab</span> <span class="ot">-&gt;</span> <span class="dt">Widget</span> <span class="dt">N</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>renderTabBar activeTab <span class="ot">=</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> tabs <span class="ot">=</span> [<span class="dt">AgentsTab</span>, <span class="dt">ChatsTab</span>, <span class="dt">HistoryTab</span>, <span class="dt">HelpTab</span>]</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        renderTab tab <span class="ot">=</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> tabName <span class="ot">=</span> <span class="kw">case</span> tab <span class="kw">of</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>                    <span class="dt">AgentsTab</span> <span class="ot">-&gt;</span> <span class="st">&quot; Agents &quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>                    <span class="dt">ChatsTab</span> <span class="ot">-&gt;</span> <span class="st">&quot; Chats &quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>                    <span class="dt">HistoryTab</span> <span class="ot">-&gt;</span> <span class="st">&quot; History &quot;</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>                    <span class="dt">HelpTab</span> <span class="ot">-&gt;</span> <span class="st">&quot; Help &quot;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>                tabAttr <span class="ot">=</span> <span class="kw">if</span> tab <span class="op">==</span> activeTab </span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>                          <span class="kw">then</span> activeTabAttr </span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>                          <span class="kw">else</span> inactiveTabAttr</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>             <span class="kw">in</span> withAttr tabAttr <span class="op">$</span> txt tabName</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>     <span class="kw">in</span> hBox (intersperse separator <span class="op">$</span> <span class="fu">map</span> renderTab tabs)</span></code></pre></div></div><h4 id="tab-specific-content">Tab-Specific Content</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">render_contentArea ::</span> <span class="dt">TuiState</span> <span class="ot">-&gt;</span> <span class="dt">Widget</span> <span class="dt">N</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>render_contentArea st <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> st <span class="op">^.</span> tuiUI <span class="op">.</span> currentTab <span class="kw">of</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        <span class="dt">AgentsTab</span> <span class="ot">-&gt;</span> renderAgentsTab st</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">ChatsTab</span> <span class="ot">-&gt;</span> renderChatsTab st</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">HistoryTab</span> <span class="ot">-&gt;</span> renderHistoryTab st</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">HelpTab</span> <span class="ot">-&gt;</span> renderHelpTab st</span></code></pre></div></div><h4 id="attachment-list-rendering">Attachment List Rendering</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">render_attachmentPanel ::</span> <span class="dt">TuiState</span> <span class="ot">-&gt;</span> [<span class="dt">MediaAttachment</span>] <span class="ot">-&gt;</span> <span class="dt">Widget</span> <span class="dt">N</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>render_attachmentPanel st attachments <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    borderWithFocus</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        st</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">AttachmentListWidget</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        (<span class="st">&quot; Attachments (&quot;</span> <span class="op">&lt;&gt;</span> Text.pack (<span class="fu">show</span> <span class="op">$</span> <span class="fu">length</span> attachments) <span class="op">&lt;&gt;</span> <span class="st">&quot;) &quot;</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        <span class="op">$</span> vBox</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>            [ txt <span class="st">&quot;Del/Backspace: remove | Ctrl+Shift+F: clear all&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>            , txt <span class="st">&quot;&quot;</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>            , vBox <span class="op">$</span> <span class="fu">zipWith</span> (render_attachment_item selectedIdx) [<span class="dv">0</span> <span class="op">..</span>] attachments</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>            ]</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="ot">render_attachment_item ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span> <span class="ot">-&gt;</span> <span class="dt">Int</span> <span class="ot">-&gt;</span> <span class="dt">MediaAttachment</span> <span class="ot">-&gt;</span> <span class="dt">Widget</span> <span class="dt">N</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>render_attachment_item selectedIdx idx att <span class="ot">=</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> isSelected <span class="ot">=</span> selectedIdx <span class="op">==</span> <span class="dt">Just</span> idx</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        marker <span class="ot">=</span> <span class="kw">if</span> isSelected <span class="kw">then</span> <span class="st">&quot;▶ &quot;</span> <span class="kw">else</span> <span class="st">&quot;  &quot;</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        filename <span class="ot">=</span> <span class="fu">maybe</span> <span class="st">&quot;unnamed&quot;</span> <span class="fu">id</span> att<span class="op">.</span>mediaFilename</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>        mimeType <span class="ot">=</span> att<span class="op">.</span>mediaMimeType</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>        sizeStr <span class="ot">=</span> formatAttachmentSize att<span class="op">.</span>mediaBase64Data</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>     <span class="kw">in</span> hBox</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>         [ txt marker</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>         , txt <span class="st">&quot;📎 &quot;</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>         , txt filename</span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>         , txt <span class="st">&quot; (&quot;</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>         , withAttr attachmentSizeAttr <span class="op">$</span> txt mimeType</span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>         , txt <span class="st">&quot;, &quot;</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>         , withAttr attachmentSizeAttr <span class="op">$</span> txt sizeStr</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>         , txt <span class="st">&quot;)&quot;</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>         ]</span></code></pre></div></div><h4 id="conversation-list-with-nesting">Conversation List with Nesting</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Render conversation list with subcall hierarchy</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">render_conversationList ::</span> <span class="dt">TuiState</span> <span class="ot">-&gt;</span> <span class="dt">Widget</span> <span class="dt">N</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>render_conversationList st <span class="ot">=</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> convs <span class="ot">=</span> Vector.toList (listElements (st <span class="op">^.</span> tuiUI <span class="op">.</span> conversationList))</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        forest <span class="ot">=</span> buildConversationForest convs</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        hasFocus <span class="ot">=</span> focusGetCurrent (st <span class="op">^.</span> tuiUI <span class="op">.</span> uiFocusRing) <span class="op">==</span> <span class="dt">Just</span> <span class="dt">ConversationListWidget</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        selectedId <span class="ot">=</span> <span class="kw">case</span> listSelectedElement (st <span class="op">^.</span> tuiUI <span class="op">.</span> conversationList) <span class="kw">of</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>            <span class="dt">Just</span> (_, conv) <span class="ot">-&gt;</span> <span class="dt">Just</span> (conversationId conv)</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>            <span class="dt">Nothing</span> <span class="ot">-&gt;</span> <span class="dt">Nothing</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>     <span class="kw">in</span> borderWithFocus</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>            st</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>            <span class="dt">ConversationListWidget</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;Conversations&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>            ( viewport <span class="dt">ConversationListWidget</span> <span class="dt">Both</span> <span class="op">$</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>                vBox <span class="op">$</span> renderConversationForest st selectedId hasFocus forest</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>            )</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="ot">renderConversationForest ::</span> <span class="dt">TuiState</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span> <span class="ot">-&gt;</span> [<span class="dt">ConversationTree</span>] <span class="ot">-&gt;</span> [<span class="dt">Widget</span> <span class="dt">N</span>]</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>renderConversationForest st selectedId hasFocus trees <span class="ot">=</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">concatMap</span> (<span class="op">\</span>(idx, tree) <span class="ot">-&gt;</span> renderTreeNode st selectedId hasFocus [] (idx <span class="op">==</span> <span class="fu">length</span> trees <span class="op">-</span> <span class="dv">1</span>) tree) (<span class="fu">zip</span> [<span class="dv">0</span> <span class="op">..</span>] trees)</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="ot">renderTreeNode ::</span> <span class="dt">TuiState</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span> <span class="ot">-&gt;</span> [<span class="dt">Bool</span>] <span class="ot">-&gt;</span> <span class="dt">Bool</span> <span class="ot">-&gt;</span> <span class="dt">ConversationTree</span> <span class="ot">-&gt;</span> [<span class="dt">Widget</span> <span class="dt">N</span>]</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>renderTreeNode st selectedId hasFocus ancestorIsLasts isLast (<span class="dt">ConversationTree</span> conv children) <span class="ot">=</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> isSelected <span class="ot">=</span> selectedId <span class="op">==</span> <span class="dt">Just</span> (conversationId conv)</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>        nodeWidget <span class="ot">=</span> renderNestedConversationItem st hasFocus isSelected ancestorIsLasts isLast conv</span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>        childWidgets <span class="ot">=</span> <span class="fu">concatMap</span> (<span class="op">\</span>(idx, child) <span class="ot">-&gt;</span> renderTreeNode st selectedId hasFocus (ancestorIsLasts <span class="op">++</span> [isLast]) (idx <span class="op">==</span> <span class="fu">length</span> children <span class="op">-</span> <span class="dv">1</span>) child) (<span class="fu">zip</span> [<span class="dv">0</span> <span class="op">..</span>] children)</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>     <span class="kw">in</span> nodeWidget <span class="op">:</span> childWidgets</span></code></pre></div></div><h3 id="event-handling">Event Handling</h3>
+<h4 id="tab-switching">Tab Switching</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- TUI.Event</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>tui_appHandleEvent tracer ev <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> ev <span class="kw">of</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- Tab switching</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">VtyEvent</span> (<span class="dt">Vty.EvKey</span> (<span class="dt">Vty.KChar</span> <span class="ch">&#39;[&#39;</span>) [<span class="dt">Vty.MCtrl</span>]) <span class="ot">-&gt;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>            cycleTabBackward</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">VtyEvent</span> (<span class="dt">Vty.EvKey</span> (<span class="dt">Vty.KChar</span> <span class="ch">&#39;]&#39;</span>) [<span class="dt">Vty.MCtrl</span>]) <span class="ot">-&gt;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>            cycleTabForward</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- ...</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">cycleTabForward ::</span> <span class="dt">EventM</span> <span class="dt">N</span> <span class="dt">TuiState</span> ()</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>cycleTabForward <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    current <span class="ot">&lt;-</span> use (tuiUI <span class="op">.</span> currentTab)</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> next <span class="ot">=</span> nextTab current</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    tuiUI <span class="op">.</span> currentTab <span class="op">.=</span> next</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Update focus ring for the new tab</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    mCurrentFocus <span class="ot">&lt;-</span> use (tuiUI <span class="op">.</span> uiFocusRing <span class="op">.</span> to focusGetCurrent)</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    tuiUI <span class="op">.</span> uiFocusRing <span class="op">.=</span> buildFocusRingForTabPreserving next mCurrentFocus</span></code></pre></div></div><h4 id="subcall-event-handling">Subcall Event Handling</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Handle subcall events in both normal and navigation mode</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>handleNormalEvent tracer ev <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> ev <span class="kw">of</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        <span class="dt">AppEvent</span> (<span class="dt">AppEvent_SubcallStarted</span> parentId subcallId slug depth) <span class="ot">-&gt;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>            handleSubcallStarted tracer parentId subcallId slug depth</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">AppEvent</span> (<span class="dt">AppEvent_SubcallProgress</span> subcallId sess) <span class="ot">-&gt;</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>            handleSubcallProgress subcallId sess</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">AppEvent</span> (<span class="dt">AppEvent_SubcallCompleted</span> subcallId result) <span class="ot">-&gt;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>            handleSubcallCompleted subcallId result</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">AppEvent</span> (<span class="dt">AppEvent_SubcallFailed</span> subcallId err) <span class="ot">-&gt;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>            handleSubcallFailed subcallId err</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="op">...</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create subcall conversation entry</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="ot">handleSubcallStarted ::</span> <span class="dt">Tracer</span> <span class="dt">IO</span> <span class="dt">Trace</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Int</span> <span class="ot">-&gt;</span> <span class="dt">EventM</span> <span class="dt">N</span> <span class="dt">TuiState</span> ()</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>handleSubcallStarted _tracer parentId subcallId slug depth <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    agents <span class="ot">&lt;-</span> use (tuiUI <span class="op">.</span> agentList <span class="op">.</span> to listElements)</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> findAgentBySlug slug agents <span class="kw">of</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>        <span class="dt">Just</span> tuiAgent <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>            inChan <span class="ot">&lt;-</span> liftIO <span class="op">$</span> newBChan <span class="dv">100</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> conv <span class="ot">=</span> <span class="dt">Conversation</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>                    { conversationId <span class="ot">=</span> subcallId</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>                    , conversationAgent <span class="ot">=</span> tuiAgent</span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>                    , conversationThreadId <span class="ot">=</span> <span class="dt">Nothing</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>                    , conversationSession <span class="ot">=</span> <span class="dt">Nothing</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>                    , conversationName <span class="ot">=</span> <span class="st">&quot;@&quot;</span> <span class="op">&lt;&gt;</span> tuiSlug tuiAgent</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>                    , conversationChan <span class="ot">=</span> inChan</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>                    , conversationStatus <span class="ot">=</span> <span class="dt">ConversationStatus_Active</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>                    , conversationOnProgress <span class="ot">=</span> <span class="op">\</span>_ <span class="ot">-&gt;</span> <span class="fu">pure</span> ()</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>                    , conversationIsSubcall <span class="ot">=</span> <span class="dt">True</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>                    , conversationParentId <span class="ot">=</span> <span class="dt">Just</span> parentId</span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>                    , conversationSubcallDepth <span class="ot">=</span> depth</span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>                    }</span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>            coreRef <span class="ot">&lt;-</span> use tuiCore</span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>            liftIO <span class="op">$</span> atomically <span class="op">$</span> modifyTVar coreRef <span class="op">$</span> appendConversation conv</span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>            tuiUI <span class="op">.</span> conversationList <span class="op">%=</span> listInsert <span class="dv">0</span> conv</span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a>        <span class="dt">Nothing</span> <span class="ot">-&gt;</span> showStatus <span class="dt">StatusWarning</span> <span class="op">$</span> <span class="st">&quot;Agent not found for subcall: &quot;</span> <span class="op">&lt;&gt;</span> slug</span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a><span class="co">-- Update subcall progress</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a><span class="ot">handleSubcallProgress ::</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">EventM</span> <span class="dt">N</span> <span class="dt">TuiState</span> ()</span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a>handleSubcallProgress subcallId sess <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="42"><a href="#42" aria-hidden="true" tabindex="-1"></a>    coreRef <span class="ot">&lt;-</span> use tuiCore</span>
+<span id="43"><a href="#43" aria-hidden="true" tabindex="-1"></a>    liftIO <span class="op">$</span> atomically <span class="op">$</span> modifyTVar coreRef <span class="op">$</span> <span class="op">\</span>c <span class="ot">-&gt;</span></span>
+<span id="44"><a href="#44" aria-hidden="true" tabindex="-1"></a>        c { coreConversations <span class="ot">=</span> updateConversationSession subcallId sess (coreConversations c) }</span>
+<span id="45"><a href="#45" aria-hidden="true" tabindex="-1"></a></span>
+<span id="46"><a href="#46" aria-hidden="true" tabindex="-1"></a><span class="co">-- Mark subcall completed</span></span>
+<span id="47"><a href="#47" aria-hidden="true" tabindex="-1"></a><span class="ot">handleSubcallCompleted ::</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">EventM</span> <span class="dt">N</span> <span class="dt">TuiState</span> ()</span>
+<span id="48"><a href="#48" aria-hidden="true" tabindex="-1"></a>handleSubcallCompleted subcallId _result <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="49"><a href="#49" aria-hidden="true" tabindex="-1"></a>    updateConversationStatus subcallId <span class="dt">ConversationStatus_WaitingForInput</span></span>
+<span id="50"><a href="#50" aria-hidden="true" tabindex="-1"></a>    showStatus <span class="dt">StatusInfo</span> <span class="st">&quot;Subcall completed&quot;</span></span></code></pre></div></div><h4 id="attachment-event-handling">Attachment Event Handling</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Handle Ctrl+F for file attachment</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="dt">VtyEvent</span> (<span class="dt">Vty.EvKey</span> (<span class="dt">Vty.KChar</span> <span class="ch">&#39;f&#39;</span>) [<span class="dt">Vty.MCtrl</span>]) <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    resetQuitConfirmation</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    openFilePathDialog</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Handle Ctrl+Shift+F to clear all attachments</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="dt">VtyEvent</span> (<span class="dt">Vty.EvKey</span> (<span class="dt">Vty.KChar</span> <span class="ch">&#39;F&#39;</span>) [<span class="dt">Vty.MCtrl</span>, <span class="dt">Vty.MShift</span>]) <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    resetQuitConfirmation</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    handleClearAllAttachments</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- Handle clipboard paste</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="dt">VtyEvent</span> (<span class="dt">Vty.EvKey</span> (<span class="dt">Vty.KChar</span> <span class="ch">&#39;v&#39;</span>) [<span class="dt">Vty.MCtrl</span>]) <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    resetQuitConfirmation</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    handleClipboardPaste tracer</span></code></pre></div></div><h4 id="clipboard-paste-handler">Clipboard Paste Handler</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">handleClipboardPaste ::</span> <span class="dt">Tracer</span> <span class="dt">IO</span> <span class="dt">Trace</span> <span class="ot">-&gt;</span> <span class="dt">EventM</span> <span class="dt">N</span> <span class="dt">TuiState</span> ()</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>handleClipboardPaste _tracer <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    hasSupport <span class="ot">&lt;-</span> liftIO hasClipboardSupport</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="fu">not</span> hasSupport</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="kw">then</span> showStatus <span class="dt">StatusError</span> <span class="st">&quot;Clipboard not available - install xclip, wl-clipboard, or pbpaste&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        <span class="kw">else</span> <span class="kw">do</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>            mContent <span class="ot">&lt;-</span> liftIO detectClipboardContent</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>            <span class="kw">case</span> mContent <span class="kw">of</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>                <span class="dt">Nothing</span> <span class="ot">-&gt;</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>                    showStatus <span class="dt">StatusWarning</span> <span class="st">&quot;Clipboard is empty or inaccessible&quot;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>                <span class="dt">Just</span> content <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>                    action <span class="ot">&lt;-</span> liftIO <span class="op">$</span> analyzeContent content</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">case</span> action <span class="kw">of</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>                        <span class="dt">IgnoreContent</span> <span class="ot">-&gt;</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>                            showStatus <span class="dt">StatusWarning</span> <span class="st">&quot;No attachable content in clipboard&quot;</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>                        <span class="dt">PasteAsText</span> text <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>                            editorContents <span class="ot">&lt;-</span> use (tuiUI <span class="op">.</span> messageEditor <span class="op">.</span> editContentsL)</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>                            <span class="kw">let</span> newContents <span class="ot">=</span> TextZipper.insertMany text editorContents</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>                            tuiUI <span class="op">.</span> messageEditor <span class="op">.</span> editContentsL <span class="op">.=</span> newContents</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>                            showStatus <span class="dt">StatusInfo</span> <span class="st">&quot;Text pasted from clipboard&quot;</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>                        <span class="dt">AttachAsMedia</span> attachment <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>                            mConv <span class="ot">&lt;-</span> getFocusedConversation</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>                            <span class="kw">case</span> mConv <span class="kw">of</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>                                <span class="dt">Nothing</span> <span class="ot">-&gt;</span> showStatus <span class="dt">StatusError</span> <span class="st">&quot;No conversation selected&quot;</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>                                <span class="dt">Just</span> conv <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>                                    <span class="kw">let</span> convId <span class="ot">=</span> conversationId conv</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>                                    tuiUI <span class="op">.</span> attachedFiles <span class="op">%=</span> Map.insertWith (<span class="op">\</span>new old <span class="ot">-&gt;</span> old <span class="op">++</span> new) convId [attachment]</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>                                    <span class="kw">let</span> filename <span class="ot">=</span> <span class="fu">maybe</span> <span class="st">&quot;unnamed&quot;</span> <span class="fu">id</span> attachment<span class="op">.</span>mediaFilename</span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>                                    showStatus <span class="dt">StatusInfo</span> <span class="op">$</span> <span class="st">&quot;Attached from clipboard: &quot;</span> <span class="op">&lt;&gt;</span> filename</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>                        <span class="dt">AttachMultipleFiles</span> attachments <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>                            mConv <span class="ot">&lt;-</span> getFocusedConversation</span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>                            <span class="kw">case</span> mConv <span class="kw">of</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>                                <span class="dt">Nothing</span> <span class="ot">-&gt;</span> showStatus <span class="dt">StatusError</span> <span class="st">&quot;No conversation selected&quot;</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>                                <span class="dt">Just</span> conv <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>                                    <span class="kw">let</span> convId <span class="ot">=</span> conversationId conv</span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>                                    tuiUI <span class="op">.</span> attachedFiles <span class="op">%=</span> Map.insertWith (<span class="op">\</span>new old <span class="ot">-&gt;</span> old <span class="op">++</span> new) convId attachments</span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a>                                    showStatus <span class="dt">StatusInfo</span> <span class="op">$</span> <span class="st">&quot;Attached &quot;</span> <span class="op">&lt;&gt;</span> Text.pack (<span class="fu">show</span> <span class="op">$</span> <span class="fu">length</span> attachments) <span class="op">&lt;&gt;</span> <span class="st">&quot; files from clipboard&quot;</span></span></code></pre></div></div><h3 id="turn-navigation">Turn Navigation</h3>
+<p>Turn navigation allows you to browse through conversation history turn-by-turn and fork new conversations from any point.</p>
+<h4 id="entering-navigation-mode">Entering Navigation Mode</h4>
+<p>Press <code>Enter</code> when focused on the Conversation view or Session view to enter turn navigation mode:</p>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│ Conversation - Turn Navigation (3/8) [Enter:exit F:fork]    │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ -----------------------                                 │ │
+│ │▶ &lt; What is the best approach for...      ← SELECTED    │ │
+│ │  + ...                                                  │ │
+│ │                                                         │ │
+│ │ -----------------------                                 │ │
+│ │  &lt; You could consider using...                          │ │
+│ └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h4 id="navigation-controls">Navigation Controls</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Up</code></td><td>Navigate to earlier turn</td></tr>
+<tr><td><code>Down</code></td><td>Navigate to later turn</td></tr>
+<tr><td><code>F</code></td><td>Fork conversation at selected turn</td></tr>
+<tr><td><code>Enter</code></td><td>Exit navigation mode</td></tr>
+<tr><td><code>Esc</code></td><td>Exit navigation mode</td></tr>
+</table>
+<h4 id="forking-conversations">Forking Conversations</h4>
+<p>Forking creates a new conversation starting from the selected turn, preserving only the turns before it:</p>
+<pre><code>Turn 0: User - &quot;Hello!&quot;
+Turn 1: Assistant - &quot;Hi there!&quot;
+Turn 2: User - &quot;How do I...&quot; ← Selected for fork
+Turn 3: Assistant - &quot;You can...&quot;
+
+Forking at Turn 2 creates new conversation with:
+Turn 0: User - &quot;Hello!&quot;
+Turn 1: Assistant - &quot;Hi there!&quot;
+(New conversation starts here)
+</code></pre>
+<p>The original session remains untouched. The forked session has <code>forkedFromSessionId</code> set to the original session’s ID.</p>
+<h4 id="turn-navigation-types">Turn Navigation Types</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | State for turn-by-turn navigation</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">TurnNavigationState</span> <span class="ot">=</span> <span class="dt">TurnNavigationState</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> _navSession ::</span> <span class="dt">Session</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ The session being navigated</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _navSelectedTurnIndex ::</span> <span class="dt">Int</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Currently selected turn index (0-based)</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _navTotalTurns ::</span> <span class="dt">Int</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Total number of turns for display</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Widget name for turn navigation viewport</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">WidgetName</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="op">...</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TurnNavigationWidget</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ For viewport scrolling during turn navigation</span></span></code></pre></div></div><h3 id="message-queue-management">Message Queue Management</h3>
+<p>When a conversation is paused, you can manage queued messages - messages typed while the agent was processing.</p>
+<h4 id="queue-management-ui">Queue Management UI</h4>
+<p>When paused with queued messages, the Chats tab shows a queue management panel:</p>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│ Message                                                      │
+├─────────────────────────────────────────────────────────────┤
+│ &gt; User's typed message...                                   │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Queued Messages (2) - Ctrl+D: clear  Del: delete selected │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ ▶ First queued message text...                          │ │
+│ │   Second queued message that is longer...               │ │
+│ └─────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────┤
+│ Conversation                                                 │
+│ ...existing conversation content...                          │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h4 id="queue-management-controls">Queue Management Controls</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+D</code></td><td>Clear all queued messages</td></tr>
+<tr><td><code>Del</code> / <code>Backspace</code></td><td>Delete selected queued message</td></tr>
+<tr><td><code>Up</code></td><td>Select previous message</td></tr>
+<tr><td><code>Down</code></td><td>Select next message</td></tr>
+</table>
+<h4 id="activation">Activation</h4>
+<p>Queue management is only available when:</p>
+<ul>
+<li>The conversation status is <code>ConversationStatus_Paused</code>
+</li>
+<li>There are queued messages in the buffer
+</li>
+</ul>
+<p>To pause/unpause a conversation, press <code>Ctrl+E</code>.</p>
+<h4 id="queue-state">Queue State</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">UIState</span> <span class="ot">=</span> <span class="dt">UIState</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    { <span class="op">...</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _uiBufferedMessages ::</span> <span class="dt">Map</span> <span class="dt">ConversationId</span> [<span class="dt">Text</span>]</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Copy of buffered messages from Core for UI rendering</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> _queuedMessagesFocus ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Index of currently selected queued message (Nothing = none selected)</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- The Core also maintains the source of truth</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Core</span> <span class="ot">=</span> <span class="dt">Core</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    { <span class="op">...</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> coreBufferedMessages ::</span> <span class="dt">TVar</span> (<span class="dt">Map</span> <span class="dt">ConversationId</span> [<span class="dt">Text</span>])</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Buffered messages per conversation</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> corePausedConversations ::</span> <span class="dt">Set</span> <span class="dt">ConversationId</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Set of paused conversation IDs</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h3 id="keyboard-shortcuts">Keyboard Shortcuts</h3>
+<h4 id="navigation">Navigation</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Tab</code></td><td>Cycle focus forward through widgets</td></tr>
+<tr><td><code>Shift+Tab</code></td><td>Cycle focus backward through widgets</td></tr>
+<tr><td><code>Ctrl+Z</code></td><td>Toggle zoom mode for current widget</td></tr>
+</table>
+<h4 id="tabs">Tabs</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+[</code></td><td>Switch to previous tab</td></tr>
+<tr><td><code>Ctrl+]</code></td><td>Switch to next tab</td></tr>
+</table>
+<h4 id="conversations">Conversations</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+N</code></td><td>Start new conversation with selected agent</td></tr>
+<tr><td><code>Ctrl+C</code></td><td>Continue restored session</td></tr>
+<tr><td><code>Meta+Enter</code></td><td>Send message</td></tr>
+<tr><td><code>Ctrl+E</code></td><td>Pause/unpause conversation</td></tr>
+</table>
+<h4 id="file-attachments-1">File Attachments</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+F</code></td><td>Open file path input dialog</td></tr>
+<tr><td><code>Ctrl+Shift+F</code></td><td>Clear all attachments</td></tr>
+<tr><td><code>Del</code> / <code>Backspace</code></td><td>Remove selected attachment</td></tr>
+<tr><td><code>Up</code> / <code>Down</code></td><td>Select attachment (when focused)</td></tr>
+</table>
+<h4 id="clipboard">Clipboard</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+V</code></td><td>Paste from clipboard (images, files, text)</td></tr>
+</table>
+<h4 id="turn-navigation-1">Turn Navigation</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Enter</code></td><td>Enter turn navigation mode (when on conversation)</td></tr>
+<tr><td><code>Up/Down</code></td><td>Navigate between turns (in navigation mode)</td></tr>
+<tr><td><code>F</code></td><td>Fork conversation at selected turn</td></tr>
+<tr><td><code>Enter/Esc</code></td><td>Exit turn navigation mode</td></tr>
+</table>
+<h4 id="queue-management-when-paused">Queue Management (when paused)</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+D</code></td><td>Clear all queued messages</td></tr>
+<tr><td><code>Del</code> / <code>Backspace</code></td><td>Delete selected queued message</td></tr>
+<tr><td><code>Up/Down</code></td><td>Select queued message</td></tr>
+</table>
+<h4 id="session-export">Session Export</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>Ctrl+P</code></td><td>Export session to markdown file</td></tr>
+<tr><td><code>Ctrl+T</code></td><td>View session in external viewer (chronological)</td></tr>
+<tr><td><code>Ctrl+R</code></td><td>View session in external viewer (reverse)</td></tr>
+</table>
+<h4 id="session-search-history-tab">Session Search (History Tab)</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>/</code></td><td>Start search</td></tr>
+<tr><td><code>n</code></td><td>Next result</td></tr>
+<tr><td><code>N</code></td><td>Previous result</td></tr>
+<tr><td><code>Esc</code></td><td>Clear search</td></tr>
+</table>
+<h4 id="other">Other</h4>
+<table>
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><code>F5</code></td><td>Refresh tools for selected agent</td></tr>
+<tr><td><code>Esc</code>, <code>Ctrl+Q</code></td><td>Quit application</td></tr>
+</table>
+<h3 id="session-export-and-viewing">Session Export and Viewing</h3>
+<p>The TUI supports exporting and viewing session content in markdown format.</p>
+<h4 id="export-to-markdown">Export to Markdown</h4>
+<p>Press <code>Ctrl+p</code> to export the current session to a markdown file:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">handleDumpSessionToMarkdown ::</span> <span class="dt">EventM</span> <span class="dt">N</span> <span class="dt">TuiState</span> ()</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>handleDumpSessionToMarkdown <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    mSession <span class="ot">&lt;-</span> use (tuiCore <span class="op">.</span> coreSession)</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    mConvId <span class="ot">&lt;-</span> getFocusedConversationId</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> (mSession, mConvId) <span class="kw">of</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        (<span class="dt">Just</span> session, <span class="dt">Just</span> (<span class="dt">ConversationId</span> cid)) <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> markdown <span class="ot">=</span> formatSessionMarkdown <span class="dt">Chronological</span> session</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>                fileName <span class="ot">=</span> <span class="st">&quot;conv.&quot;</span> <span class="op">&lt;&gt;</span> <span class="fu">show</span> cid <span class="op">&lt;.&gt;</span> <span class="st">&quot;md&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>            liftIO <span class="op">$</span> TextIO.writeFile fileName markdown</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>            showStatus <span class="dt">StatusInfo</span> <span class="op">$</span> <span class="st">&quot;Exported to &quot;</span> <span class="op">&lt;&gt;</span> Text.pack fileName</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        <span class="op">...</span></span></code></pre></div></div><h4 id="view-with-external-viewer">View with External Viewer</h4>
+<p>The TUI can display session content using an external markdown viewer configured via the <code>AGENT_MD_VIEWER</code> environment variable.</p>
+<p><strong>Chronological Order (Oldest First):</strong>
+Press <code>Ctrl+t</code> to view the session in chronological order (oldest messages first):</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="dt">VtyEvent</span> (<span class="dt">Vty.EvKey</span> (<span class="dt">Vty.KChar</span> <span class="ch">&#39;t&#39;</span>) [<span class="dt">Vty.MCtrl</span>]) <span class="ot">-&gt;</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    handleViewSessionWithExternalViewer <span class="dt">Chronological</span></span></code></pre></div></div><p><strong>Antichronological Order (Newest First):</strong>
+Press <code>Ctrl+r</code> to view the session in reverse chronological order (newest messages first):</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="dt">VtyEvent</span> (<span class="dt">Vty.EvKey</span> (<span class="dt">Vty.KChar</span> <span class="ch">&#39;r&#39;</span>) [<span class="dt">Vty.MCtrl</span>]) <span class="ot">-&gt;</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    handleViewSessionWithExternalViewer <span class="dt">Antichronological</span></span></code></pre></div></div><p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Set viewer (e.g., glow, bat, less)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">AGENT_MD_VIEWER</span><span class="op">=</span><span class="st">&quot;glow -p&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Or use a pager</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">AGENT_MD_VIEWER</span><span class="op">=</span><span class="st">&quot;less -R&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Then start TUI</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="at">--agent-file</span> agent.json</span></code></pre></div></div><h4 id="order-preference">Order Preference</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">OrderPreference</span> <span class="ot">=</span> <span class="dt">Chronological</span> <span class="op">|</span> <span class="dt">Antichronological</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">formatSessionMarkdown ::</span> <span class="dt">OrderPreference</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">Text.Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>formatSessionMarkdown orderPref session <span class="ot">=</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> opts <span class="ot">=</span> <span class="dt">SessionPrintOptions</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>            { <span class="op">...</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>            , orderPreference <span class="ot">=</span> orderPref</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>            , <span class="op">...</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>            }</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>     <span class="kw">in</span> formatSessionAsMarkdown opts session</span></code></pre></div></div><p>Use cases:</p>
+<ul>
+<li><strong>Chronological (<code>Ctrl+t</code>)</strong>: Best for reviewing the full conversation from start to finish
+</li>
+<li><strong>Antichronological (<code>Ctrl+r</code>)</strong>: Best when you care about recent changes and want to see the most recent messages first
+</li>
+</ul>
+<h3 id="session-search">Session Search</h3>
+<p>The History tab includes session search functionality for finding past conversations.</p>
+<h4 id="search-interface">Search Interface</h4>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│ Sessions                                [Search: database] │
+│ ─────────────────────────────────────────────────────────  │
+│  ▶ 2024-01-15 10:30 - database migration                  │
+│    2024-01-14 15:20 - api design                          │
+│  ▶ 2024-01-13 09:00 - database schema review              │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│ Session View                                                 │
+│ ...selected session content...                              │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h4 id="search-features">Search Features</h4>
+<ul>
+<li><strong>Real-time filtering</strong>: Sessions are filtered as you type
+</li>
+<li><strong>Full-text search</strong>: Searches across session content
+</li>
+<li><strong>Highlighting</strong>: Matching terms are highlighted
+</li>
+<li><strong>Keyboard navigation</strong>: <code>n</code>/<code>N</code> to jump between results
+</li>
+</ul>
+<h3 id="running-the-tui">Running the TUI</h3>
+<h4 id="main-entry-point">Main Entry Point</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- TUI.Core</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">runTUI ::</span> <span class="dt">Tracer</span> <span class="dt">IO</span> <span class="dt">Trace</span> <span class="ot">-&gt;</span> <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> <span class="dt">LoadedApiKeys</span> <span class="ot">-&gt;</span> [<span class="dt">Props</span>] <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>runTUI tracer store apiKeys propsList <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> config <span class="ot">=</span> fileSessionConfig store apiKeys</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    runTUIWithConfig tracer config propsList</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="ot">runTUIWithConfig ::</span> <span class="dt">Tracer</span> <span class="dt">IO</span> <span class="dt">Trace</span> <span class="ot">-&gt;</span> <span class="dt">SessionConfig</span> <span class="ot">-&gt;</span> [<span class="dt">Props</span>] <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>runTUIWithConfig tracer config props <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Load agent trees and create TuiAgents</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    trees <span class="ot">&lt;-</span> <span class="fu">traverse</span> loadAgentTree props</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> itrees <span class="ot">=</span> [tree <span class="op">|</span> <span class="dt">Initialized</span> tree <span class="ot">&lt;-</span> trees]</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create TUI agents from OS-native trees</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> tuiAgents <span class="ot">=</span> <span class="fu">map</span> createTuiAgent itrees</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Load existing session files</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    loadedSessions <span class="ot">&lt;-</span> loadSessionFiles config<span class="op">.</span>sessionStore</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Collect tools from all agents</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    agentTools <span class="ot">&lt;-</span> collectAgentTools tuiAgents</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create event channel</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    evChan <span class="ot">&lt;-</span> newBChan <span class="dv">100</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create OS event queue for subcall visibility</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    osEventQueue <span class="ot">&lt;-</span> newTQueueIO</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Start the event bridge</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    startOSEventBridge osEventQueue evChan</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create and initialize the OS World</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>    world <span class="ot">&lt;-</span> atomically initWorld</span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create core state with World and EventQueue</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>    core0 <span class="ot">&lt;-</span> initCore (<span class="dt">Just</span> world) (<span class="dt">Just</span> osEventQueue)</span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>    coreTVar <span class="ot">&lt;-</span> newTVarIO core0</span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create UI state</span></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> ui0 <span class="ot">=</span> (initUIState defaultHelpContent tuiAgents [s <span class="op">|</span> (_, <span class="dt">Just</span> s) <span class="ot">&lt;-</span> loadedSessions])</span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a>                { _uiAgentTools <span class="ot">=</span> agentTools }</span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="42"><a href="#42" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create TUI state</span></span>
+<span id="43"><a href="#43" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> st <span class="ot">=</span> <span class="dt">TuiState</span> coreTVar ui0 evChan config</span>
+<span id="44"><a href="#44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="45"><a href="#45" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Build and run the app</span></span>
+<span id="46"><a href="#46" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> app <span class="ot">=</span> <span class="dt">App</span></span>
+<span id="47"><a href="#47" aria-hidden="true" tabindex="-1"></a>            { appDraw <span class="ot">=</span> tui_appDraw</span>
+<span id="48"><a href="#48" aria-hidden="true" tabindex="-1"></a>            , appChooseCursor <span class="ot">=</span> tui_appChooseCursor</span>
+<span id="49"><a href="#49" aria-hidden="true" tabindex="-1"></a>            , appHandleEvent <span class="ot">=</span> tui_appHandleEvent tracer</span>
+<span id="50"><a href="#50" aria-hidden="true" tabindex="-1"></a>            , appStartEvent <span class="ot">=</span> tui_appStartEvent</span>
+<span id="51"><a href="#51" aria-hidden="true" tabindex="-1"></a>            , appAttrMap <span class="ot">=</span> tui_appAttrMap</span>
+<span id="52"><a href="#52" aria-hidden="true" tabindex="-1"></a>            }</span>
+<span id="53"><a href="#53" aria-hidden="true" tabindex="-1"></a></span>
+<span id="54"><a href="#54" aria-hidden="true" tabindex="-1"></a>    void <span class="op">$</span> customMainWithDefaultVty (<span class="dt">Just</span> evChan) app st</span></code></pre></div></div><h3 id="styling">Styling</h3>
+<h4 id="attributes">Attributes</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">tui_appAttrMap ::</span> <span class="dt">TuiState</span> <span class="ot">-&gt;</span> <span class="dt">AttrMap</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>tui_appAttrMap _ <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    attrMap Vty.defAttr</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        [ (headerAttr, fg white <span class="ot">`on`</span> blue)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        , (activeTabAttr, fg black <span class="ot">`on`</span> brightWhite <span class="ot">`withStyle`</span> bold)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        , (inactiveTabAttr, fg white <span class="ot">`on`</span> blue)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        , (userAttr, fg cyan)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        , (agentAttr, fg green)</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        , (toolAttr, fg yellow)</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        , (toolSuccessAttr, fg green)</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        , (toolErrorAttr, fg red)</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        , (systemAttr, fg magenta)</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        , (inputAttr, fg white)</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        , (queuedMessageAttr, fg yellow)</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        , (queuedMessageSelectedAttr, bg blue <span class="ot">`withStyle`</span> bold)</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        , (selectedTurnAttr, bg blue <span class="ot">`withStyle`</span> bold)</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        , (attachmentAttr, fg cyan)</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>        , (attachmentSelectedAttr, bg blue <span class="ot">`withStyle`</span> bold)</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>        , (attachmentSizeAttr, fg white <span class="ot">`withStyle`</span> dim)</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>        , <span class="co">-- Subcall conversation attributes</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>          (subcallAttr, fg white <span class="ot">`withStyle`</span> dim)</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>        , (subcallSelectedAttr, fg black <span class="ot">`on`</span> brightWhite <span class="ot">`withStyle`</span> bold)</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>        , (treeBranchAttr, fg white <span class="ot">`withStyle`</span> dim)</span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>        , (rootConversationAttr, defAttr)</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>        ]</span></code></pre></div></div><h3 id="status-bar">Status Bar</h3>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">render_statusBar ::</span> <span class="dt">Maybe</span> <span class="dt">StatusMessage</span> <span class="ot">-&gt;</span> <span class="dt">Widget</span> <span class="dt">N</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>render_statusBar <span class="dt">Nothing</span> <span class="ot">=</span> emptyWidget</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>render_statusBar (<span class="dt">Just</span> msg) <span class="ot">=</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    withAttr (statusAttr msg<span class="op">.</span>statusSeverity) <span class="op">$</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        txt <span class="op">$</span> <span class="st">&quot; &quot;</span> <span class="op">&lt;&gt;</span> statusText msg</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">StatusSeverity</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">StatusInfo</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">StatusWarning</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">StatusError</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span></code></pre></div></div><h3 id="best-practices">Best Practices</h3>
+<h4 id="performance">Performance</h4>
+<ol>
+<li><strong>Limit scrollback</strong>: Keep only last N messages in memory
+</li>
+<li><strong>Lazy rendering</strong>: Don’t render off-screen content
+</li>
+<li><strong>Rate limiting</strong>: Throttle UI updates during streaming
+</li>
+</ol>
+<h4 id="user-experience">User Experience</h4>
+<ol>
+<li><strong>Visual feedback</strong>: Show typing indicators and tool calls
+</li>
+<li><strong>Error handling</strong>: Display errors without crashing
+</li>
+<li><strong>Help text</strong>: Always show keyboard shortcuts
+</li>
+<li><strong>Tab organization</strong>: Group related functionality into logical tabs
+</li>
+<li><strong>Pause before queue management</strong>: Queue management only works when paused to prevent accidental modifications
+</li>
+</ol>
+<h4 id="multi-agent-ui">Multi-Agent UI</h4>
+<ol>
+<li><strong>Clear indicators</strong>: Show which agent is active
+</li>
+<li><strong>Separate contexts</strong>: Each agent maintains its own conversation
+</li>
+<li><strong>Easy switching</strong>: Tab between agents quickly
+</li>
+<li><strong>Subcall visibility</strong>: Show nested agent calls with visual hierarchy
+</li>
+</ol>
+<h4 id="conversation-forking">Conversation Forking</h4>
+<ol>
+<li><strong>Non-destructive</strong>: Original session always preserved
+</li>
+<li><strong>Clear lineage</strong>: Forked sessions track their origin
+</li>
+<li><strong>Agent selection</strong>: Current agent selection used for fork
+</li>
+<li><strong>Navigation mode</strong>: Enter navigation to review before forking
+</li>
+</ol>
+<h4 id="file-attachments-2">File Attachments</h4>
+<ol>
+<li><strong>Size limits</strong>: Warn users about large files
+</li>
+<li><strong>MIME detection</strong>: Automatic type detection from extensions
+</li>
+<li><strong>Visual feedback</strong>: Show attachment count in UI
+</li>
+<li><strong>Temporary cleanup</strong>: Clipboard images are temporary files
+</li>
+</ol>
+<h4 id="clipboard-integration-1">Clipboard Integration</h4>
+<ol>
+<li><strong>Graceful degradation</strong>: Handle missing clipboard tools gracefully
+</li>
+<li><strong>Security</strong>: Validate file paths before attachment
+</li>
+<li><strong>Size limits</strong>: Prevent memory issues with large clipboard content
+</li>
+<li><strong>Platform detection</strong>: Auto-detect best clipboard backend
+</li>
+</ol>
+<h4 id="subcall-visibility">Subcall Visibility</h4>
+<ol>
+<li><strong>Tree rendering</strong>: Show parent-child relationships clearly
+</li>
+<li><strong>Visual distinction</strong>: Use different attributes for subcalls vs root conversations
+</li>
+<li><strong>Event bridging</strong>: Convert OS events to AppEvents for Brick integration
+</li>
+<li><strong>Orphan handling</strong>: Handle async race conditions where child arrives before parent
+</li>
+<li><strong>Nesting depth</strong>: Track and display recursion depth
+</li>
+</ol>
+<h3 id="customization">Customization</h3>
+<h4 id="custom-event-handlers">Custom Event Handlers</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">customHandleEvent ::</span> <span class="dt">TUIState</span> <span class="ot">-&gt;</span> <span class="dt">BrickEvent</span> () <span class="dt">CustomEvent</span> <span class="ot">-&gt;</span> <span class="dt">EventM</span> () (<span class="dt">Next</span> <span class="dt">TUIState</span>)</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>customHandleEvent state ev <span class="ot">=</span> <span class="kw">case</span> ev <span class="kw">of</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Add custom shortcuts</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">VtyEvent</span> (<span class="dt">EvKey</span> (<span class="dt">KChar</span> <span class="ch">&#39;s&#39;</span>) [<span class="dt">MCtrl</span>]) <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        liftIO <span class="op">$</span> saveSession state</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        continue <span class="op">$</span> state { status <span class="ot">=</span> <span class="dt">Ready</span> }</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">VtyEvent</span> (<span class="dt">EvKey</span> (<span class="dt">KChar</span> <span class="ch">&#39;l&#39;</span>) [<span class="dt">MCtrl</span>]) <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        newState <span class="ot">&lt;-</span> liftIO <span class="op">$</span> loadSession state</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        continue newState</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    _ <span class="ot">-&gt;</span> handleEvent state ev  <span class="co">-- Fall through to default</span></span></code></pre></div></div><h4 id="custom-widgets">Custom Widgets</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">customProgressBar ::</span> <span class="dt">Float</span> <span class="ot">-&gt;</span> <span class="dt">Widget</span> ()</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>customProgressBar progress <span class="ot">=</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> width <span class="ot">=</span> <span class="dv">20</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        filled <span class="ot">=</span> <span class="fu">round</span> (progress <span class="op">*</span> <span class="fu">fromIntegral</span> width)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        bar <span class="ot">=</span> <span class="fu">replicate</span> filled <span class="ch">&#39;█&#39;</span> <span class="op">++</span> <span class="fu">replicate</span> (width <span class="op">-</span> filled) <span class="ch">&#39;░&#39;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">in</span> withAttr progressAttr <span class="op">$</span> str <span class="op">$</span> <span class="st">&quot;[&quot;</span> <span class="op">++</span> bar <span class="op">++</span> <span class="st">&quot;]&quot;</span></span></code></pre></div></div><h3 id="related-modules">Related Modules</h3>
+<table>
+<tr><th>Module</th><th>Purpose</th></tr>
+<tr><td><code>System.Agents.TUI.Core</code></td><td>Main TUI application</td></tr>
+<tr><td><code>System.Agents.TUI.Types</code></td><td>TUI state and types</td></tr>
+<tr><td><code>System.Agents.TUI.Render</code></td><td>Rendering functions</td></tr>
+<tr><td><code>System.Agents.TUI.Event</code></td><td>Event handling</td></tr>
+<tr><td><code>System.Agents.TUI.Clipboard</code></td><td>Clipboard and drag-and-drop support</td></tr>
+<tr><td><code>System.Agents.Media.Types</code></td><td>Media attachment types</td></tr>
+<tr><td><code>System.Agents.SessionPrint</code></td><td>Session formatting</td></tr>
+<tr><td><code>System.Agents.OS.Events</code></td><td>OS event types for subcall visibility</td></tr>
+<tr><td><code>System.Agents.AgentTree.OneShotTool</code></td><td>Subcall execution</td></tr>
+</table>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

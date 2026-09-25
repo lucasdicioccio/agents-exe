@@ -1,0 +1,109 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Analysis of Issue Dependencies and DAG-Aware Agent Processing</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="## Overview This document analyzes the current interaction between `sqq-agent.sh` and `create-issue.sh`, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management. ## Current S"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Analysis of Issue Dependencies and DAG-Aware Agent Processing"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="## Overview This document analyzes the current interaction between `sqq-agent.sh` and `create-issue.sh`, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management. ## Current S"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Analysis of Issue Dependencies and DAG-Aware Agent Processing"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html"><meta property="og:description" content="## Overview This document analyzes the current interaction between `sqq-agent.sh` and `create-issue.sh`, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management. ## Current S"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-sqq-dag.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-sqq-dag.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"## Overview This document analyzes the current interaction between `sqq-agent.sh` and `create-issue.sh`, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management. ## Current S","headline":"Analysis of Issue Dependencies and DAG-Aware Agent Processing","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Analysis of Issue Dependencies and DAG-Aware Agent Processing</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 575 words, 0 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-tui.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">4/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-tools.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-dag.md"><code>documentation/sqq-dag.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="analysis-of-issue-dependencies-and-dag-aware-agent-processing">Analysis of Issue Dependencies and DAG-Aware Agent Processing</h2>
+<h3 id="overview">Overview</h3>
+<p>This document analyzes the current interaction between <code>sqq-agent.sh</code> and <code>create-issue.sh</code>, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management.</p>
+<h3 id="current-state-analysis">Current State Analysis</h3>
+<h4 id="1-issue-creation-create-issuesh">1. Issue Creation (<code>create-issue.sh</code>)</h4>
+<ul>
+<li><strong>Mechanism:</strong> The script takes a <code>dependencies</code> argument (e.g., <code>#42,&amp;#35;43</code>).
+</li>
+<li><strong>Labeling Logic:</strong>
+<ul>
+<li>No dependencies: Labeled <code>agents/to-be-taken</code>.
+</li>
+<li>Has dependencies: Labeled <code>agents/wait</code>.
+</li>
+</ul>
+</li>
+<li><strong>Limitation:</strong> The labeling is static at creation time. There is no automated process to monitor dependencies and “unlock” <code>agents/wait</code> issues.
+</li>
+</ul>
+<h4 id="2-task-fetching-sqq-agentsh-from_github">2. Task Fetching (<code>sqq-agent.sh from_github</code>)</h4>
+<ul>
+<li><strong>Mechanism:</strong> Queries GitHub for issues with the <code>agents/to-be-taken</code> label.
+</li>
+<li><strong>Limitation:</strong> It is “blind” to any issue labeled <code>agents/wait</code>. This requires manual intervention (human or another agent) to re-label issues once their dependencies are met.
+</li>
+</ul>
+<h4 id="3-worktree-execution-sqq-agentsh-worktree_exec">3. Worktree Execution (<code>sqq-agent.sh worktree_exec</code>)</h4>
+<ul>
+<li><strong>Branching Strategy:</strong> Always executes <code>git worktree add &quot;$name&quot; &quot;origin/main&quot;</code>.
+</li>
+<li><strong>The “Context Loss” Problem:</strong>
+<ul>
+<li>If Issue B depends on Issue A, Issue B <em>must</em> have the code changes from Issue A to proceed correctly (e.g., using a new Type or API defined in A).
+</li>
+<li>If Issue B is started before Issue A is merged into <code>main</code>, Issue B will be missing critical context.
+</li>
+<li>Currently, <code>sqq-agent.sh</code> has no awareness of which branch a dependency might be residing in.
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="4-the-unfinished-work-problem">4. The “Unfinished Work” Problem</h4>
+<ul>
+<li>Users reported that merging multiple parallel PRs can lead to <code>main</code> having “unfinished work” if dependencies aren’t respected.
+</li>
+<li>Without a strict DAG (Directed Acyclic Graph) enforcement, agents might implement redundant or conflicting logic because they are both branching from an older state of <code>main</code>.
+</li>
+</ul>
+<hr />
+<h3 id="proposed-dag-aware-model">Proposed DAG-Aware Model</h3>
+<p>To resolve these issues, we propose a transition from a “label-polling” model to a “DAG-aware” model.</p>
+<h4 id="1-automated-issue-promotion">1. Automated Issue Promotion</h4>
+<p>We need a “Manager” process (or an update to <code>from_github</code>) that:</p>
+<ol>
+<li>Lists all issues with <code>agents/wait</code>.
+</li>
+<li>Parses the dependency IDs from the issue description or metadata.
+</li>
+<li>Checks the status of these dependencies via <code>gh issue view</code> or <code>gh pr view</code>.
+</li>
+<li><strong>Promotion Rule:</strong> If all dependencies are “Closed” (or their associated PRs are “Merged”), the label is updated to <code>agents/to-be-taken</code>.
+</li>
+</ol>
+<h4 id="2-branch-chaining-optional-but-powerful">2. Branch Chaining (Optional but Powerful)</h4>
+<p>Instead of always branching from <code>main</code>, the system could support “Branch Chaining”:</p>
+<ul>
+<li>If Issue B depends on Issue A, and Issue A’s work is in branch <code>gh-A</code>, Issue B could branch from <code>origin/gh-A</code> instead of <code>origin/main</code>.
+</li>
+<li><strong>Pros:</strong> Allows pipelined development without waiting for merges.
+</li>
+<li><strong>Cons:</strong> Requires complex rebasing if Issue A is updated after Issue B starts.
+</li>
+</ul>
+<h4 id="3-strict-sequential-processing-recommended">3. Strict Sequential Processing (Recommended)</h4>
+<p>Given the user requirement that “the processing of the second issue should wait for the first issue to be finalized”, a strict sequential approach is safer:</p>
+<ul>
+<li><strong>Rule:</strong> An issue is only promoted to <code>to-be-taken</code> when all its dependencies are <strong>merged into <code>main</code></strong>.
+</li>
+<li>This ensures <code>origin/main</code> always contains the necessary context for the next task.
+</li>
+<li>This prevents “unfinished work” from polluting <code>main</code> because each task starts from a “finalized” baseline.
+</li>
+</ul>
+<h3 id="implementation-recommendations">Implementation Recommendations</h3>
+<h4 id="short-term-fixes">Short-term Fixes:</h4>
+<ol>
+<li><strong>Update <code>sqq-agent.sh</code>:</strong> Add a <code>promote_issues</code> command that uses <code>gh issue list --label agents/wait</code> and checks dependency status.
+</li>
+<li><strong>Standardize Dependency Metadata:</strong> Ensure <code>create-issue.sh</code> stores dependencies in a machine-readable format (e.g., a specific line in the body like <code>Depends-on: &amp;#35;123, &amp;#35;124</code>).
+</li>
+</ol>
+<h4 id="long-term-architecture">Long-term Architecture:</h4>
+<ul>
+<li><strong>Centralized DAG State:</strong> The <code>sqq</code> queue database could be extended to store task dependencies directly, allowing the scheduler to respect the DAG without polling GitHub repeatedly.
+</li>
+<li><strong>Feature Branch Isolation:</strong> Maintain the current practice of using <code>gh-&lt;number&gt;</code> branches, but ensure the <code>BASE_BRANCH</code> is dynamically determined if “Branch Chaining” is desired.
+</li>
+</ul>
+<h3 id="summary-of-benefits">Summary of Benefits</h3>
+<ul>
+<li><strong>Zero Manual Intervention:</strong> Issues flow from <code>wait</code> -&gt; <code>to-be-taken</code> -&gt; <code>taken</code> -&gt; <code>completed</code> automatically.
+</li>
+<li><strong>Consistency:</strong> Agents always work on top of the latest “finalized” code they depend on.
+</li>
+<li><strong>Clean Main:</strong> Prevents the “unfinished work” syndrome by ensuring a logical ordering of merges.
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

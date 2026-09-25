@@ -1,0 +1,891 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - OS Model API Reference</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="Complete API reference for the Entity-Component-System (ECS) based OS architecture. ## Table of Contents 1. [Core ECS Types](#core-ecs-types) 2. [World Operations](#world-operations) 3. [Agent Operations](#agent-operations) 4. [Toolbox Oper"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - OS Model API Reference"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Complete API reference for the Entity-Component-System (ECS) based OS architecture. ## Table of Contents 1. [Core ECS Types](#core-ecs-types) 2. [World Operations](#world-operations) 3. [Agent Operations](#agent-operations) 4. [Toolbox Oper"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - OS Model API Reference"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html"><meta property="og:description" content="Complete API reference for the Entity-Component-System (ECS) based OS architecture. ## Table of Contents 1. [Core ECS Types](#core-ecs-types) 2. [World Operations](#world-operations) 3. [Agent Operations](#agent-operations) 4. [Toolbox Oper"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-OS-API.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-OS-API.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"Complete API reference for the Entity-Component-System (ECS) based OS architecture. ## Table of Contents 1. [Core ECS Types](#core-ecs-types) 2. [World Operations](#world-operations) 3. [Agent Operations](#agent-operations) 4. [Toolbox Oper","headline":"OS Model API Reference","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>OS Model API Reference</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 652 words, 50 code snippets, 9 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-MIGRATION-OS.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">7/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-durable-workflows-howto.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/OS-API.md"><code>documentation/OS-API.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="os-model-api-reference">OS Model API Reference</h2>
+<p>Complete API reference for the Entity-Component-System (ECS) based OS architecture.</p>
+<h3 id="table-of-contents">Table of Contents</h3>
+<ol>
+<li><a href="#core-ecs-types">Core ECS Types</a>
+</li>
+<li><a href="#world-operations">World Operations</a>
+</li>
+<li><a href="#agent-operations">Agent Operations</a>
+</li>
+<li><a href="#toolbox-operations">Toolbox Operations</a>
+</li>
+<li><a href="#resource-management">Resource Management</a>
+</li>
+<li><a href="#concurrent-access">Concurrent Access</a>
+</li>
+<li><a href="#conversation-tracking">Conversation Tracking</a>
+</li>
+<li><a href="#os-events">OS Events</a>
+</li>
+<li><a href="#persistence-layer">Persistence Layer</a>
+</li>
+</ol>
+<hr />
+<h3 id="core-ecs-types">Core ECS Types</h3>
+<h4 id="entityid">EntityId</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Unique identifier for any entity in the system.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">EntityId</span> <span class="ot">=</span> <span class="dt">EntityId</span> {<span class="ot"> unEntityId ::</span> <span class="dt">UUID</span> }</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Eq</span>, <span class="dt">Ord</span>, <span class="dt">Show</span>, <span class="dt">Hashable</span>, <span class="dt">FromJSON</span>, <span class="dt">ToJSON</span>)</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Generate a new unique EntityId.</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">newEntityId ::</span> <span class="dt">IO</span> <span class="dt">EntityId</span></span></code></pre></div></div><p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a>eid1 <span class="ot">&lt;-</span> newEntityId  <span class="co">-- Unique ID</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>eid2 <span class="ot">&lt;-</span> newEntityId  <span class="co">-- Different unique ID</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>assert (eid1 <span class="op">/=</span> eid2)  <span class="co">-- True</span></span></code></pre></div></div><h4 id="phantom-typed-entity-ids">Phantom-Typed Entity IDs</h4>
+<p>Phantom types provide compile-time safety for entity operations:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">AgentId</span> <span class="ot">=</span> <span class="dt">AgentId</span> {<span class="ot"> unAgentId ::</span> <span class="dt">EntityId</span> }</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ToolboxId</span> <span class="ot">=</span> <span class="dt">ToolboxId</span> {<span class="ot"> unToolboxId ::</span> <span class="dt">EntityId</span> }</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ConversationId</span> <span class="ot">=</span> <span class="dt">ConversationId</span> {<span class="ot"> unConversationId ::</span> <span class="dt">EntityId</span> }</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">TurnId</span> <span class="ot">=</span> <span class="dt">TurnId</span> {<span class="ot"> unTurnId ::</span> <span class="dt">EntityId</span> }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ToolCallId</span> <span class="ot">=</span> <span class="dt">ToolCallId</span> {<span class="ot"> unToolCallId ::</span> <span class="dt">EntityId</span> }</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ResourceId</span> <span class="ot">=</span> <span class="dt">ResourceId</span> {<span class="ot"> unResourceId ::</span> <span class="dt">EntityId</span> }</span></code></pre></div></div><p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a>eid <span class="ot">&lt;-</span> newEntityId</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> agentId <span class="ot">=</span> <span class="dt">AgentId</span> eid</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> toolboxId <span class="ot">=</span> <span class="dt">ToolboxId</span> eid  <span class="co">-- Same underlying ID, different type</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- Type-safe: Can&#39;t mix up IDs</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>useAgent agentId       <span class="co">-- OK</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>useAgent toolboxId     <span class="co">-- Compile error!</span></span></code></pre></div></div><h4 id="component-typeclass">Component Typeclass</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Type-level identifier for component types.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ComponentTypeId</span> <span class="ot">=</span> <span class="dt">ComponentTypeId</span> {<span class="ot"> unComponentTypeId ::</span> <span class="dt">Int</span> }</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | A component is any data type that can be attached to an entity.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> <span class="dt">Component</span> a <span class="kw">where</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">    componentId ::</span> <span class="dt">Proxy</span> a <span class="ot">-&gt;</span> <span class="dt">ComponentTypeId</span></span></code></pre></div></div><p><strong>Creating a custom component:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">MyComponent</span> <span class="ot">=</span> <span class="dt">MyComponent</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> mcValue ::</span> <span class="dt">Int</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mcName ::</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">MyComponent</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">instance</span> <span class="dt">ToJSON</span> <span class="dt">MyComponent</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- Choose a unique ID (check existing IDs to avoid collisions)</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">instance</span> <span class="dt">Component</span> <span class="dt">MyComponent</span> <span class="kw">where</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    componentId _ <span class="ot">=</span> <span class="dt">ComponentTypeId</span> <span class="dv">100</span></span></code></pre></div></div><hr />
+<h3 id="world-operations">World Operations</h3>
+<h4 id="creating-and-managing-worlds">Creating and Managing Worlds</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | The world contains all component stores.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">World</span> <span class="ot">=</span> <span class="dt">World</span> {<span class="ot"> componentStores ::</span> <span class="dt">HashMap</span> <span class="dt">ComponentTypeId</span> (<span class="dt">TVar</span> <span class="dt">Any</span>) }</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Create an empty world.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">newWorld ::</span> <span class="dt">STM</span> <span class="dt">World</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Register a component store for a component type.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">registerComponentStore ::</span> (<span class="dt">Component</span> a, <span class="dt">Typeable</span> a) <span class="ot">=&gt;</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">Proxy</span> a <span class="ot">-&gt;</span> <span class="dt">STM</span> <span class="dt">World</span></span></code></pre></div></div><p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">Data.Proxy</span> (<span class="dt">Proxy</span>(<span class="op">..</span>))</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create world with agent components</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>world <span class="ot">&lt;-</span> atomically <span class="op">$</span> <span class="kw">do</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    w <span class="ot">&lt;-</span> newWorld</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    w&#39; <span class="ot">&lt;-</span> registerComponentStore w (<span class="dt">Proxy</span> <span class="op">@</span><span class="dt">AgentConfig</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    w&#39;&#39; <span class="ot">&lt;-</span> registerComponentStore w&#39; (<span class="dt">Proxy</span> <span class="op">@</span><span class="dt">AgentState</span>)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">pure</span> w&#39;&#39;</span></code></pre></div></div><h4 id="entity-operations">Entity Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Create a new entity.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">createEntity ::</span> <span class="dt">IO</span> <span class="dt">EntityId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Check if an entity exists (has any component).</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">entityExists ::</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">STM</span> <span class="dt">Bool</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get all entities with a specific component.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">allEntitiesWithComponent ::</span> (<span class="dt">Component</span> a, <span class="dt">Typeable</span> a) <span class="ot">=&gt;</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">STM</span> [<span class="dt">EntityId</span>]</span></code></pre></div></div><p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a>eid <span class="ot">&lt;-</span> createEntity</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>exists <span class="ot">&lt;-</span> atomically <span class="op">$</span> entityExists world eid  <span class="co">-- False</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> setComponent world eid (<span class="dt">AgentConfig</span> <span class="st">&quot;test&quot;</span> <span class="op">...</span>)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>exists&#39; <span class="ot">&lt;-</span> atomically <span class="op">$</span> entityExists world eid  <span class="co">-- True</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find all agents</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>agentIds <span class="ot">&lt;-</span> atomically <span class="op">$</span> allEntitiesWithComponent <span class="op">@</span><span class="dt">AgentConfig</span> world</span></code></pre></div></div><h4 id="component-operations">Component Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get a component for an entity.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">getComponent ::</span> (<span class="dt">Component</span> a, <span class="dt">Typeable</span> a) <span class="ot">=&gt;</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">STM</span> (<span class="dt">Maybe</span> a)</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Set a component for an entity.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">setComponent ::</span> (<span class="dt">Component</span> a, <span class="dt">Typeable</span> a) <span class="ot">=&gt;</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> a <span class="ot">-&gt;</span> <span class="dt">STM</span> ()</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Modify a component for an entity.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">modifyComponent ::</span> (<span class="dt">Component</span> a, <span class="dt">Typeable</span> a) <span class="ot">=&gt;</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> (a <span class="ot">-&gt;</span> a) <span class="ot">-&gt;</span> <span class="dt">STM</span> ()</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Remove a component from an entity.</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">removeComponent ::</span> (<span class="dt">Component</span> a, <span class="dt">Typeable</span> a) <span class="ot">=&gt;</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">STM</span> ()</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Check if an entity has a specific component.</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ot">hasComponent ::</span> (<span class="dt">Component</span> a, <span class="dt">Typeable</span> a) <span class="ot">=&gt;</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">STM</span> <span class="dt">Bool</span></span></code></pre></div></div><p><strong>Example:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Set component</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> setComponent world eid <span class="dt">AgentConfig</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    { agentName <span class="ot">=</span> <span class="st">&quot;my-agent&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    , agentModel <span class="ot">=</span> <span class="dt">ModelConfig</span> <span class="st">&quot;openai&quot;</span> <span class="st">&quot;...&quot;</span> <span class="st">&quot;gpt-4&quot;</span> <span class="st">&quot;key1&quot;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    , agentSystemPrompt <span class="ot">=</span> <span class="st">&quot;You are helpful&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    , agentToolboxBindings <span class="ot">=</span> []</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- Get component</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>mConfig <span class="ot">&lt;-</span> atomically <span class="op">$</span> getComponent <span class="op">@</span><span class="dt">AgentConfig</span> world eid</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">case</span> mConfig <span class="kw">of</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Nothing</span> <span class="ot">-&gt;</span> <span class="fu">putStrLn</span> <span class="st">&quot;No agent config&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Just</span> config <span class="ot">-&gt;</span> <span class="fu">putStrLn</span> <span class="op">$</span> <span class="st">&quot;Agent: &quot;</span> <span class="op">++</span> <span class="fu">show</span> config<span class="op">.</span>agentName</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="co">-- Modify component</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> modifyComponent <span class="op">@</span><span class="dt">AgentConfig</span> world eid <span class="op">$</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="op">\</span>c <span class="ot">-&gt;</span> c { agentName <span class="ot">=</span> <span class="st">&quot;renamed-agent&quot;</span> }</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co">-- Check and remove</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>hasIt <span class="ot">&lt;-</span> atomically <span class="op">$</span> hasComponent <span class="op">@</span><span class="dt">AgentConfig</span> world eid</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>when hasIt <span class="op">$</span> atomically <span class="op">$</span> removeComponent <span class="op">@</span><span class="dt">AgentConfig</span> world eid</span></code></pre></div></div><hr />
+<h3 id="agent-operations">Agent Operations</h3>
+<h4 id="agent-configuration">Agent Configuration</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentConfig</span> <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> agentName ::</span> <span class="dt">Text</span>                    <span class="co">-- ^ Human-readable name</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentModel ::</span> <span class="dt">ModelConfig</span>            <span class="co">-- ^ LLM configuration</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentSystemPrompt ::</span> <span class="dt">Text</span>            <span class="co">-- ^ System instructions</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentToolboxBindings ::</span> [<span class="dt">ToolboxBindingSpec</span>]  <span class="co">-- ^ Bound toolboxes</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ModelConfig</span> <span class="ot">=</span> <span class="dt">ModelConfig</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> modelFlavor ::</span> <span class="dt">Text</span>      <span class="co">-- ^ Provider (openai, mistral, etc.)</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> modelUrl ::</span> <span class="dt">Text</span>         <span class="co">-- ^ API endpoint</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> modelName ::</span> <span class="dt">Text</span>        <span class="co">-- ^ Model identifier</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> modelApiKeyId ::</span> <span class="dt">Text</span>    <span class="co">-- ^ Key reference</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><h4 id="agent-state">Agent State</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentState</span> <span class="ot">=</span> <span class="dt">AgentState</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> agentStatus ::</span> <span class="dt">AgentStatus</span>           <span class="co">-- ^ Current status</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentCurrentConversation ::</span> <span class="dt">Maybe</span> <span class="dt">ConversationId</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> agentCreatedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AgentStatus</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">AgentIdle</span>                           <span class="co">-- ^ Available for work</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AgentBusy</span> <span class="dt">TurnId</span>                    <span class="co">-- ^ Executing a turn</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AgentError</span> <span class="dt">Text</span>                     <span class="co">-- ^ Error state</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><p><strong>Example: Creating an Agent</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">createAgent ::</span> <span class="dt">OS</span> <span class="ot">-&gt;</span> <span class="dt">AgentConfig</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">AgentId</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>createAgent os config <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    eid <span class="ot">&lt;-</span> createEntity</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    now <span class="ot">&lt;-</span> getCurrentTime</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    atomically <span class="op">$</span> <span class="kw">do</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        setComponent (osWorld os) eid config</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        setComponent (osWorld os) eid <span class="dt">AgentState</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>            { agentStatus <span class="ot">=</span> <span class="dt">AgentIdle</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>            , agentCurrentConversation <span class="ot">=</span> <span class="dt">Nothing</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>            , agentCreatedAt <span class="ot">=</span> now</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>            }</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">pure</span> <span class="op">$</span> <span class="dt">AgentId</span> eid</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- Usage</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> config <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    { agentName <span class="ot">=</span> <span class="st">&quot;coder-agent&quot;</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    , agentModel <span class="ot">=</span> <span class="dt">ModelConfig</span> <span class="st">&quot;openai&quot;</span> <span class="st">&quot;https://api.openai.com/v1&quot;</span> <span class="st">&quot;gpt-4&quot;</span> <span class="st">&quot;openai-key&quot;</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    , agentSystemPrompt <span class="ot">=</span> <span class="st">&quot;You are a helpful coding assistant&quot;</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    , agentToolboxBindings <span class="ot">=</span> []</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>agentId <span class="ot">&lt;-</span> createAgent os config</span></code></pre></div></div><hr />
+<h3 id="toolbox-operations">Toolbox Operations</h3>
+<h4 id="toolbox-configuration">Toolbox Configuration</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolboxConfig</span> <span class="ot">=</span> <span class="dt">ToolboxConfig</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> toolboxName ::</span> <span class="dt">Text</span>           <span class="co">-- ^ Human-readable name</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolboxType ::</span> <span class="dt">ToolboxType</span>    <span class="co">-- ^ Type of toolbox</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolboxSettings ::</span> <span class="dt">Value</span>      <span class="co">-- ^ Type-specific settings</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolboxType</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ToolboxTypeBash</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxTypeMCP</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxTypeOpenAPI</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxTypePostgREST</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxTypeSqlite</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxTypeSystem</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxTypeDeveloper</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxTypeLua</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxTypeSkills</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><h4 id="toolbox-state">Toolbox State</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolboxState</span> <span class="ot">=</span> <span class="dt">ToolboxState</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> toolboxScope ::</span> <span class="dt">ResourceScope</span>     <span class="co">-- ^ Resource lifetime scope</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolboxStatus ::</span> <span class="dt">ToolboxStatus</span>    <span class="co">-- ^ Current status</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolboxResourceRef ::</span> <span class="dt">Maybe</span> <span class="dt">ResourceId</span>  <span class="co">-- ^ Associated resource</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolboxStatus</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ToolboxInitializing</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxReady</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxError</span> <span class="dt">Text</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxDisposed</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><h4 id="resource-scope">Resource Scope</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ResourceScope</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ScopeGlobal</span>                       <span class="co">-- ^ Global/program scope</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ScopeAgent</span> <span class="dt">AgentId</span>                <span class="co">-- ^ Per-agent scope</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ScopeConversation</span> <span class="dt">ConversationId</span>  <span class="co">-- ^ Per-conversation scope</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><p><strong>Example: Creating Toolboxes</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create a bash toolbox</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> bashConfig <span class="ot">=</span> <span class="dt">ToolboxConfig</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    { toolboxName <span class="ot">=</span> <span class="st">&quot;bash-tools&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    , toolboxType <span class="ot">=</span> <span class="dt">ToolboxTypeBash</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    , toolboxSettings <span class="ot">=</span> object [<span class="st">&quot;directory&quot;</span> <span class="op">.=</span> <span class="st">&quot;./tools&quot;</span>]</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>bashId <span class="ot">&lt;-</span> createToolbox os bashConfig</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create a SQLite toolbox</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> sqliteConfig <span class="ot">=</span> <span class="dt">ToolboxConfig</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    { toolboxName <span class="ot">=</span> <span class="st">&quot;memory-db&quot;</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    , toolboxType <span class="ot">=</span> <span class="dt">ToolboxTypeSqlite</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    , toolboxSettings <span class="ot">=</span> object </span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        [ <span class="st">&quot;path&quot;</span> <span class="op">.=</span> <span class="st">&quot;./memory.db&quot;</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        , <span class="st">&quot;access&quot;</span> <span class="op">.=</span> <span class="st">&quot;readwrite&quot;</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        ]</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>sqliteId <span class="ot">&lt;-</span> createToolbox os sqliteConfig</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="co">-- Bind toolboxes to agent</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> agentConfig <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    { <span class="op">...</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    , agentToolboxBindings <span class="ot">=</span> </span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>        [ unToolboxId bashId</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>        , unToolboxId sqliteId</span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>        ]</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><hr />
+<h3 id="resource-management">Resource Management</h3>
+<h4 id="resource-types">Resource Types</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ResourceType</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">SqliteResource</span> <span class="dt">SqliteConfig</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">LuaResource</span> <span class="dt">LuaConfig</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">HttpResource</span> <span class="dt">HttpConfig</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">CustomResource</span> <span class="dt">Text</span> <span class="dt">Value</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ResourceHandle</span> <span class="ot">=</span> <span class="dt">ResourceHandle</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> handleId ::</span> <span class="dt">ResourceId</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> handleCleanup ::</span> <span class="dt">IO</span> ()</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> handleAccess ::</span> (<span class="dt">ResourceAccessor</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> a) <span class="ot">-&gt;</span> <span class="dt">IO</span> a</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ResourceInfo</span> <span class="ot">=</span> <span class="dt">ResourceInfo</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> resourceId ::</span> <span class="dt">ResourceId</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resourceScope ::</span> <span class="dt">ResourceScope</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resourceType ::</span> <span class="dt">ResourceType</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resourceCreatedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="resource-context">Resource Context</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ResourceContext</span> <span class="ot">=</span> <span class="dt">ResourceContext</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> contextScope ::</span> [<span class="dt">ScopeLevel</span>]      <span class="co">-- ^ Active scope path</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> contextRegistry ::</span> <span class="dt">ResourceRegistry</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ScopeLevel</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ProgramScope</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AgentScope</span> <span class="dt">AgentId</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxScope</span> <span class="dt">ToolboxId</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ConversationScope</span> <span class="dt">ConversationId</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TurnScope</span> <span class="dt">TurnId</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolCallScope</span> <span class="dt">ToolCallId</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span></code></pre></div></div><h4 id="resource-operations">Resource Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Create a new resource.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">createResource ::</span> </span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">ResourceContext</span> <span class="ot">-&gt;</span> </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">ResourceType</span> <span class="ot">-&gt;</span> </span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    (<span class="dt">ResourceId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">ResourceHandle</span>) <span class="ot">-&gt;</span> </span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">IO</span> <span class="dt">ResourceId</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Cleanup all resources in a scope.</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ot">cleanupScope ::</span> <span class="dt">ResourceRegistry</span> <span class="ot">-&gt;</span> <span class="dt">ScopeLevel</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Check if a resource is valid in given scopes.</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ot">isResourceValid ::</span> <span class="dt">ResourceScope</span> <span class="ot">-&gt;</span> [<span class="dt">ScopeLevel</span>] <span class="ot">-&gt;</span> <span class="dt">Bool</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Access a resource with a function.</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="ot">withResource ::</span> <span class="dt">ResourceRegistry</span> <span class="ot">-&gt;</span> <span class="dt">ResourceId</span> <span class="ot">-&gt;</span> (<span class="dt">ResourceAccessor</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> a) <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> a)</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get total resource count.</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="ot">getResourceCount ::</span> <span class="dt">ResourceRegistry</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">Int</span></span></code></pre></div></div><p><strong>Example: Resource Lifecycle</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Resources</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create registry and context</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>registry <span class="ot">&lt;-</span> atomically newResourceRegistry</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> ctx <span class="ot">=</span> <span class="dt">ResourceContext</span> [<span class="dt">ProgramScope</span>] registry</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create SQLite resource</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>rid <span class="ot">&lt;-</span> createResource ctx (<span class="dt">SqliteResource</span> config) <span class="op">$</span> <span class="op">\</span>rid <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    conn <span class="ot">&lt;-</span> openConnection config</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">pure</span> <span class="dt">ResourceHandle</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        { handleId <span class="ot">=</span> rid</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        , handleCleanup <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>            <span class="fu">putStrLn</span> <span class="st">&quot;Closing SQLite connection&quot;</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>            closeConnection conn</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        , handleAccess <span class="ot">=</span> <span class="op">\</span>f <span class="ot">-&gt;</span> f (<span class="dt">SqliteAccessor</span> conn)</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="co">-- Use the resource</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> withResource registry rid <span class="op">$</span> <span class="op">\</span>accessor <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> accessor <span class="kw">of</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>        <span class="dt">SqliteAccessor</span> conn <span class="ot">-&gt;</span> queryDatabase conn <span class="st">&quot;SELECT * FROM table&quot;</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="co">-- Later, cleanup all agent resources</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>cleanupScope registry (<span class="dt">AgentScope</span> agentId)</span></code></pre></div></div><hr />
+<h3 id="concurrent-access">Concurrent Access</h3>
+<h4 id="access-patterns">Access Patterns</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AccessPattern</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ExclusiveAccess</span>      <span class="co">-- ^ Single accessor (TMVar)</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ReadWriteAccess</span>      <span class="co">-- ^ Multiple readers, single writer (RWLock)</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">PoolAccess</span> <span class="dt">Int</span>       <span class="co">-- ^ Bounded pool (TBQueue)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">StatelessAccess</span>      <span class="co">-- ^ No synchronization needed</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AccessControl</span> <span class="ot">=</span> <span class="dt">AccessControl</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> accessPattern ::</span> <span class="dt">AccessPattern</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> accessTimeout ::</span> <span class="dt">Maybe</span> <span class="dt">NominalDiffTime</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="resource-monad">Resource Monad</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Monad for resource operations.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">ResourceM</span> a <span class="ot">=</span> <span class="dt">ResourceM</span> {<span class="ot"> unResourceM ::</span> <span class="dt">ReaderT</span> <span class="dt">ResourceContext</span> (<span class="dt">ExceptT</span> <span class="dt">ResourceError</span> <span class="dt">IO</span>) a }</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Functor</span>, <span class="dt">Applicative</span>, <span class="dt">Monad</span>, <span class="dt">MonadIO</span>)</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Run a ResourceM computation.</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">runResourceM ::</span> <span class="dt">ResourceContext</span> <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">ResourceError</span> a)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Resource errors.</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ResourceError</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ResourceNotFound</span> <span class="dt">ResourceId</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ResourceBusy</span> <span class="dt">ResourceId</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ResourceClosed</span> <span class="dt">ResourceId</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ResourceAccessTimeout</span> <span class="dt">ResourceId</span> <span class="dt">NominalDiffTime</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ResourceInvalidAccess</span> <span class="dt">ResourceId</span> <span class="dt">Text</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span></code></pre></div></div><h4 id="access-operations">Access Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Execute with exclusive access.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">withExclusive ::</span> <span class="dt">ResourceId</span> <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Execute with read access.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">withRead ::</span> <span class="dt">ResourceId</span> <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Execute with write access.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">withWrite ::</span> <span class="dt">ResourceId</span> <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Execute with pooled resource.</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">withPooled ::</span> <span class="dt">ResourceId</span> <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Execute without synchronization.</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ot">withStateless ::</span> <span class="dt">ResourceId</span> <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a</span></code></pre></div></div><p><strong>Example: Concurrent Access Patterns</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Concurrent</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- SQLite with WAL mode (supports concurrent reads)</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>sqliteRid <span class="ot">&lt;-</span> createSqliteResource ctx config <span class="dt">True</span>  <span class="co">-- WAL mode enabled</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Multiple concurrent reads (safe)</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>forConcurrently_ [<span class="dv">1</span><span class="op">..</span><span class="dv">10</span>] <span class="op">$</span> <span class="op">\</span>_ <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    result <span class="ot">&lt;-</span> runResourceM ctx <span class="op">$</span> withRead sqliteRid <span class="op">$</span> <span class="kw">do</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        queryData</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">print</span> result</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co">-- Exclusive write (blocks readers)</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>runResourceM ctx <span class="op">$</span> withWrite sqliteRid <span class="op">$</span> <span class="kw">do</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    modifyData</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- Lua interpreter (requires exclusive access)</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>luaRid <span class="ot">&lt;-</span> createLuaResource ctx config</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>result <span class="ot">&lt;-</span> runResourceM ctx <span class="op">$</span> withExclusive luaRid <span class="op">$</span> <span class="kw">do</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    runScript <span class="st">&quot;return 1 + 1&quot;</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="co">-- HTTP connection pool</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>httpRid <span class="ot">&lt;-</span> createHttpPool ctx <span class="dv">10</span>  <span class="co">-- 10 connections</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>results <span class="ot">&lt;-</span> forConcurrently urls <span class="op">$</span> <span class="op">\</span>url <span class="ot">-&gt;</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    runResourceM ctx <span class="op">$</span> withPooled httpRid <span class="op">$</span> <span class="kw">do</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>        fetchUrl url</span></code></pre></div></div><h4 id="initialization-helpers">Initialization Helpers</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Initialize access control.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">initAccessControl ::</span> <span class="dt">AccessPattern</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">NominalDiffTime</span> <span class="ot">-&gt;</span> <span class="dt">AccessControl</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Initialize SQLite access (WAL mode flag).</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">initSqliteAccess ::</span> <span class="dt">Bool</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">SqliteAccess</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Initialize Lua access.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">initLuaAccess ::</span> <span class="dt">IO</span> <span class="dt">LuaAccess</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Initialize HTTP access.</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">initHttpAccess ::</span> <span class="dt">Int</span> <span class="ot">-&gt;</span> <span class="dt">ResourceId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">HttpAccess</span></span></code></pre></div></div><hr />
+<h3 id="conversation-tracking">Conversation Tracking</h3>
+<h4 id="conversation-components">Conversation Components</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ConversationConfig</span> <span class="ot">=</span> <span class="dt">ConversationConfig</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> conversationTitle ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationMetadata ::</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">Value</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ConversationState</span> <span class="ot">=</span> <span class="dt">ConversationState</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> conversationAgentId ::</span> <span class="dt">AgentId</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationStatus ::</span> <span class="dt">ConversationStatus</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationStartedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> conversationLastActivity ::</span> <span class="dt">TVar</span> <span class="dt">UTCTime</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Generic</span>)</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ConversationStatus</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ConversationActive</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ConversationPaused</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ConversationCompleted</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ConversationError</span> <span class="dt">Text</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><h4 id="turn-components">Turn Components</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">TurnConfig</span> <span class="ot">=</span> <span class="dt">TurnConfig</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> turnConversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> turnParentTurnId ::</span> <span class="dt">Maybe</span> <span class="dt">TurnId</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">TurnState</span> <span class="ot">=</span> <span class="dt">TurnState</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> turnStatus ::</span> <span class="dt">TurnStatus</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> turnStartedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> turnCompletedAt ::</span> <span class="dt">Maybe</span> <span class="dt">UTCTime</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">TurnStatus</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">TurnStarting</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TurnProcessing</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TurnWaitingForTools</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TurnCompleted</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TurnError</span> <span class="dt">Text</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><h4 id="tool-call-components">Tool Call Components</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallConfig</span> <span class="ot">=</span> <span class="dt">ToolCallConfig</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> toolCallTurnId ::</span> <span class="dt">TurnId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolCallParentId ::</span> <span class="dt">Maybe</span> <span class="dt">ToolCallId</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolCallName ::</span> <span class="dt">Text</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolCallInput ::</span> <span class="dt">Value</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallState</span> <span class="ot">=</span> <span class="dt">ToolCallState</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> toolCallStatus ::</span> <span class="dt">ToolCallStatus</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolCallResult ::</span> <span class="dt">Maybe</span> <span class="dt">Value</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolCallStartedAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> toolCallCompletedAt ::</span> <span class="dt">Maybe</span> <span class="dt">UTCTime</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallStatus</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ToolCallPending</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolCallExecuting</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolCallCompleted</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolCallFailed</span> <span class="dt">Text</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><h4 id="lineage-tracking">Lineage Tracking</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Lineage</span> <span class="ot">=</span> <span class="dt">Lineage</span> {<span class="ot"> unLineage ::</span> [<span class="dt">LineageFrame</span>] }</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">LineageFrame</span> <span class="ot">=</span> <span class="dt">LineageFrame</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> frameType ::</span> <span class="dt">FrameType</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> frameEntityId ::</span> <span class="dt">EntityId</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> frameTimestamp ::</span> <span class="dt">UTCTime</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">FrameType</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ProgramFrame</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AgentFrame</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolboxFrame</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ConversationFrame</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">TurnFrame</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolCallFrame</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Enum</span>, <span class="dt">Bounded</span>)</span></code></pre></div></div><h4 id="lineage-operations">Lineage Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Empty lineage.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">emptyLineage ::</span> <span class="dt">Lineage</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Push a frame onto the lineage.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">pushLineage ::</span> <span class="dt">FrameType</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">UTCTime</span> <span class="ot">-&gt;</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> <span class="dt">Lineage</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get lineage depth.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">lineageDepth ::</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> <span class="dt">Int</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get the most recent frame.</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">lineageHead ::</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">LineageFrame</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get the oldest frame.</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ot">lineageRoot ::</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">LineageFrame</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Build context from lineage.</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ot">buildLineageContext ::</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> <span class="dt">LineageContext</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Find frames by type.</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="ot">findFramesByType ::</span> <span class="dt">FrameType</span> <span class="ot">-&gt;</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> [<span class="dt">LineageFrame</span>]</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Check if in specific context.</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="ot">isInConversation ::</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="ot">isInTurn ::</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="ot">currentFrameType ::</span> <span class="dt">Lineage</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">FrameType</span></span></code></pre></div></div><p><strong>Example: Conversation and Lineage</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Conversation</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create conversation</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>convId <span class="ot">&lt;-</span> createEntity</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>now <span class="ot">&lt;-</span> getCurrentTime</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>lastActivity <span class="ot">&lt;-</span> newTVarIO now</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> <span class="kw">do</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    setComponent world convId <span class="dt">ConversationConfig</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        { conversationTitle <span class="ot">=</span> <span class="dt">Just</span> <span class="st">&quot;My Chat&quot;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        , conversationMetadata <span class="ot">=</span> Map.empty</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    setComponent world convId <span class="dt">ConversationState</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        { conversationAgentId <span class="ot">=</span> agentId</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        , conversationStatus <span class="ot">=</span> <span class="dt">ConversationActive</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        , conversationStartedAt <span class="ot">=</span> now</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        , conversationLastActivity <span class="ot">=</span> lastActivity</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create turn</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>turnId <span class="ot">&lt;-</span> createEntity</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> <span class="kw">do</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    setComponent world turnId <span class="dt">TurnConfig</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>        { turnConversationId <span class="ot">=</span> convId</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>        , turnParentTurnId <span class="ot">=</span> <span class="dt">Nothing</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    setComponent world turnId <span class="dt">TurnState</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>        { turnStatus <span class="ot">=</span> <span class="dt">TurnStarting</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>        , turnStartedAt <span class="ot">=</span> now</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>        , turnCompletedAt <span class="ot">=</span> <span class="dt">Nothing</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a><span class="co">-- Build lineage</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> lineage <span class="ot">=</span> pushLineage <span class="dt">ConversationFrame</span> (unConversationId convId) now <span class="op">$</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>              pushLineage <span class="dt">TurnFrame</span> (unTurnId turnId) now <span class="op">$</span></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>              emptyLineage</span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a><span class="co">-- Check depth</span></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span> <span class="op">$</span> lineageDepth lineage  <span class="co">-- 2</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find conversation frames</span></span>
+<span id="42"><a href="#42" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> convFrames <span class="ot">=</span> findFramesByType <span class="dt">ConversationFrame</span> lineage</span></code></pre></div></div><hr />
+<h3 id="os-events">OS Events</h3>
+<p>Subcall lifecycle and tool-call activity are reported through a single
+emission mechanism, <code>OSEmission</code> (<code>System.Agents.OS.Events</code>), and the
+session runner (<code>System.Agents.Host.Runner</code>) is the mechanism’s one
+consumer that matters in practice: it turns each <code>OSEmission</code> into an
+<code>EventBody</code> (<code>System.Agents.Protocol</code>) and publishes it on the owning
+session’s event stream, which every runner client (the in-process TUI, the
+HTTP/SSE server) subscribes to. There is no more <code>OSEvent</code> type or
+<code>ctxEventQueue</code>; <code>System.Agents.Session.Base.Agent.ctxEmit</code> /
+<code>System.Agents.Tools.Context.ToolExecutionContext.ctxEmit</code> is the one hook
+(see <code>todos/os-as-standalone-server.md</code>, Phase 2c and Phase 3c).</p>
+<h4 id="osemission-type">OSEmission Type</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | The single in-library event emission type.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">OSEmission</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">EmitSubcallStarted</span> <span class="dt">SessionId</span> <span class="dt">SessionId</span> <span class="dt">Text</span> <span class="dt">Int</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>      <span class="co">-- ^ Parent session id, child session id, the helper&#39;s slug, call depth.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">EmitSubcallCompleted</span> <span class="dt">SessionId</span> (<span class="dt">Maybe</span> <span class="dt">Text</span>)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="co">-- ^ Child session id, the subcall&#39;s result text (when it succeeded).</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">EmitSubcallFailed</span> <span class="dt">SessionId</span> <span class="dt">Text</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>      <span class="co">-- ^ Child session id, the failure message.</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">EmitToolCallActivity</span> <span class="dt">ToolCallActivity</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">EmitError</span> <span class="dt">Text</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="co">-- ^ A hook (e.g. a before/after tool-call command hook) failed</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>      <span class="co">-- outside of the normal tool-call result path. Not a session</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>      <span class="co">-- failure: the run continues.</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>)</span></code></pre></div></div><p><code>ToolCallActivity</code> (also in <code>System.Agents.OS.Events</code>) carries a tool
+call’s session/conversation/tool-call ids, the LLM provider’s own call id
+when known, the tool name, a <code>ToolCallPhase</code> (<code>ToolCallStarted</code>,
+<code>ToolCallProgressed Value</code>, <code>ToolCallCompleted</code>, <code>ToolCallFailed Text</code>,
+<code>ToolCallCancelled</code>) and a timestamp.</p>
+<h4 id="subcall-event-lifecycle">Subcall Event Lifecycle</h4>
+<pre><code>Parent Conversation
+       │
+       ▼ triggers agent call
+┌───────────────────────────┐
+│ EmitSubcallStarted         │ ctxEmit'd when the subcall begins
+│ - parent session id        │
+│ - child session id         │
+│ - agent slug                │
+│ - depth                    │
+└──────────────┬─────────────┘
+               │
+               ▼
+        Agent execution
+               │
+               ▼ (completion)
+┌───────────────────────────┐
+│ EmitSubcallCompleted        │ ctxEmit'd on success
+│ - child session id         │
+│ - result                   │
+└─────────────────────────────┘
+               │
+               ▼ (or failure)
+┌───────────────────────────┐
+│ EmitSubcallFailed           │ ctxEmit'd on error
+│ - child session id         │
+│ - error                    │
+└─────────────────────────────┘
+</code></pre>
+<p>Phase 3c retires the old <code>OSEvent_SubcallProgress</code> (it used to carry a
+whole <code>Session</code>, snapshotted after every step, purely for the TUI’s
+benefit): there is no runner-event equivalent. Phase 5 gives a real
+sub-agent session its own <code>SessionUpdated</code> events instead, once
+<code>prompt_agent_*</code> spawns through <code>spawnSession</code> rather than running inline.</p>
+<h4 id="the-runners-event-stream">The Runner’s Event Stream</h4>
+<p><code>System.Agents.Host.Runner.toEventBody</code> is the one place that converts
+<code>OSEmission</code> into <code>Protocol.EventBody</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">toEventBody ::</span> <span class="dt">OSEmission</span> <span class="ot">-&gt;</span> <span class="dt">EventBody</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>toEventBody <span class="ot">=</span> <span class="op">\</span><span class="kw">case</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">EmitSubcallStarted</span> parent child slug depth <span class="ot">-&gt;</span> <span class="dt">SubcallStarted</span> parent child slug depth</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">EmitSubcallCompleted</span> child result <span class="ot">-&gt;</span> <span class="dt">SubcallCompleted</span> child result</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">EmitSubcallFailed</span> child msg <span class="ot">-&gt;</span> <span class="dt">SubcallFailed</span> child msg</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">EmitToolCallActivity</span> activity <span class="ot">-&gt;</span> <span class="dt">ToolCallProgressed</span> activity</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">EmitError</span> msg <span class="ot">-&gt;</span> <span class="dt">HookFailed</span> msg</span></code></pre></div></div><p><code>newAgent</code> installs <code>withEmit (emit runner sid . toEventBody)</code> on every
+root agent it builds, so every emission from that session (and its
+subcalls, which inherit <code>ctxEmit</code> the same way they inherit <code>ctxWorld</code>)
+ends up on <code>sid</code>’s own event stream, wire-encoded with <code>kind</code>
+<code>subcall.started</code> / <code>subcall.completed</code> / <code>subcall.failed</code> /
+<code>tool.progressed</code> / <code>hook.failed</code> (see <code>documentation/agents-server.md</code>’s event
+table for the full list, including the runner’s own <code>run.*</code>/<code>session.*</code>
+kinds that do not originate from <code>OSEmission</code> at all).</p>
+<h4 id="using-ctxemit-outside-a-runner">Using ctxEmit Outside a Runner</h4>
+<p>A local (non-runner) consumer that used to drain <code>ctxEventQueue</code> –
+a CLI path, a test – installs <code>System.Agents.OS.Events.queueEmitter</code>
+(or <code>newQueueEmitter</code>, which also allocates the queue) as <code>ctxEmit</code>
+instead, and reads emissions back off the queue:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Events</span> (newQueueEmitter, <span class="dt">OSEmission</span> (<span class="op">..</span>))</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>(queue, emitter) <span class="ot">&lt;-</span> newQueueEmitter</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> agent&#39; <span class="ot">=</span> agent{ctxEmit <span class="ot">=</span> <span class="dt">Just</span> emitter}</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- ... run agent&#39; ...</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>emissions <span class="ot">&lt;-</span> atomically <span class="op">$</span> flushTQueue queue</span></code></pre></div></div><h4 id="toolexecutioncontext-extensions">ToolExecutionContext Extensions</h4>
+<p>For subcall visibility, the <code>ToolExecutionContext</code> includes OS integration
+fields:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolExecutionContext</span> <span class="ot">=</span> <span class="dt">ToolExecutionContext</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    { <span class="co">-- ... existing fields ...</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxWorld ::</span> <span class="dt">Maybe</span> <span class="dt">World</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Optional OS World for ECS operations. When present, subcalls</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- can insert entities and components into the OS.</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxEmit ::</span> <span class="dt">Maybe</span> (<span class="dt">OSEmission</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ())</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Optional emission hook. When present, subcalls emit events to</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- notify a runner (or other local consumer) of their lifecycle.</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxParentConversation ::</span> <span class="dt">Maybe</span> <span class="dt">ConversationId</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Optional parent conversation ID for subcalls. When present,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- indicates this context is for a nested agent invocation.</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><p><strong>Helper Functions:</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get the subcall depth (0 if not a subcall).</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">getSubcallDepth ::</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">Int</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Check if this context represents a subcall.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">isSubcallContext ::</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Create a nested context for subcall execution.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">mkSubcallContext ::</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Maybe</span> <span class="dt">World</span> <span class="ot">-&gt;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">ConversationId</span> <span class="ot">-&gt;</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">ToolExecutionContext</span></span></code></pre></div></div><h4 id="tui-integration">TUI Integration</h4>
+<p>In the TUI, runner <code>Event</code>s are turned into <code>AppEvent</code>s by
+<code>bridgeRunnerEvents</code> (<code>System.Agents.TUI.Core</code>), which maps each
+<code>EventBody</code> kind onto its <code>AppEvent</code> counterpart – <code>subcall.started</code> /
+<code>subcall.completed</code> / <code>subcall.failed</code> / <code>tool.progressed</code> map straight
+across, translating <code>SessionId</code> to <code>ConversationId</code> (they are the same
+UUID). <code>hook.failed</code> has no dedicated view yet (it is not a session
+failure, so it is not surfaced as one); see <code>documentation/tui.md</code>.</p>
+<hr />
+<h3 id="persistence-layer">Persistence Layer</h3>
+<h4 id="backend-types">Backend Types</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">PersistenceHandle</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">InMemoryHandle</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">FileHandle</span> <span class="dt">FilePersistenceBackend</span> <span class="dt">FilePersistence</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SqliteHandle</span> <span class="dt">SqliteBackend</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">PersistenceBackendType</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">InMemory</span>                           <span class="co">-- ^ No persistence</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">FileBackendType</span> <span class="dt">FilePath</span> <span class="dt">FileFormat</span> <span class="co">-- ^ File-based</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SqliteBackendType</span> <span class="dt">FilePath</span>          <span class="co">-- ^ SQLite</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">PostgresBackendType</span> <span class="dt">Text</span>            <span class="co">-- ^ PostgreSQL</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">FileFormat</span> <span class="ot">=</span> <span class="dt">JSONFormat</span> <span class="op">|</span> <span class="dt">YAMLFormat</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span></code></pre></div></div><h4 id="core-operations">Core Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Create a persistence backend.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">createPersistenceBackend ::</span> <span class="dt">PersistenceBackendType</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">PersistenceHandle</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Close a persistence backend.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">closePersistenceBackend ::</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Persist a component.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">persist ::</span> (<span class="dt">Persistable</span> a, <span class="dt">ToJSON</span> a) <span class="ot">=&gt;</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> a <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Load a component.</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">load ::</span> (<span class="dt">Persistable</span> a, <span class="dt">FromJSON</span> a) <span class="ot">=&gt;</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> a)</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Query entities by component type.</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ot">query ::</span> (<span class="dt">Persistable</span> a) <span class="ot">=&gt;</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">EntityQuery</span> a <span class="ot">-&gt;</span> <span class="dt">IO</span> [<span class="dt">EntityId</span>]</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Delete an entity and all components.</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ot">delete ::</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span></code></pre></div></div><h4 id="persistable-typeclass">Persistable Typeclass</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> <span class="dt">Persistable</span> a <span class="kw">where</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">    persistenceTable ::</span> <span class="dt">Proxy</span> a <span class="ot">-&gt;</span> <span class="dt">Text</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">    persistenceKey ::</span> <span class="dt">Proxy</span> a <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ot">    persistenceComponentType ::</span> <span class="dt">Proxy</span> a <span class="ot">-&gt;</span> <span class="dt">ComponentType</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Example instance</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">instance</span> <span class="dt">Persistable</span> <span class="dt">AgentConfig</span> <span class="kw">where</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    persistenceTable _ <span class="ot">=</span> <span class="st">&quot;agents&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    persistenceKey _ eid <span class="ot">=</span> <span class="st">&quot;agent:&quot;</span> <span class="op">&lt;&gt;</span> entityIdToText eid</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    persistenceComponentType _ <span class="ot">=</span> componentTypeIdToType (<span class="dt">ComponentTypeId</span> <span class="dv">1</span>)</span></code></pre></div></div><h4 id="event-logging">Event Logging</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Persist an OS event.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">persistOSEvent ::</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Value</span> <span class="ot">-&gt;</span> <span class="dt">Maybe</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get events for an entity.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">getEvents ::</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> [(<span class="dt">UTCTime</span>, <span class="dt">Text</span>, <span class="dt">Value</span>)]</span></code></pre></div></div><h4 id="specialized-queries">Specialized Queries</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get messages for a conversation.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">getConversationMessages ::</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> [(<span class="dt">UTCTime</span>, <span class="dt">Text</span>, <span class="dt">Text</span>, <span class="dt">Maybe</span> <span class="dt">Value</span>)]</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get tool calls for a turn.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">getTurnToolCalls ::</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> [(<span class="dt">Text</span>, <span class="dt">Text</span>, <span class="dt">Value</span>, <span class="dt">Maybe</span> <span class="dt">Value</span>, <span class="dt">Text</span>)]</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Get nested tool calls.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">getNestedToolCalls ::</span> <span class="dt">PersistenceHandle</span> <span class="ot">-&gt;</span> <span class="dt">EntityId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> [(<span class="dt">Text</span>, <span class="dt">Text</span>, <span class="dt">Value</span>, <span class="dt">Maybe</span> <span class="dt">Value</span>, <span class="dt">Text</span>)]</span></code></pre></div></div><p><strong>Example: Persistence Usage</strong></p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.OS.Persistence</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create SQLite backend</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>backend <span class="ot">&lt;-</span> createPersistenceBackend (<span class="dt">SqliteBackendType</span> <span class="st">&quot;./agents.db&quot;</span>)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Persist agent configuration</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>eid <span class="ot">&lt;-</span> createEntity</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> config <span class="ot">=</span> <span class="dt">AgentConfig</span> <span class="st">&quot;my-agent&quot;</span> <span class="op">...</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>persist backend eid config</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- Load it back later</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>mConfig <span class="ot">&lt;-</span> load backend<span class="ot"> eid ::</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> <span class="dt">AgentConfig</span>)</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="kw">case</span> mConfig <span class="kw">of</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Nothing</span> <span class="ot">-&gt;</span> <span class="fu">putStrLn</span> <span class="st">&quot;Agent not found&quot;</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Just</span> cfg <span class="ot">-&gt;</span> <span class="fu">putStrLn</span> <span class="op">$</span> <span class="st">&quot;Loaded: &quot;</span> <span class="op">++</span> <span class="fu">show</span> cfg<span class="op">.</span>agentName</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co">-- Query all agents</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>agentIds <span class="ot">&lt;-</span> query backend (mkEntityQuery <span class="op">@</span><span class="dt">AgentConfig</span>)</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="fu">putStrLn</span> <span class="op">$</span> <span class="st">&quot;Found &quot;</span> <span class="op">++</span> <span class="fu">show</span> (<span class="fu">length</span> agentIds) <span class="op">++</span> <span class="st">&quot; agents&quot;</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="co">-- Log an event</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>persistOSEvent backend <span class="st">&quot;agent_created&quot;</span> </span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    (object [<span class="st">&quot;name&quot;</span> <span class="op">.=</span> <span class="st">&quot;my-agent&quot;</span>]) </span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    (<span class="dt">Just</span> eid)</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="co">-- Get events</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>events <span class="ot">&lt;-</span> getEvents backend eid</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>forM_ events <span class="op">$</span> <span class="op">\</span>(time, eventType, data_) <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">putStrLn</span> <span class="op">$</span> <span class="fu">show</span> time <span class="op">++</span> <span class="st">&quot;: &quot;</span> <span class="op">++</span> <span class="fu">show</span> eventType</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a><span class="co">-- Cleanup</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>closePersistenceBackend backend</span></code></pre></div></div><hr />
+<h3 id="common-patterns">Common Patterns</h3>
+<h4 id="pattern-1-agent-with-multiple-toolboxes">Pattern 1: Agent with Multiple Toolboxes</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">createFullAgent ::</span> <span class="dt">OS</span> <span class="ot">-&gt;</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> [<span class="dt">ToolboxId</span>] <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">AgentId</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>createFullAgent os name toolboxes <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> config <span class="ot">=</span> <span class="dt">AgentConfig</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        { agentName <span class="ot">=</span> name</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        , agentModel <span class="ot">=</span> <span class="dt">ModelConfig</span> <span class="st">&quot;openai&quot;</span> <span class="st">&quot;...&quot;</span> <span class="st">&quot;gpt-4&quot;</span> <span class="st">&quot;key&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        , agentSystemPrompt <span class="ot">=</span> <span class="st">&quot;You are helpful&quot;</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        , agentToolboxBindings <span class="ot">=</span> <span class="fu">map</span> unToolboxId toolboxes</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    createAgent os config</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- Usage</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>bashTb <span class="ot">&lt;-</span> createToolbox os bashConfig</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>sqlTb <span class="ot">&lt;-</span> createToolbox os sqliteConfig</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>httpTb <span class="ot">&lt;-</span> createToolbox os httpConfig</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>agentId <span class="ot">&lt;-</span> createFullAgent os <span class="st">&quot;multi-tool-agent&quot;</span> [bashTb, sqlTb, httpTb]</span></code></pre></div></div><h4 id="pattern-2-forking-a-conversation">Pattern 2: Forking a Conversation</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">forkConversation ::</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">ConversationId</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>forkConversation world convId <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Get original config</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Just</span> config <span class="ot">&lt;-</span> atomically <span class="op">$</span> getComponent <span class="op">@</span><span class="dt">ConversationConfig</span> world (unConversationId convId)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create new conversation</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    newConvId <span class="ot">&lt;-</span> createEntity</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    now <span class="ot">&lt;-</span> getCurrentTime</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    lastActivity <span class="ot">&lt;-</span> newTVarIO now</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    atomically <span class="op">$</span> <span class="kw">do</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        setComponent world newConvId config</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        setComponent world newConvId <span class="dt">ConversationState</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>            { conversationAgentId <span class="ot">=</span> <span class="op">...</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>            , conversationStatus <span class="ot">=</span> <span class="dt">ConversationActive</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>            , conversationStartedAt <span class="ot">=</span> now</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>            , conversationLastActivity <span class="ot">=</span> lastActivity</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>            }</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Copy turn history</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    turns <span class="ot">&lt;-</span> getConversationTurns world convId</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    forM_ turns <span class="op">$</span> <span class="op">\</span>turnId <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>        <span class="dt">Just</span> turnConfig <span class="ot">&lt;-</span> atomically <span class="op">$</span> getComponent <span class="op">@</span><span class="dt">TurnConfig</span> world (unTurnId turnId)</span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>        newTurnId <span class="ot">&lt;-</span> createEntity</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>        atomically <span class="op">$</span> setComponent world newTurnId turnConfig</span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>            { turnConversationId <span class="ot">=</span> <span class="dt">ConversationId</span> newConvId</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>            }</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">pure</span> <span class="op">$</span> <span class="dt">ConversationId</span> newConvId</span></code></pre></div></div><h4 id="pattern-3-resource-pool-with-timeout">Pattern 3: Resource Pool with Timeout</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">withPooledTimeout ::</span> <span class="dt">ResourceContext</span> <span class="ot">-&gt;</span> <span class="dt">ResourceId</span> <span class="ot">-&gt;</span> <span class="dt">NominalDiffTime</span> <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a <span class="ot">-&gt;</span> <span class="dt">ResourceM</span> a</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>withPooledTimeout ctx rid timeout action <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    currentTimeout <span class="ot">&lt;-</span> getResourceTimeout rid</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Temporarily set timeout</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    updateResourceTimeout rid (<span class="dt">Just</span> timeout)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    result <span class="ot">&lt;-</span> withPooled rid action</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Restore original timeout</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    updateResourceTimeout rid currentTimeout</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">pure</span> result</span></code></pre></div></div><h4 id="pattern-4-transaction-with-multiple-components">Pattern 4: Transaction with Multiple Components</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">updateAgentAndToolbox ::</span> <span class="dt">World</span> <span class="ot">-&gt;</span> <span class="dt">AgentId</span> <span class="ot">-&gt;</span> <span class="dt">ToolboxId</span> <span class="ot">-&gt;</span> <span class="dt">AgentConfig</span> <span class="ot">-&gt;</span> <span class="dt">ToolboxConfig</span> <span class="ot">-&gt;</span> <span class="dt">STM</span> ()</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>updateAgentAndToolbox world agentId toolboxId agentConfig toolboxConfig <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Both updates happen atomically</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    setComponent world (unAgentId agentId) agentConfig</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    setComponent world (unToolboxId toolboxId) toolboxConfig</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Usage</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> updateAgentAndToolbox world agentId toolboxId newAgentConfig newToolboxConfig</span></code></pre></div></div><hr />
+<h3 id="type-index">Type Index</h3>
+<h4 id="core-types">Core Types</h4>
+<ul>
+<li><code>EntityId</code> - Base entity identifier
+</li>
+<li><code>AgentId</code>, <code>ToolboxId</code>, <code>ConversationId</code>, <code>TurnId</code>, <code>ToolCallId</code>, <code>ResourceId</code> - Phantom-typed IDs
+</li>
+<li><code>ComponentTypeId</code> - Component type identifier
+</li>
+<li><code>World</code> - ECS world container
+</li>
+</ul>
+<h4 id="component-types">Component Types</h4>
+<ul>
+<li><code>AgentConfig</code>, <code>AgentState</code>, <code>AgentStatus</code> - Agent components
+</li>
+<li><code>ToolboxConfig</code>, <code>ToolboxState</code>, <code>ToolboxBinding</code> - Toolbox components
+</li>
+<li><code>ConversationConfig</code>, <code>ConversationState</code>, <code>ConversationStatus</code> - Conversation components
+</li>
+<li><code>TurnConfig</code>, <code>TurnState</code>, <code>TurnStatus</code> - Turn components
+</li>
+<li><code>ToolCallConfig</code>, <code>ToolCallState</code>, <code>ToolCallStatus</code> - Tool call components
+</li>
+<li><code>Message</code>, <code>MessageRole</code> - Message components
+</li>
+<li><code>Lineage</code>, <code>LineageFrame</code>, <code>FrameType</code> - Lineage components
+</li>
+</ul>
+<h4 id="resource-types-1">Resource Types</h4>
+<ul>
+<li><code>ResourceType</code>, <code>ResourceHandle</code>, <code>ResourceInfo</code> - Resource definitions
+</li>
+<li><code>ResourceContext</code>, <code>ScopeLevel</code>, <code>ResourceScope</code> - Scope management
+</li>
+<li><code>ResourceRegistry</code> - Resource storage
+</li>
+</ul>
+<h4 id="concurrent-types">Concurrent Types</h4>
+<ul>
+<li><code>AccessPattern</code>, <code>AccessControl</code> - Access patterns
+</li>
+<li><code>ResourceM</code> - Resource monad
+</li>
+<li><code>ResourceError</code> - Error types
+</li>
+<li><code>SyncPrimitive</code>, <code>ExclusiveLock</code>, <code>ReadWriteLock</code>, <code>PoolLock</code> - Lock types
+</li>
+</ul>
+<h4 id="event-types">Event Types</h4>
+<ul>
+<li><code>OSEmission</code> - the single emission type: subcall lifecycle, tool-call activity, hook failures
+</li>
+<li><code>ToolCallActivity</code>, <code>ToolCallPhase</code> - background tool-call activity payloads
+</li>
+<li><code>SessionProgress</code> - Session progress tracking
+</li>
+</ul>
+<h4 id="persistence-types">Persistence Types</h4>
+<ul>
+<li><code>PersistenceHandle</code>, <code>PersistenceBackendType</code> - Backend types
+</li>
+<li><code>Persistable</code> - Persistence typeclass
+</li>
+<li><code>EntityQuery</code> - Query specification
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

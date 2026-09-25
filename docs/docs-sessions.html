@@ -1,0 +1,1118 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Session Management</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-sessions.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified re"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Session Management"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified re"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Session Management"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-sessions.html"><meta property="og:description" content="Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified re"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-sessions.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-sessions.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified re","headline":"Session Management","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-sessions.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Session Management</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1006 words, 49 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-architecture.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">22/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-parameters-and-bindings.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sessions.md"><code>documentation/sessions.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="session-management">Session Management</h2>
+<p>Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified read view.</p>
+<h3 id="overview">Overview</h3>
+<p>Sessions represent complete conversations between users and agents, including:</p>
+<ul>
+<li><strong>Session metadata</strong>: IDs, timestamps, agent references, version info
+</li>
+<li><strong>Turn history</strong>: Complete conversation turns
+</li>
+<li><strong>Tool calls</strong>: Records of tool invocations and results
+</li>
+<li><strong>Media attachments</strong>: Base64-encoded images, documents, audio, video
+</li>
+<li><strong>Context</strong>: Full conversation state for resumption
+</li>
+</ul>
+<p>The SessionStore now supports <strong>multi-location storage</strong>:</p>
+<ul>
+<li><strong>Write location</strong>: Single directory where new sessions are written
+</li>
+<li><strong>Read locations</strong>: Multiple directories searched for existing sessions
+</li>
+<li><strong>Deduplication</strong>: First location wins when sessions exist in multiple places
+</li>
+<li><strong>Tilde expansion</strong>: Paths like <code>~/.config/agents-exe/sessions/</code> are resolved automatically
+</li>
+</ul>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                       Session                                │
+├─────────────────────────────────────────────────────────────┤
+│  SessionId: &quot;uuid&quot;                                          │
+│  ConversationId: &quot;uuid&quot;                                     │
+│  AgentSlug: &quot;my-agent&quot;                                      │
+│  SessionVersion: 1                                          │
+├─────────────────────────────────────────────────────────────┤
+│  Turns:                                                      │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ Turn 1                                              │   │
+│  │   User: &quot;Hello!&quot;                                    │   │
+│  │   [📎 image.png]                                    │   │
+│  │   Assistant: &quot;Hi there!&quot;                            │   │
+│  └─────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ Turn 2                                              │   │
+│  │   User: &quot;List files&quot;                                │   │
+│  │   Tool: list_files -&gt; [&quot;a.txt&quot;, &quot;b.txt&quot;]            │   │
+│  │   [📎 screenshot.png]                               │   │
+│  │   Assistant: &quot;Found 2 files...&quot;                     │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                  Multi-Location SessionStore                 │
+├─────────────────────────────────────────────────────────────┤
+│  Write Location: ./sessions/                                 │
+│  Read Locations:                                             │
+│    1. ./sessions/           (primary, write location)       │
+│    2. ./.agents-sessions/   (project-local archive)         │
+│    3. ~/.config/agents-exe/sessions/  (global storage)      │
+├─────────────────────────────────────────────────────────────┤
+│  Deduplication: First location wins by ConversationId       │
+│  Priority: ./sessions/ &gt; ./.agents-sessions/ &gt; ~/.config/   │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="core-types">Core Types</h3>
+<h4 id="session-types-systemagentssessiontypes">Session Types (<code>System.Agents.Session.Types</code>)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">SessionId</span> <span class="ot">=</span> <span class="dt">SessionId</span> <span class="dt">UUID</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">newtype</span> <span class="dt">TurnId</span> <span class="ot">=</span> <span class="dt">TurnId</span> <span class="dt">UUID</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- | User query - can include text and media attachments.</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">UserQuery</span> <span class="ot">=</span> <span class="dt">UserQuery</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> queryText ::</span> <span class="dt">Text</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ The text query/prompt</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> queryMedia ::</span> [<span class="dt">MediaAttachment</span>]</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Optional media attachments (images, audio, video, etc.)</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Tool response from the user/agent system to the LLM.</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">UserToolResponse</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">TextResponse</span> <span class="dt">Text</span>                    <span class="co">-- Plain UTF-8 text</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">JsonResponse</span> <span class="dt">Aeson.Value</span>             <span class="co">-- Structured JSON data</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">MediaResponse</span> <span class="dt">MediaAttachment</span>        <span class="co">-- Single binary media (base64-encoded)</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">MixedResponse</span> [<span class="dt">ContentPart</span>]          <span class="co">-- Multi-modal: alternating text and media</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Individual part of a mixed multi-modal response.</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ContentPart</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">TextPart</span> <span class="dt">Text</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">MediaPart</span> <span class="dt">MediaAttachment</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a><span class="co">-- | A media attachment containing base64-encoded binary data.</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">MediaAttachment</span> <span class="ot">=</span> <span class="dt">MediaAttachment</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> mediaMimeType ::</span> <span class="dt">Text</span>        <span class="co">-- ^ MIME type (e.g., &quot;image/png&quot;)</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mediaBase64Data ::</span> <span class="dt">Text</span>      <span class="co">-- ^ Base64-encoded content</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mediaFilename ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span>  <span class="co">-- ^ Optional filename</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Session with versioning for backwards compatibility.</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Session</span> <span class="ot">=</span> <span class="dt">Session</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> sessionId ::</span> <span class="dt">SessionId</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> forkedFromSessionId ::</span> <span class="dt">Maybe</span> <span class="dt">SessionId</span>  <span class="co">-- ^ For conversation forking</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> turnId ::</span> <span class="dt">TurnId</span></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> turns ::</span> [<span class="dt">Turn</span>]</span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sessionVersion ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Optional session version:</span></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a>    <span class="co">--   Nothing = legacy (pre-media)</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a>    <span class="co">--   Just 1 = media support enabled</span></span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="42"><a href="#42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="43"><a href="#43" aria-hidden="true" tabindex="-1"></a><span class="co">-- | User turn content including possible media.</span></span>
+<span id="44"><a href="#44" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">UserTurnContent</span> <span class="ot">=</span> <span class="dt">UserTurnContent</span></span>
+<span id="45"><a href="#45" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> userPrompt ::</span> <span class="dt">SystemPrompt</span></span>
+<span id="46"><a href="#46" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> userTools ::</span> [<span class="dt">SystemTool</span>]</span>
+<span id="47"><a href="#47" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> userQuery ::</span> <span class="dt">Maybe</span> <span class="dt">UserQuery</span></span>
+<span id="48"><a href="#48" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Query with optional media attachments</span></span>
+<span id="49"><a href="#49" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> userToolResponses ::</span> [(<span class="dt">LlmToolCall</span>, <span class="dt">UserToolResponse</span>)]</span>
+<span id="50"><a href="#50" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Tool responses with multi-modal support</span></span>
+<span id="51"><a href="#51" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="52"><a href="#52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="53"><a href="#53" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Turn</span></span>
+<span id="54"><a href="#54" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">UserTurn</span> <span class="dt">UserTurnContent</span> (<span class="dt">Maybe</span> <span class="dt">StepByteUsage</span>)</span>
+<span id="55"><a href="#55" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">LlmTurn</span> <span class="dt">LlmTurnContent</span> (<span class="dt">Maybe</span> <span class="dt">StepByteUsage</span>)</span></code></pre></div></div><h4 id="media-types-systemagentsmediatypes">Media Types (<code>System.Agents.Media.Types</code>)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | High-level media type classification.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">MediaType</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">MediaImage</span> <span class="dt">ImageType</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">MediaAudio</span> <span class="dt">AudioType</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">MediaVideo</span> <span class="dt">VideoType</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">MediaApplication</span> <span class="dt">ApplicationType</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">MediaText</span> <span class="dt">TextSubtype</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ImageType</span> <span class="ot">=</span> <span class="dt">ImagePNG</span> <span class="op">|</span> <span class="dt">ImageJPEG</span> <span class="op">|</span> <span class="dt">ImageGIF</span> <span class="op">|</span> <span class="dt">ImageWebP</span> <span class="op">|</span> <span class="dt">ImageSVG</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AudioType</span> <span class="ot">=</span> <span class="dt">AudioMPEG</span> <span class="op">|</span> <span class="dt">AudioWAV</span> <span class="op">|</span> <span class="dt">AudioOGG</span> <span class="op">|</span> <span class="dt">AudioMP3</span> <span class="op">|</span> <span class="dt">AudioAAC</span> <span class="op">|</span> <span class="dt">AudioFLAC</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">VideoType</span> <span class="ot">=</span> <span class="dt">VideoMP4</span> <span class="op">|</span> <span class="dt">VideoWebM</span> <span class="op">|</span> <span class="dt">VideoOGG</span> <span class="op">|</span> <span class="dt">VideoAVI</span> <span class="op">|</span> <span class="dt">VideoMOV</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ApplicationType</span> <span class="ot">=</span> <span class="dt">AppPDF</span> <span class="op">|</span> <span class="dt">AppJSON</span> <span class="op">|</span> <span class="dt">AppXML</span> <span class="op">|</span> <span class="dt">AppOctetStream</span> <span class="op">|</span> <span class="dt">AppZip</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">TextSubtype</span> <span class="ot">=</span> <span class="dt">TextPlain</span> <span class="op">|</span> <span class="dt">TextHTML</span> <span class="op">|</span> <span class="dt">TextCSS</span> <span class="op">|</span> <span class="dt">TextCSV</span> <span class="op">|</span> <span class="dt">TextMarkdown</span></span></code></pre></div></div><h3 id="session-versioning">Session Versioning</h3>
+<p>Sessions include a version field for backwards compatibility:</p>
+<table>
+<tr><th>Version</th><th>Description</th></tr>
+<tr><td><code>Nothing</code> / missing</td><td>Legacy session (pre-media support)</td></tr>
+<tr><td><code>Just 1</code></td><td>Full media support enabled</td></tr>
+</table>
+<h4 id="backwards-compatibility">Backwards Compatibility</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- JSON serialization handles both old and new formats</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">Session</span> <span class="kw">where</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    parseJSON <span class="ot">=</span> Aeson.withObject <span class="st">&quot;Session&quot;</span> <span class="op">$</span> <span class="op">\</span>v <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        mVersion <span class="ot">&lt;-</span> v <span class="op">.:?</span> <span class="st">&quot;sessionVersion&quot;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">Session</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>            <span class="op">&lt;$&gt;</span> v <span class="op">.:</span> <span class="st">&quot;turns&quot;</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>            <span class="op">&lt;*&gt;</span> v <span class="op">.:</span> <span class="st">&quot;sessionId&quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>            <span class="op">&lt;*&gt;</span> v <span class="op">.:?</span> <span class="st">&quot;forkedFromSessionId&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>            <span class="op">&lt;*&gt;</span> v <span class="op">.:</span> <span class="st">&quot;turnId&quot;</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>            <span class="op">&lt;*&gt;</span> <span class="fu">pure</span> mVersion</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">instance</span> <span class="dt">ToJSON</span> <span class="dt">Session</span> <span class="kw">where</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    toJSON s <span class="ot">=</span> Aeson.object <span class="op">$</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        [ <span class="st">&quot;turns&quot;</span> <span class="op">.=</span> s<span class="op">.</span>turns</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        , <span class="st">&quot;sessionId&quot;</span> <span class="op">.=</span> s<span class="op">.</span>sessionId</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        , <span class="st">&quot;forkedFromSessionId&quot;</span> <span class="op">.=</span> s<span class="op">.</span>forkedFromSessionId</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        , <span class="st">&quot;turnId&quot;</span> <span class="op">.=</span> s<span class="op">.</span>turnId</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>        ]</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>        <span class="op">++</span> [<span class="st">&quot;sessionVersion&quot;</span> <span class="op">.=</span> v <span class="op">|</span> <span class="dt">Just</span> v <span class="ot">&lt;-</span> [s<span class="op">.</span>sessionVersion]]</span></code></pre></div></div><h3 id="media-attachments">Media Attachments</h3>
+<h4 id="supported-media-types">Supported Media Types</h4>
+<table>
+<tr><th>Category</th><th>Extensions</th><th>MIME Types</th></tr>
+<tr><td><strong>Images</strong></td><td><code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>, <code>.gif</code>, <code>.webp</code>, <code>.svg</code></td><td><code>image/png</code>, <code>image/jpeg</code>, <code>image/gif</code>, <code>image/webp</code>, <code>image/svg+xml</code></td></tr>
+<tr><td><strong>Documents</strong></td><td><code>.pdf</code>, <code>.txt</code>, <code>.md</code>, <code>.json</code>, <code>.xml</code></td><td><code>application/pdf</code>, <code>text/plain</code>, <code>text/markdown</code>, <code>application/json</code>, <code>application/xml</code></td></tr>
+<tr><td><strong>Audio</strong></td><td><code>.mp3</code>, <code>.wav</code>, <code>.ogg</code>, <code>.aac</code>, <code>.flac</code></td><td><code>audio/mp3</code>, <code>audio/wav</code>, <code>audio/ogg</code>, <code>audio/aac</code>, <code>audio/flac</code></td></tr>
+<tr><td><strong>Video</strong></td><td><code>.mp4</code>, <code>.webm</code>, <code>.mov</code>, <code>.avi</code></td><td><code>video/mp4</code>, <code>video/webm</code>, <code>video/quicktime</code>, <code>video/avi</code></td></tr>
+</table>
+<h4 id="creating-media-attachments">Creating Media Attachments</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="kw">qualified</span> <span class="dt">Data.ByteString.Base64</span> <span class="kw">as</span> <span class="dt">B64</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="kw">qualified</span> <span class="dt">Data.Text.Encoding</span> <span class="kw">as</span> <span class="dt">Text</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create a media attachment from file</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">createMediaAttachment ::</span> <span class="dt">FilePath</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">String</span> <span class="dt">MediaAttachment</span>)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>createMediaAttachment path <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    content <span class="ot">&lt;-</span> BS.readFile path</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> mimeType <span class="ot">=</span> detectMimeType path</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> base64Data <span class="ot">=</span> Text.decodeUtf8 <span class="op">$</span> B64.encode content</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">return</span> <span class="op">$</span> <span class="dt">Right</span> <span class="op">$</span> <span class="dt">MediaAttachment</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        { mediaMimeType <span class="ot">=</span> mimeType</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        , mediaBase64Data <span class="ot">=</span> base64Data</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        , mediaFilename <span class="ot">=</span> <span class="dt">Just</span> <span class="op">$</span> Text.pack <span class="op">$</span> takeFileName path</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- Detect MIME type from file extension</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ot">detectMimeType ::</span> <span class="dt">FilePath</span> <span class="ot">-&gt;</span> <span class="dt">Text</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>detectMimeType path <span class="ot">=</span> <span class="kw">case</span> takeExtension path <span class="kw">of</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;.png&quot;</span> <span class="ot">-&gt;</span> <span class="st">&quot;image/png&quot;</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;.jpg&quot;</span> <span class="ot">-&gt;</span> <span class="st">&quot;image/jpeg&quot;</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;.jpeg&quot;</span> <span class="ot">-&gt;</span> <span class="st">&quot;image/jpeg&quot;</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;.pdf&quot;</span> <span class="ot">-&gt;</span> <span class="st">&quot;application/pdf&quot;</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ... etc</span></span></code></pre></div></div><h4 id="using-media-in-queries">Using Media in Queries</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create a query with media attachments</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> query <span class="ot">=</span> <span class="dt">UserQuery</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>        { queryText <span class="ot">=</span> <span class="st">&quot;Describe this image&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        , queryMedia <span class="ot">=</span> [imageAttachment, documentAttachment]</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- The query is sent to the LLM with media included</span></span></code></pre></div></div><h4 id="tool-responses-with-media">Tool Responses with Media</h4>
+<p>Tools can return media responses:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Tool returns an image</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> toolResponse <span class="ot">=</span> <span class="dt">MediaResponse</span> <span class="op">$</span> <span class="dt">MediaAttachment</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>        { mediaMimeType <span class="ot">=</span> <span class="st">&quot;image/png&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>        , mediaBase64Data <span class="ot">=</span> base64EncodedImageData</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        , mediaFilename <span class="ot">=</span> <span class="dt">Just</span> <span class="st">&quot;chart.png&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- Tool returns mixed text and media</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> toolResponse <span class="ot">=</span> <span class="dt">MixedResponse</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        [ <span class="dt">TextPart</span> <span class="st">&quot;Here&#39;s the analysis chart:&quot;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        , <span class="dt">MediaPart</span> chartAttachment</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        , <span class="dt">TextPart</span> <span class="st">&quot;As you can see, the trend is increasing.&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        ]</span></code></pre></div></div><h3 id="session-store">Session Store</h3>
+<p>The <code>SessionStore</code> module provides persistent storage with multi-location support:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionStore</span> <span class="ot">=</span> <span class="dt">SessionStore</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> sessionWritePrefix ::</span> <span class="dt">FilePath</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Directory where new sessions are written</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> sessionReadPrefixes ::</span> [<span class="dt">FilePath</span>]</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Directories to search for existing sessions, in priority order</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="creating-a-sessionstore">Creating a SessionStore</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.SessionStore</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create with separate write and read locations</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>store <span class="ot">&lt;-</span> mkSessionStore</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;./sessions/&quot;</span>                              <span class="co">-- Write location</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    [<span class="st">&quot;./sessions/&quot;</span>, <span class="st">&quot;~/.config/agents-exe/sessions/&quot;</span>]  <span class="co">-- Read locations</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- Create simple single-location store (backwards compatible)</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>simpleStore <span class="ot">&lt;-</span> mkSimpleSessionStore <span class="st">&quot;./sessions/&quot;</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- Resolve tilde paths automatically</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>resolvedPath <span class="ot">&lt;-</span> resolveSessionPath <span class="st">&quot;~/.config/agents-exe/sessions/&quot;</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co">-- Returns: &quot;/home/user/.config/agents-exe/sessions/&quot;</span></span></code></pre></div></div><h4 id="key-behaviors">Key Behaviors</h4>
+<ol>
+<li>
+<p><strong>Write Location</strong>: All new sessions are written to <code>sessionWritePrefix</code></p>
+</li>
+<li>
+<p><strong>Read Locations</strong>: When reading sessions, all <code>sessionReadPrefixes</code> are searched in order</p>
+</li>
+<li>
+<p><strong>Auto-prepending</strong>: If write location is not in read locations, it’s automatically prepended to ensure newly written sessions are immediately readable</p>
+</li>
+<li>
+<p><strong>Deduplication</strong>: When listing sessions, if the same session ID exists in multiple locations, the first occurrence (highest priority) is kept</p>
+</li>
+<li>
+<p><strong>Tilde Expansion</strong>: Paths starting with <code>~</code> are automatically expanded to the user’s home directory</p>
+</li>
+</ol>
+<h4 id="configuration">Configuration</h4>
+<p>Configure multi-location session storage in <code>agents-exe.cfg.json</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsConfigDir&quot;</span><span class="fu">:</span> <span class="st">&quot;~/.config/agents-exe&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsFiles&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sessions&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;writeLocation&quot;</span><span class="fu">:</span> <span class="st">&quot;./sessions/&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;readLocations&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./sessions/&quot;</span><span class="ot">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./.agents-sessions/&quot;</span><span class="ot">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./task-sessions/&quot;</span><span class="ot">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;~/.config/agents-exe/sessions/&quot;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><strong>Configuration Fields:</strong></p>
+<table>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+<tr><td><code>sessions.writeLocation</code></td><td><code>FilePath</code></td><td>Yes</td><td>Directory where new sessions are written</td></tr>
+<tr><td><code>sessions.readLocations</code></td><td><code>[FilePath]</code></td><td>Yes</td><td>Directories to search for existing sessions</td></tr>
+</table>
+<p><strong>Backwards Compatibility:</strong></p>
+<ul>
+<li>If <code>sessions</code> section is missing, falls back to <code>agentsLogs.logSessionsJsonPrefix</code> (deprecated)
+</li>
+<li>If no prefix is configured, uses <code>~/.config/agents-exe/sessions/</code> as default
+</li>
+</ul>
+<h4 id="use-cases">Use Cases</h4>
+<h5 id="personal--project-sessions">Personal + Project Sessions</h5>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sessions&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;writeLocation&quot;</span><span class="fu">:</span> <span class="st">&quot;./sessions/&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;readLocations&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./sessions/&quot;</span><span class="ot">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;~/.config/agents-exe/sessions/&quot;</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><ul>
+<li>New sessions go to <code>./sessions/</code>
+</li>
+<li>Can access personal history from home directory
+</li>
+<li>Project sessions take precedence if ID conflicts
+</li>
+</ul>
+<h5 id="task-based-organization">Task-Based Organization</h5>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sessions&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;writeLocation&quot;</span><span class="fu">:</span> <span class="st">&quot;./task-sessions/current/&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;readLocations&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./task-sessions/current/&quot;</span><span class="ot">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./task-sessions/archive/&quot;</span><span class="ot">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./sessions/&quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><ul>
+<li>Current task sessions in <code>current/</code>
+</li>
+<li>Archived tasks still searchable
+</li>
+<li>General project sessions as fallback
+</li>
+</ul>
+<h5 id="team-shared-sessions">Team Shared Sessions</h5>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sessions&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;writeLocation&quot;</span><span class="fu">:</span> <span class="st">&quot;./my-sessions/&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;readLocations&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./my-sessions/&quot;</span><span class="ot">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;./shared-sessions/&quot;</span><span class="ot">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;~/.config/agents-exe/sessions/&quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><ul>
+<li>Personal work in <code>my-sessions/</code>
+</li>
+<li>Team-shared sessions in <code>shared-sessions/</code>
+</li>
+<li>Personal history available
+</li>
+</ul>
+<h4 id="file-naming">File Naming</h4>
+<p>Sessions are stored with the pattern <code>conv.&lt;uuid&gt;.json</code>:</p>
+<pre><code>sessions/
+├── conv.550e8400-e29b-41d4-a716-446655440000.json
+├── conv.6ba7b810-9dad-11d1-80b4-00c04fd430c8.json
+└── conv.6ba7b811-9dad-11d1-80b4-00c04fd430c8.json
+</code></pre>
+<h4 id="session-store-operations">Session Store Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Store a session (always writes to sessionWritePrefix)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">storeSession ::</span> <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- Read a session (searches all read locations in order)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ot">readSession ::</span> <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> <span class="dt">Session</span>)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- List all sessions (aggregates from all read locations, deduplicated)</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">listSessions ::</span> <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> [(<span class="dt">FilePath</span>, <span class="dt">Maybe</span> <span class="dt">Session</span>, <span class="dt">ConversationId</span>)]</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co">-- Generate file path for a session</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ot">sessionFilePath ::</span> <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">FilePath</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ot">sessionWritePath ::</span> <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> <span class="dt">ConversationId</span> <span class="ot">-&gt;</span> <span class="dt">FilePath</span></span></code></pre></div></div><h3 id="session-lifecycle">Session Lifecycle</h3>
+<h4 id="creating-a-session">Creating a Session</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">newSession ::</span> <span class="dt">AgentSlug</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">Session</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>newSession slug <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    sid <span class="ot">&lt;-</span> <span class="dt">SessionId</span> <span class="op">&lt;$&gt;</span> UUID.nextRandom</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    cid <span class="ot">&lt;-</span> <span class="dt">ConversationId</span> <span class="op">&lt;$&gt;</span> UUID.nextRandom</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    tid <span class="ot">&lt;-</span> <span class="dt">TurnId</span> <span class="op">&lt;$&gt;</span> UUID.nextRandom</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">return</span> <span class="dt">Session</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        { sessionId <span class="ot">=</span> sid</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        , forkedFromSessionId <span class="ot">=</span> <span class="dt">Nothing</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        , turnId <span class="ot">=</span> tid</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        , turns <span class="ot">=</span> []</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        , sessionVersion <span class="ot">=</span> <span class="dt">Just</span> <span class="dv">1</span>  <span class="co">-- New sessions use version 1</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        }</span></code></pre></div></div><h4 id="adding-a-turn">Adding a Turn</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">addUserTurn ::</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">UserQuery</span> <span class="ot">-&gt;</span> [<span class="dt">ToolCallRecord</span>] <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">Session</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>addUserTurn session query calls <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> userContent <span class="ot">=</span> <span class="dt">UserTurnContent</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>            { userPrompt <span class="ot">=</span> currentPrompt</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>            , userTools <span class="ot">=</span> availableTools</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>            , userQuery <span class="ot">=</span> <span class="dt">Just</span> query</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>            , userToolResponses <span class="ot">=</span> calls</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>            }</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> turn <span class="ot">=</span> <span class="dt">UserTurn</span> userContent <span class="dt">Nothing</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">return</span> session { turns <span class="ot">=</span> turns session <span class="op">++</span> [turn] }</span></code></pre></div></div><h4 id="conversation-loop">Conversation Loop</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">conversationLoop ::</span> </span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">SessionStore</span> <span class="ot">-&gt;</span> </span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Runtime</span> <span class="ot">-&gt;</span> </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Session</span> <span class="ot">-&gt;</span> </span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">IO</span> ()</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>conversationLoop store runtime session <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Get user input (possibly with media)</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    (input, media) <span class="ot">&lt;-</span> getUserInput</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> query <span class="ot">=</span> <span class="dt">UserQuery</span> input media</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Call LLM with session context and media</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> messages <span class="ot">=</span> sessionToMessages session</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    response <span class="ot">&lt;-</span> callLLM runtime messages query</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Execute any tool calls</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    toolResults <span class="ot">&lt;-</span> executeToolCalls runtime (toolCalls response)</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Update session</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    newSession <span class="ot">&lt;-</span> addTurn session query toolResults</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Persist (always writes to write location)</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    storeSession store (conversationId newSession) newSession</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Continue</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    conversationLoop store runtime newSession</span></code></pre></div></div><h3 id="session-serialization">Session Serialization</h3>
+<h4 id="json-format">JSON Format</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sessionId&quot;</span><span class="fu">:</span> <span class="st">&quot;550e8400-e29b-41d4-a716-446655440000&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;turnId&quot;</span><span class="fu">:</span> <span class="st">&quot;6ba7b810-9dad-11d1-80b4-00c04fd430c8&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;forkedFromSessionId&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;turns&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;UserTurn&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;userPrompt&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="st">&quot;You are helpful...&quot;</span><span class="fu">},</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;userTools&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="er">...</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;userQuery&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;What&#39;s in this image?&quot;</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;media&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>            <span class="fu">{</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;mimeType&quot;</span><span class="fu">:</span> <span class="st">&quot;image/png&quot;</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;base64Data&quot;</span><span class="fu">:</span> <span class="st">&quot;iVBORw0KGgoAAAANSUhEUgAA...&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;filename&quot;</span><span class="fu">:</span> <span class="st">&quot;screenshot.png&quot;</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>            <span class="fu">}</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>          <span class="ot">]</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>        <span class="fu">},</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;userToolResponses&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>      <span class="fu">},</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;byteUsage&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;inputBytes&quot;</span><span class="fu">:</span> <span class="dv">1234</span><span class="fu">,</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;outputBytes&quot;</span><span class="fu">:</span> <span class="dv">567</span><span class="fu">,</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;reasoningBytes&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;totalBytes&quot;</span><span class="fu">:</span> <span class="dv">1801</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="ot">,</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;LlmTurn&quot;</span><span class="fu">,</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;llmResponse&quot;</span><span class="fu">:</span> <span class="st">&quot;I can see a chart showing...&quot;</span><span class="fu">,</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;llmThinking&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;llmToolCalls&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sessionVersion&quot;</span><span class="fu">:</span> <span class="dv">1</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="usertoolresponse-json-formats">UserToolResponse JSON Formats</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="er">//</span> <span class="er">TextResponse</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;text&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;content&quot;</span><span class="fu">:</span> <span class="st">&quot;The file contains...&quot;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="er">//</span> <span class="er">JsonResponse</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;json&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;content&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;ok&quot;</span><span class="fu">,</span> <span class="dt">&quot;count&quot;</span><span class="fu">:</span> <span class="dv">42</span><span class="fu">}</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="er">//</span> <span class="er">MediaResponse</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;media&quot;</span><span class="fu">,</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mimeType&quot;</span><span class="fu">:</span> <span class="st">&quot;image/png&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;base64Data&quot;</span><span class="fu">:</span> <span class="st">&quot;iVBORw0KGgoAAAANSUhEUgAA...&quot;</span><span class="fu">,</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;filename&quot;</span><span class="fu">:</span> <span class="st">&quot;chart.png&quot;</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="er">//</span> <span class="er">MixedResponse</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;mixed&quot;</span><span class="fu">,</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;parts&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;text&quot;</span><span class="fu">,</span> <span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;Here&#39;s the chart:&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;media&quot;</span><span class="fu">,</span> <span class="dt">&quot;mimeType&quot;</span><span class="fu">:</span> <span class="st">&quot;image/png&quot;</span><span class="fu">,</span> <span class="dt">&quot;base64Data&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;text&quot;</span><span class="fu">,</span> <span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;As you can see...&quot;</span><span class="fu">}</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h3 id="session-operations">Session Operations</h3>
+<h4 id="resuming-a-session">Resuming a Session</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Start with existing session</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> agent.json <span class="at">--session-file</span> session.json</span></code></pre></div></div><div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">mainOneShot ::</span> </span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">SessionStore</span> <span class="ot">-&gt;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Maybe</span> <span class="dt">FilePath</span> <span class="ot">-&gt;</span>  <span class="co">-- Session file path</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Maybe</span> <span class="dt">Session</span> <span class="ot">-&gt;</span>   <span class="co">-- Pre-loaded session</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Props</span> <span class="ot">-&gt;</span> </span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Text</span> <span class="ot">-&gt;</span>            <span class="co">-- Prompt</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    [<span class="dt">MediaAttachment</span>] <span class="ot">-&gt;</span> <span class="co">-- Media attachments</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">IO</span> ()</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>mainOneShot store mPath mSession props prompt media <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Load or create session</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    session <span class="ot">&lt;-</span> <span class="kw">case</span> mSession <span class="kw">of</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">Just</span> s <span class="ot">-&gt;</span> <span class="fu">return</span> s</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">Nothing</span> <span class="ot">-&gt;</span> <span class="kw">case</span> mPath <span class="kw">of</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>            <span class="dt">Just</span> path <span class="ot">-&gt;</span> fromMaybe (newSession props<span class="op">.</span>agentSlug) </span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>                                   <span class="op">&lt;$&gt;</span> readSessionFromFile path</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>            <span class="dt">Nothing</span> <span class="ot">-&gt;</span> newSession props<span class="op">.</span>agentSlug</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create query with media</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> query <span class="ot">=</span> <span class="dt">UserQuery</span> prompt media</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Run conversation</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="op">...</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Save session (to write location)</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    writeSession store updatedSession</span></code></pre></div></div><h3 id="session-printing-systemagentssessionprint">Session Printing (<code>System.Agents.SessionPrint</code>)</h3>
+<p>The <code>SessionPrint</code> module provides rich markdown formatting for session files, including statistics visualization and configurable content display with media support.</p>
+<h4 id="session-print-types">Session Print Types</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Preference for ordering session steps.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">OrderPreference</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">Chronological</span>      <span class="co">-- Oldest first</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Antichronological</span>  <span class="co">-- Newest first</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Amount of content to print (lines or characters).</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">PrintAmount</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">Lines</span> <span class="dt">Int</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Chars</span> <span class="dt">Int</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Visibility preference for displaying content.</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">PrintVisibility</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">Hidden</span>                    <span class="co">-- Don&#39;t show content</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Elided</span> <span class="dt">PrintAmount</span> <span class="dt">PrintAmount</span>  <span class="co">-- Show leading/trailing, elide middle</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ShownFull</span>                 <span class="co">-- Show complete content</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Options for controlling session print output.</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionPrintOptions</span> <span class="ot">=</span> <span class="dt">SessionPrintOptions</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> sessionPrintFile ::</span> <span class="dt">FilePath</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> showToolCallResults ::</span> <span class="dt">PrintVisibility</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> showToolCallArguments ::</span> <span class="dt">PrintVisibility</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> nTurns ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> repeatSystemPrompt ::</span> <span class="dt">Bool</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> repeatTools ::</span> <span class="dt">Bool</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> orderPreference ::</span> <span class="dt">OrderPreference</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> noFunnyStamp ::</span> <span class="dt">Bool</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Statistics about a session.</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionStatistics</span> <span class="ot">=</span> <span class="dt">SessionStatistics</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> statTotalTurns ::</span> <span class="dt">Int</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statUserTurns ::</span> <span class="dt">Int</span></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statLlmTurns ::</span> <span class="dt">Int</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statTotalToolCalls ::</span> <span class="dt">Int</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statToolCallsByName ::</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">Int</span></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statInputBytes ::</span> <span class="dt">Int</span></span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statOutputBytes ::</span> <span class="dt">Int</span></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statReasoningBytes ::</span> <span class="dt">Int</span></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statTotalBytes ::</span> <span class="dt">Int</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> statMediaAttachments ::</span> <span class="dt">Int</span>  <span class="co">-- NEW: Count of media attachments</span></span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="cli-session-print-command">CLI: session-print Command</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Print full session</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print session.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Print with tool call results visible</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--show-tool-call-results</span> shown session.json</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Show tool call arguments too</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="dt">\</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="at">--show-tool-call-results</span> shown <span class="dt">\</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="at">--show-tool-call-arguments</span> shown <span class="dt">\</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    session.json</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Elide long outputs (show first/last 10 lines)</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--show-tool-call-results</span> elided session.json</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co"># Limit to N turns</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--n-turns</span> 5 session.json</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co"># Reverse chronological order</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--antichronological</span> session.json</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="co"># Show system prompts and tools each turn</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--repeat-system-prompt</span> <span class="at">--repeat-tools</span> session.json</span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a><span class="co"># Skip the ASCII art logo</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print <span class="at">--no-funny-stamp</span> session.json</span></code></pre></div></div><h4 id="formatting-media-attachments">Formatting Media Attachments</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">formatToolResponse ::</span> <span class="dt">UserToolResponse</span> <span class="ot">-&gt;</span> <span class="dt">Text</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>formatToolResponse (<span class="dt">TextResponse</span> txt) <span class="ot">=</span> txt</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>formatToolResponse (<span class="dt">JsonResponse</span> val) <span class="ot">=</span> </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    Text.decodeUtf8 <span class="op">$</span> LByteString.toStrict <span class="op">$</span> Aeson.encodePretty val</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>formatToolResponse (<span class="dt">MediaResponse</span> media) <span class="ot">=</span> </span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;[Media: &quot;</span> <span class="op">&lt;&gt;</span> media<span class="op">.</span>mediaMimeType <span class="op">&lt;&gt;</span> </span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">maybe</span> <span class="st">&quot;&quot;</span> (<span class="st">&quot;, &quot;</span> <span class="op">&lt;&gt;</span>) media<span class="op">.</span>mediaFilename <span class="op">&lt;&gt;</span> </span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;, &quot;</span> <span class="op">&lt;&gt;</span> formatBytes (Text.length media<span class="op">.</span>mediaBase64Data <span class="ot">`div`</span> <span class="dv">4</span> <span class="op">*</span> <span class="dv">3</span>) <span class="op">&lt;&gt;</span> <span class="st">&quot;]&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>formatToolResponse (<span class="dt">MixedResponse</span> parts) <span class="ot">=</span> </span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    Text.intercalate <span class="st">&quot;\n&quot;</span> <span class="op">$</span> <span class="fu">map</span> formatContentPart parts</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>  <span class="kw">where</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    formatContentPart (<span class="dt">TextPart</span> t) <span class="ot">=</span> t</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    formatContentPart (<span class="dt">MediaPart</span> m) <span class="ot">=</span> formatToolResponse (<span class="dt">MediaResponse</span> m)</span></code></pre></div></div><h4 id="content-elision">Content Elision</h4>
+<p>The <code>elideDocument</code> function intelligently handles content that’s too long:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Elide a document by keeping leading and trailing portions.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">elideDocument ::</span> <span class="dt">PrintAmount</span> <span class="ot">-&gt;</span> <span class="dt">PrintAmount</span> <span class="ot">-&gt;</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Text</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- Examples:</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>elideDocument (<span class="dt">Lines</span> <span class="dv">3</span>) (<span class="dt">Lines</span> <span class="dv">3</span>) <span class="st">&quot;line1\nline2\n...\nline7&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="co">-- Shows all 7 lines (no overlap)</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>elideDocument (<span class="dt">Lines</span> <span class="dv">2</span>) (<span class="dt">Lines</span> <span class="dv">2</span>) <span class="st">&quot;line1\nline2\nline3\nline4\nline5&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- &quot;line1\nline2\n... (1 line elided) ...\nline4\nline5&quot;</span></span></code></pre></div></div><h4 id="statistics-visualization">Statistics Visualization</h4>
+<p>Session print includes visual bar charts for:</p>
+<ol>
+<li><strong>Tool usage</strong>: Bar chart showing which tools were called most
+</li>
+<li><strong>Byte usage</strong>: Input, output, and reasoning token breakdown
+</li>
+<li><strong>Media attachments</strong>: Count and types of media
+</li>
+</ol>
+<pre><code>📊 Statistics
+
+### 🔧 Tool Calls
+
+Total Tool Calls: 15
+
+`read-file`         8   ████████████████████████████████████████
+`write-file`        4   ████████████████████
+`grep-files`        3   ███████████████
+
+### 💾 Byte Usage
+
+`Input    `      2 KiB   ████████████████████████
+`Output   `      5 KiB   ████████████████████████████████████████████████
+`Reasoning`      1 KiB   ████████████
+
+`Media    `     50 KiB   ████████████████████████████████████████████████████████████████████████████████████████████████████
+
+Total: 58 KiB
+</code></pre>
+<h3 id="session-content-injection-systemagentssessionprintinject">Session Content Injection (<code>System.Agents.SessionPrint.Inject</code>)</h3>
+<p>The <code>SessionInject</code> module allows injecting session content into prompts with various verbosity levels.</p>
+<h4 id="injection-verbosity-levels">Injection Verbosity Levels</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionInjectMode</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">SessionXS</span>   <span class="co">-- Minimal: queries/responses only, skips tool-only turns</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionS</span>    <span class="co">-- Low: +thinking, +tool names</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionM</span>    <span class="co">-- Medium: +statistics</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionL</span>    <span class="co">-- High: +tool call results</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionXL</span>   <span class="co">-- Maximum: complete session</span></span></code></pre></div></div><h4 id="cli-session-injection-options">CLI: Session Injection Options</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Inject session at minimal verbosity</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--session-xs</span> previous-session.json <span class="at">--prompt</span> <span class="st">&quot;Continue...&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Inject at low verbosity</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--session-s</span> previous-session.json <span class="at">--prompt</span> <span class="st">&quot;Continue...&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Inject at medium verbosity</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--session-m</span> previous-session.json <span class="at">--prompt</span> <span class="st">&quot;Continue...&quot;</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Inject at high verbosity (includes tool results)</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--session-l</span> previous-session.json <span class="at">--prompt</span> <span class="st">&quot;Continue...&quot;</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Maximum verbosity</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--session-xl</span> previous-session.json <span class="at">--prompt</span> <span class="st">&quot;Continue...&quot;</span></span></code></pre></div></div><h4 id="programmatic-usage">Programmatic Usage</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.SessionPrint.Inject</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="co">-- Load session content at specific verbosity</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ot">loadSessionForPrompt ::</span> <span class="dt">SessionInjectMode</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">Text</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>loadSessionForPrompt mode session <span class="ot">=</span> <span class="kw">case</span> mode <span class="kw">of</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">SessionXS</span> <span class="ot">-&gt;</span> formatMinimal session   <span class="co">-- Just user queries and LLM responses</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">SessionS</span>  <span class="ot">-&gt;</span> formatLow session       <span class="co">-- + thinking process</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">SessionM</span>  <span class="ot">-&gt;</span> formatMedium session    <span class="co">-- + statistics</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">SessionL</span>  <span class="ot">-&gt;</span> formatHigh session      <span class="co">-- + tool call results</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">SessionXL</span> <span class="ot">-&gt;</span> formatComplete session  <span class="co">-- Everything</span></span></code></pre></div></div><h3 id="session-edit">Session Edit</h3>
+<p>The <code>SessionEdit</code> module provides operations for modifying session files.</p>
+<h4 id="cli-session-edit-command">CLI: session-edit Command</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Take first N turns</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--take</span> <span class="at">--count</span> 10 session.json <span class="op">&lt;</span> input.json <span class="op">&gt;</span> output.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Take last N turns</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--take-tail</span> <span class="at">--count</span> 5 session.json <span class="op">&lt;</span> input.json <span class="op">&gt;</span> output.json</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Drop first N turns</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--drop</span> <span class="at">--count</span> 2 session.json <span class="op">&lt;</span> input.json <span class="op">&gt;</span> output.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Drop last N turns</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--drop-tail</span> <span class="at">--count</span> 1 session.json <span class="op">&lt;</span> input.json <span class="op">&gt;</span> output.json</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Remove all tool calls</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--censor-tool-calls</span> session.json <span class="op">&lt;</span> input.json <span class="op">&gt;</span> output.json</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co"># Remove thinking content</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-edit <span class="at">--censor-thinking</span> session.json <span class="op">&lt;</span> input.json <span class="op">&gt;</span> output.json</span></code></pre></div></div><h4 id="edit-operations">Edit Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SessionEditOp</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">SessionEditTake</span> <span class="dt">Int</span>       <span class="co">-- Take first N turns</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionEditTakeTail</span> <span class="dt">Int</span>   <span class="co">-- Take last N turns</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionEditDrop</span> <span class="dt">Int</span>       <span class="co">-- Drop first N turns</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionEditDropTail</span> <span class="dt">Int</span>   <span class="co">-- Drop last N turns</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionEditCensorToolCalls</span>  <span class="co">-- Remove tool calls</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">SessionEditCensorThinking</span>   <span class="co">-- Remove thinking content</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ot">applyEdit ::</span> <span class="dt">SessionEditOp</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">Session</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>applyEdit (<span class="dt">SessionEditTake</span> n) session <span class="ot">=</span> </span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    session { turns <span class="ot">=</span> <span class="fu">take</span> n (turns session) }</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>applyEdit (<span class="dt">SessionEditDrop</span> n) session <span class="ot">=</span> </span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    session { turns <span class="ot">=</span> <span class="fu">drop</span> n (turns session) }</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>applyEdit <span class="dt">SessionEditCensorToolCalls</span> session <span class="ot">=</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    session { turns <span class="ot">=</span> <span class="fu">map</span> removeToolCalls (turns session) }</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- etc.</span></span></code></pre></div></div><h3 id="session-search-systemagentssessionsearch">Session Search (<code>System.Agents.Session.Search</code>)</h3>
+<p>The Session Search subsystem provides fast fuzzy text search across session files using SQLite FTS5. It enables searching through conversation history with trigram-based fuzzy matching and metadata filtering.</p>
+<h4 id="architecture">Architecture</h4>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                    Session Search                            │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │    Types    │  │    Index    │  │    Query    │         │
+│  │  (config)   │  │  (SQLite)   │  │  (search)   │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+│        ▲                ▲                ▲                  │
+│        └────────────────┴────────────────┘                  │
+│                    CLI Handlers                              │
+│              (session-index, session-search)                 │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+<h4 id="core-types-systemagentssessionsearchtypes">Core Types (<code>System.Agents.Session.Search.Types</code>)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Configuration for the search index.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SearchIndexConfig</span> <span class="ot">=</span> <span class="dt">SearchIndexConfig</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> indexDbPath ::</span> <span class="dt">FilePath</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Path to the SQLite index database (default: .agents-search.db)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> indexSessionStore ::</span> <span class="dt">SessionStore</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Session store to index (supports multi-location stores)</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> indexIncludeToolOutputs ::</span> <span class="dt">Bool</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Whether to include tool outputs in the index</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Options for session search queries.</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SearchOptions</span> <span class="ot">=</span> <span class="dt">SearchOptions</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> searchQuery ::</span> <span class="dt">Text</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Fuzzy search query text</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> searchDateFilter ::</span> <span class="dt">Maybe</span> <span class="dt">DateFilter</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Optional date filter</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> searchTools ::</span> [<span class="dt">Text</span>]</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Filter by tools used (any of these)</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> searchAgent ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Filter by agent slug</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> searchIncludeToolOutputs ::</span> <span class="dt">Bool</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Include tool outputs in search</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> searchJsonOutput ::</span> <span class="dt">Bool</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Output results as JSON</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> searchPreviewLines ::</span> <span class="dt">Int</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Number of context lines to show</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> searchLimit ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Maximum number of results</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> searchAutoUpdate ::</span> <span class="dt">Bool</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- ^ Auto-update index if stale before searching</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="33"><a href="#33" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Date filter for search queries.</span></span>
+<span id="34"><a href="#34" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">DateFilter</span></span>
+<span id="35"><a href="#35" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">AfterDate</span> <span class="dt">UTCTime</span></span>
+<span id="36"><a href="#36" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">BeforeDate</span> <span class="dt">UTCTime</span></span>
+<span id="37"><a href="#37" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">BetweenDates</span> <span class="dt">UTCTime</span> <span class="dt">UTCTime</span></span>
+<span id="38"><a href="#38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="39"><a href="#39" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Status of the search index.</span></span>
+<span id="40"><a href="#40" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SearchIndexStatus</span></span>
+<span id="41"><a href="#41" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">IndexCurrent</span></span>
+<span id="42"><a href="#42" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">IndexStale</span> <span class="dt">Int</span> <span class="dt">Int</span>  <span class="co">-- (stale sessions, total sessions)</span></span>
+<span id="43"><a href="#43" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">IndexMissing</span></span>
+<span id="44"><a href="#44" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">IndexError</span> <span class="dt">Text</span></span></code></pre></div></div><h4 id="search-result-types">Search Result Types</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Complete search results.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SearchResult</span> <span class="ot">=</span> <span class="dt">SearchResult</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> resultItems ::</span> [<span class="dt">SearchResultItem</span>]</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultTotalMatches ::</span> <span class="dt">Int</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultQueryTimeMs ::</span> <span class="dt">Double</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultIndexWasUpdated ::</span> <span class="dt">Bool</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="co">-- | A single search result item.</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SearchResultItem</span> <span class="ot">=</span> <span class="dt">SearchResultItem</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> resultMetadata ::</span> <span class="dt">SearchResultMetadata</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultPreview ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultMatchedTerms ::</span> [<span class="dt">Text</span>]</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Metadata about a search result.</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SearchResultMetadata</span> <span class="ot">=</span> <span class="dt">SearchResultMetadata</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> resultSessionId ::</span> <span class="dt">Text</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultFilePath ::</span> <span class="dt">FilePath</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultAgentSlug ::</span> <span class="dt">Maybe</span> <span class="dt">Text</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultTurnCount ::</span> <span class="dt">Int</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultFirstTurnAt ::</span> <span class="dt">Maybe</span> <span class="dt">UTCTime</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultLastTurnAt ::</span> <span class="dt">Maybe</span> <span class="dt">UTCTime</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> resultRank ::</span> <span class="dt">Double</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="index-schema-systemagentssessionsearchindex">Index Schema (<code>System.Agents.Session.Search.Index</code>)</h4>
+<p>The search index uses SQLite with FTS5 (Full-Text Search version 5):</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Session metadata cache</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> session_index (</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    session_id TEXT <span class="kw">PRIMARY</span> <span class="kw">KEY</span>,</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    file_path TEXT <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    mtime <span class="dt">INTEGER</span> <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    agent_slug TEXT,</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    turn_count <span class="dt">INTEGER</span>,</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    first_turn_at <span class="dt">TIMESTAMP</span>,</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    last_turn_at <span class="dt">TIMESTAMP</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>);</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co">-- FTS5 virtual table for trigram search</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> VIRTUAL <span class="kw">TABLE</span> search_content <span class="kw">USING</span> fts5(</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    session_id,</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    content,</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    tokenize<span class="op">=</span><span class="st">&#39;trigram&#39;</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>);</span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co">-- Tool call index for filtering</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> tool_index (</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    session_id TEXT <span class="kw">REFERENCES</span> session_index(session_id),</span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    tool_name TEXT <span class="kw">NOT</span> <span class="kw">NULL</span>,</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    call_count <span class="dt">INTEGER</span> <span class="kw">DEFAULT</span> <span class="dv">1</span>,</span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="kw">PRIMARY</span> <span class="kw">KEY</span> (session_id, tool_name)</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>);</span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a><span class="co">-- Index metadata</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> index_metadata (</span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="kw">key</span> TEXT <span class="kw">PRIMARY</span> <span class="kw">KEY</span>,</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    <span class="fu">value</span> TEXT</span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>);</span></code></pre></div></div><h4 id="index-operations">Index Operations</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Create a new search index, replacing any existing index.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co">-- Indexes sessions from ALL read locations in the SessionStore.</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">createSearchIndex ::</span> <span class="dt">SearchIndexConfig</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Incrementally update the search index.</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">updateSearchIndex ::</span> <span class="dt">SearchIndexConfig</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Check the status of the search index.</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ot">checkIndexStatus ::</span> <span class="dt">SearchIndexConfig</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">SearchIndexStatus</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Remove the search index.</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ot">removeSearchIndex ::</span> <span class="dt">SearchIndexConfig</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span></code></pre></div></div><h4 id="search-execution-systemagentssessionsearchquery">Search Execution (<code>System.Agents.Session.Search.Query</code>)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Execute a search query with the given options.</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co">-- Searches across all indexed sessions from all locations.</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="ot">executeSearchWithOptions ::</span> <span class="dt">SearchIndexConfig</span> <span class="ot">-&gt;</span> <span class="dt">SearchOptions</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">SearchResult</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Execute a search query against the index.</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">executeSearch ::</span> <span class="dt">SearchIndexConfig</span> <span class="ot">-&gt;</span> <span class="dt">SearchOptions</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">SearchResult</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Format search results for display.</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ot">formatResults ::</span> <span class="dt">SearchOptions</span> <span class="ot">-&gt;</span> <span class="dt">SearchResult</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span></code></pre></div></div><h4 id="fuzzy-matching">Fuzzy Matching</h4>
+<p>The search uses SQLite FTS5 with trigram tokenization:</p>
+<ul>
+<li><strong>Trigram tokenization</strong>: Breaks text into 3-character sequences
+</li>
+<li><strong>Fuzzy matching</strong>: “error” matches “errors”, “erroring”, “terror”
+</li>
+<li><strong>Prefix matching</strong>: “data” matches “database”, “datagram”
+</li>
+<li><strong>Typo tolerance</strong>: Small changes in query still find matches
+</li>
+</ul>
+<p>Example:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find sessions with fuzzy match to &quot;error&quot;</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> session_id, <span class="fu">rank</span> </span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> search_content </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> content MATCH <span class="st">&#39;error&#39;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> <span class="fu">rank</span>;</span></code></pre></div></div><h4 id="cli-session-index-command">CLI: session-index Command</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Build the search index (includes all read locations)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--build</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Check index status</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--status</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Update index incrementally</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--update</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Remove the index</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--clean</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Build with tool outputs included</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--build</span> <span class="at">--include-tool-outputs</span></span></code></pre></div></div><h4 id="cli-session-search-command">CLI: session-search Command</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Basic fuzzy search</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;database error&quot;</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Search with auto-update</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;migration&quot;</span> <span class="at">--auto</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Include tool outputs in search</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;config.yaml&quot;</span> <span class="at">--include-tool-outputs</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter by date and tool</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;auth&quot;</span> <span class="at">--after</span> 2024-01-01 <span class="at">--tool</span> write-file</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter by agent</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;refactor&quot;</span> <span class="at">--agent</span> my-coder</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="co"># JSON output for scripting</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;TODO&quot;</span> <span class="at">--json</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co"># Show context lines</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;deploy&quot;</span> <span class="at">--preview</span> 5</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="co"># Combined filters</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;fix&quot;</span> <span class="dt">\</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>  <span class="at">--after</span> 2024-01-01 <span class="dt">\</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>  <span class="at">--before</span> 2024-12-31 <span class="dt">\</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tool</span> bash_write-file <span class="dt">\</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>  <span class="at">--json</span></span></code></pre></div></div><h4 id="search-workflow-example">Search Workflow Example</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1. Build the initial index (aggregates all locations)</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--build</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># 2. Search for sessions about errors</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;error&quot;</span> <span class="at">--json</span> <span class="kw">|</span> <span class="ex">jq</span> <span class="st">&#39;.resultItems[] | .resultMetadata.resultFilePath&#39;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># 3. Find sessions using specific tools</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;database&quot;</span> <span class="at">--tool</span> write-file <span class="at">--tool</span> read-file</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># 4. Update index after new sessions</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-index <span class="at">--update</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="co"># 5. Search with date filter</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-search <span class="st">&quot;config&quot;</span> <span class="at">--after</span> 2024-06-01 <span class="at">--preview</span> 3</span></code></pre></div></div><h3 id="context-window-management">Context Window Management</h3>
+<p>Sessions track context size for LLM limits:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">estimateTokens ::</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">Int</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>estimateTokens session <span class="ot">=</span> </span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sum</span> [estimateMessageTokens m <span class="op">|</span> turn <span class="ot">&lt;-</span> turns session</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>                                 , m <span class="ot">&lt;-</span> [userMessage turn, assistantMessage turn]]</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">manageContext ::</span> <span class="dt">Int</span> <span class="ot">-&gt;</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">Session</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>manageContext maxTokens session</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> estimateTokens session <span class="op">&lt;=</span> maxTokens <span class="ot">=</span> session</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="fu">otherwise</span> <span class="ot">=</span> manageContext maxTokens (pruneOldestTurn session)</span></code></pre></div></div><h3 id="byte-usage-tracking">Byte Usage Tracking</h3>
+<p>Sessions track byte usage for monitoring:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Calculate bytes for all response types</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">userToolResponseBytes ::</span> <span class="dt">UserToolResponse</span> <span class="ot">-&gt;</span> <span class="dt">Int</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>userToolResponseBytes (<span class="dt">TextResponse</span> txt) <span class="ot">=</span> </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    Text.length txt <span class="op">*</span> <span class="dv">4</span>  <span class="co">-- UTF-8 max bytes per char</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>userToolResponseBytes (<span class="dt">JsonResponse</span> val) <span class="ot">=</span> </span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">fromIntegral</span> <span class="op">$</span> LByteString.length <span class="op">$</span> Aeson.encode val</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>userToolResponseBytes (<span class="dt">MediaResponse</span> media) <span class="ot">=</span> </span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    Text.length media<span class="op">.</span>mediaBase64Data  <span class="co">-- Already base64 = ASCII</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>userToolResponseBytes (<span class="dt">MixedResponse</span> parts) <span class="ot">=</span> </span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sum</span> (<span class="fu">map</span> contentPartBytes parts)</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ot">contentPartBytes ::</span> <span class="dt">ContentPart</span> <span class="ot">-&gt;</span> <span class="dt">Int</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>contentPartBytes (<span class="dt">TextPart</span> txt) <span class="ot">=</span> Text.length txt <span class="op">*</span> <span class="dv">4</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>contentPartBytes (<span class="dt">MediaPart</span> media) <span class="ot">=</span> Text.length media<span class="op">.</span>mediaBase64Data</span></code></pre></div></div><h3 id="tool-execution-context">Tool Execution Context</h3>
+<p>Sessions provide context for tool execution:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolExecutionContext</span> <span class="ot">=</span> <span class="dt">ToolExecutionContext</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> ctxSessionId ::</span> <span class="dt">SessionId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxConversationId ::</span> <span class="dt">ConversationId</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxTurnId ::</span> <span class="dt">TurnId</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxFullSession ::</span> <span class="dt">Maybe</span> <span class="dt">Session</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    , <span class="op">...</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><p>This allows tools to:</p>
+<ul>
+<li>Access conversation history
+</li>
+<li>Store tool-specific state
+</li>
+<li>Make context-aware decisions
+</li>
+<li>Return media responses
+</li>
+</ul>
+<h3 id="session-store-backends">Session Store Backends</h3>
+<h4 id="file-store-default">File Store (Default)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">fileSessionStore ::</span> <span class="dt">FilePath</span> <span class="ot">-&gt;</span> [<span class="dt">FilePath</span>] <span class="ot">-&gt;</span> <span class="dt">SessionStore</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>fileSessionStore writePrefix readPrefixes <span class="ot">=</span> <span class="dt">SessionStore</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    { sessionWritePrefix <span class="ot">=</span> writePrefix</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    , sessionReadPrefixes <span class="ot">=</span> </span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        <span class="kw">if</span> writePrefix <span class="ot">`elem`</span> readPrefixes</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>            <span class="kw">then</span> readPrefixes</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>            <span class="kw">else</span> writePrefix <span class="op">:</span> readPrefixes</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    , readSession <span class="ot">=</span> <span class="op">\</span>sid <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- Search through read prefixes in order</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> paths <span class="ot">=</span> <span class="fu">map</span> (<span class="op">&lt;/&gt;</span> sessionFileName sid) sessionReadPrefixes</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        findFirstExisting paths</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    , writeSession <span class="ot">=</span> <span class="op">\</span>sess <span class="ot">-&gt;</span> <span class="kw">do</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- Always write to write prefix</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> path <span class="ot">=</span> sessionWritePrefix <span class="op">&lt;/&gt;</span> sessionFileName (sessionId sess)</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>        encodeFile path sess</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    , listSessions <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- Aggregate from all read prefixes, deduplicate</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>        allSessions <span class="ot">&lt;-</span> <span class="fu">concat</span> <span class="op">&lt;$&gt;</span> <span class="fu">mapM</span> listSessionsInDir sessionReadPrefixes</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> deduplicated <span class="ot">=</span> dedupeBy sessionId allSessions</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>        sortOn modificationTime deduplicated</span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    , <span class="op">...</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><h4 id="memory-store-testing">Memory Store (Testing)</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">memorySessionStore ::</span> <span class="dt">IO</span> <span class="dt">SessionStore</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>memorySessionStore <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ref <span class="ot">&lt;-</span> newIORef Map.empty</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">return</span> <span class="dt">SessionStore</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        { readSession <span class="ot">=</span> <span class="op">\</span>sid <span class="ot">-&gt;</span> Map.lookup sid <span class="op">&lt;$&gt;</span> readIORef ref</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>        , writeSession <span class="ot">=</span> <span class="op">\</span>sess <span class="ot">-&gt;</span> </span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>            modifyIORef ref (Map.insert (sessionId sess) sess)</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>        , <span class="op">...</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>        }</span></code></pre></div></div><h3 id="best-practices">Best Practices</h3>
+<h4 id="session-hygiene">Session Hygiene</h4>
+<ol>
+<li><strong>Regular cleanup</strong>: Delete old sessions to save space
+</li>
+<li><strong>Sensitive data</strong>: Be careful with sessions containing secrets
+</li>
+<li><strong>Backup</strong>: Sessions are JSON files - back them up
+</li>
+<li><strong>Versioning</strong>: Handle schema migrations for old sessions
+</li>
+</ol>
+<h4 id="conversation-design">Conversation Design</h4>
+<ol>
+<li><strong>Clear turn boundaries</strong>: Each user input = one turn
+</li>
+<li><strong>Tool call recording</strong>: Always record for reproducibility
+</li>
+<li><strong>Error capture</strong>: Record tool failures in the session
+</li>
+<li><strong>Timestamps</strong>: Useful for debugging and auditing
+</li>
+</ol>
+<h4 id="performance">Performance</h4>
+<ol>
+<li><strong>Lazy loading</strong>: Don’t load full history unless needed
+</li>
+<li><strong>Pagination</strong>: For long sessions, load turns in chunks
+</li>
+<li><strong>Compression</strong>: Consider gzip for large session files
+</li>
+<li><strong>Search indexing</strong>: Build index periodically for fast searching
+</li>
+</ol>
+<h4 id="search-best-practices">Search Best Practices</h4>
+<ol>
+<li><strong>Regular index updates</strong>: Run <code>session-index --update</code> periodically
+</li>
+<li><strong>Include tool outputs</strong>: Use <code>--include-tool-outputs</code> for comprehensive search
+</li>
+<li><strong>Use filters</strong>: Combine text search with <code>--tool</code>, <code>--agent</code>, or date filters
+</li>
+<li><strong>JSON output</strong>: Use <code>--json</code> for scripting and automation
+</li>
+<li><strong>Auto-update</strong>: Use <code>--auto</code> flag to ensure fresh results
+</li>
+</ol>
+<h4 id="multi-location-best-practices">Multi-Location Best Practices</h4>
+<ol>
+<li><strong>Write location priority</strong>: Keep write location first in read locations for best performance
+</li>
+<li><strong>Archive old sessions</strong>: Move old sessions to archive directories instead of deleting
+</li>
+<li><strong>Shared sessions</strong>: Use shared directories for team collaboration
+</li>
+<li><strong>Tilde expansion</strong>: Use <code>~</code> for portable home directory references
+</li>
+<li><strong>Deduplication awareness</strong>: Understand that first location wins for duplicate IDs
+</li>
+</ol>
+<h4 id="media-best-practices">Media Best Practices</h4>
+<ol>
+<li><strong>Size limits</strong>: Keep media attachments under 50MB
+</li>
+<li><strong>MIME types</strong>: Always declare correct MIME types
+</li>
+<li><strong>Base64 encoding</strong>: Use proper encoding for binary data
+</li>
+<li><strong>Mixed responses</strong>: Use <code>MixedResponse</code> for rich multi-modal output
+</li>
+</ol>
+<h3 id="example-session-analysis">Example: Session Analysis</h3>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Count tool usage</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ot">toolUsageStats ::</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">Int</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>toolUsageStats session <span class="ot">=</span> </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    Map.fromListWith (<span class="op">+</span>) </span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>        [(toolName tc, <span class="dv">1</span>) <span class="op">|</span> turn <span class="ot">&lt;-</span> turns session</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>                          , tc <span class="ot">&lt;-</span> toolCalls turn]</span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- Average response time</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ot">averageResponseTime ::</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> <span class="dt">NominalDiffTime</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>averageResponseTime session <span class="ot">=</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sum</span> [toolDuration tc <span class="op">|</span> turn <span class="ot">&lt;-</span> turns session</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>                         , tc <span class="ot">&lt;-</span> toolCalls turn] </span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="op">/</span> <span class="fu">fromIntegral</span> (<span class="fu">length</span> <span class="op">$</span> <span class="fu">concatMap</span> toolCalls <span class="op">$</span> turns session)</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find turns with errors</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="ot">errorTurns ::</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> [<span class="dt">Turn</span>]</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>errorTurns session <span class="ot">=</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    [turn <span class="op">|</span> turn <span class="ot">&lt;-</span> turns session</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>          , <span class="fu">any</span> (isLeft <span class="op">.</span> toolOutput) (toolCalls turn)]</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="co">-- Count media attachments</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="ot">mediaAttachmentStats ::</span> <span class="dt">Session</span> <span class="ot">-&gt;</span> (<span class="dt">Int</span>, <span class="dt">Map</span> <span class="dt">Text</span> <span class="dt">Int</span>)</span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>mediaAttachmentStats session <span class="ot">=</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> attachments <span class="ot">=</span> collectAttachments session</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>        byType <span class="ot">=</span> Map.fromListWith (<span class="op">+</span>) </span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>            [(mediaMimeType m, <span class="dv">1</span>) <span class="op">|</span> m <span class="ot">&lt;-</span> attachments]</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    <span class="kw">in</span> (<span class="fu">length</span> attachments, byType)</span></code></pre></div></div><h3 id="example-search-integration">Example: Search Integration</h3>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Search.Types</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Search.Index</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">import</span> <span class="dt">System.Agents.Session.Search.Query</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- Search for sessions with specific patterns</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="ot">searchSessions ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">SearchResult</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>searchSessions query <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="co">-- Create store with multi-location support</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    store <span class="ot">&lt;-</span> mkSessionStore </span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;./sessions/&quot;</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>        [<span class="st">&quot;./sessions/&quot;</span>, <span class="st">&quot;~/.config/agents-exe/sessions/&quot;</span>]</span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> config <span class="ot">=</span> defaultSearchIndexConfig store</span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> opts <span class="ot">=</span> (defaultSearchOptions query)</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>            { searchJsonOutput <span class="ot">=</span> <span class="dt">False</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>            , searchPreviewLines <span class="ot">=</span> <span class="dv">3</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>            , searchLimit <span class="ot">=</span> <span class="dt">Just</span> <span class="dv">20</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>            }</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    executeSearchWithOptions config opts</span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find sessions that used specific tools</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a><span class="ot">findToolUsage ::</span> [<span class="dt">Text</span>] <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">SearchResult</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>findToolUsage tools <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    store <span class="ot">&lt;-</span> mkSimpleSessionStore <span class="st">&quot;./sessions/&quot;</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> config <span class="ot">=</span> defaultSearchIndexConfig store</span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> opts <span class="ot">=</span> (defaultSearchOptions <span class="st">&quot;&quot;</span>)</span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>            { searchTools <span class="ot">=</span> tools</span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>            , searchJsonOutput <span class="ot">=</span> <span class="dt">True</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>            }</span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    executeSearchWithOptions config opts</span></code></pre></div></div><h3 id="related-modules">Related Modules</h3>
+<table>
+<tr><th>Module</th><th>Purpose</th></tr>
+<tr><td><code>System.Agents.Media.Types</code></td><td>Media type definitions</td></tr>
+<tr><td><code>System.Agents.Session.Types</code></td><td>Core session types</td></tr>
+<tr><td><code>System.Agents.Session.Base</code></td><td>Session operations</td></tr>
+<tr><td><code>System.Agents.Session.Loop</code></td><td>Conversation loop</td></tr>
+<tr><td><code>System.Agents.Session.Step</code></td><td>Single turn execution</td></tr>
+<tr><td><code>System.Agents.Session.Edit</code></td><td>Session editing operations</td></tr>
+<tr><td><code>System.Agents.Session.OpenAI</code></td><td>OpenAI-specific session handling</td></tr>
+<tr><td><code>System.Agents.Session.Compat</code></td><td>Backwards compatibility</td></tr>
+<tr><td><code>System.Agents.Session.Search.Types</code></td><td>Search configuration types</td></tr>
+<tr><td><code>System.Agents.Session.Search.Index</code></td><td>Index building and maintenance</td></tr>
+<tr><td><code>System.Agents.Session.Search.Query</code></td><td>Search query execution</td></tr>
+<tr><td><code>System.Agents.SessionStore</code></td><td>Persistent storage with multi-location support</td></tr>
+<tr><td><code>System.Agents.SessionPrint</code></td><td>Markdown printing and statistics</td></tr>
+<tr><td><code>System.Agents.SessionPrint.Inject</code></td><td>Session content injection</td></tr>
+</table>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

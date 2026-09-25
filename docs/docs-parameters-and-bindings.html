@@ -1,0 +1,314 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Parameters, bindings, and narrowing sub-agents</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="Most agent frameworks give a tool&#39;s arguments to the model in full, or hide them entirely behind a wrapper script the author has to hand-maintain. This feature gives you a middle ground with no code: an agent&#39;s author declares a handful of"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Parameters, bindings, and narrowing sub-agents"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Most agent frameworks give a tool&#39;s arguments to the model in full, or hide them entirely behind a wrapper script the author has to hand-maintain. This feature gives you a middle ground with no code: an agent&#39;s author declares a handful of"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Parameters, bindings, and narrowing sub-agents"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html"><meta property="og:description" content="Most agent frameworks give a tool&#39;s arguments to the model in full, or hide them entirely behind a wrapper script the author has to hand-maintain. This feature gives you a middle ground with no code: an agent&#39;s author declares a handful of"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-parameters-and-bindings.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-parameters-and-bindings.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"Most agent frameworks give a tool's arguments to the model in full, or hide them entirely behind a wrapper script the author has to hand-maintain. This feature gives you a middle ground with no code: an agent's author declares a handful of","headline":"Parameters, bindings, and narrowing sub-agents","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Parameters, bindings, and narrowing sub-agents</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1522 words, 10 code snippets, 12 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-sessions.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">23/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-advanced-configuration.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/parameters-and-bindings.md"><code>documentation/parameters-and-bindings.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="parameters-bindings-and-narrowing-sub-agents">Parameters, bindings, and narrowing sub-agents</h2>
+<p>Most agent frameworks give a tool’s arguments to the model in full, or hide
+them entirely behind a wrapper script the author has to hand-maintain. This
+feature gives you a middle ground with no code: an agent’s author declares a
+handful of named <strong>parameters</strong> — a tenant id, an API token, a base URL — and
+then <strong>binds</strong> them straight into any tool’s arguments. The model never sees
+the bound value, never has to be told it, and never gets a chance to
+mistype, leak, or override it. A secret parameter never even enters the
+conversation, the session file, or a trace.</p>
+<p>The same mechanism reaches down the agent tree: one agent can partially
+apply a <em>sub-agent’s</em> tools before handing it a task — “call the diff
+reviewer, but its own <code>git diff</code> tool is pinned to this repo and this
+branch” — without changing the sub-agent’s file at all, and without ever
+seeing the values the sub-agent’s own author chose to keep hidden.</p>
+<p>If you only need one binding once, <a href="#bindings">Bindings</a> is all you need.
+The rest of this document exists for when you need more: per-session
+values from <code>agents-server</code>, sub-agents that narrow other sub-agents, or a
+narrowing worth reusing under a name.</p>
+<ul>
+<li><a href="#quick-example">Quick example</a>
+</li>
+<li><a href="#declaring-parameters">Declaring parameters</a>
+</li>
+<li><a href="#supplying-values">Supplying values</a>
+</li>
+<li><a href="#bindings">Bindings</a>
+</li>
+<li><a href="#secrets">Secrets</a>
+</li>
+<li><a href="#passing-parameters-to-sub-agents-with">Passing parameters to sub-agents (<code>with</code>)</a>
+</li>
+<li><a href="#narrowing-sub-agents-at-call-time">Narrowing sub-agents at call time</a>
+</li>
+<li><a href="#naming-a-narrowing-derive_agent">Naming a narrowing (<code>derive_agent</code>)</a>
+</li>
+<li><a href="#design-notes">Design notes</a>
+</li>
+</ul>
+<h3 id="quick-example">Quick example</h3>
+<p>An agent that declares a <code>tenant</code> parameter and binds it into a bash tool’s
+<code>tenant_id</code> argument, so the model can call <code>query-invoices</code> without ever
+knowing — or choosing — which tenant it is querying:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIAgentDescription&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;invoices-agent&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;openai&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com/v1&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4&quot;</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;answers questions about a tenant&#39;s invoices&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;You are an invoices assistant.&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;parameters&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span><span class="fu">,</span> <span class="dt">&quot;scope&quot;</span><span class="fu">:</span> <span class="st">&quot;session&quot;</span><span class="fu">,</span> <span class="dt">&quot;required&quot;</span><span class="fu">:</span> <span class="kw">true</span> <span class="fu">}</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span><span class="fu">,</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;bashToolboxes&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;FileSystemDirectory&quot;</span><span class="fu">,</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;Path&quot;</span><span class="fu">:</span> <span class="st">&quot;./tools&quot;</span><span class="fu">,</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;Bindings&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>            <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant_id&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>          <span class="ot">]</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>        <span class="fu">}</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><code>query-invoices</code>’ schema, as the model sees it, has no <code>tenant_id</code>
+argument at all — it is indistinguishable from a tool that never had one.
+Run it with a value for <code>tenant</code>:</p>
+<pre><code class="language-console">agents-exe run --agent-file agent.json --set tenant=acme-corp --prompt &quot;how many invoices are overdue?&quot;
+</code></pre>
+<h3 id="declaring-parameters">Declaring parameters</h3>
+<p>An agent’s <code>parameters</code> field is a list of named holes its author declares;
+a caller supplies the value. Nothing here is visible to the model — a
+parameter is plumbing, not a tool argument the LLM fills in.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;parameters&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;which tenant&#39;s data to operate on&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;scope&quot;</span><span class="fu">:</span> <span class="st">&quot;session&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;required&quot;</span><span class="fu">:</span> <span class="kw">true</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="ot">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;github_token&quot;</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;secret&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;scope&quot;</span><span class="fu">:</span> <span class="st">&quot;process&quot;</span><span class="fu">,</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;EnvVar&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;GITHUB_TOKEN&quot;</span> <span class="fu">}</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><table>
+<tr><th>Field</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>name</code></td><td>—</td><td>Matched by <code>Param</code> bindings, <code>--set</code>/<code>--pin</code>, <code>with</code>, and the HTTP API.</td></tr>
+<tr><td><code>description</code></td><td>(none)</td><td>For the operator's own documentation; never shown to the model.</td></tr>
+<tr><td><code>secret</code></td><td><code>false</code></td><td>The value is a string, and is never persisted, traced, or returned by any API — see [Secrets](#secrets).</td></tr>
+<tr><td><code>scope</code></td><td><code>"process"</code></td><td>Who may supply it: <code>"process"</code> (only the operator, at startup), <code>"session"</code> or <code>"message"</code> (a caller of <code>agents-server</code>, see [Supplying values](#supplying-values)).</td></tr>
+<tr><td><code>required</code></td><td><code>true</code></td><td>An unbound required parameter is an error before any LLM call — at startup for a process-scope parameter, at session creation or message post for the others.</td></tr>
+<tr><td><code>default</code></td><td>(none)</td><td>Resolved once, at tree load, if nothing else supplies a value first. Reuses the same source shapes as a toolbox secret: <code>{"tag": "Given", "contents": "literal"}</code>, <code>{"tag": "EnvVar", "contents": "NAME"}</code>, <code>{"tag": "FileSystem", "contents": "/path"}</code>, <code>{"tag": "Command", "contents": ["cmd", "arg1", "arg2"]}</code>, or <code>{"tag": "ApiKey", "contents": "key-id"}</code> (an entry of the <code>--api-keys</code> file).</td></tr>
+</table>
+<p>Resolution order for one parameter, first hit wins: a pinned process value
+(<code>--pin</code>) short-circuits everything else; then a message-scope value; then
+a session-scope value; then a process value (<code>--set</code>/<code>--set-json</code>/
+<code>--params-file</code>); then <code>default</code>; otherwise it is unbound.</p>
+<h3 id="supplying-values">Supplying values</h3>
+<h4 id="agents-exe-process-scope"><code>agents-exe</code> (process scope)</h4>
+<pre><code class="language-console">agents-exe run --agent-file agent.json \
+    --set tenant=acme-corp \
+    --set-json max_results=10 \
+    --pin region=eu-west-1 \
+    --params-file ./params.json \
+    --prompt &quot;...&quot;
+</code></pre>
+<table>
+<tr><th>Flag</th><th>Meaning</th></tr>
+<tr><td><code>--set NAME=VALUE</code></td><td>Sets a parameter to a string value. Repeatable.</td></tr>
+<tr><td><code>--set-json NAME=JSON</code></td><td>Sets a parameter to any JSON value (number, bool, object...). Repeatable.</td></tr>
+<tr><td><code>--pin NAME=VALUE</code></td><td>Like <code>--set</code>, but the value cannot be overridden by a session- or message-scope value from <code>agents-server</code> — useful to lock a container to one tenant. Repeatable.</td></tr>
+<tr><td><code>--pin-json NAME=JSON</code></td><td>The JSON form of <code>--pin</code>. Repeatable.</td></tr>
+<tr><td><code>--params-file FILE</code></td><td>A JSON file of <code>{"name": value, ...}</code>. Flags win over a file's values.</td></tr>
+</table>
+<p>These flags work the same way on <code>agents-server</code> (see
+<a href="/agents-exe/docs-agents-server.html#parameters">agents-server.md</a>), where they set values
+every session shares.</p>
+<h4 id="agents-server-session-and-message-scope"><code>agents-server</code> (session and message scope)</h4>
+<p>A session- or message-scope parameter is supplied per request, in the same
+<code>params</code> object used by <code>POST /v1/sessions</code>, <code>.../messages</code>, <code>.../resume</code>,
+and <code>POST /v1/continuations/:token</code>:</p>
+<pre><code class="language-console">curl -sS localhost:8080/v1/sessions \
+    -d '{&quot;agent&quot;: &quot;invoices-agent&quot;, &quot;message&quot;: {&quot;text&quot;: &quot;how many invoices are overdue?&quot;}, &quot;params&quot;: {&quot;tenant&quot;: &quot;acme-corp&quot;}}'
+</code></pre>
+<p>A session-scope value is kept in memory for the life of the session (a
+client must resupply it after a restart or eviction); a message-scope value
+lasts for that one run only. Neither is ever written to the session file —
+see <a href="/agents-exe/docs-agents-server.html#parameters">agents-server.md</a> for the full request
+shape and error responses, and for setting parameters over MCP-over-HTTP
+via <code>Agents-Param-&lt;name&gt;</code> headers.</p>
+<h3 id="bindings">Bindings</h3>
+<p>A <code>Bindings</code> list on a toolbox description ties one tool’s argument to a
+fixed value or to a parameter. It is supported on bash toolboxes (both
+<code>FileSystemDirectory</code> and <code>SingleTool</code>), OpenAPI toolboxes, and PostgREST
+toolboxes:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;FileSystemDirectory&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;Path&quot;</span><span class="fu">:</span> <span class="st">&quot;./tools&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;Bindings&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant_id&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;token&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;github_token&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;export-*&quot;</span><span class="fu">,</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;format&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;csv&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><table>
+<tr><th>Field</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>tool</code></td><td>(all tools)</td><td>A glob (<code>*</code> matches any run of characters) against the tool's name, to bind the same argument differently across several tools.</td></tr>
+<tr><td><code>arg</code></td><td>—</td><td>The argument name, as the underlying tool declares it.</td></tr>
+<tr><td><code>value</code></td><td>—</td><td><code>{"tag": "Literal", "contents": &lt;json&gt;}</code> for a fixed value chosen by the agent's author, or <code>{"tag": "Param", "contents": "&lt;parameter name&gt;"}</code>, resolved fresh at call time.</td></tr>
+<tr><td><code>whenUnbound</code></td><td><code>"fail"</code></td><td>What happens if a <code>Param</code> binding has no value at call time: <code>"fail"</code> (the call fails with a message an operator can act on; the model just sees a generic "tool not found"), <code>"omit"</code> (the argument is left out — only valid for an optional argument), or <code>"expose"</code> (the argument reappears in the tool's schema for the model to fill in itself, for as long as it is unbound — see below).</td></tr>
+</table>
+<p>A bound argument is removed from the tool’s schema entirely — indistinguishable
+from a tool that never had it. If the model sends the argument’s name
+anyway, the bound value wins.</p>
+<p>An agent itself can also carry a top-level <code>bindings</code> list, applied after
+every toolbox’s own bindings and matched by the tool’s final, LLM-visible
+name — the one way to bind an argument on a tool from a toolbox that has no
+per-tool <code>tool</code> glob of its own (a bash tool, for instance):</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;bindings&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_query_invoices&quot;</span><span class="fu">,</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant_id&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;tenant&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="whenunbound-expose"><code>whenUnbound: &quot;expose&quot;</code></h4>
+<p>Most bindings should fail or omit when unbound: a tool the model can only
+half-use is worse than one it cannot see. <code>&quot;expose&quot;</code> is the deliberate
+exception, for an argument that is <em>usually</em> supplied for the model but
+should fall back to letting the model choose when it is not: the tool’s
+schema is a live function of whether the session currently has a value for
+that parameter, updating as an <code>agents-server</code> session’s parameters are set
+— no agent rebuild, no restart. A secret parameter cannot use
+<code>&quot;expose&quot;</code>: it would just let the model retype the secret in plain text,
+defeating the reason it was marked secret.</p>
+<h3 id="secrets">Secrets</h3>
+<p>A <code>secret: true</code> parameter’s value is a string, and:</p>
+<ul>
+<li>is redacted (<code>&quot;&lt;secret&gt;&quot;</code>) everywhere it might otherwise be printed,
+logged, or traced;
+</li>
+<li>is never persisted — a session’s stored parameters only ever include
+non-secret ones; a secret session-scope value lives only in
+<code>agents-server</code>’s own memory, and is lost on restart or eviction;
+</li>
+<li>is never returned by any <code>agents-server</code> API response;
+</li>
+<li>never appears in the conversation itself: a bound value is merged into
+the tool call just before dispatch, after the model’s turn is already
+decided, so it is not part of the session’s own history.
+</li>
+</ul>
+<p>A bash tool argument bound to a secret parameter must use the bash <code>env</code>
+calling mode (<code>&quot;mode&quot;: &quot;env&quot;</code>), which passes it as an environment variable
+rather than on the command line — anything else would show up in <code>ps</code> and
+in traces regardless of how carefully the framework kept it from the model.
+<code>agents-exe check</code> refuses to load an agent that gets this wrong.</p>
+<h3 id="passing-parameters-to-sub-agents-with">Passing parameters to sub-agents (<code>with</code>)</h3>
+<p>Parameter <em>values</em> never travel to a sub-agent implicitly — a name like
+<code>tenant</code> is not special, and a sub-agent that happens to declare the same
+parameter name should not silently inherit whatever the caller set. An
+<code>extraAgents</code> reference’s <code>with</code> field says explicitly which of the
+sub-agent’s own parameters the caller fills, and from what:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;diff-reviewer&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;./diff-reviewer.json&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;with&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;repo_token&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Param&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;github_token&quot;</span> <span class="fu">}</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><code>with</code> is resolved against the caller’s own parameters when the sub-agent
+is actually prompted, and is checked at load time: every key must be a
+parameter the sub-agent declares, and every required session-scope
+parameter of the sub-agent must be covered — by <code>with</code>, or by the
+sub-agent’s own process value or default.</p>
+<h3 id="narrowing-sub-agents-at-call-time">Narrowing sub-agents at call time</h3>
+<p>Every sub-agent reachable through <code>extraAgents</code> or a <code>toolDirectory</code> gets a
+<code>prompt_agent_&lt;slug&gt;</code> tool. Two more things come with it, letting an agent
+partially apply a sub-agent’s <em>own</em> tools — or one of <em>its</em> sub-agents’,
+arbitrarily deep — for one call, without touching any file:</p>
+<ul>
+<li>
+<p><strong><code>describe_agent {&quot;slug&quot;: &quot;&lt;helper&gt;&quot;}</code></strong> — registered whenever an agent
+has at least one helper. It shows, from the caller’s own position in the
+chain, what is still open: the helper’s declared parameters (and whether
+each is already bound), its tools’ still-open arguments, and the same
+view recursively for its own helpers. A helper marked <code>narrowable: false</code>
+(see below) shows only its <code>announce</code>.</p>
+</li>
+<li>
+<p><strong><code>bindings</code> and <code>with</code> on the <code>prompt_agent_&lt;slug&gt;</code> call itself</strong> — the
+same shapes as a toolbox’s <code>Bindings</code> and a reference’s <code>with</code>, but
+chosen by the calling model, for this one call:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;what&quot;</span><span class="fu">:</span> <span class="st">&quot;review this diff for security issues&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;bindings&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;repo&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;backend&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span> <span class="dt">&quot;agent&quot;</span><span class="fu">:</span> <span class="st">&quot;linter&quot;</span><span class="fu">,</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;strict&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="kw">true</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;with&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;severity_threshold&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;high&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Each binding’s optional <code>agent</code> field addresses where it applies:
+omitted for the helper itself, a slash-separated path (<code>&quot;linter&quot;</code>,
+<code>&quot;a/b&quot;</code>) for one of its own helpers, or <code>&quot;**&quot;</code> for the helper and
+everything below it. A binding not addressed at the helper itself
+travels down, re-rooted, for the helper to apply in turn when <em>it</em>
+prompts one of its own helpers — so a grandparent can bind an argument
+three levels down in one call. A call-time <code>with</code> cannot refill a
+parameter the reference’s own static <code>with</code> already fills.</p>
+</li>
+</ul>
+<p>A helper’s <code>extraAgents</code> reference can set <code>&quot;narrowable&quot;: false</code> (default:
+<code>true</code>) to refuse all of this: <code>describe_agent</code> shows only its <code>announce</code>,
+and any <code>bindings</code>/<code>with</code> on a call into it — direct or inherited from
+above — is refused. Bound arguments stay bound either way: <code>narrowable</code>
+only controls whether <em>more</em> can be bound from outside, not whether an
+operator’s own bindings in the helper’s file are visible.</p>
+<p>Errors the calling model can act on — an unknown helper, no tool matching
+a glob, no such open argument, a <code>narrowable: false</code> target — are reported
+before the helper runs, naming what is still open, so one retry usually
+suffices. What is actually bound never appears in the response either way,
+by the same rule as any other binding.</p>
+<h3 id="naming-a-narrowing-derive_agent">Naming a narrowing (<code>derive_agent</code>)</h3>
+<p>Repeating the same <code>bindings</code> on every call costs tokens and invites
+inconsistency. <code>derive_agent</code> saves one under a name for the rest of the
+session:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;from&quot;</span><span class="fu">:</span> <span class="st">&quot;diff-reviewer&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;backend-strict&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;bindings&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span> <span class="dt">&quot;arg&quot;</span><span class="fu">:</span> <span class="st">&quot;repo&quot;</span><span class="fu">,</span> <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;backend&quot;</span> <span class="fu">}</span> <span class="fu">}</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;with&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;severity_threshold&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;Literal&quot;</span><span class="fu">,</span> <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="st">&quot;high&quot;</span> <span class="fu">}</span> <span class="fu">}</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>and any later <code>prompt_agent_&lt;from&gt;</code> call reuses it with <code>&quot;as&quot;: &quot;&lt;slug&gt;&quot;</code>,
+instead of repeating <code>bindings</code>/<code>with</code>. It is sugar, not a new mechanism —
+nothing is stored beyond that <code>derive_agent</code> call landing in the session’s
+own history, folded back into a table the next time it is needed. An
+unknown <code>as</code> name tells the model to call <code>derive_agent</code> first, and
+<code>narrowable: false</code> refuses <code>derive_agent</code> and <code>as</code> the same way it
+refuses an inline <code>bindings</code>/<code>with</code>.</p>
+<h3 id="design-notes">Design notes</h3>
+<p>A handful of decisions shape all of the above, in case they explain a
+surprise:</p>
+<ul>
+<li><strong>The author decides what is bindable, not the caller.</strong> Otherwise any
+client of <code>agents-server</code> could pin any argument of any tool.
+</li>
+<li><strong>The schema is static</strong>, except for <code>&quot;expose&quot;</code>: a bound argument is
+hidden whether or not a value is currently present, so the tool list
+stays identical across sessions — simpler prompt caching, simpler
+reasoning about what the model can do.
+</li>
+<li><strong>No templating.</strong> A parameter never appears inside a system prompt or a
+path string; it only ever fills a tool argument. Templating changes the
+agent’s definition per session and puts values in front of the model,
+which is a different feature with different risks.
+</li>
+<li><strong>Values live in the call context, never in the registration.</strong> A
+toolbox loads once and is shared across every session that uses it
+(hot-reload, one MCP connection, one SQLite handle); rebuilding it per
+session would mean re-describing every script and restarting every MCP
+server.
+</li>
+</ul>
+<p>See <code>todos/tool-partial-application.md</code> in the repository for the full
+design rationale and the phased implementation history, if you want the
+“why” behind any of the above in more depth.</p>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

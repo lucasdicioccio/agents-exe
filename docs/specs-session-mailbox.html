@@ -1,0 +1,488 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html"><meta property="og:description" content="Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/specs-session-mailbox.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-session-mailbox.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in","headline":"Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 2558 words, 9 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-tool-partial-application.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">11/11</span></a><span class="topic-nav topic-next-link"><span class="topic-nav-boundary">|</span></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/session-mailbox.md"><code>todos/session-mailbox.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="spec-the-session-mailbox-agent-to-agent-mail-suspended-tool-calls-interrupts-tool-call-wrappers">Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</h2>
+<p>Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
+issues #563 and #564, and most of #507 (see “What happens to the issues”).</p>
+<h3 id="goal">Goal</h3>
+<p>One mechanism through which everything that happens <em>to</em> a running session
+reaches it: a user message, a message from another agent’s session, the result
+of a tool call the LLM was told is “still running”, the result of a deferred
+call, a timer, a pause request.</p>
+<p>Around it:</p>
+<ul>
+<li>(A2A) an agent can write to another session, running or idle, and get an
+answer back, across sessions and (on <code>agents-server</code>) across restarts;
+</li>
+<li>(suspension) a slow tool call is suspended <em>inside the runtime</em>: the LLM gets
+<code>running, id = call_abc</code> and takes its turn; it may then wait up to N seconds,
+poll, cancel, or ignore the call;
+</li>
+<li>(interrupts) while the runtime is blocked (on attached tool calls, on a
+<code>wait</code>, optionally on an LLM completion), higher-priority mail pre-empts the
+wait;
+</li>
+<li>(wrappers) tool calls are wrapped declaratively (timeout, retries, hooks that
+may deny / defer / rewrite), which is the existing, currently inert,
+<code>Decorator</code> made real.
+</li>
+</ul>
+<h3 id="the-os-picture">The OS picture</h3>
+<table>
+<tr><th>OS</th><th>here</th></tr>
+<tr><td>CPU running user code</td><td>the LLM completing a turn</td></tr>
+<tr><td>syscall</td><td>a tool call</td></tr>
+<tr><td>blocking syscall</td><td>an <em>attached</em> call: the step waits for it</td></tr>
+<tr><td><code>SIGTSTP</code> / <code>bg</code></td><td><em>detach</em>: the call keeps running, the LLM gets a placeholder</td></tr>
+<tr><td><code>wait(2)</code>, <code>kill(2)</code>, <code>/proc</code></td><td><code>wait</code>, <code>cancel-tool-call</code>, <code>get-tool-call-status</code></td></tr>
+<tr><td>interrupt controller + message queue</td><td>the mailbox</td></tr>
+<tr><td>interrupt-enabled points</td><td>the receive points R1-R4 below</td></tr>
+<tr><td>syscall filter / LSM hooks</td><td>wrappers</td></tr>
+<tr><td>scheduler run queue</td><td><code>Host.Runner</code>: a session with unread mail and no run is runnable</td></tr>
+</table>
+<h3 id="current-state">Current state</h3>
+<p>More of this exists than the issues assume. They predate <code>Session/Async*</code>,
+<code>Session/Wake.hs</code> and <code>Host/Runner.hs</code>.</p>
+<h4 id="what-we-can-reuse-as-is">What we can reuse as-is</h4>
+<ul>
+<li>Background calls: <code>RunAsync</code>, the async engine, OS tool-call entities,
+placeholder tool messages (<code>partialToolMessages</code>), progress, cancellation of
+the whole process group (<code>documentation/async-tool-calls.md</code>).
+</li>
+<li><code>get-tool-call-status</code> (with <code>wait_for_completion</code> + <code>timeout_seconds</code>),
+<code>list-running-tool-calls</code>, <code>cancel-tool-call</code>.
+</li>
+<li>Deferred calls, continuation tokens, <code>wakeSessionWith</code>.
+</li>
+<li><code>Host.Runner</code>: per-session lock, one run at a time, versioned writes
+(<code>sbCompareAndStore</code>), <code>SessionEvent</code> broadcast + <code>subscribe</code>, the HTTP event
+stream, lineage (<code>smParent</code>) and owners (<code>smOwner</code>).
+</li>
+<li><code>AsyncToolResponse = ToolComplete | ToolYield</code>, which is the right result
+type for a wrapper that wants to suspend a call.
+</li>
+</ul>
+<h4 id="gaps">Gaps</h4>
+<p>G1. A session has <strong>half a dozen unrelated input channels</strong>, each with its own
+delivery rule:</p>
+<table>
+<tr><th>input</th><th>channel</th><th>"delivered once" is ensured by</th></tr>
+<tr><td>user text</td><td><code>usrQuery :: IO (Maybe UserQuery)</code>, pulled</td><td>the caller</td></tr>
+<tr><td>background result</td><td>STM over the OS entity (<code>awaitEntities</code>)</td><td><code>tcDeliveredLate</code> flag in the turn</td></tr>
+<tr><td>deferred result</td><td><code>lsInbox :: TVar [(token, result)]</code> (<code>Runner.hs:204</code>)</td><td><code>csComplete</code> + <code>TokenAlreadyCompleted</code></td></tr>
+<tr><td>user text, TUI</td><td>a <code>BChan</code> per conversation + "buffered messages" in the core, drained by <code>usrQuery</code> (<code>tui/…/Event/Conversation.hs</code>)</td><td>clearing the buffer on read</td></tr>
+<tr><td>stop</td><td><code>cancel</code> of the run thread (<code>cancelRun</code>)</td><td>-</td></tr>
+<tr><td>pause, TUI</td><td><code>step</code> polls <code>isConversationPaused</code> every 200 ms</td><td>-</td></tr>
+</table>
+<p>G2. <strong>A busy session cannot be talked to.</strong> <code>postMessage</code> answers
+<code>RunInProgress</code> / <code>NotAcceptingMessages</code> (<code>Runner.hs:664</code>). Nothing can be
+addressed to a session by another session at all. This is the A2A blocker.</p>
+<p>G3. The one interrupt we have, <code>race agent.usrQuery (waitForRunningCalls …)</code>
+(<code>Step.hs:630</code>), races two IO actions, so <code>usrQuery</code> “must tolerate
+cancellation”, and it only exists at one point (idle with background calls).
+Attached calls, <code>wait_for_completion</code> and LLM completions are not
+interruptible.</p>
+<p>G4. Suspension is <strong>static</strong>: a tool is <code>runAsync</code> or it is not. There is no
+“run it, and if it is still going after 10 s hand control back” per call;
+<code>yieldOnTimeout</code> is per agent and per step. And a <code>runSync</code> call runs in the
+step’s own thread, so it can never be detached.</p>
+<p>G5. <strong>Decorators are parsed, stored, and never applied.</strong> <code>WithTimeout</code>,
+<code>WithRetries</code>, <code>WithCache</code>, <code>WithLabel</code> (<code>Session/Types.hs:468</code>) are flattened
+into <code>ccDecorators</code> (<code>Step.hs:347</code>), which nobody reads; <code>Durable.hs</code> binds
+them to <code>_decorators</code> four times. Policy rules match one exact tool name,
+first match wins (<code>AgentConfig.hs:26</code>), so a decorator cannot be applied
+across tools.</p>
+<p>G6. “If the model reads a result with <code>get-tool-call-status</code>, the delivery
+notice repeats it once” (documented limit): a symptom of G1, there is no
+notion of a message having been consumed.</p>
+<h3 id="design">Design</h3>
+<h4 id="1-the-mailbox">1. The mailbox</h4>
+<p>An envelope:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Envelope</span> <span class="ot">=</span> <span class="dt">Envelope</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> envId       ::</span> <span class="dt">MessageId</span>      <span class="co">-- idempotency key; sender may supply it</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> envSeq      ::</span> <span class="dt">Int</span>            <span class="co">-- assigned on accept; total order per session</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> envFrom     ::</span> <span class="dt">Sender</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> envPriority ::</span> <span class="dt">Priority</span>       <span class="co">-- Normal | Interrupt</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> envHops     ::</span> <span class="dt">Int</span>            <span class="co">-- A2A loop guard, see §5</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> envSentAt   ::</span> <span class="dt">UTCTime</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> envBody     ::</span> <span class="dt">MailBody</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Sender</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">FromUser</span> (<span class="dt">Maybe</span> <span class="dt">Text</span>)                 <span class="co">-- owner, when known</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">FromSession</span> <span class="dt">SessionId</span> (<span class="dt">Maybe</span> <span class="dt">Text</span>)    <span class="co">-- and its agent slug</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">FromToolCall</span> <span class="dt">ToolCallId</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">FromSystem</span> <span class="dt">Text</span>                       <span class="co">-- timers, watchers, the runner</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">MailBody</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">UserMessage</span> <span class="dt">UserQuery</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">AgentMessage</span> <span class="dt">Text</span> (<span class="dt">Maybe</span> <span class="dt">MessageId</span>) <span class="dt">Bool</span>      <span class="co">-- text, in-reply-to, expects-reply</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ToolCallFinished</span> <span class="dt">ToolCallId</span> <span class="dt">ToolCallState</span> <span class="dt">UserToolResponse</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ContinuationResult</span> <span class="dt">ContinuationToken</span> <span class="dt">UserToolResponse</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">WatchedEvent</span> <span class="dt">SessionId</span> <span class="dt">Text</span> <span class="dt">Aeson.Value</span>       <span class="co">-- §7</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">Control</span> <span class="dt">ControlMsg</span>                            <span class="co">-- Pause | Resume | CancelCalls [ToolCallId] | StopRun</span></span></code></pre></div></div><p>Progress is <em>not</em> mail. It is state (the OS entity keeps the last 50 entries)
+and is read, not delivered.</p>
+<p>The interface, a record of functions like <code>ContinuationStore</code>, carried as
+<code>ctxMailbox :: Maybe Mailbox</code> on <code>Agent</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Mailbox</span> <span class="ot">=</span> <span class="dt">Mailbox</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> mbSend   ::</span> <span class="dt">Outgoing</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Either</span> <span class="dt">SendError</span> <span class="dt">Receipt</span>)  <span class="co">-- any thread, any session</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mbUnread ::</span> <span class="dt">Cursor</span> <span class="ot">-&gt;</span> <span class="dt">STM</span> [<span class="dt">Envelope</span>]                   <span class="co">-- never removes anything</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mbTrim   ::</span> <span class="dt">Cursor</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()                            <span class="co">-- GC at or below the cursor</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">SendError</span> <span class="ot">=</span> <span class="dt">UnknownRecipient</span> <span class="op">|</span> <span class="dt">MailboxFull</span> <span class="op">|</span> <span class="dt">NotPermitted</span> <span class="op">|</span> <span class="dt">TooManyHops</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">Receipt</span>   <span class="ot">=</span> <span class="dt">Receipt</span> {<span class="ot"> rcptId ::</span> <span class="dt">MessageId</span>,<span class="ot"> rcptSeq ::</span> <span class="dt">Int</span>,<span class="ot"> rcptDuplicate ::</span> <span class="dt">Bool</span> }</span></code></pre></div></div><p><strong>Transactional</strong> means three things, and only these:</p>
+<ol>
+<li><em>Accept is atomic and idempotent.</em> One STM transaction (in memory) or one
+<code>INSERT … ON CONFLICT DO NOTHING</code> (durable) assigns <code>envSeq</code>. Resending the
+same <code>envId</code> returns the first receipt with <code>rcptDuplicate</code>.
+</li>
+<li><em>Reading does not consume.</em> There is no <code>pop</code>. A reader is a cursor.
+</li>
+<li><em>Consumption commits with its effect.</em> <code>Session</code> gains <code>mailCursor :: Int</code>
+(JSON default 0). A step that folds envelopes <code>≤ k</code> into a turn returns a
+session with <code>mailCursor = k</code>; the versioned store of that session <em>is</em> the
+ack. A crash between reading and storing redelivers into a session that
+does not contain the mail yet: exactly-once effect, no two-phase anything.
+</li>
+</ol>
+<p>Point 3 is why #563’s <code>TQueue</code> component is not enough (a <code>readTQueue</code>
+followed by a crash loses the message), and it removes <code>tcDeliveredLate</code>-style
+flags: “delivered” is <code>envSeq ≤ mailCursor</code>.</p>
+<p>Because <code>mbUnread</code> is STM, a blocking receive is <code>retry</code>, a filtered receive
+is a <code>filter</code>, and a receive with alternatives is <code>orElse</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">awaitMail ::</span> <span class="dt">Mailbox</span> <span class="ot">-&gt;</span> <span class="dt">Cursor</span> <span class="ot">-&gt;</span> (<span class="dt">Envelope</span> <span class="ot">-&gt;</span> <span class="dt">Bool</span>) <span class="ot">-&gt;</span> <span class="dt">STM</span> [<span class="dt">Envelope</span>]</span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>awaitMail mb cur p <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    es <span class="ot">&lt;-</span> <span class="fu">filter</span> p <span class="op">&lt;$&gt;</span> mbUnread mb cur</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    when (<span class="fu">null</span> es) retry</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">pure</span> es</span></code></pre></div></div><p>Two implementations:</p>
+<ul>
+<li>in memory (<code>TVar (Seq Envelope)</code>), for <code>run</code>, the TUI, sub-agents, tests;
+</li>
+<li>durable, for <code>Host</code>: a <code>session_mail</code> table next to the continuations
+(<code>session_id, seq, id UNIQUE, from_json, priority, hops, body_json, accepted_at</code>), SQLite and Postgres, fronted by the same <code>TVar</code> so
+<code>mbUnread</code> stays STM. The runner is single-process per session already
+(second writers are detected), so the <code>TVar</code> front is sound; a multi-process
+Postgres deployment would fill it from <code>LISTEN/NOTIFY</code>, later.
+</li>
+</ul>
+<p>Bounded: <code>mailboxMaxUnread</code> (default 256). A full mailbox refuses with
+<code>MailboxFull</code>; the sender’s tool call fails, which is the backpressure.
+<code>Control</code> and <code>ToolCallFinished</code> are exempt.</p>
+<h4 id="2-receive-points">2. Receive points</h4>
+<p>The stepper reads the mailbox at four points. Everything else in this spec is
+a consequence of what each point does.</p>
+<table>
+<tr><th></th><th>when</th><th>blocking</th><th>reads</th></tr>
+<tr><td>R1</td><td>building a user turn, before <code>AskLlmCompletion</code></td><td>no</td><td>all unread</td></tr>
+<tr><td>R2</td><td>idle: the LLM issued no calls, or only detached/deferred calls remain</td><td>yes</td><td>all unread</td></tr>
+<tr><td>R3</td><td>blocked on attached calls, or inside the <code>wait</code> tool</td><td>yes, as one arm of an <code>orElse</code></td><td><code>Interrupt</code> (R3a), any (R3b, <code>wait</code>)</td></tr>
+<tr><td>R4</td><td>during an LLM completion (opt-in)</td><td><code>race</code></td><td><code>Interrupt</code></td></tr>
+</table>
+<p>R1 generalises <code>collectLateResults</code>; R2 replaces the <code>race</code> in <code>askUserQuery</code>
+and the <code>block</code> flag; both become:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- R2, no IO race, nothing to cancel</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> awaitMail mb cur (<span class="fu">const</span> <span class="dt">True</span>)</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co">-- R3a: attached calls vs. interrupts, one transaction</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>atomically <span class="op">$</span> (<span class="dt">Left</span>  <span class="op">&lt;$&gt;</span> awaitMail mb cur isInterrupt)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="ot">`orElse`</span> (<span class="dt">Right</span> <span class="op">&lt;$&gt;</span> awaitEntities world <span class="fu">any</span> attached)</span></code></pre></div></div><p>A genuine <code>race</code> (thread cancellation) remains only where an IO action must
+be abandoned: R4, and an inline call under <code>StopRun</code>.</p>
+<p><strong>What the LLM sees.</strong> Providers want exactly one tool message per call, then
+optionally a user message. So mail is folded into the <code>userQuery</code> of the turn
+being built, as <code>lateResultsQuery</code> does today, one block per envelope with a
+header the model can quote back:</p>
+<pre><code>[mail m-7f3a from session 9c1e (agent &quot;reviewer&quot;), expects reply]
+The migration in your PR drops an index that report_daily depends on.
+
+[mail m-7f3b: tool call call_abc (run_tests) completed]
+42 tests passed
+</code></pre>
+<p>The raw envelopes are also kept on the turn (<code>userMail :: [Envelope]</code>, new
+optional field of <code>UserTurnContent</code> / <code>PartialUserTurnContent</code>), so the TUI,
+the chat page and <code>session-print</code> render senders properly instead of parsing
+a blob, and the audit trail #563 wanted (<code>imSourceAgent</code>) is in the session
+file.</p>
+<p><code>Control</code> envelopes are consumed (cursor moves) but render nothing.</p>
+<p><strong>Compatibility.</strong> <code>ctxMailbox = Nothing</code> keeps today’s code paths, <code>usrQuery</code>
+included. With a mailbox, front-ends post <code>UserMessage</code> instead of answering
+<code>usrQuery</code>: one-shot runs pre-load one envelope; the TUI’s message editor posts
+to the selected conversation’s mailbox, which replaces both the per-conversation
+<code>BChan</code> and the buffered messages (typing at a busy conversation <em>is</em> unread
+mail), and the TUI’s pause becomes <code>Control Pause</code> instead of a polling <code>step</code>;
+<code>postMessage</code> posts. <code>usrQuery</code> stays on the record for embedders.</p>
+<h4 id="3-suspended-tool-calls-attach-and-detach">3. Suspended tool calls: attach and detach</h4>
+<p>In asynchronous mode <strong>every call that has an OS entity runs in the engine</strong>.
+A disposition no longer says <em>where</em> a call runs but <em>how long the step stays
+attached to it</em>:</p>
+<table>
+<tr><th>config</th><th>meaning</th></tr>
+<tr><td><code>{"tag":"runSync"}</code></td><td>attached until done (today's behaviour, now detachable by an interrupt)</td></tr>
+<tr><td><code>{"tag":"runAsync"}</code></td><td>attached per the agent's <code>asyncYieldStrategy</code> (unchanged)</td></tr>
+<tr><td><code>{"tag":"runAsync","attachSeconds":10}</code></td><td>attached for 10 s, then detached</td></tr>
+<tr><td><code>{"tag":"runAsync","attachSeconds":0}</code></td><td>detached at once</td></tr>
+</table>
+<p><code>attachSeconds</code> is G4’s answer: fast calls look synchronous, slow ones suspend
+themselves. The wait is R3a with one more <code>orElse</code> arm per distinct deadline
+(a <code>registerDelay</code> TVar).</p>
+<p>Detaching is what <code>executeTrackedCalls</code> already does when it emits a
+<code>PartialUserTurn</code> with <code>Running</code> calls; the placeholder gains the reason:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;running&quot;</span><span class="fu">,</span> <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;call_abc&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;detached&quot;</span><span class="fu">:</span> <span class="st">&quot;still running after 10s&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;message&quot;</span><span class="fu">:</span> <span class="st">&quot;Its result will arrive as mail. Use wait, get-tool-call-status or cancel-tool-call.&quot;</span><span class="fu">}</span></span></code></pre></div></div><p>On completion the engine posts <code>ToolCallFinished</code> to the owning session’s
+mailbox <strong>in the same STM transaction that marks the entity <code>TcCompleted</code></strong>,
+so a result can neither be lost nor observed by <code>get-tool-call-status</code> before
+it is mail. Fixing G6: when <code>get-tool-call-status</code> returns a final result, the
+stepper marks that envelope as read-by-tool on the turn, and R1 renders it as
+a one-line <code>already read</code> notice instead of repeating the payload.</p>
+<p>The LLM’s side, in the System Toolbox:</p>
+<table>
+<tr><th>capability</th><th></th></tr>
+<tr><td><code>wait</code> (new)</td><td><code>{"for": ["call_abc"] \| "any-call" \| "mail", "timeout_seconds": 30}</code>. Returns on the first of: a named call is final, any mail, timeout. Says which. Peeks, never consumes: the mail it woke for is delivered by R1 in the same turn.</td></tr>
+<tr><td><code>get-tool-call-status</code></td><td>unchanged; <code>wait_for_completion</code> becomes sugar for <code>wait</code> and gains interruptibility</td></tr>
+<tr><td><code>cancel-tool-call</code>, <code>list-running-tool-calls</code></td><td>unchanged</td></tr>
+<tr><td><code>send-to-tool-call</code> (later)</td><td>for a sub-agent call: mail to the child session (§5). For bash: stdin, not planned.</td></tr>
+</table>
+<p><code>wait</code> needs the mailbox, so <code>ToolExecutionContext</code> gains <code>ctxAwaitMail</code>, a
+hook like <code>ctxCancelToolCall</code>. <code>wait</code> always takes a timeout, capped by
+<code>maxWaitSeconds</code> (default 300): two agents waiting on each other time out
+instead of deadlocking.</p>
+<p>Background calls still die with their process (orphaned on reload). Unchanged,
+out of scope.</p>
+<h4 id="4-interrupts">4. Interrupts</h4>
+<p>Priority is set by the sender and checked on accept: the user and <code>Control</code>
+may always interrupt; a session may interrupt its descendants; peers may not
+(configurable, §5).</p>
+<table>
+<tr><th><code>Interrupt</code> mail arrives while the step is…</th><th>effect</th></tr>
+<tr><td>attached to engine calls (R3a)</td><td>all attached calls are detached; the LLM is asked at once, with the mail and placeholders. This is <code>^Z</code> then talk.</td></tr>
+<tr><td>in the <code>wait</code> tool (R3b)</td><td><code>wait</code> returns <code>{"woken_by": "mail"}</code>; any priority does this</td></tr>
+<tr><td>in an inline call (no entity, no engine)</td><td>nothing until it returns; <code>StopRun</code> cancels the thread</td></tr>
+<tr><td>in an LLM completion (R4), <code>interruptCompletions: true</code></td><td>the completion is cancelled; the head <code>UserTurn</code> is <strong>amended</strong> with the mail (the LLM never answered it, so no turn is lost) and asked again</td></tr>
+<tr><td>in an LLM completion, default</td><td>delivered at the next R1/R2</td></tr>
+<tr><td>idle (R2)</td><td>same as <code>Normal</code></td></tr>
+</table>
+<p><code>Normal</code> mail never pre-empts anything but <code>wait</code> and R2.</p>
+<p><code>Control</code>:</p>
+<ul>
+<li><code>Pause</code>: the run stops at the next receive point, cursor committed, status
+<code>paused</code>; detached calls keep running unless <code>pauseCancelsCalls</code>. <code>Resume</code>
+(or, by config, any mail) makes it runnable again.
+</li>
+<li><code>CancelCalls</code>: the engine’s cancel; results come back as
+<code>ToolCallFinished … Failed</code>.
+</li>
+<li><code>StopRun</code>: today’s <code>cancelRun</code>, now reachable by mail.
+</li>
+</ul>
+<h4 id="5-agent-to-agent">5. Agent-to-agent</h4>
+<p><strong>Address</strong>: a <code>SessionId</code>. Discovery is by the existing <code>list-sessions</code> /
+<code>search-sessions</code>, plus <code>smAgent</code>, <code>smParent</code>.</p>
+<p><strong>Routing.</strong> <code>mbSend</code> needs to find the recipient’s mailbox, in every front-end
+and not only on the server (helper agents are used extensively in the TUI). A
+<code>MailRouter</code> is the process’s table of live mailboxes:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">MailRouter</span> <span class="ot">=</span> <span class="dt">MailRouter</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> mrRegister ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">MailboxInfo</span> <span class="ot">-&gt;</span> <span class="dt">Mailbox</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">IO</span> ())  <span class="co">-- returns unregister</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mrLookup   ::</span> <span class="dt">SessionId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> (<span class="dt">Maybe</span> (<span class="dt">MailboxInfo</span>, <span class="dt">Mailbox</span>))</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> mrList     ::</span> <span class="dt">IO</span> [(<span class="dt">SessionId</span>, <span class="dt">MailboxInfo</span>)]   <span class="co">-- agent slug, parent, status</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><table>
+<tr><th>front-end</th><th>router</th><th>a session is live…</th></tr>
+<tr><td><code>agents-server</code></td><td><code>Host.Runner</code> (durable mail; unknown-but-stored sessions are loaded on demand)</td><td>always</td></tr>
+<tr><td>TUI</td><td>one per process, held next to <code>coreRef</code>; every conversation registers, sub-calls included</td><td>while its conversation exists</td></tr>
+<tr><td><code>run</code>, MCP server</td><td>one per process; the root and every sub-agent session register</td><td>until its loop returns</td></tr>
+</table>
+<p>It travels as <code>ctxMailRouter</code> on <code>Agent</code> and is handed down to sub-agents the
+way <code>ctxWorld</code> and <code>ctxEventQueue</code> are, so a whole call tree shares one.
+<code>mrList</code> is what makes in-memory sessions discoverable (the “ongoing sessions”
+#563 wanted to list): <code>list-sessions</code> merges it with the persisted ones.</p>
+<p><strong>Scheduling rule</strong>: <em>a session with unread mail, no run, and a status that
+accepts mail is runnable.</em> On the server the runner starts a run; in the TUI
+and in <code>run</code> a session’s loop is simply parked at R2 and wakes by itself.</p>
+<p>Which mail wakes an <strong>idle</strong> session is a per-agent option, <code>wakeOn</code>, a list
+among <code>user</code>, <code>tool</code>, <code>parent</code>, <code>child</code>, <code>peer</code>. Mail that does not wake is
+still queued and delivered with the next thing that does. Default
+<code>[&quot;user&quot;, &quot;tool&quot;, &quot;parent&quot;, &quot;child&quot;]</code>, deliberately a config knob and not a
+rule of the design: it is too early to know what peers should be allowed to do
+to each other (D10). The rule also replaces the special case in
+<code>completeCall</code>: <code>autoResume</code> becomes “post <code>ContinuationResult</code>”, and <code>lsInbox</code>
+goes away.</p>
+<p><code>postMessage</code> during a run stops failing: it posts <code>UserMessage</code> and returns
+the receipt (HTTP 202 with <code>message_id</code>, <code>seq</code>), optionally
+<code>&quot;interrupt&quot;: true</code>.</p>
+<p><strong>Tools</strong> (System Toolbox capabilities):</p>
+<table>
+<tr><th>capability</th><th></th></tr>
+<tr><td><code>send-message</code></td><td><code>{"to": "&lt;session&gt;", "text": …, "in_reply_to": "m-…", "expects_reply": true, "interrupt": false}</code> → receipt + the recipient's status (<code>running</code>, <code>idle</code>, <code>paused</code>)</td></tr>
+<tr><td><code>spawn-session</code></td><td><code>{"agent": "&lt;slug&gt;", "message": …}</code> → the new session's id. A session that is a child in lineage but <em>not</em> call/return: it outlives the tool call that created it, and answers by mail. <code>&lt;slug&gt;</code> is one of the caller's helpers, as for <code>prompt_agent_&lt;slug&gt;</code>, with the same <code>with</code> / <code>bindings</code> narrowing.</td></tr>
+<tr><td><code>wait</code></td><td>§3, with <code>"for": "mail"</code></td></tr>
+</table>
+<p><code>spawn-session</code> exists in every front-end:</p>
+<ul>
+<li>server: <code>createSessionAs</code>, durable, survives restarts;
+</li>
+<li>TUI: a new conversation, created the way sub-calls are today
+(<code>OSEvent_SubcallStarted</code>, <code>conversationParentId</code>), so it shows up in the
+conversation list, the user can open it and type into it, and its mailbox is
+what the message editor posts to. It lives until the user closes it or its
+parent conversation goes away;
+</li>
+<li><code>run</code>: a thread with an in-memory mailbox, cancelled with the root like
+background calls are (<code>withEngineShutdown</code>). A root that stops while
+spawned sessions still work loses them; an agent that wants their answers
+calls <code>wait</code> (D11).
+</li>
+</ul>
+<p>Call/return sub-agents (<code>prompt_agent_&lt;slug&gt;</code>) are unchanged, but when they run
+detached their placeholder and status report the <strong>child session id</strong>, so the
+parent can <code>send-message</code> to a helper that is still working, and the helper’s
+final answer arrives as <code>ToolCallFinished</code>. “Interacting with a running tool
+call” and “agent-to-agent chat” are the same mechanism.</p>
+<p><strong>Permissions</strong>: #563’s scope, checked in <code>mbSend</code>, per sending agent:
+<code>mailScope: own | children | subtree | all</code> (default <code>subtree</code>), and
+<code>interruptScope</code> (default <code>children</code>). Through the HTTP API the existing owner
+check applies.</p>
+<p><strong>Loops</strong>: a reply carries <code>envHops = hops of the mail being answered + 1</code>
+(the stepper knows which mail the current turn consumed); <code>maxMailHops</code>
+(default 16) refuses with <code>TooManyHops</code>. User mail resets to 0. Together with
+<code>MailboxFull</code> and the <code>wait</code> cap, two agents cannot ping-pong or deadlock
+forever.</p>
+<h4 id="6-wrappers">6. Wrappers</h4>
+<p>Decorators become middleware over the executor, applied in one place
+(<code>executeCall</code>, which both the inline path and the engine already go through):</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="dt">Exec</span> <span class="ot">=</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">LlmToolCall</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">AsyncToolResponse</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">type</span> <span class="dt">ToolMiddleware</span> <span class="ot">=</span> <span class="dt">Exec</span> <span class="ot">-&gt;</span> <span class="dt">Exec</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ot">interpretDecorator ::</span> <span class="dt">WrapperEnv</span> <span class="ot">-&gt;</span> <span class="dt">Decorator</span> <span class="ot">-&gt;</span> <span class="dt">ToolMiddleware</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="co">-- Decorate [d1, d2] base  ==&gt;  d1 (d2 exec): first listed is outermost</span></span></code></pre></div></div><p><code>AsyncToolResponse</code> rather than <code>UserToolResponse</code> so that a wrapper can
+answer <code>ToolYield</code>: that is how a <code>before</code> hook turns a call into a deferred
+one (an approval gate) from inside the engine, without blocking the step.</p>
+<p>Config: <code>rules</code> keep choosing the base disposition (first match). A new
+<code>wrappers</code> list contributes decorators; <strong>every</strong> match applies, in file
+order, outermost first. The result is still one <code>Decorate […] base</code>, recorded
+in <code>AppliedPolicy</code>, so the session file shows what wrapped each call.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;toolCallPolicyConfig&quot;</span><span class="er">:</span> <span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runSync&quot;</span><span class="fu">},</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;run_tests&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runAsync&quot;</span><span class="fu">,</span> <span class="dt">&quot;attachSeconds&quot;</span><span class="fu">:</span> <span class="dv">10</span><span class="fu">}}</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;wrappers&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;match&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;*&quot;</span><span class="fu">},</span>        <span class="dt">&quot;decorators&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;truncate&quot;</span><span class="fu">,</span> <span class="dt">&quot;maxBytes&quot;</span><span class="fu">:</span> <span class="dv">65536</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;match&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;http_*&quot;</span><span class="fu">},</span>   <span class="dt">&quot;decorators&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;retries&quot;</span><span class="fu">,</span> <span class="dt">&quot;count&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;backoffMs&quot;</span><span class="fu">:</span> <span class="dv">500</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>                                                   <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;timeout&quot;</span><span class="fu">,</span> <span class="dt">&quot;seconds&quot;</span><span class="fu">:</span> <span class="dv">30</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;match&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;deploy_*&quot;</span><span class="fu">},</span> <span class="dt">&quot;decorators&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;before&quot;</span><span class="fu">,</span> <span class="dt">&quot;hook&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;command&quot;</span><span class="fu">:</span> <span class="st">&quot;hooks/approve-deploy&quot;</span><span class="fu">}}</span><span class="ot">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>                                                   <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;after&quot;</span><span class="fu">,</span>  <span class="dt">&quot;hook&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;audit_log&quot;</span><span class="fu">}}</span><span class="ot">]</span><span class="fu">}</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><code>match</code>: <code>tool</code> (glob on the LLM-visible name), <code>toolbox</code>, later <code>args</code> (a
+JSON predicate). Decorators:</p>
+<table>
+<tr><th>tag</th><th></th></tr>
+<tr><td><code>timeout</code>, <code>retries</code>, <code>cache</code>, <code>label</code></td><td>the existing four, now applied. Per-call <code>timeout</code> wins over <code>asyncCallTimeoutSeconds</code>; each retry reports progress.</td></tr>
+<tr><td><code>truncate</code></td><td>cap the result, say so to the model</td></tr>
+<tr><td><code>before</code></td><td>hook sees <code>{tool, arguments, session_id, tool_call_id, agent}</code>; answers <code>continue</code> (optionally <code>arguments</code> rewritten), <code>deny {message}</code> (the message is the tool result, the tool does not run), <code>defer {reason}</code> (→ <code>ToolYield</code>, a continuation token, the usual external completion), <code>answer {result}</code> (short-circuit)</td></tr>
+<tr><td><code>after</code></td><td>hook sees the above plus <code>result</code>, <code>status</code>, <code>duration_ms</code>; answers <code>continue</code> (optionally <code>result</code> rewritten), <code>annotate {text}</code></td></tr>
+</table>
+<p>A hook target is <code>{&quot;command&quot;: path}</code> (JSON on stdin, JSON on stdout, the
+isolation-envelope conventions, non-zero exit = <code>deny</code> for <code>before</code>, ignored
+with a trace for <code>after</code>), or <code>{&quot;tool&quot;: name}</code>: any tool registered on the
+agent, visible to the LLM or not, <strong>including a sub-agent</strong>, which gives
+LLM-as-guard for free and lets hooks use bindings and secrets like any tool.</p>
+<p>Two rules:</p>
+<ul>
+<li>Hooks see what the LLM sent. Bindings are merged inside <code>toolRun</code>, below
+<code>executeCall</code>, so bound values, secrets included, never reach a hook, and a
+<code>before</code> rewrite cannot override a binding.
+</li>
+<li>A hook failure (crash, timeout, bad JSON) is <code>deny</code> for <code>before</code> (“fail
+closed”) and <code>continue</code> for <code>after</code>, both traced.
+</li>
+</ul>
+<h4 id="7-watching-other-sessions">7. Watching other sessions</h4>
+<p><code>Host.Runner</code> already broadcasts <code>SessionEvent</code> and serves it over HTTP. No
+subscription registry, no filter algebra: a <strong>watch</strong> forwards matching events
+of one session into the watcher’s mailbox as <code>WatchedEvent</code>, and <code>wait</code> is the
+only blocking primitive.</p>
+<p><code>watch-session {&quot;session&quot;: …, &quot;events&quot;: [&quot;run.stopped&quot;, &quot;tool.completed&quot;], &quot;tool&quot;: &quot;deploy_*&quot;, &quot;ttl_seconds&quot;: 600}</code>,
+<code>unwatch-session</code>. Watches are in-memory, scoped like mail, capped per session,
+and die with their TTL or either session. <code>SessionEvent</code> gains the two
+tool-call events (<code>tool.started</code>, <code>tool.completed</code>); the rest of #563’s event
+list is already covered by <code>SessionUpdated</code> carrying the head turn.</p>
+<h3 id="what-happens-to-the-issues">What happens to the issues</h3>
+<table>
+<tr><th>issue</th><th>kept</th><th>changed</th><th>dropped</th></tr>
+<tr><td>&amp;#35;563 ph.1 inbox</td><td>inject a message, pause, cancel calls, scopes, audit of the sender</td><td>an <code>Agent</code>-level interface with a cursor in the session, not an ECS <code>TQueue</code> component: the server path does not keep sessions in the World, and a queue pop is not transactional with the session store</td><td><code>InjectSystemInstruction</code>; <code>ForkConversation</code> (belongs with §5.2 of the partial-application spec)</td></tr>
+<tr><td>&amp;#35;563 ph.2 event history</td><td>tool-call events</td><td>extend <code>Host.Runner.SessionEvent</code>; history = the stored session versions</td><td>a second <code>SessionEvent</code> type, the <code>TBQueue</code> ring</td></tr>
+<tr><td>&amp;#35;564 ph.3 subscriptions</td><td>watching a session</td><td>events → mail (§7)</td><td>registry, <code>FilterCombinator</code>, quotas per subscriber</td></tr>
+<tr><td>&amp;#35;564 ph.4 wait-for</td><td>blocking with a timeout</td><td><code>wait</code> on one's own mailbox (§3)</td><td><code>EventCondition</code> DSL. Note the sketch's <code>readTQueue</code> then <code>retry</code> on a non-match never progresses: <code>retry</code> undoes the read, so a non-matching head blocks the queue forever.</td></tr>
+<tr><td>&amp;#35;507 suspend</td><td>suspended = no run, mail accumulates, cursor committed; <code>Pause</code>/<code>Resume</code></td><td>-</td><td><code>ManagedResource</code> tracking: engine shutdown, process groups and <code>evictIdle</code> already release what a run holds. Reopen if a toolbox leaks.</td></tr>
+</table>
+<h3 id="phases">Phases</h3>
+<p>Each phase ships alone and leaves <code>ctxMailbox = Nothing</code> agents untouched.
+Phases 0, 3 and 5 depend on nothing but Phase 1 (Phase 0 not even on that);
+Phase 4 needs Phases 1-2 and, for its server part only, Phase 3.</p>
+<h4 id="phase-0-decorators-are-real">Phase 0: decorators are real</h4>
+<p><code>interpretDecorator</code> for the existing four + <code>truncate</code>; applied in
+<code>executeCall</code> from <code>tcPolicy</code>; <code>wrappers</code> with glob matching. Independent of
+everything else. Closes G5.</p>
+<h4 id="phase-1-the-mailbox-in-memory">Phase 1: the mailbox, in memory</h4>
+<p><code>Mailbox</code>, <code>Envelope</code>, <code>mailCursor</code>, <code>userMail</code>; R1 and R2; the engine posts
+<code>ToolCallFinished</code>; late results and the <code>usrQuery</code> race ported; TUI and
+one-shot post <code>UserMessage</code>. Visible change: typing during a busy run is
+accepted and delivered at the next R1. Closes G1, G6.</p>
+<h4 id="phase-2-attach--detach">Phase 2: attach / detach</h4>
+<p>All entity-backed calls through the engine in async mode; <code>attachSeconds</code>;
+R3a with interrupt-detaches; <code>wait</code> and <code>ctxAwaitMail</code>; an interrupt key in
+the TUI. Closes G3 (except R4), G4.</p>
+<h4 id="phase-3-durable-mail-on-the-server">Phase 3: durable mail on the server</h4>
+<p><code>session_mail</code> on both backends; <code>lsInbox</code> and the <code>completeCall</code> special case
+replaced; the runnable rule and <code>wakeOn</code>; <code>postMessage</code> during a run → 202;
+<code>Control</code> by mail; mail in the event stream and on the chat page (plain text,
+as that page is on purpose). Closes G2.</p>
+<h4 id="phase-4-agent-to-agent">Phase 4: agent-to-agent</h4>
+<p><code>MailRouter</code> in the TUI, <code>run</code> and the server; <code>send-message</code>, <code>spawn-session</code>
+in all three, scopes, hops, <code>wakeOn</code>; detached sub-agent calls expose the child
+session id; <code>list-sessions</code> shows live in-memory sessions. The TUI comes first:
+it is where helpers are used most and where a spawned session can be watched
+and typed into, which is the cheapest way to find out what peers should be
+allowed to do (D10).</p>
+<h4 id="phase-5-hooks">Phase 5: hooks</h4>
+<p><code>before</code> / <code>after</code>, command and tool targets, <code>deny</code> / <code>defer</code> / <code>answer</code> /
+rewrite.</p>
+<h4 id="phase-6-watches-r4-pause">Phase 6: watches, R4, pause</h4>
+<p><code>watch-session</code>, <code>tool.*</code> events, <code>interruptCompletions</code>, <code>Pause</code>/<code>Resume</code>.</p>
+<h3 id="decisions-proposed">Decisions (proposed)</h3>
+<p>D1. <strong>The cursor lives in the session</strong>, so the versioned session store is the
+ack. No per-message delivered flags, no separate consumer table.</p>
+<p>D2. <strong>Mail is rendered into the user query, and kept raw beside it.</strong> The only
+shape every provider accepts after tool messages; the raw copy is for UIs and
+audit.</p>
+<p>D3. <strong>Reads never consume; only the stepper advances the cursor.</strong> Tools
+(<code>wait</code>, status) peek. One consumer per mailbox, so no claim/lease protocol.</p>
+<p>D4. <strong>In async mode, <code>runSync</code> means “attached forever”, not “in the step’s
+thread”.</strong> Otherwise an interrupt cannot detach it. Calls without an entity
+stay inline and uninterruptible, as today.</p>
+<p>D5. <strong>Interrupting a completion amends the unanswered head turn</strong> rather than
+stacking a second user turn or keeping a truncated LLM turn. Opt-in, because a
+cancelled completion is paid for.</p>
+<p>D6. <strong>Wrappers are data in the disposition</strong>, not a second mechanism: one
+<code>Decorate</code>, visible in <code>AppliedPolicy</code>. Wrappers compose (all matches); base
+dispositions do not (first match).</p>
+<p>D7. <strong>Hooks never see bound values</strong>, and <code>before</code> fails closed.</p>
+<p>D8. <strong>Events become mail; <code>wait</code> is the only blocking primitive.</strong> One thing
+to make interruptible, time-bounded and deadlock-free, instead of three.</p>
+<p>D9. <strong>Progress is state, not mail.</strong> It would drown the mailbox and the
+context window; a tool that wants the model’s attention can finish, or a
+later <code>notify</code> progress level can post mail.</p>
+<p>D10. <strong>What wakes an idle session is configuration (<code>wakeOn</code>), not design.</strong>
+Decided 2026-09-22: too early to settle what peers may do to each other, so
+the mechanism stays neutral and the default conservative. Same reasoning for
+<code>mailScope</code> / <code>interruptScope</code>: knobs, with defaults we expect to revisit once
+the TUI has been used with spawned sessions for a while.</p>
+<p>D11. <strong>A run never lingers for a reply.</strong> It stops when the LLM is done, no
+background call runs and nothing is unread, whatever <code>expects_reply</code> messages
+are outstanding. An agent that wants the answer calls <code>wait</code>. <code>expects_reply</code>
+is a hint to the recipient, never a runtime obligation.</p>
+<p>D12. <strong>Peer sessions exist in every front-end</strong>, not only on the server
+(decided 2026-09-22: helpers are used extensively in the TUI). Hence the
+<code>MailRouter</code>, and <code>spawn-session</code> as a TUI conversation. Durability is the
+only thing the server adds.</p>
+<h3 id="related-docs">Related docs</h3>
+<p><code>documentation/async-tool-calls.md</code>, <code>documentation/durable-workflows-howto.md</code>,
+<code>documentation/agents-server.md</code>, <code>todos/async-tool-calls.md</code>,
+<code>todos/tool-partial-application.md</code> (bindings, §5.2 fork).</p>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

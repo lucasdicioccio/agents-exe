@@ -1,4 +1,4 @@
-![agents-exe logo](docs/logo-01.png)
+![agents-exe logo](documentation/logo-01.png)
 
 # an LLM-agent tool
 
@@ -34,7 +34,7 @@ Agents-exe uses a layered architecture with a modern Entity-Component-System (EC
 - **Durable Persistence**: Pluggable persistence layer (SQLite, PostgreSQL, file-based)
 - **Complete Lineage Tracking**: Full call chains for debugging and accounting
 
-See [docs/architecture.md](docs/architecture.md) for detailed architecture documentation and [docs/MIGRATION-OS.md](docs/MIGRATION-OS.md) for migration guidance.
+See [documentation/architecture.md](documentation/architecture.md) for detailed architecture documentation and [documentation/MIGRATION-OS.md](documentation/MIGRATION-OS.md) for migration guidance.
 
 ## Quick Start
 
@@ -333,7 +333,7 @@ call — `describe_agent` shows what is still open, `bindings`/`with` on the
 narrowing under a name for the rest of the session — all without touching
 the sub-agent's file, and `agents-server` sessions can each carry their
 own parameter values over HTTP. See
-[Parameters, Bindings & Narrowing Sub-Agents](docs/parameters-and-bindings.md)
+[Parameters, Bindings & Narrowing Sub-Agents](documentation/parameters-and-bindings.md)
 for the full picture.
 
 ### API Keys
@@ -366,6 +366,21 @@ The `agents-exe mcp-server` command runs a (stdin/stdout) MCP server exposing
 agents as individual tools. It works with Claude Desktop and other MCP clients.
 
 Tool names are deterministic across runs when using the same `--agent-file` arguments in the same order.
+
+## Website
+
+The site in [`website/`](website) is a [Kitchen-Sink](https://kitchensink-tech.github.io/)
+project, the same shape as tramaj's: `website/src/` is the source, `docs/`
+is what GitHub Pages serves, and the markdown documentation lives in
+[`documentation/`](documentation). The guides there, the specs under
+`todos/` and the command reference above are mirrored into the site by a
+script rather than copied by hand. To regenerate and preview it:
+
+```sh
+./website/scripts/sync-repo-docs.sh     # documentation/, todos/ and the README's command reference -> website/src/*.cmark
+kitchen-sink serve --srcDir website/src --outDir website/www --servMode DEV --httpPort 7655
+./website/scripts/publish.sh            # produce into docs/ for publishing; commit the result
+```
 
 ## Using as a Library
 
@@ -407,7 +422,7 @@ main = do
         pure (result1, result2)
 ```
 
-See [docs/OS-API.md](docs/OS-API.md) for the complete API reference.
+See [documentation/OS-API.md](documentation/OS-API.md) for the complete API reference.
 
 ### Coding Style Guidelines
 
@@ -526,14 +541,14 @@ Absent this file, agents load from `~/.config/agents-exe/default`.
 
 # Documentation
 
-- [Architecture Overview](docs/architecture.md) - Detailed architecture documentation
-- [OS API Reference](docs/OS-API.md) - Complete API documentation for the OS model
-- [Migration Guide](docs/MIGRATION-OS.md) - Guide for migrating from old Runtime to new OS model
-- [CLI Commands](docs/cli-commands.md) - Detailed CLI documentation
-- [TUI Guide](docs/tui.md) - Terminal UI documentation
-- [MCP Documentation](docs/mcp.md) - Model Context Protocol integration
-- [agents-server](docs/agents-server.md) - Agents over HTTP, with sessions in SQLite
-- [Parameters, Bindings & Narrowing Sub-Agents](docs/parameters-and-bindings.md) - Bind tool arguments to declared parameters, keep secrets out of the model, and narrow sub-agents at call time
+- [Architecture Overview](documentation/architecture.md) - Detailed architecture documentation
+- [OS API Reference](documentation/OS-API.md) - Complete API documentation for the OS model
+- [Migration Guide](documentation/MIGRATION-OS.md) - Guide for migrating from old Runtime to new OS model
+- [CLI Commands](documentation/cli-commands.md) - Detailed CLI documentation
+- [TUI Guide](documentation/tui.md) - Terminal UI documentation
+- [MCP Documentation](documentation/mcp.md) - Model Context Protocol integration
+- [agents-server](documentation/agents-server.md) - Agents over HTTP, with sessions in SQLite
+- [Parameters, Bindings & Narrowing Sub-Agents](documentation/parameters-and-bindings.md) - Bind tool arguments to declared parameters, keep secrets out of the model, and narrow sub-agents at call time
 
 # Roadmap
 

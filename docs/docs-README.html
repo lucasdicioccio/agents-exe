@@ -1,0 +1,196 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Agents - AI Agent Framework</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-README.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations. ## Overview The Agents framework provides a complete infrastructure for: - **Agent Definition**"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Agents - AI Agent Framework"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations. ## Overview The Agents framework provides a complete infrastructure for: - **Agent Definition**"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Agents - AI Agent Framework"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-README.html"><meta property="og:description" content="A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations. ## Overview The Agents framework provides a complete infrastructure for: - **Agent Definition**"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-README.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-README.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations. ## Overview The Agents framework provides a complete infrastructure for: - **Agent Definition**","headline":"Agents - AI Agent Framework","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-README.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Agents - AI Agent Framework</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 491 words, 9 code snippets, 13 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-binary-tool.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">13/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-export-import.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/README.md"><code>documentation/README.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="agents---ai-agent-framework">Agents - AI Agent Framework</h2>
+<p>A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations.</p>
+<h3 id="overview">Overview</h3>
+<p>The Agents framework provides a complete infrastructure for:</p>
+<ul>
+<li><strong>Agent Definition</strong>: JSON-based agent configurations with system prompts, tool directories, and LLM settings
+</li>
+<li><strong>Multi-Agent Orchestration</strong>: Hierarchical agent trees with parent-child relationships and cross-agent references
+</li>
+<li><strong>Tool System</strong>: Extensible tool registration with support for bash scripts, MCP servers, and OpenAPI integrations
+</li>
+<li><strong>Session Management</strong>: Persistent conversation sessions with turn-based interactions
+</li>
+<li><strong>Durable Workflows</strong>: Asynchronous, resumable execution with deferred tool calls and isolated deployments
+</li>
+<li><strong>Multiple Interfaces</strong>: CLI, TUI (Terminal UI), MCP server, and an HTTP server
+</li>
+</ul>
+<h3 id="quick-start">Quick Start</h3>
+<h4 id="installation">Installation</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Build the project</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">cabal</span> build</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Run the durable-workflow demonstrator (no API key needed)</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">cabal</span> run durable-workflow-demo</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Run tests</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">cabal</span> test</span></code></pre></div></div><h4 id="creating-an-agent">Creating an Agent</h4>
+<p>Create an <code>agent.json</code> file:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;my-agent&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;openai&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com/v1&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;A helpful assistant&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;You are a helpful assistant.&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mcpServers&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="running-the-agent">Running the Agent</h4>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Check agent configuration</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> check <span class="at">--agent-file</span> agent.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Run in one-shot mode</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> agent.json <span class="at">--prompt</span> <span class="st">&quot;Hello!&quot;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Start interactive TUI</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> tui <span class="at">--agent-file</span> agent.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Start MCP server</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> mcp-server <span class="at">--agent-file</span> agent.json</span></code></pre></div></div><h3 id="configuration">Configuration</h3>
+<h4 id="api-keys">API Keys</h4>
+<p>Store API keys in <code>~/.config/agents-exe/secret-keys</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;openai&quot;</span><span class="fu">:</span> <span class="st">&quot;sk-...&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;openrouter&quot;</span><span class="fu">:</span> <span class="st">&quot;sk-...&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="project-configuration">Project Configuration</h4>
+<p>Create <code>agents-exe.cfg.json</code> in your project root:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsDirectories&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;./agents&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsFiles&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;./main-agent.json&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;agentsLogs&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;logJsonHttpEndpoint&quot;</span><span class="fu">:</span> <span class="st">&quot;http://localhost:8080/log&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;logJsonPath&quot;</span><span class="fu">:</span> <span class="st">&quot;./logs/agents.json&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;logRawPath&quot;</span><span class="fu">:</span> <span class="st">&quot;./logs/agents.log&quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h3 id="project-structure">Project Structure</h3>
+<pre><code>agents/
+├── app/                      # Application entry point
+│   └── Main.hs              # CLI argument parsing and command routing
+├── examples/                # Runnable example programs
+│   └── durable-workflow-demo/
+│       └── Main.hs          # Self-contained durable workflow demonstrator
+├── src/
+│   └── System/Agents/
+│       ├── Base.hs          # Core types (Agent, AgentId, ConversationId)
+│       ├── Runtime.hs       # Agent runtime and execution
+│       ├── AgentTree.hs     # Multi-agent hierarchy management
+│       ├── Session/         # Session management
+│       ├── Tools/           # Tool system
+│       ├── MCP/             # Model Context Protocol
+│       ├── TUI/             # Terminal UI
+│       ├── CLI/             # Command implementations
+│       ├── ExportImport/    # Tool sharing
+│       └── FileLoader/      # File loading utilities
+├── documentation/                    # Documentation
+└── test/                    # Test suite
+</code></pre>
+<h3 id="key-features">Key Features</h3>
+<h4 id="multi-agent-hierarchies">Multi-Agent Hierarchies</h4>
+<p>Agents can reference other agents via:</p>
+<ul>
+<li><strong>Tool Directory</strong>: Child agents in a subdirectory
+</li>
+<li><strong>Extra Agents</strong>: Explicit references via <code>extraAgents</code> field
+</li>
+</ul>
+<h4 id="tool-types">Tool Types</h4>
+<ol>
+<li><strong>Bash Tools</strong>: Executable scripts in the tool directory
+</li>
+<li><strong>MCP Tools</strong>: Model Context Protocol servers
+</li>
+<li><strong>OpenAPI Tools</strong>: REST API endpoints via OpenAPI specs
+</li>
+<li><strong>IO Tools</strong>: Haskell-based tool implementations
+</li>
+</ol>
+<h4 id="session-persistence">Session Persistence</h4>
+<p>Sessions are automatically saved and can be resumed:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Resume a session</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> run <span class="at">--agent-file</span> agent.json <span class="at">--session-file</span> session.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Print session history</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> session-print session.json</span></code></pre></div></div><h4 id="durable-workflows">Durable Workflows</h4>
+<p>Turns can pause mid-execution, persist, and resume when external results
+arrive:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Pause after one async step</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">agents</span> session pause <span class="op">&lt;</span>session-id<span class="op">&gt;</span> --agent-file agent.json</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># List deferred calls</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">agents</span> session pending <span class="op">&lt;</span>session-id<span class="op">&gt;</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Inject an external result</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">agents</span> session complete <span class="op">&lt;</span>token<span class="op">&gt;</span> result.json</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="co"># Resume until completion or next yield</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="ex">agents</span> session resume <span class="op">&lt;</span>session-id<span class="op">&gt;</span> --agent-file agent.json</span></code></pre></div></div><p>See <a href="/agents-exe/docs-durable-workflows-howto.html">Durable Workflows How-To</a> for a full walkthrough,
+including a runnable mock-LLM demonstrator.</p>
+<h3 id="documentation">Documentation</h3>
+<ul>
+<li><a href="/agents-exe/docs-architecture.html">Architecture</a> - Runtime and core architecture
+</li>
+<li><a href="/agents-exe/docs-tools.html">Tool System</a> - Tool registration and execution
+</li>
+<li><a href="/agents-exe/docs-mcp.html">MCP Protocol</a> - Model Context Protocol integration
+</li>
+<li><a href="/agents-exe/docs-sessions.html">Session Management</a> - Session lifecycle and persistence
+</li>
+<li><a href="/agents-exe/docs-parameters-and-bindings.html">Parameters, Bindings &amp; Narrowing Sub-Agents</a> - Bind tool arguments to declared parameters, keep secrets out of the model, and narrow sub-agents at call time
+</li>
+<li><a href="/agents-exe/docs-durable-workflows-howto.html">Durable Workflows How-To</a> - Resumable async execution
+</li>
+<li><a href="/agents-exe/docs-agents-server.html">agents-server</a> - Agents over HTTP: sessions, events, OpenAPI, and a chat page
+</li>
+<li><a href="/agents-exe/docs-async-tool-calls.html">Asynchronous Tool Calls</a> - Background tool calls, progress and cancellation
+</li>
+<li><a href="/agents-exe/docs-tui.html">Terminal UI</a> - TUI interface
+</li>
+<li><a href="/agents-exe/docs-cli-commands.html">CLI Reference</a> - Command reference
+</li>
+<li><a href="/agents-exe/docs-export-import.html">Export/Import</a> - Tool sharing and distribution
+</li>
+<li><a href="/agents-exe/docs-file-loader.html">File Loader</a> - File loading utilities
+</li>
+</ul>
+<h3 id="architecture-overview">Architecture Overview</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                        CLI / TUI / MCP                       │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│                      AgentTree                               │
+│         (multi-agent hierarchy management)                   │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│                     Runtime                                  │
+│    (agent execution, tool registration, LLM calls)           │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+┌──────────────┐ ┌──────────┐ ┌──────────────┐
+│   Session    │ │  Tools   │ │     LLM      │
+│  Management  │ │  System  │ │  Integration │
+└──────────────┘ └──────────┘ └──────────────┘
+</code></pre>
+<h3 id="contributing">Contributing</h3>
+<ol>
+<li>Fork the repository
+</li>
+<li>Create a feature branch
+</li>
+<li>Make your changes
+</li>
+<li>Run tests: <code>cabal test</code>
+</li>
+<li>Submit a pull request
+</li>
+</ol>
+<h3 id="license">License</h3>
+<p>See the project LICENSE file for details.</p>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

@@ -377,7 +377,7 @@ preflight `OPTIONS` with 204 before auth and before `checkOrigin`. An
 origin listed here passes `checkOrigin` even with auth off. The SSE route
 keeps working cross-origin through `?access_token=` since `EventSource`
 cannot set headers. Docs: a "Running as a service" section in
-`docs/agents-server.md` with a systemd unit, and the CORS flag in the flag
+`documentation/agents-server.md` with a systemd unit, and the CORS flag in the flag
 table and the authentication section. Also add the undocumented
 `cancel-attached`, `pause`, `interrupt`, `tool.started` and
 `tool.completed` to the same doc. Tests: preflight, allowed and refused
@@ -396,8 +396,8 @@ Original scope:
 
 Config loading into the library (§6); `serve` subcommand on `agents-exe`;
 `--socket`. The `agents-server` executable stays as the flags-only entry
-point over the same code. Docs: `docs/agents-server.md` gains the config
-section; `docs/cli-commands.md` gains `serve`.
+point over the same code. Docs: `documentation/agents-server.md` gains the config
+section; `documentation/cli-commands.md` gains `serve`.
 
 ### Phase 2: the protocol, in the library
 
@@ -612,15 +612,15 @@ this spec; `lsParams` stays volatile and the TUI resupplies from its
 
 D8. **Out of scope:** several servers on one Postgres, mid-tool-call
 durability for `RunAsync` calls, per-owner API keys. They are documented as
-unsupported in `docs/agents-server.md` and are not needed for attach.
+unsupported in `documentation/agents-server.md` and are not needed for attach.
 
 ## Related docs
 
 * `todos/web-server-embedding.md`, `.progress.md`: the Host/Runner and the
   HTTP server this builds on.
 * `todos/session-mailbox.md`: mail, interrupts, control messages, watches.
-* `docs/agents-server.md`: the current API; sections to update are marked in
+* `documentation/agents-server.md`: the current API; sections to update are marked in
   Phases 0 and 1.
-* `docs/tui.md`: TUI features that form the parity checklist of Phase 2.
-* `docs/OS-API.md`: the ECS layer; its `OS.Interfaces` section is stale and
+* `documentation/tui.md`: TUI features that form the parity checklist of Phase 2.
+* `documentation/OS-API.md`: the ECS layer; its `OS.Interfaces` section is stale and
   goes with D1.

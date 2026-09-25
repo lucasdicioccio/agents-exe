@@ -1,0 +1,41 @@
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+
+  --bg: #faf9f6;
+  --surface: #ffffff;
+  --surface-alt: #f3f1ec;
+  --ink: #1c1b19;
+  --ink-soft: #514d46;
+  --muted: #8d867a;
+  --border: #e7e3da;
+  --accent: #3a5fd9;
+  --accent-soft: #e8ecfb;
+  --code-accent: #c0562f;
+  --radius: 12px;
+  --shadow-sm: 0 1px 2px rgba(20,20,20,0.06), 0 1px 1px rgba(20,20,20,0.04);
+  --shadow-md: 0 12px 32px rgba(20,20,20,0.08);
+
+  /* kept for backwards compatibility with any content still referencing them */
+  --color-primary: var(--surface-alt);
+  --color-secondary: var(--accent-soft);
+  --color-highlight-background: var(--surface-alt);
+  --color-highlight-halo: var(--accent-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15181b;
+    --surface: #1b1f23;
+    --surface-alt: #21262b;
+    --ink: #e8e6e1;
+    --ink-soft: #c7c2b8;
+    --muted: #8b8880;
+    --border: #2a2e33;
+    --accent: #7f9dff;
+    --accent-soft: rgba(127,157,255,0.14);
+    --code-accent: #e2915f;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+    --shadow-md: 0 16px 40px rgba(0,0,0,0.45);
+  }
+}

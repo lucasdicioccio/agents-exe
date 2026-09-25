@@ -30,7 +30,7 @@ data SpecOptions = SpecOptions
 
 -- | Embedded bash-tools documentation
 bashToolsDocumentation :: Text.Text
-bashToolsDocumentation = $(embedStringFile "docs/binary-tool.md")
+bashToolsDocumentation = $(embedStringFile "documentation/binary-tool.md")
 
 -- | Handle the spec command: display embedded documentation
 handleSpec ::

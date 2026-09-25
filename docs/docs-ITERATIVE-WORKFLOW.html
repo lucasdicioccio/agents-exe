@@ -1,0 +1,361 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Iterative Development Workflow</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="&gt; How to handle multi-step, recursive, or iterative invocations on this codebase. ## Invocation Patterns ### Pattern 1: Fresh Start (No Previous State) **When:** First time working on this codebase, or no knowledge base. **Steps:** 1. Initi"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Iterative Development Workflow"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="&gt; How to handle multi-step, recursive, or iterative invocations on this codebase. ## Invocation Patterns ### Pattern 1: Fresh Start (No Previous State) **When:** First time working on this codebase, or no knowledge base. **Steps:** 1. Initi"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Iterative Development Workflow"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html"><meta property="og:description" content="&gt; How to handle multi-step, recursive, or iterative invocations on this codebase. ## Invocation Patterns ### Pattern 1: Fresh Start (No Previous State) **When:** First time working on this codebase, or no knowledge base. **Steps:** 1. Initi"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/docs-ITERATIVE-WORKFLOW.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-ITERATIVE-WORKFLOW.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"> How to handle multi-step, recursive, or iterative invocations on this codebase. ## Invocation Patterns ### Pattern 1: Fresh Start (No Previous State) **When:** First time working on this codebase, or no knowledge base. **Steps:** 1. Initi","headline":"Iterative Development Workflow","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Iterative Development Workflow</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 776 words, 15 code snippets, 1 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-file-loader.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">26/26</span></a><span class="topic-nav topic-next-link"><span class="topic-nav-boundary">|</span></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ITERATIVE-WORKFLOW.md"><code>documentation/ITERATIVE-WORKFLOW.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="iterative-development-workflow">Iterative Development Workflow</h2>
+<blockquote>
+<p>How to handle multi-step, recursive, or iterative invocations on this codebase.</p>
+</blockquote>
+<h3 id="invocation-patterns">Invocation Patterns</h3>
+<h4 id="pattern-1-fresh-start-no-previous-state">Pattern 1: Fresh Start (No Previous State)</h4>
+<p><strong>When:</strong> First time working on this codebase, or no knowledge base.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Initialize knowledge base tables
+</li>
+<li>Scan all source files → <code>code_index</code>
+</li>
+<li>Read existing docs → <code>docs_index</code>
+</li>
+<li>Identify documentation gaps
+</li>
+<li>Create initial documentation plan
+</li>
+</ol>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Initialize if empty</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> project_overview (<span class="op">..</span>.);</span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> code_index (<span class="op">..</span>.);</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> docs_index (<span class="op">..</span>.);</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TABLE</span> <span class="cf">IF</span> <span class="kw">NOT</span> <span class="kw">EXISTS</span> commits_seen (<span class="op">..</span>.);</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- Populate code_index</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- (scan all .hs files with bash_list-files and bash_grep-files)</span></span></code></pre></div></div><h4 id="pattern-2-continue-previous-work">Pattern 2: Continue Previous Work</h4>
+<p><strong>When:</strong> Knowledge base exists, continuing documentation task.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Query what was completed
+</li>
+<li>Check for new commits since last work
+</li>
+<li>Review current docs_index state
+</li>
+<li>Pick up where left off
+</li>
+</ol>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- What was documented?</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> module_name, last_updated </span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> code_index </span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> documented_in <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> last_updated <span class="kw">DESC</span>;</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- What&#39;s missing?</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> filepath, module_name </span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> code_index </span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> documented_in <span class="kw">IS</span> <span class="kw">NULL</span>;</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="co">-- Any new commits?</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> commits_seen </span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> commit_date <span class="kw">DESC</span> <span class="kw">LIMIT</span> <span class="dv">10</span>;</span></code></pre></div></div><h4 id="pattern-3-handle-new-code-changes">Pattern 3: Handle New Code Changes</h4>
+<p><strong>When:</strong> Code has changed since last documentation.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Check commits_seen vs git log
+</li>
+<li>Read new commit details
+</li>
+<li>Identify affected modules
+</li>
+<li>Update documentation
+</li>
+<li>Record commits as processed
+</li>
+</ol>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co"># Get recent commits</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="ex">bash_get_git_log</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="co"># Read specific commit</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ex">bash_get_git_commit</span> abc123</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co"># Find affected files</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ex">bash_grep-files</span> <span class="st">&quot;changed_pattern&quot;</span></span></code></pre></div></div><h4 id="pattern-4-deep-dive-on-subsystem">Pattern 4: Deep Dive on Subsystem</h4>
+<p><strong>When:</strong> Need to document one specific subsystem thoroughly.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Identify all modules in subsystem
+</li>
+<li>Read each module source
+</li>
+<li>Extract types and functions
+</li>
+<li>Create/update doc file
+</li>
+<li>Link all modules in code_index
+</li>
+</ol>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Find subsystem modules</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> <span class="op">*</span> <span class="kw">FROM</span> code_index </span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> module_name <span class="kw">LIKE</span> <span class="st">&#39;System.Agents.Subsystem.%&#39;</span>;</span></code></pre></div></div><h3 id="chunking-strategy">Chunking Strategy</h3>
+<p>Large documentation tasks should be chunked:</p>
+<h4 id="by-subsystem">By Subsystem</h4>
+<pre><code>Chunk 1: Core (Base, Runtime, AgentTree)
+Chunk 2: Tools (Bash, MCP, OpenAPI, IO)
+Chunk 3: Sessions (Types, Loop, Store)
+Chunk 4: Interfaces (CLI, TUI, MCP Server)
+Chunk 5: Utilities (FileLoader, ExportImport)
+</code></pre>
+<h4 id="by-document">By Document</h4>
+<pre><code>Iteration 1: README.md (overview)
+Iteration 2: architecture.md (core)
+Iteration 3: tools.md (tools)
+Iteration 4: cli-commands.md (CLI)
+Iteration 5: Remaining docs
+</code></pre>
+<h4 id="state-tracking-between-iterations">State Tracking Between Iterations</h4>
+<p>Always update the knowledge base at the end of each iteration:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Record what&#39;s been documented</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="kw">UPDATE</span> code_index </span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">SET</span> documented_in <span class="op">=</span> <span class="st">&#39;documentation/architecture.md&#39;</span>,</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    last_updated <span class="op">=</span> datetime(<span class="st">&#39;now&#39;</span>)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span> module_name <span class="kw">IN</span> (<span class="st">&#39;System.Agents.Base&#39;</span>, <span class="st">&#39;System.Agents.Runtime&#39;</span>);</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- If new doc created</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="kw">INSERT</span> <span class="kw">INTO</span> docs_index (doc_path, title, description, related_modules)</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="kw">VALUES</span> (<span class="st">&#39;documentation/new-feature.md&#39;</span>, <span class="st">&#39;New Feature&#39;</span>, <span class="st">&#39;Description&#39;</span>, <span class="st">&#39;Module1, Module2&#39;</span>);</span></code></pre></div></div><h3 id="recursive-documentation">Recursive Documentation</h3>
+<h4 id="when-documenting-recursion-features">When Documenting Recursion Features</h4>
+<p>The codebase has recursion (agents calling agents). When documenting:</p>
+<ol>
+<li><strong>Acknowledge the recursion</strong> - Note that this is a recursive feature
+</li>
+<li><strong>Show depth tracking</strong> - Document <code>ctxMaxDepth</code>, <code>CallStackEntry</code>
+</li>
+<li><strong>Explain limits</strong> - Document how infinite loops are prevented
+</li>
+<li><strong>Cross-reference</strong> - Link to related recursive patterns
+</li>
+</ol>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">## Agent Recursion</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>Agents can call other agents, creating a call stack:</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="in">```haskell</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolExecutionContext</span> <span class="ot">=</span> <span class="dt">ToolExecutionContext</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> ctxCallStack ::</span> [<span class="dt">CallStackEntry</span>]  <span class="co">-- Tracks recursion</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> ctxMaxDepth ::</span> <span class="dt">Maybe</span> <span class="dt">Int</span>          <span class="co">-- Prevents infinite loops</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    }</span></code></pre></div></div><p>See also: <a href="/agents-exe/docs-tools.html#recursion-control">Tool Context</a></p>
+<pre><code>
+### Self-Referential Documentation
+
+This document itself is recursive - it documents how to document. When updating:
+- Keep patterns general enough to apply to future changes
+- Don't make assumptions about specific future tasks
+- Focus on process, not content
+
+## Knowledge Base Consistency Checks
+
+Between iterations, verify:
+
+```sql
+-- Check 1: All modules have valid doc references
+SELECT module_name, documented_in 
+FROM code_index 
+WHERE documented_in IS NOT NULL 
+  AND documented_in NOT IN (SELECT doc_path FROM docs_index);
+
+-- Check 2: All docs reference valid modules
+SELECT di.doc_path, di.related_modules
+FROM docs_index di
+LEFT JOIN code_index ci ON di.related_modules LIKE '%' || ci.module_name || '%'
+WHERE ci.module_name IS NULL;
+
+-- Check 3: No duplicate doc entries
+SELECT doc_path, COUNT(*) 
+FROM docs_index 
+GROUP BY doc_path 
+HAVING COUNT(*) &gt; 1;
+
+-- Check 4: Timestamps are recent
+SELECT module_name, last_updated
+FROM code_index
+WHERE last_updated &lt; datetime('now', '-7 days')
+  AND documented_in IS NOT NULL;
+</code></pre>
+<h3 id="decision-tree">Decision Tree</h3>
+<pre><code>Invoked on codebase
+       │
+       ▼
+Knowledge base exists?
+       │
+   ┌───┴───┐
+   │       │
+  Yes     No
+   │       │
+   ▼       ▼
+Check     Initialize
+state     tables
+   │       │
+   └───┬───┘
+       ▼
+Task specified?
+       │
+   ┌───┴───┐
+   │       │
+  Yes     No
+   │       │
+   ▼       ▼
+Do task   Identify
+          gaps
+       │
+       ▼
+Multiple subtasks?
+       │
+   ┌───┴───┐
+   │       │
+  Yes     No
+   │       │
+   ▼       ▼
+Chunk    Complete
+work     task
+   │
+   ▼
+Update KB
+   │
+   ▼
+Done (or next iteration)
+</code></pre>
+<h3 id="handoff-notes">Handoff Notes</h3>
+<p>When work will continue in next invocation, include:</p>
+<ol>
+<li><strong>What’s done</strong>: List completed documentation
+</li>
+<li><strong>What’s next</strong>: Specific next steps
+</li>
+<li><strong>Blockers</strong>: Any issues to resolve
+</li>
+<li><strong>Context</strong>: Relevant state from knowledge base
+</li>
+</ol>
+<p>Example handoff:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">## Handoff Summary</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>Completed:</span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>documentation/architecture.md (core types, runtime, agent tree)</span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>documentation/tools.md (bash tools, partial MCP)</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>Next:</span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Complete MCP section in tools.md</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Document OpenAPI tools</span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Create mcp.md for protocol details</span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>Blockers: None</span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>Context:</span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>12 of 79 modules documented</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Runtime and AgentTree fully covered</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span>Tools subsystem 60% complete</span></code></pre></div></div><h3 id="common-iteration-sequences">Common Iteration Sequences</h3>
+<h4 id="sequence-full-documentation-pass">Sequence: Full Documentation Pass</h4>
+<pre><code>Iteration 1: README + architecture
+Iteration 2: Tools system
+Iteration 3: Sessions + TUI
+Iteration 4: CLI + Export/Import
+Iteration 5: File loading + cleanup
+Iteration 6: Review + cross-references
+</code></pre>
+<h4 id="sequence-new-feature-documentation">Sequence: New Feature Documentation</h4>
+<pre><code>Iteration 1: Understand feature (read code)
+Iteration 2: Document core types
+Iteration 3: Document API/functions
+Iteration 4: Add examples
+Iteration 5: Update related docs
+Iteration 6: Add to README/index
+</code></pre>
+<h4 id="sequence-maintenance-update">Sequence: Maintenance Update</h4>
+<pre><code>Iteration 1: Check new commits
+Iteration 2: Identify affected docs
+Iteration 3: Update affected sections
+Iteration 4: Verify consistency
+Iteration 5: Record commits processed
+</code></pre>
+<h3 id="tool-usage-by-phase">Tool Usage by Phase</h3>
+<h4 id="discovery-phase">Discovery Phase</h4>
+<ul>
+<li><code>bash_list-files</code> - Find all source files
+</li>
+<li><code>bash_grep-files</code> - Search for patterns
+</li>
+<li><code>bash_get_git_log</code> - See recent changes
+</li>
+</ul>
+<h4 id="analysis-phase">Analysis Phase</h4>
+<ul>
+<li><code>bash_get_git_commit</code> - Read specific changes
+</li>
+<li>Read source files with grep results
+</li>
+<li>Query <code>code_index</code> for relationships
+</li>
+</ul>
+<h4 id="documentation-phase">Documentation Phase</h4>
+<ul>
+<li><code>bash_write-file</code> - Create/update docs
+</li>
+<li>Update <code>docs_index</code> with new entries
+</li>
+<li>Update <code>code_index</code> with document links
+</li>
+</ul>
+<h4 id="verification-phase">Verification Phase</h4>
+<ul>
+<li>Query for consistency
+</li>
+<li>Check cross-references
+</li>
+<li>Verify all modules covered
+</li>
+</ul>
+<h3 id="anti-patterns-to-avoid">Anti-Patterns to Avoid</h3>
+<ol>
+<li><strong>Don’t</strong> document without updating knowledge base
+</li>
+<li><strong>Don’t</strong> create docs without adding to <code>docs_index</code>
+</li>
+<li><strong>Don’t</strong> leave <code>code_index</code> modules unlinked
+</li>
+<li><strong>Don’t</strong> assume previous state - always query
+</li>
+<li><strong>Don’t</strong> document too much in one iteration (fatigue/errors)
+</li>
+<li><strong>Don’t</strong> forget the summary line (first line of response)
+</li>
+</ol>
+<h3 id="success-metrics">Success Metrics</h3>
+<p>Good iterative documentation:</p>
+<ul>
+<li>Each iteration has clear scope
+</li>
+<li>Knowledge base stays consistent
+</li>
+<li>No lost work between invocations
+</li>
+<li>Progress is measurable (X of Y modules done)
+</li>
+<li>Final docs are comprehensive and cross-referenced
+</li>
+</ul>
+<h3 id="quick-reference-card">Quick Reference Card</h3>
+<pre><code>STARTING:
+  SELECT * FROM project_overview;
+  SELECT * FROM docs_index;
+  SELECT * FROM code_index WHERE documented_in IS NULL;
+
+DURING:
+  Read source → Extract types → Write doc → Update KB
+
+ENDING:
+  UPDATE code_index SET documented_in = 'documentation/X.md' ...
+  INSERT INTO docs_index ... (if new doc)
+  SELECT consistency checks
+
+HANDOFF:
+  List done, next steps, blockers, context
+  Include summary line as first line
+</code></pre>
+<hr />
+<p>Use this workflow for multi-step documentation tasks.</p>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

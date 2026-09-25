@@ -1,0 +1,116 @@
+=base:build-info.json
+{"layout":"article"
+,"publicationStatus":"Public"
+}
+
+=base:preamble.json
+{"author": "Lucas DiCioccio"
+,"date": "2026-09-25T12:00:00Z"
+,"title": "Docs"
+}
+
+=base:topic.json
+{"topics":["docs"]
+,"keywords":["documentation", "guide", "reference", "architecture", "tools", "server", "tui"]
+}
+
+=base:social.json
+{"twitter": "lucasdicioccio"
+,"linkedin": "lucasdicioccio"
+,"github": "lucasdicioccio"
+,"mastodon": "https://fosstodon.org/@lucasdicioccio"
+}
+
+=base:summary.cmark
+The guides and references, mirrored from the repository's documentation/ directory: architecture, tools, the server, sessions, the TUI, parameters, and the migration and workflow notes.
+
+=base:main-content.cmark
+
+# Docs
+
+These pages are generated straight from the `documentation/` directory of the
+[agents-exe repository](https://github.com/lucasdicioccio/agents-exe/tree/main/documentation):
+the repository is always the canonical source, and may be ahead of what is
+published here.
+
+## Using agents-exe
+
+- [**Command reference**](/commands.html): the global options and every
+  command, from the README.
+- [**CLI reference**](/docs-cli-commands.html): the same commands in
+  depth, with their options and examples.
+- [**Advanced configuration**](/docs-advanced-configuration.html):
+  `agents-exe.cfg.json`, agent directories, and per-project settings.
+- [**The TUI**](/docs-tui.html): the terminal UI.
+- [**agents-server**](/docs-agents-server.html): agents over HTTP, durable
+  sessions, event streams, the chat page, MCP over HTTP, running as a
+  service.
+- [**MCP**](/docs-mcp.html): agents-exe as an MCP server, and MCP servers
+  as tool providers.
+- [**Export and import**](/docs-export-import.html): moving sessions and
+  agents between stores.
+
+## Tools and agents
+
+- [**Tool system**](/docs-tools.html): how tools are registered and
+  exposed to the model.
+- [**Executable-program tools**](/docs-binary-tool.html): the
+  self-description protocol a program follows to become a tool.
+- [**Parameters, bindings and narrowing sub-agents**](/docs-parameters-and-bindings.html):
+  pre-bound arguments, declared parameters, and narrowed helpers.
+- [**Internal tool mapping**](/docs-internal-tool-mapping.html): the
+  built-in system toolbox and what each capability maps to.
+- [**File loader**](/docs-file-loader.html): how agent files and
+  directories are discovered and loaded.
+
+## Sessions and workflows
+
+- [**Session management**](/docs-sessions.html): turns, storage, and
+  resuming.
+- [**Asynchronous tool calls**](/docs-async-tool-calls.html): deferred and
+  background calls, and how a run yields on them.
+- [**Durable workflows how-to**](/docs-durable-workflows-howto.html): the
+  patterns for long-running, resumable work.
+- [**Iterative development workflow**](/docs-ITERATIVE-WORKFLOW.html): the
+  build, check and run loop while writing agents.
+
+## Under the hood
+
+- [**Architecture**](/docs-architecture.html): the layers and the OS model.
+- [**OS model API reference**](/docs-OS-API.html): entities, components,
+  resources and conversations.
+- [**OS model migration guide**](/docs-MIGRATION-OS.html) and its
+  [**changelog**](/docs-CHANGELOG-OS-MIGRATION.html): how the codebase
+  moved onto the OS model.
+- [**Migration guide**](/docs-MIGRATION-GUIDE.html): earlier breaking
+  changes and how to follow them.
+- [**SQQ agent flow**](/docs-sqq-flow.html) and
+  [**issue dependencies as a DAG**](/docs-sqq-dag.html): notes from the
+  issue-processing agent.
+
+## For people and agents working in the code
+
+- [**Agents, the framework overview**](/docs-README.html): the `docs/`
+  directory's own index.
+- [**AI context**](/docs-AI-CONTEXT.html) and
+  [**AI assistant guidelines**](/docs-ai-assistant-guidelines.html): the
+  conventions and context an assistant should load before changing the
+  code.
+
+Two more documents exist only in the repository:
+
+- [`CHANGELOG.md`](https://github.com/lucasdicioccio/agents-exe/blob/main/CHANGELOG.md):
+  release history.
+- [`todos/`](/specs.html): the design documents, indexed on the
+  [Specs](/specs.html) page with what of each has shipped.
+
+=base:main-css.tramaj-json
+{ "format": "css"
+, "contents":
+  [ ""
+  , "@import \"`$ctx.pathPrefix`/css/dev.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/colors.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/article.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/navigation.css\";"
+  ]
+}

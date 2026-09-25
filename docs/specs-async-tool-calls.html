@@ -1,0 +1,427 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Asynchronous / Interruptible Tool Calls</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: no status line yet"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Asynchronous / Interruptible Tool Calls"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: no status line yet"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Asynchronous / Interruptible Tool Calls"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html"><meta property="og:description" content="Status: no status line yet"><meta name="article:published_time" content="2026-09-25T13:05:36Z"><meta name="article:modified_time" content="2026-09-25T13:05:36Z"><meta name="ks:article_json" content="/agents-exe/json/specs-async-tool-calls.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-async-tool-calls.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T13:05:36Z","datePublished":"2026-09-25T13:05:36Z","description":"Status: no status line yet","headline":"Asynchronous / Interruptible Tool Calls","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Asynchronous / Interruptible Tool Calls</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1519 words, 12 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-web-server-embedding.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">8/11</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.progress.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls.md"><code>todos/async-tool-calls.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="asynchronous--interruptible-tool-calls">Asynchronous / Interruptible Tool Calls</h2>
+<h3 id="goal">Goal</h3>
+<p>Make tool calls in a TUI/oneshot session truly interruptible and inspectable:</p>
+<ul>
+<li>Tool calls can execute concurrently instead of blocking the whole turn.
+</li>
+<li>The LLM can receive <em>partial</em> answers as soon as individual calls finish.
+</li>
+<li>The LLM can later query the status of a still-running or previously-yielded tool call.
+</li>
+<li>Tool calls become first-class entities in the ECS-style OS, visible to the rest of the system.
+</li>
+</ul>
+<p>Today the flow is:</p>
+<ol>
+<li>LLM turn emits tool calls.
+</li>
+<li><code>agents-exe</code> schedules them synchronously:
+<ul>
+<li>tool call 1 runs
+</li>
+<li>tool call 2 runs
+</li>
+</ul>
+</li>
+<li><code>agents-exe</code> returns the LLM turn.
+</li>
+</ol>
+<p>We want:</p>
+<ol>
+<li>LLM turn emits tool calls.
+</li>
+<li><code>agents-exe</code> promotes each call to an OS entity and starts them concurrently.
+</li>
+<li>As soon as at least one call has a useful partial result, the scheduler can yield a partial user turn back to the LLM.
+</li>
+<li>The LLM can continue the conversation, optionally calling a system capability to inspect any call it is interested in.
+</li>
+<li>When all calls for the turn are complete, the turn finalizes normally.
+</li>
+</ol>
+<h3 id="current-state">Current State</h3>
+<p>There is already async scaffolding in place:</p>
+<ul>
+<li><code>System.Agents.Session.Types</code> defines <code>TrackedToolCall</code>, <code>ToolCallState</code> (<code>Ready</code>, <code>Running</code>, <code>Deferred</code>, <code>Completed</code>, <code>Failed</code>), <code>ToolCallDisposition</code> (<code>RunSync</code>, <code>RunAsync</code>, <code>RunIsolated</code>, <code>Defer</code>, <code>Decorate</code>), <code>ContinuationToken</code>, etc.
+</li>
+<li><code>System.Agents.Session.Async</code> provides continuation tokens, snapshots, and a <code>ContinuationStore</code> (SQLite-backed).
+</li>
+<li><code>System.Agents.Session.Step</code> has <code>runStepMAsync</code>, which classifies calls via <code>ctxToolCallPolicy</code> and can defer calls.
+</li>
+<li><code>System.Agents.Session.Loop</code> has <code>runAsync</code> / <code>runAsyncWithProgress</code> that pause when a <code>PartialUserTurn</code> is present.
+</li>
+</ul>
+<p>What is missing:</p>
+<ul>
+<li><code>RunAsync</code> / <code>Running</code> are mostly nominal. Calls are still executed sequentially in one batch; <code>RunAsync</code> just defers them.
+</li>
+<li>There is no real concurrent execution engine.
+</li>
+<li>There is no way for the LLM to ask “what is the status of tool-call X?” while it is running.
+</li>
+<li>Tool calls are not yet represented as ECS entities with runtime components.
+</li>
+<li>Partial answers are not surfaced: a call is either done or deferred.
+</li>
+</ul>
+<h3 id="design-overview">Design Overview</h3>
+<p>We introduce three layers:</p>
+<ol>
+<li><strong>ECS OS layer</strong> — every tool call becomes an <code>EntityId</code> with <code>ToolCallConfig</code> and <code>ToolCallState</code> components. The OS is the source of truth for status.
+</li>
+<li><strong>Async execution engine</strong> — a small scheduler that runs approved calls concurrently, updates OS components, and emits heartbeat/partial progress.
+</li>
+<li><strong>System-toolbox introspection capability</strong> — a new <code>get-tool-call-status</code> capability (and possibly <code>list-running-tool-calls</code>) that any agent can invoke.
+</li>
+</ol>
+<p>The key idea is that the existing <code>PartialUserTurn</code> mechanism is extended so that a turn can be yielded <em>before</em> all calls are complete, carrying intermediate responses. The LLM can then decide whether to keep waiting, do something else, or inspect a specific call.</p>
+<h3 id="ecs-integration">ECS Integration</h3>
+<p><code>System.Agents.OS.Conversation.Types</code> already has the right component shapes:</p>
+<ul>
+<li><code>ToolCallConfig</code> — static info: turn, tool name, input args, parent call.
+</li>
+<li><code>ToolCallState</code> — runtime status, timestamps, result value.
+</li>
+</ul>
+<p>We extend them with async-specific fields:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallConfig</span> <span class="ot">=</span> <span class="dt">ToolCallConfig</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> tcTurnId ::</span> <span class="dt">TurnId</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcToolName ::</span> <span class="dt">Text</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcToolInput ::</span> <span class="dt">Value</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcParentCallId ::</span> <span class="dt">Maybe</span> <span class="dt">ToolCallId</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcSessionId ::</span> <span class="dt">SessionId</span>          <span class="co">-- NEW: which session owns this call</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcConversationId ::</span> <span class="dt">ConversationId</span> <span class="co">-- NEW</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallState</span> <span class="ot">=</span> <span class="dt">ToolCallState</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> tcStatus ::</span> <span class="dt">ToolCallStatus</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcStartedAt ::</span> <span class="dt">Maybe</span> <span class="dt">UTCTime</span>      <span class="co">-- NEW: was required, now optional until actually started</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcCompletedAt ::</span> <span class="dt">Maybe</span> <span class="dt">UTCTime</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcResult ::</span> <span class="dt">Maybe</span> <span class="dt">Value</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> tcProgress ::</span> [<span class="dt">ToolCallProgress</span>]  <span class="co">-- NEW: ordered structured partial updates</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="co">-- NEW component-like value stored inside ToolCallState.</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a><span class="co">-- All progress payloads are structured JSON.</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ToolCallProgress</span> <span class="ot">=</span> <span class="dt">ToolCallProgress</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> progressAt ::</span> <span class="dt">UTCTime</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> progressKind ::</span> <span class="dt">ProgressKind</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> progressPayload ::</span> <span class="dt">Value</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">ProgressKind</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">ProgressStarted</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ProgressLog</span> <span class="dt">Text</span>          <span class="co">-- free-form log line (still wrapped in JSON)</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ProgressPartial</span> <span class="dt">Value</span>     <span class="co">-- structured partial result</span></span>
+<span id="31"><a href="#31" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">ProgressHeartbeat</span>         <span class="co">-- &quot;still alive&quot;</span></span>
+<span id="32"><a href="#32" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>, <span class="dt">Generic</span>)</span></code></pre></div></div><p>When the scheduler receives tool calls from an LLM turn, it:</p>
+<ol>
+<li>Creates one OS entity per call.
+</li>
+<li>Attaches <code>ToolCallConfig</code> and <code>ToolCallState { TcPending }</code>.
+</li>
+<li>Links the call back to the current <code>TurnId</code> and <code>ConversationId</code>.
+</li>
+<li>Returns a lightweight <code>ToolCallHandle</code> (entity id + <code>ToolCallId</code>) to the session layer.
+</li>
+</ol>
+<p>The existing <code>TrackedToolCall</code> keeps its <code>ToolCallId</code> but gains a <code>tcEntityId :: Maybe EntityId</code> so the session can map back to the OS.</p>
+<h3 id="async-execution-engine">Async Execution Engine</h3>
+<p>A new module <code>System.Agents.Session.Async.Engine</code> provides:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AsyncEngine</span> <span class="ot">=</span> <span class="dt">AsyncEngine</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    {<span class="ot"> aeWorld ::</span> <span class="dt">World</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> aeExecutor ::</span> <span class="dt">ToolExecutionContext</span> <span class="ot">-&gt;</span> <span class="dt">LlmToolCall</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">UserToolResponse</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    ,<span class="ot"> aeMaxConcurrency ::</span> <span class="dt">Int</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Start executing a batch of calls concurrently.</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="co">-- Returns handles and, if some calls already completed synchronously, their results.</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="ot">startAsyncBatch ::</span> <span class="dt">AsyncEngine</span> <span class="ot">-&gt;</span> [<span class="dt">TrackedToolCall</span>] <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">AsyncBatch</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Block until at least one call in the batch makes progress, then return.</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a><span class="ot">waitForProgress ::</span> <span class="dt">AsyncBatch</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">AsyncBatchUpdate</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Finalize any completed calls into UserToolResponses.</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a><span class="ot">finalizeCompleted ::</span> <span class="dt">AsyncBatch</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> [(<span class="dt">ToolCallId</span>, <span class="dt">UserToolResponse</span>)]</span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Cancel all still-running calls (best effort).</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a><span class="ot">cancelAsyncBatch ::</span> <span class="dt">AsyncBatch</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ()</span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a><span class="co">-- | Cancel a single running call by its handle.</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a><span class="ot">cancelToolCall ::</span> <span class="dt">AsyncEngine</span> <span class="ot">-&gt;</span> <span class="dt">ToolCallId</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> <span class="dt">Bool</span></span></code></pre></div></div><p>The engine uses <code>async</code>/<code>Async</code> (or <code>forkIO</code> + <code>TVar</code>) to run calls. For each call:</p>
+<ol>
+<li>It sets the OS state to <code>TcExecuting</code>.
+</li>
+<li>It runs the call in a background thread.
+</li>
+<li>The call can emit progress via a callback injected into <code>ToolExecutionContext</code>:
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">ctxProgressCallback ::</span> <span class="dt">Maybe</span> (<span class="dt">Value</span> <span class="ot">-&gt;</span> <span class="dt">IO</span> ())</span></code></pre></div></div>All payloads passed to this callback must be valid JSON values.
+</li>
+<li>On completion it sets the OS state to <code>TcCompleted result</code> (or <code>TcFailed err</code> / <code>TcCancelled</code>).
+</li>
+</ol>
+<p>Policy integration:</p>
+<ul>
+<li><code>RunSync</code> calls are still executed inline.
+</li>
+<li><code>RunAsync</code> calls go to the engine.
+</li>
+<li><code>RunIsolated</code> calls are delegated to the configured deployment runner but also tracked as OS entities.
+</li>
+<li><code>Defer</code> calls stay in <code>TcPending</code> with a continuation token.
+</li>
+</ul>
+<h3 id="partial-answers">Partial Answers</h3>
+<p>A tool can emit a partial answer by calling the progress callback if the tool supports streaming. For tools that do not support streaming, the engine can still yield after each individual call finishes, so the LLM gets <em>some</em> responses earlier.</p>
+<p>When the session stepper asks for a user turn, the scheduler can produce a <code>PartialUserTurn</code> with the subset of calls that have completed so far. The LLM then sees:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;completed&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;result&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>and for still-running calls:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;running&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;at&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span> <span class="dt">&quot;kind&quot;</span><span class="fu">:</span> <span class="st">&quot;log&quot;</span><span class="fu">,</span> <span class="dt">&quot;payload&quot;</span><span class="fu">:</span> <span class="st">&quot;downloading...&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;at&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span> <span class="dt">&quot;kind&quot;</span><span class="fu">:</span> <span class="st">&quot;partial&quot;</span><span class="fu">,</span> <span class="dt">&quot;payload&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;percent&quot;</span><span class="fu">:</span> <span class="dv">50</span><span class="fu">}}</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>The LLM can choose to continue immediately (if the completed answers are enough) or call <code>get_tool_call_status</code> for more detail.</p>
+<h3 id="tool-call-status-system-capability">Tool-Call Status System Capability</h3>
+<p>Add new capabilities to <code>SystemToolCapability</code>:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="op">|</span> <span class="dt">SystemToolGetToolCallStatus</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="op">|</span> <span class="dt">SystemToolListRunningToolCalls</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="op">|</span> <span class="dt">SystemToolCancelToolCall</span></span></code></pre></div></div><p>and expose them through <code>System.Agents.Tools.SystemToolbox</code>.</p>
+<h4 id="get_tool_call_status"><code>get_tool_call_status</code></h4>
+<p>Input schema:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;uuid&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;include_progress&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;wait_for_completion&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;timeout_seconds&quot;</span><span class="fu">:</span> <span class="dv">5</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Output schema:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;uuid&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;pending|running|completed|failed|cancelled|orphaned&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tool_name&quot;</span><span class="fu">:</span> <span class="st">&quot;bash&quot;</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;started_at&quot;</span><span class="fu">:</span> <span class="st">&quot;...&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;completed_at&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;result&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;progress&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="er">...</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;is_final&quot;</span><span class="fu">:</span> <span class="kw">false</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Status values:</p>
+<ul>
+<li><code>pending</code> — call is queued but has not started.
+</li>
+<li><code>running</code> — call is executing.
+</li>
+<li><code>completed</code> — call finished successfully.
+</li>
+<li><code>failed</code> — call finished with an error.
+</li>
+<li><code>cancelled</code> — call was cancelled before completion.
+</li>
+<li><code>orphaned</code> — the call is referenced in the chat history but no longer exists in the OS (process restarted, entity was dropped, etc.). This is the clear “task no longer exists” status.
+</li>
+</ul>
+<p>If <code>wait_for_completion</code> is true, the tool blocks up to <code>timeout_seconds</code> and returns the final result when available. This lets an LLM poll efficiently.</p>
+<h4 id="list_running_tool_calls"><code>list_running_tool_calls</code></h4>
+<p>Returns calls filtered by the current session/conversation scope (reusing the existing session-introspection scope rules). Useful for the LLM to discover what it can inspect.</p>
+<h4 id="cancel_tool_call"><code>cancel_tool_call</code></h4>
+<p>Input schema:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;uuid&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;reason&quot;</span><span class="fu">:</span> <span class="st">&quot;user request&quot;</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Output schema:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;uuid&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;cancelled&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;previous_status&quot;</span><span class="fu">:</span> <span class="st">&quot;running&quot;</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>Cancellation is best-effort. If the call is already final, the capability returns <code>cancelled: false</code>.</p>
+<h3 id="changes-to-session-step--loop">Changes to Session Step / Loop</h3>
+<ol>
+<li>
+<p><code>runStepMAsync</code> currently defers <code>RunAsync</code> calls. We change it to:</p>
+<ul>
+<li>Classify calls.
+</li>
+<li>Execute <code>RunSync</code> calls inline.
+</li>
+<li>Hand <code>RunAsync</code> calls to the async engine.
+</li>
+<li>If <em>all</em> calls complete quickly, produce a normal <code>UserTurn</code>.
+</li>
+<li>Otherwise produce a <code>PartialUserTurn</code> and yield.
+</li>
+</ul>
+</li>
+<li>
+<p>Add a new agent configuration field:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ot">ctxAsyncYieldStrategy ::</span> <span class="dt">AsyncYieldStrategy</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">AsyncYieldStrategy</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="ot">=</span> <span class="dt">YieldOnAnyProgress</span>       <span class="co">-- yield as soon as one call finishes</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">YieldWhenAllDone</span>         <span class="co">-- DEFAULT: yield only once every synchronous and asynchronous call in the batch has reached a final state</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>    <span class="op">|</span> <span class="dt">YieldOnTimeout</span> <span class="dt">Int</span>       <span class="co">-- yield after N milliseconds even if nothing finished</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Eq</span>)</span></code></pre></div></div><p>The default is <code>YieldWhenAllDone</code> for backward compatibility with the existing synchronous mental model.</p>
+</li>
+<li>
+<p>On resume (<code>continuePartialTurn</code>), the stepper checks the OS for calls that have completed since the last step and finalizes them. Any still-running calls remain in the <code>PartialUserTurn</code>.</p>
+</li>
+<li>
+<p>When the LLM invokes <code>get_tool_call_status</code> and the call is still running, the stepper does not block the whole session; it returns the current snapshot. If the call completed, the result is copied back into the <code>TrackedToolCall</code>.</p>
+</li>
+</ol>
+<h3 id="sub-conversations-and-lineage">Sub-Conversations and Lineage</h3>
+<p>Lineage remains important. Tool-call entities already carry <code>tcParentCallId</code> for nested calls. Sub-conversations will eventually need richer primitives so that one conversation can ask another conversation for more information. The work described here is a prerequisite: once a tool-call result can be replaced by a later status update, the LLM can treat a long-running sub-conversation as an “interruptible” tool call. For now we keep the existing call-stack/lineage plumbing and ensure child tool-call entities are created with the correct parent reference.</p>
+<h3 id="tui--oneshot-integration">TUI / OneShot Integration</h3>
+<ul>
+<li>The TUI already has a buffered-message queue and pause mechanism (<code>ConversationStatus_Paused</code>).
+</li>
+<li>When a partial turn is yielded, the TUI should render running tool calls with a spinner/progress indicator.
+</li>
+<li>The TUI event loop should listen for <code>AppEvent_ToolCallProgress</code> events emitted by the async engine and refresh the conversation view.
+</li>
+<li>OneShot mode should support a <code>--wait-for-async</code> flag; without it, oneshot exits with a JSON description of pending calls and a continuation token.
+</li>
+</ul>
+<h3 id="lifecycle-state-machine">Lifecycle State Machine</h3>
+<pre><code>Pending -&gt; Executing -&gt; Completed
+        -&gt; Executing -&gt; Failed
+        -&gt; Executing -&gt; Cancelled
+        -&gt; Deferred   -&gt; Pending  (wake/resume)
+        -&gt; Deferred   -&gt; Completed (external completion)
+</code></pre>
+<p>When a session resumes after a process restart, any tool call referenced in the chat history that has no corresponding OS entity is reported as <code>orphaned</code> by <code>get_tool_call_status</code>. No in-progress call persistence is required; the LLM is responsible for deciding what to do with an orphaned call.</p>
+<p><code>Ready</code> / <code>Running</code> / <code>Deferred</code> / <code>Completed</code> / <code>Failed</code> from <code>ToolCallState</code> map cleanly to ECS <code>ToolCallStatus</code>:</p>
+<table>
+<tr><th>Session <code>ToolCallState</code></th><th>ECS <code>ToolCallStatus</code></th></tr>
+<tr><td>Ready</td><td>TcPending</td></tr>
+<tr><td>Running</td><td>TcExecuting</td></tr>
+<tr><td>Deferred</td><td>TcPending (with continuation token)</td></tr>
+<tr><td>Completed</td><td>TcCompleted</td></tr>
+<tr><td>Failed</td><td>TcFailed</td></tr>
+</table>
+<p>Cancelled session calls become <code>TcCancelled</code>. Missing OS entities become the <code>orphaned</code> status in the capability response.</p>
+<h3 id="new-modules--files">New Modules / Files</h3>
+<ul>
+<li><code>System.Agents.Session.Async.Engine</code> — concurrent execution engine.
+</li>
+<li><code>System.Agents.OS.Conversation.ToolCalls</code> — helpers to create/update/query tool-call entities.
+</li>
+<li><code>System.Agents.Tools.SystemToolbox.ToolCallStatus</code> — implementation of the new capabilities.
+</li>
+<li><code>System.Agents.TUI.Event.ToolCallProgress</code> — TUI event handling for progress updates.
+</li>
+</ul>
+<h3 id="modified-modules">Modified Modules</h3>
+<ul>
+<li><code>System.Agents.OS.Conversation.Types</code> — add progress, session/conversation ids to tool-call components; add <code>TcCancelled</code>.
+</li>
+<li><code>System.Agents.Session.Types</code> — add <code>tcEntityId</code> to <code>TrackedToolCall</code>; add <code>AsyncYieldStrategy</code>.
+</li>
+<li><code>System.Agents.Session.Step</code> — integrate the async engine and partial-yield logic.
+</li>
+<li><code>System.Agents.Session.Loop</code> — handle resume from partial turns with running background calls.
+</li>
+<li><code>System.Agents.Session.Async</code> — reuse continuation store; add progress-related helpers.
+</li>
+<li><code>System.Agents.Base</code> — add new <code>SystemToolCapability</code> constructors.
+</li>
+<li><code>System.Agents.Tools.SystemToolbox.Core</code> — register new capabilities.
+</li>
+<li><code>System.Agents.Tools.SystemToolbox.Types</code> — add query/error types for tool-call status.
+</li>
+<li><code>System.Agents.TUI.Types</code> — add events for tool-call progress.
+</li>
+</ul>
+<h3 id="implementation-phases">Implementation Phases</h3>
+<h4 id="phase-1-ecs-tool-call-entities">Phase 1: ECS Tool-Call Entities</h4>
+<ul>
+<li>Promote tool-call creation from session layer to OS layer.
+</li>
+<li>Add <code>tcEntityId</code> to <code>TrackedToolCall</code>.
+</li>
+<li>Ensure every tool call in a session has a corresponding OS entity.
+</li>
+<li>Write tests in <code>test/OS/ConversationTests.hs</code>.
+</li>
+</ul>
+<h4 id="phase-2-async-engine">Phase 2: Async Engine</h4>
+<ul>
+<li>Implement <code>AsyncEngine</code> with background threads and progress callbacks.
+</li>
+<li>Integrate engine into <code>runStepMAsync</code> for <code>RunAsync</code> calls.
+</li>
+<li>Keep <code>RunSync</code> behavior unchanged.
+</li>
+<li>Add <code>AsyncYieldStrategy</code> with default <code>YieldWhenAllDone</code>.
+</li>
+</ul>
+<h4 id="phase-3-system-capability">Phase 3: System Capability</h4>
+<ul>
+<li>Add <code>SystemToolGetToolCallStatus</code>, <code>SystemToolListRunningToolCalls</code>, and <code>SystemToolCancelToolCall</code>.
+</li>
+<li>Implement lookup by <code>ToolCallId</code> / entity id from the OS <code>World</code>.
+</li>
+<li>Add <code>wait_for_completion</code> optional blocking.
+</li>
+<li>Implement cancellation and the <code>orphaned</code> status.
+</li>
+<li>Expose capabilities in agent configs.
+</li>
+</ul>
+<h4 id="phase-4-tui--oneshot-ux">Phase 4: TUI / OneShot UX</h4>
+<ul>
+<li>Render running calls and progress in the TUI.
+</li>
+<li>Add progress events to the TUI event channel.
+</li>
+<li>Add oneshot <code>--wait-for-async</code> / continuation-token resume.
+</li>
+</ul>
+<h4 id="phase-5-cleanup--hardening">Phase 5: Cleanup &amp; Hardening</h4>
+<ul>
+<li>Cancellation on session abort.
+</li>
+<li>Expiration of stale running calls.
+</li>
+<li>Rate limiting / max concurrency enforcement.
+</li>
+<li>Ensure orphaned status is returned consistently after process restart.
+</li>
+</ul>
+<h3 id="open-questions">Open Questions</h3>
+<p>None remaining. Decisions from review:</p>
+<ol>
+<li>Progress payloads are structured JSON.
+</li>
+<li>Cancellation capability is included.
+</li>
+<li>Lineage is preserved; sub-conversation primitives will be built later on top of interruptible tool calls.
+</li>
+<li>In-progress calls are not persisted; missing OS entities are reported as <code>orphaned</code>.
+</li>
+<li>Default <code>AsyncYieldStrategy</code> is <code>YieldWhenAllDone</code>.
+</li>
+</ol>
+<h3 id="success-criteria">Success Criteria</h3>
+<ul>
+<li>[ ] Two long-running tool calls issued in one LLM turn execute concurrently.
+</li>
+<li>[ ] The LLM receives a partial user turn as soon as the first call finishes (when <code>YieldOnAnyProgress</code> is configured).
+</li>
+<li>[ ] The LLM can call <code>get_tool_call_status</code> for any call and see current structured progress or final result.
+</li>
+<li>[ ] The LLM can call <code>cancel_tool_call</code> to stop a running call.
+</li>
+<li>[ ] Tool calls appear as ECS entities in the OS <code>World</code>.
+</li>
+<li>[ ] Existing synchronous behavior is unchanged when <code>ExecutionMode = Synchronous</code>.
+</li>
+<li>[ ] <code>get_tool_call_status</code> returns <code>orphaned</code> for calls referenced in history that no longer exist.
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>
