@@ -97,6 +97,7 @@ import qualified NarrowingTests
 import qualified MailboxTests
 import qualified ConfigLoaderTests
 import qualified TuiDraftTests
+import qualified TuiFileBrowserTests
 import qualified TuiPendingTests
 
 main :: IO ()
@@ -156,6 +157,7 @@ tests =
         , MailboxTests.tests
         , ConfigLoaderTests.tests
         , TuiDraftTests.tests
+        , TuiFileBrowserTests.tests
         , TuiPendingTests.tests
         ]
 

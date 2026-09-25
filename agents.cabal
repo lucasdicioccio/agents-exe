@@ -284,6 +284,7 @@ library agents-tui
                     , System.Agents.TUI.Event.Draft
                     , System.Agents.TUI.Event.Navigation
                     , System.Agents.TUI.Event.Pending
+                    , System.Agents.TUI.FileBrowserNav
                     , System.Agents.TUI.KeyMapping
                     , System.Agents.TUI.MessageComposer
                     , System.Agents.TUI.Render
@@ -572,10 +573,13 @@ test-suite agents-tests
                     , ToolPortalTests
                     , OS.CompatibilityTests
                     , TuiDraftTests
+                    , TuiFileBrowserTests
                     , TuiPendingTests
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     build-depends:    base >=4.18.3.0,
+                      brick,
+                      temporary,
                       agents-lib,
                       agents-server-internal,
                       agents-tui,

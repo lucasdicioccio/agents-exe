@@ -12,6 +12,7 @@ import Brick.Widgets.FileBrowser (renderFileBrowser)
 import Control.Lens ((^.))
 import qualified Data.Text as Text
 
+import System.Agents.TUI.FileBrowserNav (browserHint, browserStatusLine)
 import System.Agents.TUI.Render.Attributes
 import System.Agents.TUI.Types
 
@@ -44,6 +45,7 @@ renderFileBrowserDialog st =
                     borderWithLabel (txt " Attach File (Ctrl+F) ") $
                         vBox
                             [ hLimit 80 $ vLimit 20 $ renderFileBrowser True fb
+                            , txt (browserStatusLine fb)
                             , txt ""
-                            , txt "Enter: select file | Space: toggle | /: search | Esc: cancel"
+                            , txt (browserHint fb)
                             ]
