@@ -60,6 +60,7 @@ Three optional objects are new.
   },
   "runtime": {
     "run_as": { "user": "logs", "group": "logs" },
+    "sandbox": { "fs": { "read": ["/var/log"], "write": ["state"] }, "net": "none" },
     "envdir": "env",
     "environment": { "LC_ALL": "C" },
     "rundir": "state",
@@ -95,12 +96,51 @@ the process group).
 | Field | Meaning |
 |---|---|
 | `run_as` | `{"user", "group"}`: run the process as this user and group. The runtime uses one mechanism it was configured with (`setpriv`, `sudo -u`, `runuser`, or a refusal when none is configured); the tool never names the mechanism. Same shape and reasoning as salmon's `RunAs`/`Mechanism` (`multi-user-privilege-separation.md` there). |
+| `sandbox` | `{"fs": {"read": [...], "write": [...]}, "net": "host"\|"none", "tmp": "shared"\|"private"}`: what the process may touch (§1.4). Enforced by one operator-configured mechanism, `bwrap` or `landlock`; never images or containers. |
 | `envdir` | A subdirectory name under the operator's explicit `--envdir-root`, read the daemontools way: one file per variable, file name is the name, file content is the value. Read at start; absent files are absent variables. Lets an operator provision secrets without touching the tool or the checkout. There is no implicit default location: a tool that declares `envdir` while no `--envdir-root` was given fails to load with a `LoadingError` naming the field. |
 | `environment` | Literal variables, added last (they win over `envdir`). |
 | `rundir` | A directory, relative to the tool's directory, created if missing and made the process's working directory; where a `service` keeps its state. |
 | `timeout` | `start`: seconds to reach `ready` or fail the start; `stop`: seconds between the cancel signal and `SIGKILL`; `idle`: seconds without any output or input event after which a `service` is stopped (`null`: never). |
 | `on_exit` | For a `service`: `report` (default: the model is told, the handle becomes final), `restart` (bring it back, bounded by a small backoff; every restart is an event), `fail` (the call that started it fails if it has not completed yet). |
 | `cancel` | The signal sent first on cancel/stop: `SIGTERM` (default), `SIGINT`, or a JSON event `{"send": {...}}` written to stdin before the signal, for tools that prefer a polite request. |
+
+### 1.4 `sandbox`: what the process may touch, without images
+
+A small declaration, no more: `fs.read` and `fs.write` are lists of paths
+(absolute, or relative to the tool's directory), `net` is `host` (default)
+or `none`, `tmp` is `shared` (default) or `private`. Everything not listed
+is not granted; the tool's own directory is always readable so it can run.
+Like `run_as`, the tool names what it needs and the **operator** names how
+it is enforced (`--sandbox bwrap` or `--sandbox landlock`); a tool that
+declares `sandbox` with no mechanism configured fails to load with a
+`LoadingError`, it never runs unconfined by silence. `sandbox` composes with
+`run_as` (the sandbox is set up for the process that runs as that user).
+
+* **bubblewrap** builds a mount namespace: only the declared paths (plus the
+  minimum to exec the tool) exist, `net: none` is a network namespace,
+  `tmp: private` a fresh tmpfs, and the process dies with agents-exe. It
+  needs unprivileged user namespaces, which many distributions restrict: a
+  plain `bwrap` on the Ubuntu machine this was written on failed with
+  `setting up uid map: Permission denied` (`kernel.apparmor_restrict_unprivileged_userns=1`;
+  not conclusive, that shell may itself have been inside another sandbox).
+* **Landlock** is a kernel security module needing no privilege and no
+  namespaces: the runtime applies a ruleset in the child before `exec`.
+  Paths outside the ruleset are denied (not hidden), and on kernels with
+  network rules it can deny TCP bind and connect, which is not the same as
+  no network (to verify in the slice, then state precisely in `check`).
+
+`agents-exe check` probes the configured mechanism for real, the way it would
+run a tool, and reports what it can and cannot enforce (for example
+"`net: none` best effort under landlock"). Where a mechanism cannot honour a
+declared field the tool fails to load naming the field; it is never silently
+weakened.
+
+**Non-goal: image or container isolation.** agents-exe has no notion of an
+image, and this spec adds none. A tool that wants podman or docker calls it
+from its own script, like any other command, and agents-exe sees an ordinary
+process. (Reviewed against `juhp/encapsule`, an interactive podman
+dev-shell: useful vocabulary for named capabilities, the wrong shape for a
+non-interactive tool call.)
 
 These are declarations, not privileges: an agent's configuration (and the
 operator's `--set`/`--pin` parameters, `tool-partial-application.md`) may
@@ -228,7 +268,8 @@ D2. **Independent features, each shippable** (the feature `9914ff73` is
 split as needed). (1) `describe` v2 parsing, `oneshot` with framing and
 validation; (2) `runtime` for `oneshot` tools (`envdir` with
 `--envdir-root`, `environment`, `rundir`, `timeout.stop`, `cancel`) and
-`run_as` behind an operator-configured mechanism, which ships ahead of the
+`run_as` and `sandbox` behind operator-configured mechanisms (`bwrap`,
+`landlock`), which ship ahead of the
 process modes because a low-privilege `oneshot` tool is valuable alone;
 (3) `stream` on the existing async engine; (4) `service`: the handle
 entity, mail delivery and `digest`, the typed `T.send` companions, the
@@ -262,6 +303,11 @@ grow with the number of families' management surfaces.
 D7. **Explicit envdir root.** Secrets are provisioned where the operator
 says (`--envdir-root`), never found by convention next to the tool.
 
+D8. **Process isolation, not image isolation.** `sandbox` is enforced by
+bubblewrap or Landlock, chosen by the operator; agents-exe never builds,
+pulls or names an image. It composes with `run_as`, refuses rather than
+weakens, and is probed by `check`.
+
 ## Resolved in review (2026-09-25, PR #574 comments)
 
 * `send`: one tool per process family with a handle and a typed event; a
@@ -276,3 +322,7 @@ says (`--envdir-root`), never found by convention next to the tool.
 * The generated `T.send` companion is optional per agent: an agent
   configuration may omit it for a service the model may start but never talk
   to, which saves the tool's tokens (owner's answer, 2026-09-25; D6).
+
+## Open questions
+* Isolation backend: bubblewrap and Landlock, no images; whoever wants podman
+  calls it from the tool's own script (§1.4, D8).
