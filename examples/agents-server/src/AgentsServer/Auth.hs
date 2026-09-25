@@ -20,11 +20,13 @@ module AgentsServer.Auth (
     authenticate,
     bearerToken,
     tokenDigest,
+    mintSessionToken,
 ) where
 
 import Control.Exception (throwIO)
 import Control.Monad (forM, when)
 import Crypto.Hash (Digest, SHA256 (..), hashWith)
+import Crypto.Random (getRandomBytes)
 import Data.Aeson ((.:), (.:?))
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
@@ -89,3 +91,15 @@ bearerToken header = case Char8.words header of
 -- | Lowercase hex SHA-256.
 tokenDigest :: ByteString.ByteString -> Text
 tokenDigest = Text.pack . show . (hashWith SHA256 :: ByteString.ByteString -> Digest SHA256)
+
+{- | A fresh session token: 32 random bytes from the system's generator, in
+hex, prefixed @st_@ so it is recognisable in a log or a secret scanner. Only
+its 'tokenDigest' is ever stored.
+-}
+mintSessionToken :: IO Text
+mintSessionToken = do
+    bytes <- getRandomBytes 32 :: IO ByteString.ByteString
+    pure $ "st_" <> Text.pack (concatMap hex2 (ByteString.unpack bytes))
+  where
+    hex2 w = [digit (w `div` 16), digit (w `mod` 16)]
+    digit n = "0123456789abcdef" !! fromIntegral n

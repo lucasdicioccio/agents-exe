@@ -10,6 +10,7 @@ port, a mock LLM, and real HTTP requests.
 -}
 module Main (main) where
 
+import Control.Monad (forM_)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait)
 import qualified Control.Concurrent.Async as Async
@@ -66,6 +67,7 @@ main =
             , testCase "errors have a status and a code" errorsTest
             , testCase "shutdown ends event streams and releases waiting requests" shutdownTest
             , testCase "with tokens, callers need one and only see their own sessions" authTest
+            , testCase "sealed sessions and session tokens" sessionTokenTest
             , testCase "tokens files hold hashed or plain tokens" tokensFileTest
             , testCase "MCP over HTTP: initialize, list tools, call an agent" mcpTest
             , testCase "MCP over HTTP: a call stopping on deferred calls reports the tokens" mcpDeferredTest
@@ -408,6 +410,69 @@ authTest = do
         map (textField "session_id") (arrayField "sessions" aliceList) @?= [sid]
         (done, final) <- call alice "POST" ("/v1/continuations/" <> token <> "?wait=true") (Just (Aeson.object ["result" .= ("42" :: Text)]))
         (done, field "status" final) @?= (200, "idle")
+
+sessionTokenTest :: Assertion
+sessionTokenTest = do
+    let tokens = authTokensFromList [("alice-token", "alice")]
+        obj = Aeson.object
+    withServerAuth (Just tokens) withTenantParam mockCompletion $ \anonymous -> do
+        let alice = anonymous{srvToken = Just "alice-token"}
+            params = ["params" .= obj ["tenant" .= ("acme" :: Text)]]
+        -- alice mints a sealed session with a token, and another session
+        (created, view) <- call alice "POST" "/v1/sessions" (Just (obj (["agent" .= ("server-test" :: Text), "seal" .= True, "session_token" .= True] <> params)))
+        created @?= 201
+        field "sealed" view @?= Aeson.Bool True
+        let sid = textField "session_id" view
+            minted = textField "session_token" view
+            path = "/v1/sessions/" <> sid
+            holder = anonymous{srvToken = Just (Text.encodeUtf8 minted)}
+        (_, other) <- call alice "POST" "/v1/sessions" (Just (obj (["agent" .= ("server-test" :: Text)] <> params)))
+        let otherPath = "/v1/sessions/" <> textField "session_id" other
+        assertBool "the token has a recognisable shape" ("st_" `Text.isPrefixOf` minted)
+        -- the token is shown once: reads never carry it, and a session without one has none
+        (_, again) <- call alice "GET" path Nothing
+        assertBool "no token in a read" (not ("session_token" `Text.isInfixOf` Text.pack (show again)))
+        assertBool "no token on a session created without one" (not ("session_token" `Text.isInfixOf` Text.pack (show other)))
+        -- the holder reads, messages and cancels its own session
+        (get, gv) <- call holder "GET" path Nothing
+        (get, field "sealed" gv) @?= (200, Aeson.Bool True)
+        (msg, _) <- call holder "POST" (path <> "/messages?wait=true") (Just (obj ["prompt" .= ("hi" :: Text)]))
+        msg @?= 200
+        -- ... but never parameters, on a sealed session or any other
+        (withParams, pErr) <- call holder "POST" (path <> "/messages") (Just (obj ["prompt" .= ("hi" :: Text), "params" .= obj ["tenant" .= ("evil" :: Text)]]))
+        (withParams, field "error" pErr) @?= (403, "forbidden_params")
+        (put, _) <- call holder "PUT" (path <> "/params") (Just (obj ["params" .= obj ["tenant" .= ("evil" :: Text)]]))
+        put @?= 403
+        -- ... nor anything beyond it
+        forM_ [("POST", path <> "/fork"), ("POST", path <> "/resume"), ("DELETE", path), ("GET", path <> "/mail"), ("GET", path <> "/pending"), ("DELETE", path <> "/token")] $ \(method, p) -> do
+            (status, _) <- call holder method p (Just (obj []))
+            (method, p, status) @?= (method, p, 403)
+        -- ... and the token is no credential outside its own session's paths
+        forM_ [("GET", "/v1/sessions"), ("GET", "/v1/agents"), ("GET", "/v1/events")] $ \(method, p) -> do
+            (status, _) <- call holder method p Nothing
+            (method, p, status) @?= (method, p, 401)
+        -- ... on any other session: not even a 404 to probe with
+        (elsewhere, _) <- call holder "GET" otherPath Nothing
+        elsewhere @?= 401
+        -- a wrong token, or the token on a session that has none
+        (wrong, _) <- call anonymous{srvToken = Just "st_guess"} "GET" path Nothing
+        wrong @?= 401
+        -- the owner keeps control, and can still set parameters
+        (ownerPut, _) <- call alice "PUT" (path <> "/params") (Just (obj ["params" .= obj ["tenant" .= ("acme-2" :: Text)]]))
+        ownerPut @?= 200
+        -- revoking the token ends the holder's access
+        (revoked, _) <- call alice "DELETE" (path <> "/token") Nothing
+        revoked @?= 200
+        (afterRevoke, _) <- call holder "GET" path Nothing
+        afterRevoke @?= 401
+        (ownerStill, _) <- call alice "GET" path Nothing
+        ownerStill @?= 200
+    -- without authentication a session token means nothing, so it is refused
+    withServer withTenantParam mockCompletion $ \open -> do
+        (bad, err) <- call open "POST" "/v1/sessions" (Just (obj ["agent" .= ("server-test" :: Text), "session_token" .= True, "params" .= obj ["tenant" .= ("acme" :: Text)]]))
+        (bad, field "error" err) @?= (400, "bad_request")
+  where
+    withTenantParam = "{\"parameters\": [{\"name\": \"tenant\", \"scope\": \"session\", \"required\": true}]}"
 
 tokensFileTest :: Assertion
 tokensFileTest = withSystemTempDirectory "agents-server-tokens" $ \dir -> do

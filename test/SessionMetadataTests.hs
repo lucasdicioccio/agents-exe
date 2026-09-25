@@ -178,12 +178,30 @@ migrationTests =
             -- Old rows can be taken over with a compare-and-store at version 0.
             result <- backend.sbCompareAndStore meta sess
             fmap (.smVersion) result @?= Right 1
+        , testCase "a session's security (sealed, token digest) survives a store and a reload, but is never serialized" $ do
+            conn <- open ":memory:"
+            backend <- mkSqliteSessionStore conn
+            sess <- readySession
+            now <- getCurrentTime
+            let security = SessionSecurity True (Just "abc123digest")
+                meta0 = (freshSessionMeta sess.sessionId now){smSecurity = security}
+            Right stored <- backend.sbCompareAndStore meta0 sess
+            Just (_, loaded) <- backend.sbLoadMeta sess.sessionId
+            loaded.smSecurity @?= security
+            -- a later store from the loaded meta carries it on
+            Right again <- backend.sbCompareAndStore loaded sess
+            again.smSecurity @?= security
+            -- clients see whether it is sealed, never the digest
+            let wire = Text.pack (show (Aeson.encode stored))
+            assertBool "sealed is shown" ("sealed" `Text.isInfixOf` wire)
+            assertBool "the digest is not" (not ("abc123digest" `Text.isInfixOf` wire))
+            Aeson.fromJSON (Aeson.toJSON stored) @?= Aeson.Success stored{smSecurity = SessionSecurity True Nothing}
         , testCase "migrations run once" $ do
             conn <- open ":memory:"
             initializeSessionSchema conn
             initializeSessionSchema conn
             versions <- query_ conn "SELECT version FROM schema_migrations WHERE component = 'sessions' ORDER BY version" :: IO [Only Int]
-            map fromOnly versions @?= [1, 2, 3, 4]
+            map fromOnly versions @?= [1, 2, 3, 4, 5]
         ]
 
 -------------------------------------------------------------------------------

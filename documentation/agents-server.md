@@ -555,7 +555,8 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `GET /v1/agents/:slug` | | `200` agent (same shape) | 404 `unknown_agent` |
 | `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
 | `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` |
-| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt?, media?, run?, params?, parent?}` | `201` session, with a `Location` header | 404 `unknown_agent`, 404 `unknown_session` (parent), 400 `bad_request`, see [Parameters](#parameters) |
+| `POST /v1/sessions?wait=&timeout=` | `{agent, prompt?, media?, run?, params?, parent?, seal?, session_token?}` | `201` session (with `session_token` once, when asked), with a `Location` header | 404 `unknown_agent`, 404 `unknown_session` (parent), 400 `bad_request`, see [Parameters](#parameters) and [Session tokens](#session-tokens-and-sealed-sessions) |
+| `DELETE /v1/sessions/:id/token` | none | `200` session | 404; revokes the session's token, also during a run |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
 | `GET /v1/sessions/:id?wait=&timeout=` | | `200` session, or `202` when `wait` expired with a run still active | 404 `unknown_session` |
 | `POST /v1/sessions/:id/messages?wait=&timeout=` | `{prompt, media?, run?, params?, interrupt?}` | `202` or `200` session | 404, 409 `run_in_progress`, 409 `not_accepting_messages`, see [Parameters](#parameters) |
@@ -745,6 +746,30 @@ Several tokens may share an owner. The file is read at startup.
   other endpoint does, and the request log records no query strings.
 
 All owners share the agents and the API keys of the server.
+
+### Session tokens and sealed sessions
+
+A backend that opens a chat for an end user should not have to proxy every
+message and event stream, but must not hand the browser its own token either.
+Two options on `POST /v1/sessions` (with `--auth-tokens`) cover that:
+
+* `"seal": true` marks the session sealed (shown as `"sealed": true`). `params` on
+  a message, resume or continuation is then refused with `403 forbidden_params`
+  for every caller but the session's owner, who keeps `PUT /v1/sessions/:id/params`
+  to rotate values. The parameters of a sealed session are those its creator chose.
+* `"session_token": true` adds a `session_token` to the creation answer, once:
+  32 random bytes in hex, prefixed `st_`. Only its SHA-256 digest is stored, with
+  the session, on either backend; reads never show it. It is refused with `400`
+  without `--auth-tokens`, where every caller has full access anyway.
+
+`Authorization: Bearer <session token>` allows exactly, on that one session:
+`GET /v1/sessions/:id`, `GET /v1/sessions/:id/events`, `POST /v1/sessions/:id/messages`
+(without `params`: `403 forbidden_params`) and `POST /v1/sessions/:id/cancel`.
+The other paths of the session answer `403 forbidden`; every path outside it
+(other sessions, the listing, agents, `/v1/events`) answers `401`, so a token
+cannot probe for other sessions. The owner revokes a token with
+`DELETE /v1/sessions/:id/token`; it also dies with the session. A fork or a
+child session does not inherit the seal or the token.
 
 **Browser origins.** Without `--auth-tokens`, requests carrying an `Origin`
 header that is not `localhost`, `127.0.0.1`, `[::1]`, or a `--cors-origin`
