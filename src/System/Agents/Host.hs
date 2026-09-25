@@ -135,6 +135,9 @@ data HostTrace
     | HostSubAgentTrace !OneShotTool.Trace
     | HostTreeTrace !TreeTrace
     | HostRecoveredSessions ![SessionId]
+    | -- | A recovered session whose running calls were failed because these
+      -- required parameters are no longer bound (see 'Runner.recoverOnStartup').
+      HostRecoveredParamsRequired !SessionId ![Text]
     | -- | A runner event, by kind (e.g. @run.started@), for a session.
       HostRunnerTrace !Text !SessionId
     | -- | A stored agent that was not loaded, and why.
