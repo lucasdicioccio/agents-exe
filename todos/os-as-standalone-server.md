@@ -573,7 +573,10 @@ why it is last.
 * G11: secret params, watches and the run handle are volatile (D7 stands);
   since 2026-09-25 `recoverOnStartup` fails the running calls of a session
   whose required params were lost, with a `params_required` detail.
-* TUI: no selection among several pending calls; no view for `hook.failed`.
+* TUI: selection among several pending calls (`select-pending`, Ctrl+O) and
+  `fail-pending` (Ctrl+W) are done; a failed call completes with the text
+  `Error: <reason>` rather than a new `UserToolResponse` variant. Still no view
+  for `hook.failed`.
 * Service packaging: docs only, no unit file shipped, no `bundling/` entry.
 * `checks/` fake endpoint cannot script multi-turn answers, so sub-agent
   and tool-call flows have no pty end-to-end test.

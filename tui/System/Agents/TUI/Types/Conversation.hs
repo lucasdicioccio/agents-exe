@@ -34,6 +34,9 @@ module System.Agents.TUI.Types.Conversation (
 
     -- * Pending calls (Phase 3c)
     pendingSummaryLine,
+    selectedPendingCall,
+    nextPendingToken,
+    failedCallText,
 
     -- * Utility Functions
     updateConversationSession,
@@ -45,7 +48,7 @@ import qualified Data.Text as Text
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Media.Types (MediaAttachment)
 import System.Agents.Protocol (NewMessage (..))
-import System.Agents.Session.Base (DeferredCallView (..), Session, SessionId, SessionStatus (..))
+import System.Agents.Session.Base (ContinuationToken, DeferredCallView (..), Session, SessionId, SessionStatus (..))
 import System.Agents.SessionStore (SessionMeta)
 
 -------------------------------------------------------------------------------
@@ -196,6 +199,43 @@ pendingSummaryLine calls =
   where
     n = length calls
     names = Text.intercalate ", " (map dcvToolName calls)
+
+{- | The pending call the Pending panel acts on: the one holding the selected
+continuation token, else the first call that has a token (a call without
+one cannot be completed from the TUI).
+-}
+selectedPendingCall :: Maybe ContinuationToken -> [DeferredCallView] -> Maybe DeferredCallView
+selectedPendingCall selected calls =
+    case [c | c <- completable, selected /= Nothing, dcvToken c == selected] of
+        (c : _) -> Just c
+        [] -> case completable of
+            (c : _) -> Just c
+            [] -> Nothing
+  where
+    completable = [c | c <- calls, dcvToken c /= Nothing]
+
+{- | The token after the selected one, wrapping around, among the calls that
+can be completed. 'Nothing' when there are none. With no (or a vanished)
+selection the first call is the current one, so the next is the second.
+-}
+nextPendingToken :: Maybe ContinuationToken -> [DeferredCallView] -> Maybe ContinuationToken
+nextPendingToken selected calls =
+    case tokens of
+        [] -> Nothing
+        _ ->
+            let current = dcvToken =<< selectedPendingCall selected calls
+                idx = maybe 0 id (current >>= \t -> lookup t (zip tokens [0 ..]))
+             in Just (tokens !! ((idx + 1) `mod` length tokens))
+  where
+    tokens = [t | c <- calls, Just t <- [dcvToken c]]
+
+{- | The text a failed call reports to the model: what a failing tool's
+error text reads ('Error: ...'), carrying the user's reason.
+-}
+failedCallText :: Text -> Text
+failedCallText reason
+    | Text.null (Text.strip reason) = "Error: the user declined this call"
+    | otherwise = "Error: " <> Text.strip reason
 
 -------------------------------------------------------------------------------
 -- Utility Functions

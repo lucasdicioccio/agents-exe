@@ -256,23 +256,33 @@ token, and its arguments:
 
 ```
 ┌ Pending (1) ──────────────────────────────────────┐
-│ Ctrl+Y: answer oldest pending call, then send      │
+│ Ctrl+O: select next | Ctrl+Y: answer selected, ... │
 │                                                     │
-│ - bash_command (token a1b2c3d4): {"cmd": "ls"}     │
+│ > bash_command (token a1b2c3d4): {"cmd": "ls"}     │
+│ - search (token 5e6f7a8b): {"q": "todo"}           │
 └─────────────────────────────────────────────────────┘
 ```
 
+`>` marks the selected call, the first one with a continuation token until
+you move it: `Ctrl+O` (`select-pending`) selects the next one, wrapping
+around. `Ctrl+Y` and `Ctrl+W` act on the selected call.
+
 `Ctrl+Y` (`answer-pending`) puts the message editor into "answer mode" for
-the oldest pending call with a continuation token; type the result and
+the selected pending call; type the result and
 send it (`Ctrl+Enter`/the usual send trigger) the way you would any other
 message. That calls `completeCall` with `autoResume = true`, the same
 mechanism the server's own `GET /v1/sessions/:id/pending` workers use, so
 the run resumes on its own — a fresh `run.started`/`run.stopped` pair
 follows. The panel clears once the run starts again.
 
-There is no separate "fail this call" binding: `UserToolResponse` has no
-dedicated error form, so a call is always answered with a text (or JSON)
-result; report a failure as an ordinary text result that says so.
+`Ctrl+W` (`fail-pending`) fails the selected call: it completes it (the same
+`completeCall`, `autoResume = true`) with the text `Error: <reason>`, where the
+reason is what is in the message editor (which is cleared), or "the user
+declined this call" when it is empty. `UserToolResponse` has no dedicated
+error form, so a failed call reaches the model as an ordinary text result that
+reads as an error, the way a failing tool's own error does. Selecting, answering
+and failing work the same over an embedded runner and with `--attach`, since
+they only use `completeCall`.
 
 ## Subcall Conversation Visibility
 
