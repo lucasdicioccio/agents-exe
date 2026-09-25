@@ -72,9 +72,6 @@ import qualified OS.ResourcesTests
 import qualified OS.ConcurrentTests
 -- Import OS Integration tests
 import qualified OS.IntegrationTests
--- Import OS Persistence tests
--- Import OS Persistence tests
-import qualified OS.PersistenceTests
 -- Import Activation Session tests
 import qualified ActivationSessionTests
 -- Import DeveloperToolbox tests
@@ -121,7 +118,6 @@ tests =
         , OS.ResourcesTests.resourcesTests
         , OS.ConcurrentTests.concurrentTests
         , OS.IntegrationTests.integrationTests
-        , OS.PersistenceTests.persistenceTests
         , OpenAPIToolboxTests.tests
         , PostgRESTParseTest.tests
         , SessionEditTests.tests

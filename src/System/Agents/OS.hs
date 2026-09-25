@@ -23,9 +23,6 @@ module System.Agents.OS (
     -- * Concurrent Access
     module System.Agents.OS.Concurrent,
 
-    -- * Persistence
-    module System.Agents.OS.Persistence,
-
     -- * Conversation Tracking
     module System.Agents.OS.Conversation,
 
@@ -39,6 +36,5 @@ import System.Agents.OS.Concurrent
 import System.Agents.OS.Conversation
 import System.Agents.OS.Core
 import System.Agents.OS.Events
-import System.Agents.OS.Persistence
 import System.Agents.OS.Resources hiding (ResourceScope)
 

@@ -38,11 +38,6 @@ The framework now uses an Entity-Component-System (ECS) pattern at its core:
 | `System.Agents.OS.Conversation` | Conversation and turn management |
 | `System.Agents.OS.Conversation.Types` | Turn, Message, Conversation components |
 | `System.Agents.OS.Conversation.Lineage` | Call chain tracking |
-| `System.Agents.OS.Persistence` | Component persistence layer |
-| `System.Agents.OS.Persistence.Types` | Backend abstractions |
-| `System.Agents.OS.Persistence.Sqlite` | SQLite persistence backend |
-| `System.Agents.OS.Persistence.File` | File-based persistence |
-| `System.Agents.OS.Persistence.Schema` | Database schema |
 | `System.Agents.OS.Compat` | Compatibility layer exports |
 | `System.Agents.OS.Compat.Runtime` | Runtime-to-OS bridge |
 | `System.Agents.OS.Interfaces` | Interface layer |
@@ -118,7 +113,6 @@ PhaseOldOnly (REMOVED) ──> PhaseDual ──> PhaseNewOnly
 | `test/OS/ConcurrentTests.hs` | Concurrent access patterns |
 | `test/OS/ResourcesTests.hs` | Resource management |
 | `test/OS/ConversationTests.hs` | Conversation/lineage |
-| `test/OS/PersistenceTests.hs` | Persistence layer |
 | `test/OS/CompatTests.hs` | Compatibility layer |
 | `test/OS/InterfaceTests.hs` | Interface layer |
 

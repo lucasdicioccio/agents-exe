@@ -477,10 +477,6 @@ OS Layer
   ├── OS.Conversation
   │     ├── OS.Conversation.Types
   │     └── OS.Conversation.Lineage
-  ├── OS.Persistence
-  │     ├── OS.Persistence.Types
-  │     ├── OS.Persistence.Sqlite
-  │     └── OS.Persistence.File
   └── OS.Agents
 ```
 
