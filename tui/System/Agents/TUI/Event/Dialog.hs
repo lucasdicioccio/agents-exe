@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -30,12 +31,14 @@ import Brick.BChan (writeBChan)
 import Brick.Widgets.Edit (editContentsL, getEditContents, handleEditorEvent)
 import Brick.Widgets.FileBrowser (
     fileBrowserCursor,
-    fileInfoFilePath,
+    fileBrowserIsSearching,
     handleFileBrowserEvent,
     newFileBrowser,
     selectNonDirectories,
  )
+import Control.Exception (IOException, try)
 import Control.Lens (to, use, (%=), (.=), _Just)
+import Control.Monad (forM_)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Base64 as Base64
@@ -51,6 +54,7 @@ import System.FilePath (takeExtension, takeFileName)
 import qualified Brick.Widgets.List as List
 import System.Agents.CLI.PromptScript (parseMediaReference, resolveMediaType)
 import System.Agents.Media.Types (MediaAttachment (..))
+import System.Agents.TUI.FileBrowserNav (EnterAction (..), classifyEnter, navigateUp)
 import System.Agents.TUI.Types (
     AppEvent (..),
     AttachmentDialogState (..),
@@ -143,17 +147,38 @@ handleFileBrowserDialogEvent :: BrickEvent N AppEvent -> EventM N TuiState ()
 handleFileBrowserDialogEvent ev =
     case ev of
         VtyEvent (Vty.EvKey Vty.KEsc []) -> do
-            closeFileBrowserDialog
-            showStatus StatusInfo "Attachment cancelled"
-        VtyEvent (Vty.EvKey Vty.KEnter []) -> handleFileBrowserSelection
-        VtyEvent vtyEv -> do
-            mFb <- use (tuiUI . fileBrowser)
-            case mFb of
-                Nothing -> pure ()
-                Just _ -> zoom (tuiUI . fileBrowser . _Just) $ handleFileBrowserEvent vtyEv
+            -- Esc first leaves a search in progress, then cancels the dialog.
+            searching <- maybe False fileBrowserIsSearching <$> use (tuiUI . fileBrowser)
+            if searching
+                then forwardToBrowser (Vty.EvKey Vty.KEsc [])
+                else do
+                    closeFileBrowserDialog
+                    showStatus StatusInfo "Attachment cancelled"
+        VtyEvent (Vty.EvKey Vty.KEnter []) -> do
+            searching <- maybe False fileBrowserIsSearching <$> use (tuiUI . fileBrowser)
+            if searching then forwardToBrowser (Vty.EvKey Vty.KEnter []) else handleFileBrowserSelection
+        VtyEvent (Vty.EvKey Vty.KBS []) -> do
+            searching <- maybe False fileBrowserIsSearching <$> use (tuiUI . fileBrowser)
+            if searching
+                then forwardToBrowser (Vty.EvKey Vty.KBS [])
+                else do
+                    mFb <- use (tuiUI . fileBrowser)
+                    forM_ mFb $ \fb -> do
+                        fb' <- liftIO $ navigateUp fb
+                        tuiUI . fileBrowser .= Just fb'
+        VtyEvent vtyEv -> forwardToBrowser vtyEv
         _ -> pure ()
+  where
+    forwardToBrowser vtyEv = do
+        mFb <- use (tuiUI . fileBrowser)
+        case mFb of
+            Nothing -> pure ()
+            Just _ -> zoom (tuiUI . fileBrowser . _Just) $ handleFileBrowserEvent vtyEv
 
--- | Handle file selection from FileBrowser.
+{- | Enter in the file browser: open the directory under the cursor, or
+attach the file under it (see 'classifyEnter'). An empty or unreadable
+directory keeps the dialog open, so Backspace can leave it.
+-}
 handleFileBrowserSelection :: EventM N TuiState ()
 handleFileBrowserSelection = do
     mFb <- use (tuiUI . fileBrowser)
@@ -161,29 +186,32 @@ handleFileBrowserSelection = do
         Nothing -> do
             closeFileBrowserDialog
             showStatus StatusError "File browser not initialized"
-        Just fb -> do
-            case fileBrowserCursor fb of
-                Nothing -> do
-                    closeFileBrowserDialog
-                    showStatus StatusWarning "No file selected"
-                Just fileInfo -> do
-                    let filePath = fileInfoFilePath fileInfo
-                    result <- liftIO $ loadFileAsAttachment filePath
-                    case result of
-                        Left err -> do
-                            closeFileBrowserDialog
-                            showStatus StatusError $ Text.pack err
-                        Right attachment -> do
-                            mConv <- getFocusedConversation
-                            case mConv of
-                                Nothing -> do
-                                    closeFileBrowserDialog
-                                    showStatus StatusError "No conversation selected"
-                                Just conv -> do
-                                    let convId = conversationId conv
-                                    tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
-                                    closeFileBrowserDialog
-                                    showStatus StatusInfo $ "Attached: " <> fromMaybe "unnamed" attachment.mediaFilename
+        Just fb ->
+            case classifyEnter (fileBrowserCursor fb) of
+                EnterDirectory -> forwardEnter
+                NothingUnderCursor -> showStatus StatusWarning "Nothing to open here (Backspace goes to the parent directory)"
+                AttachFile filePath -> attachFile filePath
+  where
+    forwardEnter =
+        zoom (tuiUI . fileBrowser . _Just) $ handleFileBrowserEvent (Vty.EvKey Vty.KEnter [])
+    attachFile filePath = do
+        result <- liftIO $ try (loadFileAsAttachment filePath)
+        case result of
+            Left (err :: IOException) -> showStatus StatusError $ "Cannot read " <> Text.pack filePath <> ": " <> Text.pack (show err)
+            Right (Left err) -> do
+                closeFileBrowserDialog
+                showStatus StatusError $ Text.pack err
+            Right (Right attachment) -> do
+                mConv <- getFocusedConversation
+                case mConv of
+                    Nothing -> do
+                        closeFileBrowserDialog
+                        showStatus StatusError "No conversation selected"
+                    Just conv -> do
+                        let convId = conversationId conv
+                        tuiUI . attachedFiles %= Map.insertWith (\new old -> old ++ new) convId [attachment]
+                        closeFileBrowserDialog
+                        showStatus StatusInfo $ "Attached: " <> fromMaybe "unnamed" attachment.mediaFilename
 
 -- | Close file browser dialog and cleanup.
 closeFileBrowserDialog :: EventM N TuiState ()

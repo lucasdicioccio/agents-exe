@@ -454,6 +454,20 @@ The TUI supports attaching files to messages for multi-modal LLM interactions.
 - Type or paste the absolute path to the file
 - Press `Enter` to attach, `Esc` to cancel
 
+**Via the file browser:** the dialog `Ctrl+F` opens lists a directory, with
+its current path under the listing.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Move the cursor |
+| `Enter` | Open the directory under the cursor (`..` goes up), or attach the file under it |
+| `Backspace` | Go to the parent directory |
+| `/` | Filter the listing by name; `Enter` keeps the filter, `Esc` stops searching |
+| `Esc` | Cancel (or stop a search in progress) |
+
+A directory that cannot be read (for instance for lack of permission) is
+reported under the listing; `Backspace` leaves it.
+
 **Supported file path formats:**
 ```
 /path/to/image.png                    # Auto-detect MIME type
