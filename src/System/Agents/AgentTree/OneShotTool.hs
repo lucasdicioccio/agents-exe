@@ -25,6 +25,7 @@ import Control.Concurrent.STM (atomically, newTVarIO, readTVarIO)
 import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
+import Data.Dynamic (toDyn)
 import Data.Foldable (traverse_)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as CByteString
@@ -319,32 +320,36 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
             depth = length parentCallStack
         -- Phase 5 (@todos/os-as-standalone-server.md@ G10): when the
         -- calling agent was built by the runner ('ctx.ctxRunSubagent' is
-        -- installed) and this call carries no narrowing at all -- neither
-        -- its own ('ownScoped'), nor inherited ('inheritedHere'), nor the
-        -- reference's own static 'with' ('mWith') -- run the child as a
-        -- real, cancellable, observable session instead of in-tool.
-        -- Reproducing a narrowed node through a fresh session build is not
-        -- yet supported, so any of those falls back to the unconditional
-        -- path below, same as when the hook is absent (@agents-exe run@,
-        -- the durable @session@ CLI, tests that build agents directly).
-        case (Ctx.ctxRunSubagent ctx, allScoped, Map.null callWith, mWith) of
-            (Just hook, [], True, Nothing) -> do
-                resolved <- hook parentSessionId (Base.slug agent) query
+        -- installed), run the child as a real, cancellable, observable
+        -- session instead of in-tool. Whatever the call narrows -- its own
+        -- bindings, inherited ones, 'with' -- travels to the runner as a
+        -- 'SubagentNarrowing', which builds the child's agent the way
+        -- 'runSubAgentInTool' would. Without the hook (@agents-exe run@,
+        -- the durable @session@ CLI, tests that build agents directly) the
+        -- call runs in-tool below.
+        let refWith = fromMaybe Map.empty mWith
+            narrowing =
+                SessionBase.SubagentNarrowing
+                    { SessionBase.snNode = Just (toDyn node)
+                    , SessionBase.snHere = hereBindings
+                    , SessionBase.snRest = restBindings
+                    , SessionBase.snWith = resolveWith ctx.ctxParams (Map.union refWith (Map.difference callWith refWith))
+                    }
+        case Ctx.ctxRunSubagent ctx of
+            Just hook -> do
+                resolved <- hook parentSessionId (Base.slug agent) narrowing query
                 case resolved of
-                    -- The hook could not resolve this helper as a session
-                    -- (e.g. it is not declared as this node's own child in
-                    -- the tree the runner can see, only wired directly into
-                    -- this tool's closure, as some tests do): fall back to
-                    -- the in-tool path below, which already has the exact
-                    -- 'node' in hand and needs no resolution at all. Once a
-                    -- child session has actually started (the 'Right'
-                    -- case), a failure is real and reported, never retried
-                    -- in-tool (that would run the call twice).
+                    -- The hook could not resolve this helper as a session:
+                    -- fall back to the in-tool path below, which already has
+                    -- the exact 'node' in hand. Once a child session has
+                    -- actually started (the 'Right' case), a failure is real
+                    -- and reported, never retried in-tool (that would run
+                    -- the call twice).
                     Left _resolutionErr ->
                         runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
                     Right (childSessionId, waiter) ->
                         runSubAgentViaRunner (Ctx.ctxEmit ctx) parentSessionId depth childSessionId waiter
-            _ -> runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
+            Nothing -> runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
 
     runSubAgentViaRunner :: Maybe (OSEmission -> IO ()) -> SessionBase.SessionId -> Int -> SessionBase.SessionId -> IO (Either Text Text) -> IO CByteString.ByteString
     runSubAgentViaRunner mEmit parentSessionId depth childSessionId waiter = do
