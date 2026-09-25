@@ -1,0 +1,8 @@
+Usage: agents-exe check [--tools MODE]
+
+  Validate agent configurations and optionally dump tool schemas
+
+Available options:
+  --tools MODE             Tool display mode: none, list, agents-exe, openai
+                           (default: none) (default: none)
+  -h,--help                Show this help text

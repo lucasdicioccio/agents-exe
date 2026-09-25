@@ -1,0 +1,26 @@
+// The standalone server: who talks to the runner.
+digraph server {
+  rankdir=LR;
+  bgcolor="transparent";
+  node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#e3f2fd", color="#1565c0"];
+  edge [fontname="Helvetica", fontsize=10, color="#555555"];
+  subgraph cluster_clients { label="clients"; style="rounded"; color="#1565c0";
+    web [label="web chat page"];
+    app [label="your backend / HTTP clients"];
+    tuia [label="tui --attach"];
+    mcpc [label="MCP clients"];
+  }
+  subgraph cluster_host { label="agents-server process"; style="rounded"; color="#2e7d32";
+    api [label="HTTP API\n/v1/sessions, events (SSE)", fillcolor="#e8f5e9", color="#2e7d32"];
+    runner [label="SessionRunner\nlive sessions, runs, mail", fillcolor="#fff3e0", color="#ef6c00"];
+    tree [label="agent tree\n(agent files, stored agents)", fillcolor="#f3e5f5", color="#6a1b9a"];
+  }
+  db [label="SQLite / Postgres\nsessions, mail", shape=cylinder, fillcolor="#eeeeee", color="#555555"];
+  llm [label="LLM endpoints,\ntools, MCP servers", fillcolor="#eeeeee", color="#555555"];
+  web -> api; app -> api; tuia -> api; mcpc -> api [label="/mcp"];
+  api -> runner;
+  runner -> tree;
+  runner -> db [dir=both];
+  tree -> llm;
+  app -> api [style=dashed, label="complete deferred calls", constraint=false];
+}

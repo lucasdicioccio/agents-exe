@@ -1,0 +1,35 @@
+Usage: agents-exe serve [--db FILE|URL] [--bind HOST] [--port PORT] 
+                        [--live-session-ttl SECONDS] [--shutdown-grace SECONDS] 
+                        [--auth-tokens FILE] [--stream-tokens] 
+                        [--admin-owners OWNER,…] [--no-ui] 
+                        [--cors-origin ORIGIN] [--socket PATH]
+
+  Run agents over HTTP (like agents-server), loading agents-exe.cfg.json like
+  the TUI does
+
+Available options:
+  --db FILE|URL            SQLite file, or postgresql:// URL, for sessions
+                           (default: "./agents-server.db")
+  --bind HOST              Address to listen on (default: "127.0.0.1")
+  --port PORT              Port to listen on (default: 8080)
+  --live-session-ttl SECONDS
+                           Idle time before a session's in-memory state is
+                           dropped (default: 900)
+  --shutdown-grace SECONDS Time open requests get to finish on shutdown
+                           (default: 10)
+  --auth-tokens FILE       Bearer tokens and their owners; callers then only see
+                           their own sessions
+  --stream-tokens          Stream LLM answers, sending text.delta events as the
+                           text arrives
+  --admin-owners OWNER,…   Owners allowed to store and delete agents over the
+                           API (needs --auth-tokens)
+  --no-ui                  Do not serve the chat page at /
+  --cors-origin ORIGIN     Allow this origin to call the server cross-origin
+                           (e.g. http://localhost:5173); repeat for several, or
+                           pass "*" for any (needs no --auth-tokens)
+  --socket PATH            Also listen on this Unix domain socket (in addition
+                           to --bind/--port); a stale file there is removed at
+                           start, the socket is created 0600. The socket is the
+                           local trust boundary: requests over it carry no
+                           Origin and need no bearer token beyond --auth-tokens
+  -h,--help                Show this help text

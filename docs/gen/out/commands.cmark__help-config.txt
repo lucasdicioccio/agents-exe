@@ -1,0 +1,12 @@
+Usage: agents-exe config COMMAND [-f|--force]
+
+  Configure agents-exe (git-config style)
+
+Available options:
+  -f,--force               Overwrite existing files
+  -h,--help                Show this help text
+
+Available commands:
+  local                    Manage local agents-exe.cfg.json
+  keymap                   Manage keymap configuration
+  api-key                  Manage API keys

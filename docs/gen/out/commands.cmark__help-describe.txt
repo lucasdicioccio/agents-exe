@@ -1,0 +1,9 @@
+Usage: agents-exe describe [--self-describe-slug NAME] 
+                           [--self-describe-description DESC]
+
+Available options:
+  --self-describe-slug NAME
+                           The name/slug field for self-describe output
+  --self-describe-description DESC
+                           The description/announce for self-describe output
+  -h,--help                Show this help text

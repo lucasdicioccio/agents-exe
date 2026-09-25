@@ -43,6 +43,10 @@ walks you through writing an `agent.json` and its tools directory. The result lo
 
 An agent is a repeatable, parameterized LLM: an endpoint, a model, a system prompt, a directory of command-line tools, MCP servers, and helper agents it can prompt. Tools and helpers are both exposed to the model as functions; when the model asks for several at once, agents-exe runs them concurrently. [Tools](/docs-tools.html ) explains how an executable describes itself, and [the command reference](/commands.html ) lists what `init` and the other commands accept.
 
+![An agent's tree: the model calls the root agent's tools, which are helper agents, executable tools, MCP servers, OpenAPI operations and builtin toolboxes](/gen/images/agent-tree.dot.png )
+
+Whatever the tool's origin, the model sees a function to call; a helper agent's answer comes back as that function's result, and helpers can have tools and helpers of their own.
+
 ## Store an API key
 
 Agents authenticate against their LLM endpoint with a key looked up by id in `~/.config/agents-exe/secret-keys` (or the file given with `--api-keys`):

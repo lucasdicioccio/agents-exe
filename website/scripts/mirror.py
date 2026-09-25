@@ -78,6 +78,8 @@ def main():
     p.add_argument("--section-from", default="")
     p.add_argument("--section-to", default="")
     p.add_argument("--intro", default="")
+    p.add_argument("--figure", action="append", default=[],
+                   help="NAME.dot|caption: a diagram from website/src, shown under the page's title")
     a = p.parse_args()
 
     text = open(a.source).read()
@@ -88,6 +90,17 @@ def main():
         base_dir = os.path.dirname(a.source)
     text = tables(neutralise_numeric_hashtags(rewrite_links(text, base_dir)))
     summary_text = neutralise_numeric_hashtags(rewrite_links(a.summary, base_dir))
+    if a.figure:
+        figures = []
+        for spec in a.figure:
+            name, _, caption = spec.partition("|")
+            figures.append(f"![{caption}](/gen/images/{name}.png)")
+        lines = text.split("\n")
+        at = next((i for i, l in enumerate(lines) if l.startswith("# ")), -1) + 1
+        text = "\n".join(lines[:at] + [""] + figures + [""] + lines[at:])
+    image_link = ""
+    if a.figure:
+        image_link = ',"imageLink": "/gen/images/%s.png"' % a.figure[0].partition("|")[0]
     keywords = [k.strip() for k in a.keywords.split(",") if k.strip()]
     kw = ", ".join('"%s"' % k.replace('"', '\\"') for k in keywords)
     title = a.title.replace('"', '\\"')
@@ -100,7 +113,7 @@ def main():
 =base:preamble.json
 {{"author": "Lucas DiCioccio"
 ,"date": "{a.date}"
-,"title": "{title}"
+,"title": "{title}"{image_link}
 }}
 
 =base:topic.json

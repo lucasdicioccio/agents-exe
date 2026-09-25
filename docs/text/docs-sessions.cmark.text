@@ -2,6 +2,8 @@ _Generated from [`documentation/sessions.md`](https://github.com/lucasdicioccio/
 
 # Session Management
 
+![The statuses of a session and what moves it from one to the next.](/gen/images/session-lifecycle.dot.png )
+
 Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified read view.
 
 ## Overview

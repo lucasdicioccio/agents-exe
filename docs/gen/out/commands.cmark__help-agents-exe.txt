@@ -1,0 +1,63 @@
+
+Usage: agents-exe [--api-keys AGENTS-KEY] [--log-file LOGFILE] 
+                  [--log-http LOGHTTP] [--log-json-file JSONFILE] 
+                  [--agent-file AGENTFILE] [-a|--agent SLUG] COMMAND 
+                  [--set NAME=VALUE] [--pin NAME=VALUE] [--set-json NAME=JSON] 
+                  [--pin-json NAME=JSON] [--params-file FILE]
+
+  Your favorite agent framework.
+
+Available options:
+  --api-keys AGENTS-KEY    path to json-file containing API keys
+                           (default: "/home/lucas/.config/agents-exe/secret-keys")
+  --log-file LOGFILE       raw log file (default: "agents-logfile")
+  --log-http LOGHTTP       http log sink
+  --log-json-file JSONFILE local JSON file log sink
+  --agent-file AGENTFILE   root agent(s) description files defaults to
+                           'agent.json' multi-support vary from command to
+                           command
+  -a,--agent SLUG          Select agent by slug instead of file path
+  --set NAME=VALUE         Set a parameter value; repeatable
+  --pin NAME=VALUE         Set a parameter value that cannot be overridden;
+                           repeatable
+  --set-json NAME=JSON     Set a parameter to any JSON value; repeatable
+  --pin-json NAME=JSON     Set a JSON parameter value that cannot be overridden;
+                           repeatable
+  --params-file FILE       JSON file of {"name": value, ...} parameter values;
+                           repeatable. Flags win over a file's values.
+  -h,--help                Show this help text
+
+Available commands:
+  check                    Validate agent configurations and optionally dump
+                           tool schemas
+  check-tool-call          Validate a tool call payload against a tool schema
+                           (reads JSON from stdin)
+  config                   Configure agents-exe (git-config style)
+  list-tool-calls          List all tool calls from a session file
+  replay-tool-call         Replay a tool call from a session file, validating
+                           and optionally executing
+  tui                      Interactive terminal UI, over an embedded runner or,
+                           with --attach, a running server
+  run                      
+  echo-prompt              
+  describe                 
+  describe-tool            Validate and describe a tool script without agent
+                           context
+  init                     
+  mcp-server               
+  session-print            Print a session file in markdown format
+  session-edit             Edit a session file (reads JSON from STDIN, writes
+                           JSON to STDOUT)
+  session-index            Manage the session search index
+  session-search           Search session files with fuzzy matching
+  paths                    Show important configuration paths
+  cowsay                   Display a message with the agents-exe mascot
+  spec                     Display specification documentation (e.g.,
+                           bash-tools)
+  new                      Create new agent or tool scaffolding
+  session                  Operate durable sessions: start, step, pause, resume,
+                           pending, complete, run-isolated
+  tool-call                Call a tool from the first loaded agent with JSON
+                           payload from stdin
+  serve                    Run agents over HTTP (like agents-server), loading
+                           agents-exe.cfg.json like the TUI does

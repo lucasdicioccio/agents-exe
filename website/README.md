@@ -19,6 +19,24 @@ Kitchen-Sink assembles them into a static site.
   site is produced into the repository's `docs/`, which GitHub Pages serves
   from `main` (`scripts/publish.sh`).
 
+## Diagrams and generated listings
+
+Diagrams are [graphviz](https://graphviz.org/) `.dot` files in `src/`
+(`architecture-layers`, `agent-tree`, `session-lifecycle`, `async-tool-call`,
+`server-overview`, `module-docs-graph`). `kitchen-sink produce`/`serve` renders
+each to `/gen/images/<name>.dot.png`, which the pages reference. The hand-written
+pages embed theirs directly; `scripts/sync-repo-docs.sh` adds one under the
+title of the mirrored pages it belongs to (`figure_of` there). The PNGs are
+produce output; the `.dot` files are the source.
+
+The command reference links the exact `--help` text of each command, produced
+by `=generator:cmd.json` sections that run the binary at produce time and
+publish the output under `/gen/out/commands.cmark__help-<command>.txt`, so it
+cannot drift from the code.
+
+**Producing the site therefore requires `graphviz` (`dot`) and an
+`agents-exe` executable on the `PATH`**, on top of `kitchen-sink`.
+
 ## Regenerate and preview
 
 ```sh

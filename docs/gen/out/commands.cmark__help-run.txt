@@ -1,0 +1,34 @@
+Usage: agents-exe run [--session-file SESSIONFILE] [--alias NAME] 
+                      [(-p|--prompt PROMPT) | (-f|--file FILE) | --shell SHELL |
+                        (-s|--sep4 SEPARATOR) | (-S|--sep40 SEPARATOR) | 
+                        --session-xs SESSIONFILE | --session-s SESSIONFILE | 
+                        --session-m SESSIONFILE | --session-l SESSIONFILE | 
+                        --session-xl SESSIONFILE] [-m|--media MEDIA] 
+                      [--thinking TARGET]
+
+Available options:
+  --session-file SESSIONFILE
+                           extra session-file to resume/store
+  --alias NAME             Use a predefined prompt alias (e.g., translate,
+                           summarize, code-review, explain)
+  -p,--prompt PROMPT       prompt text paragraph
+  -f,--file FILE           prompt text file
+  --shell SHELL            prompt the stdout of a shell command
+  -s,--sep4 SEPARATOR      a short separator
+  -S,--sep40 SEPARATOR     a long separator
+  --session-xs SESSIONFILE inject session file content at minimal verbosity
+                           (queries/responses only, skips tool-only turns)
+  --session-s SESSIONFILE  inject session file content at low verbosity
+                           (+thinking, +tool names)
+  --session-m SESSIONFILE  inject session file content at medium verbosity
+                           (+statistics)
+  --session-l SESSIONFILE  inject session file content at high verbosity (+tool
+                           call results)
+  --session-xl SESSIONFILE inject session file content at maximum verbosity
+                           (complete)
+  -m,--media MEDIA         Attach a media file. Format:
+                           [mime/type;]/path/to/file (can be specified multiple
+                           times)
+  --thinking TARGET        Where to output thinking content: none, stdout, or
+                           stderr (default: none) (default: none)
+  -h,--help                Show this help text

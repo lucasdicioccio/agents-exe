@@ -2,6 +2,8 @@ _Generated from [`documentation/agents-server.md`](https://github.com/lucasdicio
 
 # agents-server: agents over HTTP
 
+![The standalone server: clients reach one session runner through the HTTP API.](/gen/images/server-overview.dot.png )
+
 `agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick sessions up again after a restart.
 
 It uses the same agent files as `agents-exe`, and the same durable-session machinery as the `session` CLI commands (see [durable-workflows-howto.md](/docs-durable-workflows-howto.html )): an agent can pause on deferred tool calls, and the server resumes it when the results arrive.
@@ -267,7 +269,7 @@ A request whose `params` do not check out is refused before anything runs:
 <tr><td><code>422 unknown_params</code></td><td>A name the agent does not declare.</td></tr>
 <tr><td><code>403 forbidden_params</code></td><td>A <code>process</code>-scope parameter, or one pinned with <code>--pin</code>/<code>--pin-json</code> at server start: only the operator may set it.</td></tr>
 <tr><td><code>422 invalid_params</code></td><td>A <code>secret</code> parameter's value was not given as a string.</td></tr>
-<tr><td><code>422 params_required</code></td><td>A required parameter has no value once this request's <code>params</code> are applied — process value or default, session value, and message value combined.</td></tr>
+<tr><td><code>422 params_required</code></td><td>A required parameter has no value once this request's <code>params</code> are applied — process value or default, session value, and message value combined. On a message or resume to an existing session (whose values lapsed, e.g. after a restart) the status is <code>409</code> instead: supply them with <code>PUT /v1/sessions/:id/params</code> or in the request's <code>params</code>.</td></tr>
 </table>
 ```
 
@@ -404,7 +406,8 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 <tr><td><code>POST /v1/sessions/:id/pause</code></td><td></td><td><code>200</code> session metadata</td><td>404</td></tr>
 <tr><td><code>POST /v1/sessions/:id/mail</code></td><td><code>{body, priority?}</code></td><td><code>202</code> mail <code>Receipt</code>: <code>{id, seq, duplicate}</code></td><td>404, see [Mail](#mail)</td></tr>
 <tr><td><code>GET /v1/sessions/:id/mail?unread=</code></td><td></td><td><code>200 {mail: [Envelope]}</code></td><td>404</td></tr>
-<tr><td><code>POST /v1/sessions/:id/fork</code></td><td><code>{at_turn?, agent?}</code></td><td><code>201</code> new session, with a <code>Location</code> header</td><td>404 <code>unknown_session</code> / <code>unknown_turn</code> / <code>unknown_agent</code></td></tr>
+<tr><td><code>POST /v1/sessions/:id/fork</code></td><td><code>{at_turn?, agent?, params?}</code></td><td><code>201</code> new session, with a <code>Location</code> header</td><td>404 <code>unknown_session</code> / <code>unknown_turn</code> / <code>unknown_agent</code>, see [Parameters](#parameters)</td></tr>
+<tr><td><code>PUT /v1/sessions/:id/params</code></td><td><code>{params}</code></td><td><code>200</code> session</td><td>404, 409 <code>run_in_progress</code>, 422/403 as in [Parameters](#parameters); <code>message</code>-scope names are <code>422 invalid_params</code></td></tr>
 <tr><td><code>GET /v1/sessions/:id/pending</code></td><td></td><td><code>200 {calls}</code></td><td>404</td></tr>
 <tr><td><code>GET /v1/sessions/:id/events?after=</code></td><td></td><td><code>200 text/event-stream</code></td><td>404</td></tr>
 <tr><td><code>GET /v1/events?scope=&amp;after=</code></td><td></td><td><code>200 text/event-stream</code></td><td>403 <code>forbidden</code> (<code>scope=all</code> without authentication off or an admin owner)</td></tr>
@@ -419,7 +422,7 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 
 `wait=true` on `GET /v1/sessions/:id` first waits (up to `timeout` seconds, default 120, at most 600) for the session's active run to stop, then answers the session with `200`, or `202` if a run is still active once the time is up. Without `wait`, it answers at once, always `200`.
 
-`at_turn` on fork is a 0-based index into the session's `turns`, **newest first** (`turns[0]` is the most recent turn): the fork keeps that turn and every older one, dropping anything newer. Absent, the whole session is copied. `agent` rebinds the fork to another agent's slug (also how to "continue with another agent": fork with no `at_turn`, or `at_turn: 0`, and an `agent`). The fork gets a fresh `session_id`, `forkedFromSessionId` set to the source, the source's parent link and non-secret parameters, and `status` derived from the turns it kept -- never the source's own status, and it starts no run, so it never picks up a later change to the source.
+`at_turn` on fork is a 0-based index into the session's `turns`, **newest first** (`turns[0]` is the most recent turn): the fork keeps that turn and every older one, dropping anything newer. Absent, the whole session is copied. `agent` rebinds the fork to another agent's slug (also how to "continue with another agent": fork with no `at_turn`, or `at_turn: 0`, and an `agent`). `params` on a fork are overlaid on the source's persisted, non-secret session values and validated like any request's; secrets are never inherited and have to be given again. `PUT /v1/sessions/:id/params` sets session-scope values (a `null` clears one) without starting a run, e.g. to rotate a credential or re-supply secrets after a restart. The fork gets a fresh `session_id`, `forkedFromSessionId` set to the source, the source's parent link and non-secret parameters, and `status` derived from the turns it kept -- never the source's own status, and it starts no run, so it never picks up a later change to the source.
 
 Any endpoint that reads a body or a query parameter can answer `400 bad_request`; the table names it only where it is the usual outcome. Other errors: `401 unauthorized` when authentication is on (with a `WWW-Authenticate: Bearer` header), `403 forbidden_origin` when it is off (see [Authentication](#authentication )), `404 not_found` for an unknown path, `405 method_not_allowed`, `413 payload_too_large` for bodies over 32 MiB, and `500 internal_error`.
 

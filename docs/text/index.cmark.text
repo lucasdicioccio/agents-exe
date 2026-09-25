@@ -20,6 +20,12 @@ Tools are plain executables that describe themselves, MCP servers, or OpenAPI op
 
 The code is on GitHub at [`lucasdicioccio/agents-exe`](https://github.com/lucasdicioccio/agents-exe ). It is a Haskell cabal project: the `agents` library, the `agents-exe` and `agents-server` executables, and `agq`, a small query tool over stored sessions.
 
+## How it fits together
+
+![The layers of agents-exe: the CLI, TUI, MCP server and HTTP server on top of the session runner and agent tree, over sessions, tools and LLM endpoints](/gen/images/architecture-layers.dot.png )
+
+The interfaces are thin: the terminal UI and the HTTP server are both clients of one session runner, while the one-shot, MCP and inspection commands go straight to the agent tree. Everything below the tree (sessions, tools, LLM endpoints) is shared, so an agent behaves the same in each mode.
+
 ## Explore
 
 - [**Getting started**](/getting-started.html ): build it, write a first agent, store an API key, and run it in each mode.

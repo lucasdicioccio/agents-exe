@@ -7,6 +7,7 @@
 {"author": "Lucas DiCioccio"
 ,"date": "2026-09-25T12:00:00Z"
 ,"title": "Getting started with agents-exe"
+,"imageLink": "/gen/images/agent-tree.dot.png"
 }
 
 =base:topic.json
@@ -82,6 +83,12 @@ when the model asks for several at once, agents-exe runs them concurrently.
 [Tools](/docs-tools.html) explains how an executable describes itself, and
 [the command reference](/commands.html) lists what `init` and the other
 commands accept.
+
+![An agent's tree: the model calls the root agent's tools, which are helper agents, executable tools, MCP servers, OpenAPI operations and builtin toolboxes](/gen/images/agent-tree.dot.png)
+
+Whatever the tool's origin, the model sees a function to call; a helper
+agent's answer comes back as that function's result, and helpers can have
+tools and helpers of their own.
 
 ## Store an API key
 

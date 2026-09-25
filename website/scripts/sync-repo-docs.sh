@@ -15,7 +15,7 @@ cd "$(dirname "$0")/../.."  # repo root
 
 OUT=website/src
 # the output skeleton `kitchen-sink produce` writes into and does not create
-mkdir -p website/www/{audios,css,docs,gen,hashtags,images,js,json,raw,text,topics,videos}
+mkdir -p website/www/{audios,css,docs,gen/images,gen/out,hashtags,images,js,json,raw,text,topics,videos}
 MIRROR="python3 website/scripts/mirror.py"
 GITHUB="https://github.com/lucasdicioccio/agents-exe/blob/main"
 DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -35,9 +35,22 @@ status_of() {
 }
 
 # documentation/: the guides and references
+# Diagrams (website/src/*.dot, rendered by kitchen-sink with graphviz) shown
+# under the title of the page they explain, as "name.dot|caption".
+figure_of() {
+  case "$1" in
+    architecture) echo "architecture-layers.dot|The layers: interfaces on top, the session runner and OS model, the agent tree, and the foundation they share." ;;
+    sessions) echo "session-lifecycle.dot|The statuses of a session and what moves it from one to the next." ;;
+    async-tool-calls) echo "async-tool-call.dot|One tool call in asynchronous mode: a placeholder while it runs, a notice when it finishes." ;;
+    agents-server) echo "server-overview.dot|The standalone server: clients reach one session runner through the HTTP API." ;;
+    tools) echo "agent-tree.dot|What an agent can call: helper agents, executable tools, MCP servers and OpenAPI operations all reach the model as functions." ;;
+    *) echo "" ;;
+  esac
+}
 for src in documentation/*.md; do
   name="$(basename "$src" .md)"
-  $MIRROR --kind docs --source "$src" --title "$(title_of "$src")" --topic docs \
+  fig="$(figure_of "$name")"
+  $MIRROR --kind docs ${fig:+--figure "$fig"} --source "$src" --title "$(title_of "$src")" --topic docs \
     --keywords "guide, documentation" --summary "$(summary_of "$src")" \
     --github "$GITHUB/$src" --date "$DATE" > "$OUT/docs-$name.cmark"
 done
@@ -56,7 +69,21 @@ $MIRROR --kind readme-section --source README.md --title "Command reference" \
   --summary "The global options and every agents-exe command, as the README lists them." \
   --github "$GITHUB/README.md" --date "$DATE" \
   --section-from "## Command Reference" --section-to "## Using as a Tool" \
-  --intro "# Command reference" > "$OUT/commands.cmark"
+  --intro "# Command reference
+
+The exact help text of each command, as printed by the binary this site was
+produced with: [agents-exe --help](/gen/out/commands.cmark__help-agents-exe.txt), $(for c in check config init run tui serve mcp-server session describe new; do printf '[%s](/gen/out/commands.cmark__help-%s.txt), ' "$c" "$c"; done | sed 's/, $//')." > "$OUT/commands.cmark"
+
+# The command reference's help texts are produced by the binary itself at
+# `kitchen-sink produce` time (generator sections, published under
+# /gen/out/commands.cmark__<target>), so they cannot drift from the code.
+# Needs agents-exe on the PATH. The first line the binary prints ("hi") is dropped.
+{
+  printf '\n=generator:cmd.json\n{"cmd":"sh"\n,"args":["-c","agents-exe --help 2>&1 | sed 1d"]\n,"target":"help-agents-exe.txt"\n}\n'
+  for c in check config init run tui serve mcp-server session describe new; do
+    printf '\n=generator:cmd.json\n{"cmd":"sh"\n,"args":["-c","agents-exe %s --help 2>&1"]\n,"target":"help-%s.txt"\n}\n' "$c" "$c"
+  done
+} >> "$OUT/commands.cmark"
 
 # the specs index: title, status, link, one entry per spec
 {

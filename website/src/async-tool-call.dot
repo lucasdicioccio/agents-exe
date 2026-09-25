@@ -1,0 +1,19 @@
+// One tool call in asynchronous mode.
+digraph asynccall {
+  rankdir=LR;
+  bgcolor="transparent";
+  node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#e3f2fd", color="#1565c0"];
+  edge [fontname="Helvetica", fontsize=10, color="#555555"];
+  llm [label="LLM emits\ntool call", shape=ellipse, fillcolor="#fff3e0", color="#ef6c00"];
+  run [label="call runs\nin the background", fillcolor="#e8f5e9", color="#2e7d32"];
+  fast [label="finishes before\nthe next completion", fillcolor="#eeeeee", color="#555555"];
+  slow [label="still running", fillcolor="#eeeeee", color="#555555"];
+  ph [label="placeholder tool message\n{status: running, tool_call_id}", fillcolor="#f3e5f5", color="#6a1b9a"];
+  res [label="tool result", fillcolor="#e3f2fd"];
+  note [label="notice in the next\nuser message", fillcolor="#e3f2fd"];
+  llm -> run;
+  run -> fast -> res [label="result"];
+  run -> slow -> ph;
+  ph -> note [label="call finishes", style=dashed];
+  llm -> run [label="get-tool-call-status\ncancel-tool-call", style=dotted, constraint=false];
+}

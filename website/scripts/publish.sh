@@ -6,6 +6,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."  # repo root
 ./website/scripts/sync-repo-docs.sh
-mkdir -p docs/{audios,css,docs,gen,hashtags,images,js,json,raw,text,topics,videos}
+mkdir -p docs/{audios,css,docs,gen/images,gen/out,hashtags,images,js,json,raw,text,topics,videos}
 kitchen-sink produce --srcDir website/src --outDir docs
 echo "produced $(ls docs/*.html | wc -l) pages into docs/"

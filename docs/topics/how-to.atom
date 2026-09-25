@@ -38,6 +38,10 @@ when the model asks for several at once, agents-exe runs them concurrently.
 &lt;a href="/agents-exe/docs-tools.html"&gt;Tools&lt;/a&gt; explains how an executable describes itself, and
 &lt;a href="/agents-exe/commands.html"&gt;the command reference&lt;/a&gt; lists what &lt;code&gt;init&lt;/code&gt; and the other
 commands accept.&lt;/p&gt;
+&lt;p&gt;&lt;img src="/agents-exe/gen/images/agent-tree.dot.png" alt="An agent’s tree: the model calls the root agent’s tools, which are helper agents, executable tools, MCP servers, OpenAPI operations and builtin toolboxes" /&gt;&lt;/p&gt;
+&lt;p&gt;Whatever the tool’s origin, the model sees a function to call; a helper
+agent’s answer comes back as that function’s result, and helpers can have
+tools and helpers of their own.&lt;/p&gt;
 &lt;h3 id="store-an-api-key"&gt;Store an API key&lt;/h3&gt;
 &lt;p&gt;Agents authenticate against their LLM endpoint with a key looked up by id in
 &lt;code&gt;~/.config/agents-exe/secret-keys&lt;/code&gt; (or the file given with &lt;code&gt;--api-keys&lt;/code&gt;):&lt;/p&gt;

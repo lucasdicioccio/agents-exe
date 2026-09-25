@@ -7,6 +7,7 @@
 {"author": "Lucas DiCioccio"
 ,"date": "2026-09-25T12:00:00Z"
 ,"title": "agents-exe"
+,"imageLink": "/gen/images/architecture-layers.dot.png"
 }
 
 =base:main-content.cmark
@@ -44,6 +45,15 @@ The code is on GitHub at
 It is a Haskell cabal project: the `agents` library, the `agents-exe` and
 `agents-server` executables, and `agq`, a small query tool over stored
 sessions.
+
+## How it fits together
+
+![The layers of agents-exe: the CLI, TUI, MCP server and HTTP server on top of the session runner and agent tree, over sessions, tools and LLM endpoints](/gen/images/architecture-layers.dot.png)
+
+The interfaces are thin: the terminal UI and the HTTP server are both clients
+of one session runner, while the one-shot, MCP and inspection commands go
+straight to the agent tree. Everything below the tree (sessions, tools, LLM
+endpoints) is shared, so an agent behaves the same in each mode.
 
 ## Explore
 

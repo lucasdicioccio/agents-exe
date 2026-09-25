@@ -1,0 +1,23 @@
+// Session statuses and what moves a session from one to the next.
+digraph lifecycle {
+  rankdir=LR;
+  bgcolor="transparent";
+  node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#e3f2fd", color="#1565c0"];
+  edge [fontname="Helvetica", fontsize=10, color="#555555"];
+  ready [fillcolor="#fff3e0", color="#ef6c00"];
+  running [fillcolor="#e8f5e9", color="#2e7d32"];
+  waiting_external [label="waiting_external\n(deferred calls)", fillcolor="#f3e5f5", color="#6a1b9a"];
+  idle [label="idle\n(LLM answered)"];
+  paused [fillcolor="#eeeeee", color="#555555"];
+  failed [fillcolor="#ffebee", color="#c62828"];
+  ready -> running [label="resume"];
+  running -> idle [label="final answer"];
+  running -> waiting_external [label="only deferred\ncalls remain"];
+  running -> paused [label="pause"];
+  running -> failed [label="run fails"];
+  waiting_external -> ready [label="results posted\nto the token"];
+  idle -> ready [label="new message"];
+  paused -> running [label="resume, or mail\n(resumeOnAnyMail)"];
+  failed -> running [label="resume retries"];
+  running -> running [label="background calls:\nrun waits, then\nfolds results in"];
+}

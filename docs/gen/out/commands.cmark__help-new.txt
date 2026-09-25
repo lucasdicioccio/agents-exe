@@ -1,0 +1,12 @@
+Usage: agents-exe new COMMAND [-f|--force]
+
+  Create new agent or tool scaffolding
+
+Available options:
+  -f,--force               Overwrite existing files
+  -h,--help                Show this help text
+
+Available commands:
+  agent                    Create a new agent configuration
+  tool                     Create a new tool script
+  models                   Manage the model catalog

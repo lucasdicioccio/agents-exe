@@ -2,6 +2,8 @@ _Generated from [`documentation/architecture.md`](https://github.com/lucasdicioc
 
 # Architecture
 
+![The layers: interfaces on top, the session runner and OS model, the agent tree, and the foundation they share.](/gen/images/architecture-layers.dot.png )
+
 This document describes the runtime architecture and core components of the Agents framework.
 
 ## Core Architecture
@@ -521,10 +523,6 @@ OS Layer
   ├── OS.Conversation
   │     ├── OS.Conversation.Types
   │     └── OS.Conversation.Lineage
-  ├── OS.Persistence
-  │     ├── OS.Persistence.Types
-  │     ├── OS.Persistence.Sqlite
-  │     └── OS.Persistence.File
   └── OS.Agents
 ```
 
