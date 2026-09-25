@@ -148,6 +148,18 @@ fromRunnerError e = ApiError (statusFor (runnerErrorCode e)) (runnerErrorCode e)
         "mailbox_full" -> status429
         _ -> status500
 
+{- | On an existing session a missing required parameter is a conflict with
+its state (its values lapsed, e.g. after a restart), not a malformed request:
+@409 params_required@, where creation keeps @422@.
+-}
+orThrowLapsed :: IO (Either RunnerError a) -> IO a
+orThrowLapsed action =
+    action >>= \case
+        Left e@(MissingRequiredParams _) ->
+            let ApiError _ code msg = fromRunnerError e in throwIO (ApiError status409 code msg)
+        Left e -> throwIO (fromRunnerError e)
+        Right a -> pure a
+
 orThrow :: IO (Either RunnerError a) -> IO a
 orThrow action = action >>= either (throwIO . fromRunnerError) pure
 
@@ -213,6 +225,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("GET", ["v1", "sessions", sid, "pending"]) -> withSession sid (pendingH env)
     ("POST", ["v1", "sessions", sid, "mail"]) -> withSession sid (mailPostH env req caller)
     ("GET", ["v1", "sessions", sid, "mail"]) -> withSession sid (mailListH env req)
+    ("PUT", ["v1", "sessions", sid, "params"]) -> withSession sid (paramsPutH env req)
     ("POST", ["v1", "sessions", sid, "fork"]) -> withSession sid (forkH env req caller)
     ("GET", ["v1", "sessions", sid, "events"]) -> withSession sid (eventsH env req)
     ("GET", ["v1", "events"]) -> allEventsH env req caller
@@ -235,7 +248,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
-        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "mail", "fork", "events"]
+        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "mail", "fork", "events", "params"]
         ["v1", "events"] -> True
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
@@ -519,7 +532,7 @@ messagesH env req sid = do
     w <- waitParams req
     body <- jsonBody req
     (msg, mode, params) <- parseBody body $ \o -> (,,) <$> messageFields o <*> runField o <*> paramsField o
-    _ <- orThrow $ postMessage env.envRunner sid msg mode params
+    _ <- orThrowLapsed $ postMessage env.envRunner sid msg mode params
     runResponse <$> afterRun env w sid
 
 resumeH :: ServerEnv -> Request -> SessionId -> IO Response
@@ -533,7 +546,7 @@ resumeH env req sid = do
                 Just m -> maybe (fail "mode must be \"step\" or \"until_blocked\"") pure (runModeFromText m)
         params <- paramsField o
         pure (mode, params)
-    _ <- orThrow $ resume env.envRunner sid mode params
+    _ <- orThrowLapsed $ resume env.envRunner sid mode params
     runResponse <$> afterRun env w sid
 
 cancelH :: ServerEnv -> SessionId -> IO Response
@@ -556,7 +569,9 @@ whether this mail was ever read.
 pauseH :: ServerEnv -> SessionId -> IO Response
 pauseH env sid = json status200 <$> orThrow (pauseSession env.envRunner sid)
 
-{- | Fork a session (G6): @{at_turn?, agent?}@. @at_turn@ is a 0-based
+{- | Fork a session (G6): @{at_turn?, agent?, params?}@. @params@ are new
+values overlaid on the source's non-secret ones (§5.2), validated like any
+request's. @at_turn@ is a 0-based
 turn index, newest first (as the TUI's own turn navigation counts them);
 absent, the whole session is copied. @agent@ rebinds the fork to another
 agent (also covers "continue with another agent": a fork with no
@@ -565,8 +580,8 @@ agent (also covers "continue with another agent": a fork with no
 forkH :: ServerEnv -> Request -> Caller -> SessionId -> IO Response
 forkH env req (Caller owner) sid = do
     body <- jsonBodyOrEmpty req
-    (atTurn, agentSlug) <- parseBody body $ \o -> (,) <$> o .:? "at_turn" <*> o .:? "agent"
-    meta <- orThrow $ forkSession env.envRunner owner sid atTurn agentSlug
+    (atTurn, agentSlug, params) <- parseBody body $ \o -> (,,) <$> o .:? "at_turn" <*> o .:? "agent" <*> paramsField o
+    meta <- orThrow $ forkSessionWithParams env.envRunner owner sid atTurn agentSlug params
     let newSid = meta.smSessionId
     view <- loadView env newSid
     pure $
@@ -574,6 +589,19 @@ forkH env req (Caller owner) sid = do
             status201
             [(hContentType, jsonType), ("Location", "/v1/sessions/" <> Text.encodeUtf8 (showId newSid))]
             (Aeson.encode view)
+
+{- | @PUT /v1/sessions/:id/params@: @{params}@ sets session-scope values
+without starting a run (§5.1), e.g. to rotate a credential or to re-supply
+secrets after a restart. Answers the session view.
+-}
+paramsPutH :: ServerEnv -> Request -> SessionId -> IO Response
+paramsPutH env req sid = do
+    body <- jsonBody req
+    params <- parseBody body $ \o -> do
+        _ <- o .: "params" :: Aeson.Parser Aeson.Value
+        paramsField o
+    _ <- orThrow $ setSessionParams env.envRunner sid params
+    json status200 <$> loadView env sid
 
 pendingH :: ServerEnv -> SessionId -> IO Response
 pendingH env sid = do

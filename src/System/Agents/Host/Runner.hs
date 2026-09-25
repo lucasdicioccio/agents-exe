@@ -52,6 +52,8 @@ module System.Agents.Host.Runner (
     sendControlMail,
     listMail,
     forkSession,
+    forkSessionWithParams,
+    setSessionParams,
     resume,
     completeCall,
     cancelRun,
@@ -1752,7 +1754,17 @@ paused or failed source forks into a session that is simply ready or idle
 per its copied turns).
 -}
 forkSession :: SessionRunner -> Maybe Text -> SessionId -> Maybe Int -> Maybe Text -> IO (Either RunnerError SessionMeta)
-forkSession runner owner sourceSid atTurn newAgentSlug =
+forkSession runner owner sourceSid atTurn newAgentSlug = forkSessionWithParams runner owner sourceSid atTurn newAgentSlug Map.empty
+
+{- | 'forkSession' with new parameter values (@todos/tool-partial-application.md@
+§5.2): @supplied@ is overlaid on the source's persisted non-secret values and
+validated like any request's @params@ (@unknown_params@, @forbidden_params@,
+@invalid_params@). Secrets are never inherited, so they have to be given
+again. Required parameters are not enforced here: a fork starts no run, and
+the next message or resume reports what is still missing.
+-}
+forkSessionWithParams :: SessionRunner -> Maybe Text -> SessionId -> Maybe Int -> Maybe Text -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+forkSessionWithParams runner owner sourceSid atTurn newAgentSlug supplied =
     runner.srHost.hostBackend.sbLoadMeta sourceSid >>= \case
         Nothing -> pure $ Left $ UnknownSession sourceSid
         Just (sourceSess, sourceMeta) -> case atTurn of
@@ -1796,11 +1808,51 @@ forkSession runner owner sourceSid atTurn newAgentSlug =
                     }
         withLive runner newSid $ \live -> do
             atomically $ writeTVar live.lsParams (Map.map (\v -> ParamValue v False) sourceMeta.smParams)
-            store runner live meta0 forked status Nothing >>= \case
-                Left conflict -> pure (Left (Conflict conflict))
-                Right meta -> do
-                    emit runner newSid (SessionCreated meta)
-                    pure (Right meta)
+            validated <-
+                if Map.null supplied
+                    then pure (Right ())
+                    else
+                        agentNodeFor runner meta0 >>= \case
+                            Left err -> pure (Left err)
+                            Right node -> fmap (const ()) <$> prepareParams runner live node supplied
+            case validated of
+                Left err -> pure (Left err)
+                Right () ->
+                    store runner live meta0 forked status Nothing >>= \case
+                        Left conflict -> pure (Left (Conflict conflict))
+                        Right meta -> do
+                            emit runner newSid (SessionCreated meta)
+                            pure (Right meta)
+
+{- | Set session-scope parameter values without starting a run
+(@PUT /v1/sessions/:id/params@). Validated like the @params@ of a message;
+message-scope names are refused as invalid since nothing here would use
+them. A @null@ value clears a session-scope value. The non-secret values
+are persisted with the session; secrets live in memory only. Refused while a
+run is active, like other edits that need an idle session.
+-}
+setSessionParams :: SessionRunner -> SessionId -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+setSessionParams runner sid supplied =
+    withLive runner sid $ \live ->
+        withIdle runner live $ \sess meta ->
+            agentNodeFor runner meta >>= \case
+                Left err -> pure (Left err)
+                Right node -> do
+                    let messageScoped =
+                            [ d.paramName
+                            | d <- nodeParameterDecls node
+                            , d.paramScope == ScopeMessage
+                            , Map.member d.paramName supplied
+                            ]
+                    if not (null messageScoped)
+                        then pure $ Left $ InvalidParams messageScoped
+                        else
+                            prepareParams runner live node supplied >>= \case
+                                Left err -> pure (Left err)
+                                Right _ ->
+                                    store runner live meta sess meta.smStatus meta.smStatusDetail >>= \case
+                                        Left conflict -> pure (Left (Conflict conflict))
+                                        Right meta' -> pure (Right meta')
 
 {- | Who a session belongs to: the owner of its root session, since
 sub-sessions record none. 'Nothing' when the session does not exist.

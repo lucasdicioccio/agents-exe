@@ -70,6 +70,7 @@ main =
             , testCase "MCP over HTTP: initialize, list tools, call an agent" mcpTest
             , testCase "MCP over HTTP: a call stopping on deferred calls reports the tokens" mcpDeferredTest
             , testCase "MCP over HTTP: Agents-Param- headers and _meta set session params" mcpParamsTest
+            , testCase "PUT params, 409 params_required on lapsed params, fork with params" sessionParamsTest
             , testCase "without authentication, non-local browser origins are refused" originTest
             , testCase "CORS: preflight, matching origins, refused origins, SSE" corsTest
             , testCase "CORS: --cors-origin '*' is refused at startup with --auth-tokens" corsWildcardStartupTest
@@ -497,6 +498,44 @@ mcpParamsTest =
         let sid2 = textField "session_id" (field "_meta" (field "result" viaMeta))
         (_, view2) <- call srv "GET" ("/v1/sessions/" <> sid2) Nothing
         field "tenant" (field "params" view2) @?= Aeson.String "from-meta"
+  where
+    withTenantParam = "{\"parameters\": [{\"name\": \"tenant\", \"scope\": \"session\", \"required\": true}]}"
+
+sessionParamsTest :: Assertion
+sessionParamsTest =
+    withServer withTenantParam mockCompletion $ \srv -> do
+        let obj = Aeson.object
+        (created, sess) <- call srv "POST" "/v1/sessions" (Just (obj ["agent" .= ("server-test" :: Text), "params" .= obj ["tenant" .= ("acme" :: Text)]]))
+        created @?= 201
+        let sid = textField "session_id" sess
+            path = "/v1/sessions/" <> sid
+        -- PUT rotates a value without starting a run
+        (put, rotated) <- call srv "PUT" (path <> "/params") (Just (obj ["params" .= obj ["tenant" .= ("acme-2" :: Text)]]))
+        put @?= 200
+        field "tenant" (field "params" rotated) @?= Aeson.String "acme-2"
+        -- validation table applies
+        (unknown, unknownErr) <- call srv "PUT" (path <> "/params") (Just (obj ["params" .= obj ["nope" .= ("x" :: Text)]]))
+        (unknown, field "error" unknownErr) @?= (422, "unknown_params")
+        (noBody, _) <- call srv "PUT" (path <> "/params") (Just (obj []))
+        noBody @?= 400
+        -- clearing the value lapses it: a message now gets 409 params_required
+        (cleared, _) <- call srv "PUT" (path <> "/params") (Just (obj ["params" .= obj ["tenant" .= Aeson.Null]]))
+        cleared @?= 200
+        (lapsed, lapsedErr) <- call srv "POST" (path <> "/messages") (Just (obj ["prompt" .= ("hi" :: Text)]))
+        (lapsed, field "error" lapsedErr) @?= (409, "params_required")
+        -- creation without the parameter stays 422
+        (bare, bareErr) <- call srv "POST" "/v1/sessions" (Just (obj ["agent" .= ("server-test" :: Text)]))
+        (bare, field "error" bareErr) @?= (422, "params_required")
+        -- a fork starts from the source's values overlaid with the request's
+        _ <- call srv "PUT" (path <> "/params") (Just (obj ["params" .= obj ["tenant" .= ("acme-3" :: Text)]]))
+        (forked, fork1) <- call srv "POST" (path <> "/fork") (Just (obj []))
+        forked @?= 201
+        field "tenant" (field "params" fork1) @?= Aeson.String "acme-3"
+        (forked2, fork2) <- call srv "POST" (path <> "/fork") (Just (obj ["params" .= obj ["tenant" .= ("fresh" :: Text)]]))
+        forked2 @?= 201
+        field "tenant" (field "params" fork2) @?= Aeson.String "fresh"
+        (badFork, badForkErr) <- call srv "POST" (path <> "/fork") (Just (obj ["params" .= obj ["nope" .= ("x" :: Text)]]))
+        (badFork, field "error" badForkErr) @?= (422, "unknown_params")
   where
     withTenantParam = "{\"parameters\": [{\"name\": \"tenant\", \"scope\": \"session\", \"required\": true}]}"
 
