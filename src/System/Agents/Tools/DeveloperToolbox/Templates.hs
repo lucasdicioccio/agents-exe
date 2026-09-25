@@ -264,5 +264,6 @@ defaultDeveloperToolboxDescription =
                 ]
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
             , developerToolboxFileSandbox = Nothing -- Uses default: deny all
+            , developerToolboxBuildCommand = Nothing
             }
 

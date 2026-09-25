@@ -31,6 +31,7 @@ capabilityToName DevToolSnapshot = "snapshot"
 capabilityToName DevToolRestoreFile = "restore-file"
 capabilityToName DevToolListDirectory = "list-directory"
 capabilityToName DevToolTraverseDirectory = "traverse-directory"
+capabilityToName DevToolBuildCommand = "build-command"
 
 -- | Convert a capability name text to the corresponding DeveloperToolCapability.
 capabilityFromName :: Text -> Maybe DeveloperToolCapability
@@ -47,6 +48,7 @@ capabilityFromName name = case name of
     "restore-file" -> Just DevToolRestoreFile
     "list-directory" -> Just DevToolListDirectory
     "traverse-directory" -> Just DevToolTraverseDirectory
+    "build-command" -> Just DevToolBuildCommand
     _ -> Nothing
 
 -- | Get information about a capability (name and description).
@@ -98,5 +100,9 @@ getCapabilityInfo DevToolListDirectory =
 getCapabilityInfo DevToolTraverseDirectory =
     ( "traverse-directory"
     , "Recursively traverses a directory tree and returns all entries within scope"
+    )
+getCapabilityInfo DevToolBuildCommand =
+    ( "build-command"
+    , "Runs the build command configured for this toolbox (e.g. cabal build) and returns its exit code and captured output"
     )
 

@@ -1596,6 +1596,7 @@ devCapabilityToText DevToolSnapshot = "snapshot"
 devCapabilityToText DevToolRestoreFile = "restore-file"
 devCapabilityToText DevToolListDirectory = "list-directory"
 devCapabilityToText DevToolTraverseDirectory = "traverse-directory"
+devCapabilityToText DevToolBuildCommand = "build-command"
 
 {- | Register all tools from a Developer toolbox.
 
@@ -2345,6 +2346,11 @@ executeDeveloperCapability tracer box cap params = case cap of
                     Left err -> pure $ DeveloperToolError () err
                     Right listingResult -> pure $ DeveloperToolDirectoryListingResult () listingResult
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "build-command" -> do
+        result <- DeveloperTools.executeBuildCommand box
+        case result of
+            Left err -> pure $ DeveloperToolError () err
+            Right out -> pure $ DeveloperToolSpecResult () out
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
   where
     -- Parse a JSON value as Text, returning Nothing for non-string values
@@ -2810,6 +2816,20 @@ formatCapabilityHelp DevToolTraverseDirectory =
         , "  - path (string, required): Root directory path to traverse"
         , ""
         , "Returns: DirectoryListingResult with path, entries, entryCount, recursive."
+        , ""
+        ]
+formatCapabilityHelp DevToolBuildCommand =
+    Text.unlines
+        [ "--------------------------------------------------------------------------------"
+        , "CAPABILITY: build-command"
+        , "--------------------------------------------------------------------------------"
+        , ""
+        , "Description: Runs the build command configured for this toolbox (argv, no shell)"
+        , "             and returns its exit code and captured output."
+        , ""
+        , "Parameters: none"
+        , ""
+        , "Returns: text with the command, exit code, and combined stdout/stderr."
         , ""
         ]
 

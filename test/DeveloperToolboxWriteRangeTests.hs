@@ -62,6 +62,7 @@ testToolbox = do
                     [ DevToolReadFileRange
                     , DevToolWriteFileRange
                     ]
+                , developerToolboxBuildCommand = Nothing
                 , developerToolboxFileSandbox = Just FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing

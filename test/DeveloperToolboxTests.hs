@@ -82,6 +82,7 @@ testToolbox = do
                     , DevToolValidateAgent
                     ]
                 , developerToolboxActivation = Nothing
+                , developerToolboxBuildCommand = Nothing
                 , developerToolboxFileSandbox = Just FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing
@@ -105,6 +106,7 @@ testDirectoryToolbox = do
                     , DevToolTraverseDirectory
                     ]
                 , developerToolboxActivation = Nothing
+                , developerToolboxBuildCommand = Nothing
                 , developerToolboxFileSandbox = Just FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing
@@ -1117,7 +1119,52 @@ directoryTests =
         , testCase "traverse-directory returns recursive entries" testTraverseDirectory
         , testCase "ToolRegistration dispatches list-directory" testListDirectoryDispatch
         , testCase "ToolRegistration dispatches traverse-directory" testTraverseDirectoryDispatch
+        , testCase "build-command runs the configured command" testBuildCommandRuns
+        , testCase "build-command reports failing exit code" testBuildCommandFails
+        , testCase "build-command requires a configured command" testBuildCommandRequiresConfig
         ]
+
+buildCommandDesc :: Maybe [Text] -> DeveloperToolboxDescription
+buildCommandDesc cmd =
+    DeveloperToolboxDescription
+        { developerToolboxName = "test-build"
+        , developerToolboxDescription = "Test build-command"
+        , developerToolboxCapabilities = [DevToolBuildCommand]
+        , developerToolboxActivation = Nothing
+        , developerToolboxBuildCommand = cmd
+        , developerToolboxFileSandbox = Nothing
+        }
+
+buildCommandCall cmd = do
+    r <- DeveloperToolbox.initializeToolbox silent (buildCommandDesc cmd)
+    case r of
+        Left err -> error err
+        Right toolbox -> runDeveloperToolCapability toolbox (KeyMap.fromList [("capability", Aeson.String "build-command")])
+
+testBuildCommandRuns :: Assertion
+testBuildCommandRuns = do
+    result <- buildCommandCall (Just ["echo", "built-ok"])
+    case result of
+        DeveloperToolSpecResult _ out -> do
+            assertBool "exit code 0" $ "exit code: 0" `Text.isInfixOf` out
+            assertBool "captured output" $ "built-ok" `Text.isInfixOf` out
+        other -> assertFailure $ "Unexpected result: " ++ show other
+
+testBuildCommandFails :: Assertion
+testBuildCommandFails = do
+    result <- buildCommandCall (Just ["sh", "-c", "echo boom >&2; exit 3"])
+    case result of
+        DeveloperToolSpecResult _ out -> do
+            assertBool "exit code 3" $ "exit code: 3" `Text.isInfixOf` out
+            assertBool "stderr captured" $ "boom" `Text.isInfixOf` out
+        other -> assertFailure $ "Unexpected result: " ++ show other
+
+testBuildCommandRequiresConfig :: Assertion
+testBuildCommandRequiresConfig = do
+    r <- DeveloperToolbox.initializeToolbox silent (buildCommandDesc Nothing)
+    case r of
+        Left _ -> pure ()
+        Right _ -> assertFailure "Expected init to fail without buildCommand"
 
 -- | Create a small directory tree for directory tests
 withTestDirectoryTree :: (FilePath -> IO a) -> IO a

@@ -382,6 +382,11 @@ executeDeveloperCapability tracer box cap params = case cap of
                     Left err -> pure $ DeveloperToolError () err
                     Right listingResult -> pure $ DeveloperToolDirectoryListingResult () listingResult
             _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError "Missing 'path' parameter")
+    "build-command" -> do
+        result <- DeveloperTools.executeBuildCommand box
+        case result of
+            Left err -> pure $ DeveloperToolError () err
+            Right out -> pure $ DeveloperToolSpecResult () out
     _ -> pure $ DeveloperToolError () (DeveloperTools.ValidationError $ "Unknown capability: " <> cap)
   where
     -- Parse a JSON value as Text, returning Nothing for non-string values

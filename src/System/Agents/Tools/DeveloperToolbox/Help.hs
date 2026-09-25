@@ -449,6 +449,19 @@ buildCapabilityHelp cap = case cap of
             , "  - recursive: Always true"
             , ""
             ]
+    DevToolBuildCommand ->
+        Text.unlines
+            [ "build-command"
+            , "-------------"
+            , "Runs the build command configured in the toolbox's buildCommand field"
+            , "(an argv list, executed without a shell) and returns its result."
+            , ""
+            , "Parameters: none"
+            , ""
+            , "Returns: text with the command, exit code, and combined stdout/stderr"
+            , "(truncated to the last part if very long). Fails after a timeout."
+            , ""
+            ]
 
 -- | Get short name for a capability.
 capabilityToShortName :: DeveloperToolCapability -> Text
@@ -464,6 +477,7 @@ capabilityToShortName DevToolSnapshot = "snapshot"
 capabilityToShortName DevToolRestoreFile = "restore-file"
 capabilityToShortName DevToolListDirectory = "list-directory"
 capabilityToShortName DevToolTraverseDirectory = "traverse-directory"
+capabilityToShortName DevToolBuildCommand = "build-command"
 
 {- | Build comprehensive help text for all capabilities.
 
