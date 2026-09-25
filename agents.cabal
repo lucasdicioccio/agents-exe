@@ -82,11 +82,6 @@ library agents-lib
                     , System.Agents.OS.Core.Types
                     , System.Agents.OS.Core.World
                     , System.Agents.OS.Events
-                    , System.Agents.OS.Persistence
-                    , System.Agents.OS.Persistence.File
-                    , System.Agents.OS.Persistence.Schema
-                    , System.Agents.OS.Persistence.Sqlite
-                    , System.Agents.OS.Persistence.Types
                     , System.Agents.OS.Resources
                     , System.Agents.OS.Resources.Http
                     , System.Agents.OS.Resources.Lua
@@ -560,7 +555,6 @@ test-suite agents-tests
                     , OS.ConversationTests
                     , OS.CoreTests
                     , OS.IntegrationTests
-                    , OS.PersistenceTests
                     , OS.ResourcesTests
                     , PostgRESTParseTest
                     , MediaContentPartTests

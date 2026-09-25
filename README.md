@@ -391,14 +391,12 @@ The code is designed to be usable as a Haskell library.
 ```haskell
 import System.Agents.OS
 import System.Agents.OS.Core
-import System.Agents.OS.Persistence
 
 main :: IO ()
 main = do
-    -- Initialize the OS with SQLite persistence
+    -- Initialize the OS
     os <- initializeOS defaultConfig
-    backend <- createPersistenceBackend (SqliteBackendType "./agents.db")
-    
+
     -- Create a shared SQLite toolbox
     tbConfig <- createToolboxConfig SqliteToolboxType "shared-db" 
         (object ["path" .= "./data.db"])

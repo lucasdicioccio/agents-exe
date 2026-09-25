@@ -56,7 +56,6 @@ import System.Agents.OS.Core.World (
     setComponent,
  )
 import System.Agents.OS.Conversation
-import System.Agents.OS.Persistence
 
 -------------------------------------------------------------------------------
 -- Test Suite
@@ -71,7 +70,6 @@ integrationTests =
         , conversationForkTests
         , lineageTrackingTests
         , concurrentAccessTests
-        , persistenceIntegrationTests
         ]
 
 -------------------------------------------------------------------------------
@@ -330,93 +328,6 @@ concurrentAccessTests =
             -- Verify all increments completed
             finalCount <- readTVarIO counter
             finalCount @?= 10
-        ]
-
--------------------------------------------------------------------------------
--- Test 6: Persistence integration
--------------------------------------------------------------------------------
-
-persistenceIntegrationTests :: TestTree
-persistenceIntegrationTests =
-    testGroup
-        "Persistence Integration"
-        [ testCase "Persist and load agent config" $ do
-            withSystemTempDirectory "persist-test" $ \tmpDir -> do
-                let dbPath = tmpDir ++ "/test.db"
-                backend <- createPersistenceBackend (SqliteBackendType dbPath)
-
-                -- Create and persist entity
-                eid <- createEntity
-                let config =
-                        AgentConfig
-                            { agentName = "persisted-agent"
-                            , agentModel = ModelConfig "openai" "https://api.openai.com/v1" "gpt-4" "key1"
-                            , agentSystemPrompt = "You are persistent"
-                            , agentToolboxBindings = []
-                            }
-
-                persist backend eid config
-
-                -- Close and reopen backend
-                closePersistenceBackend backend
-                backend' <- createPersistenceBackend (SqliteBackendType dbPath)
-
-                -- Load back
-                mLoaded <- load backend' eid :: IO (Maybe AgentConfig)
-
-                case mLoaded of
-                    Nothing -> assertFailure "Should load persisted config"
-                    Just loaded -> do
-                        loaded.agentName @?= "persisted-agent"
-                        loaded.agentSystemPrompt @?= "You are persistent"
-
-                closePersistenceBackend backend'
-
-        , testCase "Query entities by component type" $ do
-            withSystemTempDirectory "query-test" $ \tmpDir -> do
-                let dbPath = tmpDir ++ "/query.db"
-                backend <- createPersistenceBackend (SqliteBackendType dbPath)
-
-                -- Create multiple agents
-                eid1 <- createEntity
-                eid2 <- createEntity
-                eid3 <- createEntity
-
-                let config1 = testAgentConfig' "agent-1"
-                let config2 = testAgentConfig' "agent-2"
-                let config3 = testAgentConfig' "agent-3"
-
-                persist backend eid1 config1
-                persist backend eid2 config2
-                persist backend eid3 config3
-
-                -- Query all agents (Note: This requires the full implementation)
-                -- For now, just verify persistence doesn't crash
-                assertBool "Persistence succeeded" True
-
-                closePersistenceBackend backend
-
-        , testCase "Event logging" $ do
-            withSystemTempDirectory "event-test" $ \tmpDir -> do
-                let dbPath = tmpDir ++ "/events.db"
-                backend <- createPersistenceBackend (SqliteBackendType dbPath)
-
-                -- First create and persist an entity (required for foreign key constraint)
-                eid <- createEntity
-                let config = testAgentConfig' "event-test-agent"
-                persist backend eid config
-
-                -- Log some events with explicit type annotations
-                persistOSEvent backend "agent_created" (object ["name" .= ("test" :: Text)]) (Just eid)
-                persistOSEvent backend "conversation_started" (object ["id" .= ("conv-1" :: Text)]) (Just eid)
-                persistOSEvent backend "tool_called" (object ["tool" .= ("bash" :: Text)]) (Just eid)
-
-                -- Retrieve events (would work in full implementation)
-                events <- getEvents backend eid
-                -- events should contain 3 entries in full implementation
-                assertBool "Events retrieved (placeholder)" True
-
-                closePersistenceBackend backend
         ]
 
 -------------------------------------------------------------------------------

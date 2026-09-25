@@ -273,7 +273,6 @@ wrappedCallTool ctx tool args = do
 | (new) | `System.Agents.OS.Resources` | Resource management |
 | (new) | `System.Agents.OS.Concurrent` | Concurrent access |
 | (new) | `System.Agents.OS.Events` | OS event system |
-| (new) | `System.Agents.OS.Persistence` | Persistence layer |
 
 ## Type Mapping
 
