@@ -122,9 +122,20 @@ A small declaration, no more: `fs.read` and `fs.write` are lists of paths
 or `none`, `tmp` is `shared` (default) or `private`. Everything not listed
 is not granted; the tool's own directory is always readable so it can run.
 Like `run_as`, the tool names what it needs and the **operator** names how
-it is enforced (`--sandbox bwrap` or `--sandbox landlock`); a tool that
-declares `sandbox` with no mechanism configured fails to load with a
-`LoadingError`, it never runs unconfined by silence. `sandbox` composes with
+it is enforced (`--sandbox bwrap`, `--sandbox landlock` or `--sandbox auto`);
+a tool that declares `sandbox` with no mechanism configured fails to load
+with a `LoadingError`, it never runs unconfined by silence. There is **no
+silent default**: the two mechanisms give different guarantees (bubblewrap
+hides paths and really cuts the network, Landlock denies access and covers
+TCP only), so picking one for the operator could quietly weaken what a tool
+asked for.
+
+`--sandbox auto` is the explicit opt-in to "per tool, the strongest
+mechanism that can honour every declared field": bubblewrap first, then
+Landlock, and a tool declaring `net: none` or `tmp: private` skips Landlock
+rather than being weakened, failing to load when no mechanism qualifies.
+It is the ordered-backends idea of §1.5 applied to mechanisms, and
+`agents-exe check --probe` prints what `auto` resolved to for each tool. `sandbox` composes with
 `run_as` (the sandbox is set up for the process that runs as that user).
 
 * **bubblewrap** builds a mount namespace: only the declared paths (plus the
@@ -371,7 +382,8 @@ D7. **Explicit envdir root.** Secrets are provisioned where the operator
 says (`--envdir-root`), never found by convention next to the tool.
 
 D8. **Process isolation, not image isolation.** `sandbox` is enforced by
-bubblewrap or Landlock, chosen by the operator; agents-exe never builds,
+bubblewrap or Landlock, chosen by the operator (explicitly, or with the
+opt-in `--sandbox auto`, never by a silent default); agents-exe never builds,
 pulls or names an image. It composes with `run_as`, refuses rather than
 weakens, and is probed by `check`.
 
@@ -398,6 +410,9 @@ Pattern from Agent-Reach (§1.5).
   to, which saves the tool's tokens (owner's answer, 2026-09-25; D6).
 * Isolation backend: bubblewrap and Landlock, no images; whoever wants podman
   calls it from the tool's own script (§1.4, D8).
+* Sandbox mechanism selection: no silent default; the operator picks, or opts
+  in to `--sandbox auto` (strongest mechanism that honours every declared
+  field), shown by `check --probe` (owner, 2026-09-25; §1.4, D8).
 * Health: adopt Agent-Reach's doctor pattern (ordered backends, a real probe,
   `--json`), but not Agent-Reach itself, which is deferred as heavy
   (owner, 2026-09-25; §1.5, D9).
