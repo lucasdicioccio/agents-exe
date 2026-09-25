@@ -446,6 +446,14 @@ handleNormalEvent tracer ev = do
                 resetQuitConfirmation
                 handleAnswerPending
         VtyEvent vtyEv
+            | matchesEvent keymap EventSelectPending vtyEv -> do
+                resetQuitConfirmation
+                handleSelectPending
+        VtyEvent vtyEv
+            | matchesEvent keymap EventFailPending vtyEv -> do
+                resetQuitConfirmation
+                handleFailPending
+        VtyEvent vtyEv
             | matchesEvent keymap EventSaveBuffer vtyEv -> do
                 resetQuitConfirmation
                 handleSaveBuffer

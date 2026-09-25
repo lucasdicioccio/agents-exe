@@ -17,6 +17,8 @@ do) instead of posting a normal message, whenever that mode is active.
 -}
 module System.Agents.TUI.Event.Pending (
     handleAnswerPending,
+    handleSelectPending,
+    handleFailPending,
     handleSendOrAnswer,
 ) where
 
@@ -24,7 +26,6 @@ import Brick
 import Brick.Widgets.Edit (getEditContents)
 import Control.Lens (to, use, (.=), (^.))
 import Control.Monad.IO.Class (liftIO)
-import Data.List (find)
 import qualified Data.Text as Text
 
 import qualified Brick.Widgets.List as List
@@ -49,7 +50,11 @@ import System.Agents.TUI.Types (
     coreClient,
     coreParams,
     eventChan,
+    failedCallText,
     messageEditor,
+    nextPendingToken,
+    selectedPendingCall,
+    selectedPendingToken,
     tuiUI,
  )
 import Brick.BChan (writeBChan)
@@ -67,21 +72,76 @@ getFocusedConversation = do
     pure $ fmap snd mConv
 
 {- | Put the message editor into "answer mode" for the focused
-conversation's oldest deferred call that carries a continuation token (a
-call deferred with no token, if that ever happens, cannot be completed
-from here). The next @send-message@ ('handleSendOrAnswer') completes it.
+conversation's selected deferred call ('handleSelectPending'; the first one
+that carries a continuation token unless another was selected; a call
+deferred with no token, if that ever happens, cannot be completed from here). The next @send-message@ ('handleSendOrAnswer') completes it.
 -}
 handleAnswerPending :: EventM N TuiState ()
 handleAnswerPending = do
     mConv <- getFocusedConversation
     case mConv of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just conv -> case find (\c -> dcvToken c /= Nothing) conv.conversationPending of
-            Nothing -> showStatus StatusWarning "No pending call with a continuation token"
-            Just call -> do
-                tuiUI . answeringPendingCall .= Just (conv.conversationId, call)
-                showStatus StatusInfo $
-                    "Answering " <> call.dcvToolName <> ": type the result, then send"
+        Just conv -> do
+            selected <- use (tuiUI . selectedPendingToken)
+            case selectedPendingCall selected conv.conversationPending of
+                Nothing -> showStatus StatusWarning "No pending call with a continuation token"
+                Just call -> do
+                    tuiUI . answeringPendingCall .= Just (conv.conversationId, call)
+                    showStatus StatusInfo $
+                        "Answering " <> call.dcvToolName <> ": type the result, then send"
+
+{- | Move the Pending panel's selection to the next call that can be
+completed, wrapping around; answer-pending and fail-pending act on it.
+-}
+handleSelectPending :: EventM N TuiState ()
+handleSelectPending = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            selected <- use (tuiUI . selectedPendingToken)
+            case nextPendingToken selected conv.conversationPending of
+                Nothing -> showStatus StatusWarning "No pending call with a continuation token"
+                Just tok -> do
+                    tuiUI . selectedPendingToken .= Just tok
+                    tuiUI . answeringPendingCall .= Nothing
+                    case selectedPendingCall (Just tok) conv.conversationPending of
+                        Just call -> showStatus StatusInfo ("Selected pending call: " <> call.dcvToolName)
+                        Nothing -> pure ()
+
+{- | Fail the selected pending call: complete it with an error text
+('failedCallText') the model reads as the call's result, the same way a
+tool's own error reaches it, so no new response type is needed. The reason
+is the message editor's text, if any (which is then cleared); otherwise a
+generic one. Like answering, it goes through 'Client.completeCall' with
+@autoResume = True@, so it works over an embedded runner and with @--attach@.
+-}
+handleFailPending :: EventM N TuiState ()
+handleFailPending = do
+    mConv <- getFocusedConversation
+    case mConv of
+        Nothing -> showStatus StatusWarning "No conversation selected"
+        Just conv -> do
+            selected <- use (tuiUI . selectedPendingToken)
+            case selectedPendingCall selected conv.conversationPending of
+                Nothing -> showStatus StatusWarning "No pending call with a continuation token"
+                Just call -> case call.dcvToken of
+                    Nothing -> showStatus StatusError "That pending call has no continuation token"
+                    Just token -> do
+                        msgLines <- use (tuiUI . messageEditor . to getEditContents)
+                        core <- readCore
+                        result <-
+                            liftIO $
+                                Client.completeCall
+                                    (core ^. coreClient)
+                                    token
+                                    (TextResponse (failedCallText (Text.intercalate "\n" msgLines)))
+                                    True
+                                    (core ^. coreParams)
+                        tuiUI . answeringPendingCall .= Nothing
+                        tuiUI . selectedPendingToken .= Nothing
+                        clearEditorAndAttachments conv
+                        reportRunnerResult ("Failed " <> call.dcvToolName <> " for " <> conversationName conv) result
 
 {- | @send-message@'s actual behaviour: complete the pending call
 'handleAnswerPending' selected, if the editor is in that mode; otherwise

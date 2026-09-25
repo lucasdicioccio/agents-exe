@@ -11,6 +11,7 @@ import Brick.Widgets.Edit (getEditContents, renderEditor)
 import Brick.Widgets.List (renderList)
 import Control.Lens ((^.))
 import qualified Data.Map.Strict as Map
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -20,7 +21,7 @@ import qualified Data.Text.Encoding as TextEncoding
 
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Protocol (AgentDescriptor (..), ToolDescriptor (..))
-import System.Agents.Session.Base (DeferredCallView (..), LlmToolCall (..))
+import System.Agents.Session.Base (ContinuationToken, DeferredCallView (..), LlmToolCall (..))
 import System.Agents.SessionStore (SessionMeta (..))
 import System.Agents.Tools.Cache (extractToolInfo)
 import System.Agents.TUI.Buffer (Buffer, bufferContent)
@@ -322,16 +323,18 @@ render_pending_panel st pending =
         PendingPanelWidget
         (" Pending (" <> Text.pack (show (length pending)) <> ") ")
         $ vBox
-            [ txt "Ctrl+Y: answer oldest pending call, then send"
+            [ txt "Ctrl+O: select next | Ctrl+Y: answer selected, then send | Ctrl+W: fail selected"
             , txt ""
-            , vBox (map render_pending_call pending)
+            , vBox (map (render_pending_call selectedTok) pending)
             ]
+  where
+    selectedTok = dcvToken =<< selectedPendingCall (st ^. tuiUI . selectedPendingToken) pending
 
 -- | Render one deferred call: tool name, token prefix, arguments.
-render_pending_call :: DeferredCallView -> Widget N
-render_pending_call call =
+render_pending_call :: Maybe ContinuationToken -> DeferredCallView -> Widget N
+render_pending_call selectedTok call =
     txt $
-        "- "
+        (if isJust call.dcvToken && call.dcvToken == selectedTok then "> " else "- ")
             <> call.dcvToolName
             <> " (token "
             <> tokenPrefix

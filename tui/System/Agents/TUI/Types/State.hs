@@ -49,6 +49,7 @@ module System.Agents.TUI.Types.State (
     historySessionCache,
     historyDirty,
     answeringPendingCall,
+    selectedPendingToken,
     initUIState,
 
     -- * TUI State
@@ -79,7 +80,7 @@ import qualified Data.Vector as Vector
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Host.Client (RunnerClient)
 import System.Agents.Media.Types (MediaAttachment)
-import System.Agents.Session.Base (DeferredCallView, SessionId)
+import System.Agents.Session.Base (ContinuationToken, DeferredCallView, SessionId)
 import System.Agents.SessionStore (SessionMeta)
 import System.Agents.Tools.Params.Types (ParamName)
 import System.Agents.TUI.Buffer (Buffer)
@@ -227,6 +228,12 @@ data UIState = UIState
     ('System.Agents.Host.Client.completeCall') instead of posting a normal
     message, then clears this back to 'Nothing'.
     -}
+    , _selectedPendingToken :: Maybe ContinuationToken
+    {- ^ The Pending panel's selection: the continuation token of the call
+    that answer-pending and fail-pending act on ('selectedPendingCall' falls
+    back to the first completable call when this is 'Nothing' or no longer
+    among the pending calls).
+    -}
     }
 
 makeLenses ''UIState
@@ -278,6 +285,7 @@ initUIState helpText agents sessions =
         , _historySessionCache = Map.empty
         , _historyDirty = True
         , _answeringPendingCall = Nothing
+        , _selectedPendingToken = Nothing
         }
 
 -------------------------------------------------------------------------------
