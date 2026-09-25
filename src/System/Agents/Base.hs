@@ -1276,6 +1276,8 @@ data DeveloperToolCapability
       DevToolListDirectory
     | -- | Traverse directory tree recursively
       DevToolTraverseDirectory
+    | -- | Run the configured build command and capture its output
+      DevToolBuildCommand
     deriving (Show, Ord, Eq, Generic)
 
 -- | Serialize DeveloperToolCapability as kebab-case strings.
@@ -1292,6 +1294,7 @@ instance ToJSON DeveloperToolCapability where
     toJSON DevToolRestoreFile = Aeson.String "restore-file"
     toJSON DevToolListDirectory = Aeson.String "list-directory"
     toJSON DevToolTraverseDirectory = Aeson.String "traverse-directory"
+    toJSON DevToolBuildCommand = Aeson.String "build-command"
 
 -- | Parse DeveloperToolCapability from kebab-case strings.
 instance FromJSON DeveloperToolCapability where
@@ -1309,7 +1312,8 @@ instance FromJSON DeveloperToolCapability where
             "restore-file" -> return DevToolRestoreFile
             "list-directory" -> return DevToolListDirectory
             "traverse-directory" -> return DevToolTraverseDirectory
-            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file, list-directory, traverse-directory."
+            "build-command" -> return DevToolBuildCommand
+            other -> fail $ "Invalid DeveloperToolCapability: " ++ Text.unpack other ++ ". Expected one of: show-spec, validate-agent, create-agent, create-tool, read-file-range, write-file-range, patch-file, help, snapshot, restore-file, list-directory, traverse-directory, build-command."
 {- | Configuration for the developer toolbox.
 
 This describes which developer tools should be made available to an agent.
@@ -1345,6 +1349,11 @@ data DeveloperToolboxDescription
     , developerToolboxFileSandbox :: Maybe FileSandboxConfig
     {- ^ File sandbox for read-file-range, write-file-range, patch-file
     Default: deny all (secure by default)
+    -}
+    , developerToolboxBuildCommand :: Maybe [Text]
+    {- ^ Argv (program then arguments, no shell) run by the opt-in
+    build-command capability, in the agent's working directory.
+    Required when build-command is enabled; ignored otherwise.
     -}
     }
     deriving (Show, Ord, Eq, Generic)

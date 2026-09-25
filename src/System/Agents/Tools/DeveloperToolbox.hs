@@ -79,6 +79,7 @@ module System.Agents.Tools.DeveloperToolbox (
     executeHelp,
     executeListDirectory,
     executeTraverseDirectory,
+    executeBuildCommand,
 
     -- * Capability info
     getCapabilityInfo,
@@ -129,6 +130,7 @@ import System.Agents.Tools.DeveloperToolbox.Init
 -- Re-export capability execution functions
 
 import System.Agents.Tools.DeveloperToolbox.Create
+import System.Agents.Tools.DeveloperToolbox.BuildCommand
 import System.Agents.Tools.DeveloperToolbox.Directory
 import System.Agents.Tools.DeveloperToolbox.Help
 import System.Agents.Tools.DeveloperToolbox.Patch

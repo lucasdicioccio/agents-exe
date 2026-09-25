@@ -39,6 +39,7 @@ patchToolbox = do
                     , DevToolPatchFile
                     ]
                 , developerToolboxActivation = Nothing
+                , developerToolboxBuildCommand = Nothing
                 , developerToolboxFileSandbox =
                     Just
                         FileSandboxConfig

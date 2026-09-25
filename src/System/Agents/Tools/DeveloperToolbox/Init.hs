@@ -46,6 +46,8 @@ initializeToolbox _tracer desc = do
     -- Validate that we have at least one capability
     if null desc.developerToolboxCapabilities
         then pure $ Left "Developer toolbox must have at least one capability enabled"
+        else if DevToolBuildCommand `elem` desc.developerToolboxCapabilities && maybe True null desc.developerToolboxBuildCommand
+            then pure $ Left "Developer toolbox capability build-command requires a non-empty buildCommand"
         else do
             -- Create file sandbox if any file-related capability is enabled
             let config = fromMaybe defaultDeveloperFileSandbox desc.developerToolboxFileSandbox

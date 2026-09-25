@@ -108,6 +108,7 @@ library agents-lib
                     , System.Agents.Tools.DeveloperToolbox
                     , System.Agents.Tools.DeveloperToolbox.Capabilities
                     , System.Agents.Tools.DeveloperToolbox.Create
+                    , System.Agents.Tools.DeveloperToolbox.BuildCommand
                     , System.Agents.Tools.DeveloperToolbox.Directory
                     , System.Agents.Tools.DeveloperToolbox.Help
                     , System.Agents.Tools.DeveloperToolbox.Init
