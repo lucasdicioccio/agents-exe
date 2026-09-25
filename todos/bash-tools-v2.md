@@ -254,7 +254,8 @@ digest policy is the tool's own declaration.
 
 D6. **A typed `send` per family, a shared `processes` for the rest.** One
 handle per start, several handles per family; the family's input schema
-lives in one generated `T.send` tool present from load, while `list`,
+lives in one generated `T.send` tool present from load (an agent
+configuration may omit it, saving its tokens), while `list`,
 `status`, `tail` and `stop` are shared so the session's tool list does not
 grow with the number of families' management surfaces.
 
@@ -272,9 +273,6 @@ says (`--envdir-root`), never found by convention next to the tool.
 * Digest policy: per tool, declared in `process.digest` (§1.1, §2.3).
 * `envdir`: explicit, an operator `--envdir-root` with a per-tool
   subdirectory, no implicit location (§1.2, D7).
-
-## Open questions
-
-* The typed `T.send` companion is generated at load for every `service`
-  tool, started or not. Should an agent configuration be able to omit it
-  (a service the model may start but never talk to)?
+* The generated `T.send` companion is optional per agent: an agent
+  configuration may omit it for a service the model may start but never talk
+  to, which saves the tool's tokens (owner's answer, 2026-09-25; D6).
