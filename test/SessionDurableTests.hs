@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -27,6 +28,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import System.Agents.Base (ConversationId (..))
+import System.Agents.Media.Types (ContentPart (..))
 import qualified System.Agents.Base as Base
 import System.Agents.CLI.SessionDurable (
     applyAgentDurableConfig,
@@ -38,7 +40,7 @@ import System.Agents.CLI.SessionDurable (
     parseResultFile,
  )
 import System.Agents.Session.Base
-import System.Agents.Session.Step (applyContinuationMail, getPartialTurn, naiveTilNoToolCallStep, receiveMailForTurn, runStepM, runStepMAsync)
+import System.Agents.Session.Step (applyContinuationMail, getPartialTurn, naiveTilNoToolCallStep, partialTurnForLlm, receiveMailForTurn, runStepM, runStepMAsync)
 import System.Agents.Session.Types
 import System.Agents.Session.Wake (wakeSession)
 import qualified System.Agents.SessionStore as SessionStore
@@ -357,6 +359,55 @@ sessionMailboxTests =
                         Nothing -> assertFailure "expected a separate user query carrying the mail"
                     map snd content.userToolResponses @?= [TextResponse "done:t1", TextResponse "done:t2"]
                 other -> assertFailure $ "expected a user turn, got " <> show other
+        , testCase "mailInToolResult puts the round's mail in a partial turn's placeholder, once" $ do
+            mb <- newInMemoryMailbox
+            _ <- expectRight =<< mb.mbSend (userMessageOutgoing "hello from mail")
+            let policy _ctx call = if callName call == "defer_a" then Defer (Reason "approval") else RunSync
+                agent = (mkAsyncAgent policy){ctxMailbox = Just mb, ctxMailInToolResult = True}
+            (_agent', result) <- runStepMAsync testConvId agent (mkSessionWithCalls [mkCall "t1", mkCall "defer_a"])
+            session0 <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session" >> fail "unreachable"
+            partial <- maybe (assertFailure "expected a partial turn" >> fail "unreachable") pure (getPartialTurn session0)
+            -- The mail is held out of the query and shown in the last placeholder.
+            partial.pUserQuery @?= Nothing
+            partial.pMailInToolResult @?= True
+            let (queryShown, shown) = partialTurnForLlm partial
+            queryShown @?= Nothing
+            case map snd shown of
+                [TextResponse first, MixedResponse parts] -> do
+                    first @?= "done:t1"
+                    assertBool "placeholder carries the mail" (any (\case TextPart t -> "hello from mail" `Text.isInfixOf` t; _ -> False) parts)
+                other -> assertFailure ("expected a result and a mailed placeholder, got " <> show other)
+            -- The round completes: the mail lands in the last result, not twice.
+            token <- case [t | tc <- partial.pTrackedToolCalls, Just t <- [tc.tcContinuation]] of
+                [t] -> pure t
+                other -> assertFailure ("expected one token, got " <> show (length other)) >> fail "unreachable"
+            session1 <- wakeSession session0 [(token, TextResponse "approved")]
+            case session1.turns of
+                (UserTurn content _ : _) -> do
+                    content.userQuery @?= Nothing
+                    case map snd content.userToolResponses of
+                        [TextResponse first, TextResponse lastResp] -> do
+                            first @?= "done:t1"
+                            assertBool "last result keeps its text" ("approved" `Text.isInfixOf` lastResp)
+                            Text.count "hello from mail" lastResp @?= 1
+                        other -> assertFailure ("expected two text results, got " <> show other)
+                other -> assertFailure $ "expected a user turn, got " <> show other
+        , testCase "without mailInToolResult a partial turn keeps the mail in its query (unchanged)" $ do
+            mb <- newInMemoryMailbox
+            _ <- expectRight =<< mb.mbSend (userMessageOutgoing "hello from mail")
+            let policy _ctx call = if callName call == "defer_a" then Defer (Reason "approval") else RunSync
+                agent = (mkAsyncAgent policy){ctxMailbox = Just mb, ctxMailInToolResult = False}
+            (_agent', result) <- runStepMAsync testConvId agent (mkSessionWithCalls [mkCall "t1", mkCall "defer_a"])
+            session0 <- case result of
+                Right s -> pure s
+                Left _ -> assertFailure "expected a yielded session" >> fail "unreachable"
+            partial <- maybe (assertFailure "expected a partial turn" >> fail "unreachable") pure (getPartialTurn session0)
+            partial.pMailInToolResult @?= False
+            case partial.pUserQuery of
+                Just q -> assertBool "query includes the mail text" ("hello from mail" `Text.isInfixOf` q.queryText)
+                Nothing -> assertFailure "expected the mail in the query"
         , testCase "mailInToolResult does not affect a plain async user turn with no tool calls" $ do
             mb <- newInMemoryMailbox
             _ <- expectRight =<< mb.mbSend (userMessageOutgoing "hello from mail")
@@ -599,6 +650,8 @@ isolatedCallExtractionTests =
                         , pUserTools = []
                         , pUserQuery = Nothing
                         , pTrackedToolCalls = [tracked]
+                        , pUserMail = []
+                        , pMailInToolResult = False
                         }
             let session = (mkSessionWithCalls []){turns = [PartialUserTurn partial Nothing]}
             let isolated = extractIsolatedCalls session
@@ -633,6 +686,8 @@ isolatedCallExtractionTests =
                         , pUserTools = []
                         , pUserQuery = Nothing
                         , pTrackedToolCalls = [tracked]
+                        , pUserMail = []
+                        , pMailInToolResult = False
                         }
             let session = (mkSessionWithCalls []){turns = [PartialUserTurn partial Nothing]}
             extractIsolatedCalls session @?= []

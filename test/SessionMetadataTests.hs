@@ -367,7 +367,7 @@ waitingSession = do
                 , tcEntityId = Nothing
                 , tcDeliveredLate = False
                 }
-    let partial = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [deferred] []
+    let partial = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [deferred] [] False
     pure sess{turns = PartialUserTurn partial Nothing : sess.turns}
 
 sessionIdString :: SessionId -> String

@@ -356,7 +356,7 @@ executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery mailEnvelop
             else pure (sess, uQuery, mailEnvelopes)
 
     -- Decide whether we can emit a full user turn or need a partial one.
-    let content = PartialUserTurnContent sPrompt sTools uQuery' processedOrdered mailEnvelopes'
+    let content = PartialUserTurnContent sPrompt sTools uQuery' processedOrdered mailEnvelopes' False
     if all (isFinalToolCallState . tcState) processedOrdered
         then do
             let responses0 = partialToolMessages content
@@ -377,8 +377,15 @@ executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery mailEnvelop
             sess'' <- pushTurn sess' (UserTurn (UserTurnContent sPrompt sTools uQueryFinal responses mailEnvelopes') (Just byteUsage))
             pure (agent, Right sess'')
         else do
-            let uQueryPartial = mergeUserQueries uQuery' (mailQuery mailEnvelopes')
-                contentMerged = content{pUserQuery = uQueryPartial}
+            -- With 'ctxMailInToolResult' the mail stays out of the query: it is
+            -- rendered into the last placeholder when the turn is shown to the
+            -- LLM ('partialTurnForLlm') and folded once when the round
+            -- completes, so it is delivered exactly once either way.
+            let foldsMail = agent.ctxMailInToolResult
+                uQueryPartial
+                    | foldsMail = uQuery'
+                    | otherwise = mergeUserQueries uQuery' (mailQuery mailEnvelopes')
+                contentMerged = content{pUserQuery = uQueryPartial, pMailInToolResult = foldsMail}
             let byteUsage = calculatePartialTurnByteUsage sPrompt sTools uQueryPartial processedOrdered
             sess'' <- pushTurn sess' (PartialUserTurn contentMerged (Just byteUsage))
             pure (agent, Right sess'')
@@ -1037,6 +1044,19 @@ applyContinuationMail agent envelopes sess =
                             cache.cacheStore key $ CachedResult result now Nothing
                     forM_ agent.ctxContinuationStore $ \store -> void $ csComplete store token result
                     pure tc{tcState = Completed, tcResult = Just result}
+
+{- | A partial turn as the LLM sees it: its user query and one tool message per
+call, with the round's mail rendered into the last placeholder or result when
+the turn carries it that way ('pMailInToolResult'), else into the query.
+-}
+partialTurnForLlm :: PartialUserTurnContent -> (Maybe UserQuery, [(LlmToolCall, UserToolResponse)])
+partialTurnForLlm content = case (content.pMailInToolResult, mailQuery content.pUserMail) of
+    (True, Just block)
+        | null messages -> (mergeUserQueries content.pUserQuery (Just block), messages)
+        | otherwise -> (content.pUserQuery, zip (map fst messages) (appendMailToLastToolResult block (map snd messages)))
+    _ -> (content.pUserQuery, messages)
+  where
+    messages = partialToolMessages content
 
 {- | Render mail as a user message, one block per envelope with a header the
 model can quote back (§2, "What the LLM sees"). 'Control' envelopes are
