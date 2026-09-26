@@ -578,8 +578,12 @@ why it is last.
   `Error: <reason>` rather than a new `UserToolResponse` variant. Still no view
   for `hook.failed`.
 * Service packaging: docs only, no unit file shipped, no `bundling/` entry.
-* `checks/` fake endpoint cannot script multi-turn answers, so sub-agent
-  and tool-call flows have no pty end-to-end test.
+* `checks/lib/fake_llm.py` scripts multi-turn answers (text and tool calls,
+  matched on request index, system prompt, last message or offered tools);
+  pty end-to-end checks now cover a sub-agent call as a child session
+  (`checks/phase5-subagent-e2e`) and deferred calls answered, failed or picked
+  from the Pending panel (`checks/phase5-pending-e2e`). Not covered yet:
+  interrupts, and the same flows with `tui --attach`.
 * D8's out-of-scope items: multi-server Postgres, mid-`RunAsync` durability,
   per-owner API keys.
 
