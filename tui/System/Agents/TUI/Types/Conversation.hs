@@ -37,6 +37,7 @@ module System.Agents.TUI.Types.Conversation (
     selectedPendingCall,
     nextPendingToken,
     failedCallText,
+    hookFailedStatusText,
 
     -- * Utility Functions
     updateConversationSession,
@@ -236,6 +237,12 @@ failedCallText :: Text -> Text
 failedCallText reason
     | Text.null (Text.strip reason) = "Error: the user declined this call"
     | otherwise = "Error: " <> Text.strip reason
+
+{- | The status-bar line for a @hook.failed@ event: the run continues (a
+hook failure is not a session failure), so this is only a notification.
+-}
+hookFailedStatusText :: Text -> Text
+hookFailedStatusText msg = "Hook failed: " <> Text.strip msg
 
 -------------------------------------------------------------------------------
 -- Utility Functions

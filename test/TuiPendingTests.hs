@@ -22,7 +22,7 @@ import System.Agents.Session.Base (
     ContinuationToken (..),
     ToolCallId (..),
  )
-import System.Agents.TUI.Types (failedCallText, nextPendingToken, pendingSummaryLine, selectedPendingCall)
+import System.Agents.TUI.Types (failedCallText, hookFailedStatusText, nextPendingToken, pendingSummaryLine, selectedPendingCall)
 
 mkCall :: Aeson.Value -> DeferredCallView
 mkCall name =
@@ -80,4 +80,6 @@ tests =
             failedCallText "  no way  " @?= "Error: no way"
             failedCallText "" @?= "Error: the user declined this call"
             failedCallText "  \n " @?= "Error: the user declined this call"
+        , testCase "hookFailedStatusText names the failure and trims" $
+            hookFailedStatusText " before hook failed, denying: boom\n" @?= "Hook failed: before hook failed, denying: boom"
         ]
