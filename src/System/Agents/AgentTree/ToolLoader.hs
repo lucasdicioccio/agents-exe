@@ -20,6 +20,10 @@ module System.Agents.AgentTree.ToolLoader (
     -- * Tool loading
     loadAgentTools,
 
+    -- * MCP server environment
+    resolveMcpEnv,
+    mergeMcpEnv,
+
     -- * Loading errors
     LoadingError (..),
 ) where
@@ -30,6 +34,8 @@ import qualified Data.Aeson as Aeson
 import Data.Either (partitionEithers)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
+import qualified Data.ByteString.Lazy.Char8 as LChar8
+import System.Environment (getEnvironment)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Prod.Tracer (Tracer (..), contramap)
@@ -59,6 +65,7 @@ import System.Agents.Base (
     SystemToolboxDescription (..),
  )
 import System.Agents.SessionStore (SessionCatalog)
+import System.Agents.Tools.Bindings.Types (BindingValue (..))
 import System.Agents.ToolRegistration (ToolRegistration)
 import qualified System.Agents.ToolRegistration as ToolReg
 import System.Agents.ToolSchema (getToolName)
@@ -67,7 +74,7 @@ import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
 import System.Agents.Tools.Activation (Activation)
 import qualified System.Agents.Tools.Params as ParamsResolve
-import System.Agents.Tools.Params.Types (ParameterDecl (..), Params, ProcessParams)
+import System.Agents.Tools.Params.Types (ParamValue (..), ParameterDecl (..), Params, ProcessParams)
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import qualified System.Agents.Tools.LuaToolbox as LuaToolbox
 import qualified System.Agents.Tools.McpToolbox as McpToolbox
@@ -163,7 +170,7 @@ loadAgentTools tracer baseDir apiKeysFile sessionStore processParams agent tools
             | not (null missingRequired)
             ]
     (bashErr, bashExpose) <- loadBashTools tracer resolvedParams agent toolsTVar
-    mcpErr <- loadMcpServers tracer agent toolsTVar releaseTVar
+    mcpErr <- loadMcpServers tracer resolvedParams agent toolsTVar releaseTVar
     (openApiErr, openApiExpose) <- loadOpenAPIToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
     (postgrestErr, postgrestExpose) <- loadPostgRESToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
     builtinErr <- loadBuiltinToolboxes tracer sessionStore agent toolsTVar
@@ -289,17 +296,18 @@ and applied to all tools from that server via registerMcpToolInLLM.
 -}
 loadMcpServers ::
     Tracer IO Trace ->
+    Params ->
     Agent ->
     TVar [ToolRegistration] ->
     TVar [IO ()] ->
     IO (Maybe LoadingError)
-loadMcpServers tracer agent toolsTVar releaseTVar = do
+loadMcpServers tracer resolvedParams agent toolsTVar releaseTVar = do
     let servers = fromMaybe [] (mcpServers agent)
 
     if null servers
         then pure Nothing
         else do
-            errors <- mapM (loadMcpServer (contramap McpToolboxTrace tracer) toolsTVar releaseTVar) servers
+            errors <- mapM (loadMcpServer (contramap McpToolboxTrace tracer) resolvedParams toolsTVar releaseTVar) servers
             pure $ collectFirstError errors
 
 {- | Load a single MCP server and register its tools.
@@ -307,12 +315,56 @@ Catches exceptions during initialization and returns a graceful error.
 -}
 loadMcpServer ::
     Tracer IO McpToolbox.Trace ->
+    Params ->
     TVar [ToolRegistration] ->
     TVar [IO ()] ->
     McpServerDescription ->
     IO (Maybe LoadingError)
-loadMcpServer tracer toolsTVar releaseTVar (McpSimpleBinary config) = do
-    let proc = System.Process.proc config.executable (map Text.unpack config.args)
+loadMcpServer tracer resolvedParams toolsTVar releaseTVar (McpSimpleBinary config) =
+    case resolveMcpEnv resolvedParams (fromMaybe Map.empty config.env) of
+        Left msg -> pure $ Just $ McpLoadingError (Text.unpack config.name ++ ": " ++ Text.unpack msg)
+        Right extraEnv -> startMcpServer tracer toolsTVar releaseTVar config extraEnv
+
+{- | Resolve the @env@ of an MCP server to process environment entries.
+
+The server starts once per agent tree, so only literals and parameters
+resolved at load time (process scope) are accepted; anything else is an
+error saying why. The error never carries a value.
+-}
+resolveMcpEnv :: Params -> Map.Map Text.Text BindingValue -> Either Text.Text [(String, String)]
+resolveMcpEnv params = mapM resolveOne . Map.toList
+  where
+    resolveOne (var, Literal v) = Right (Text.unpack var, valueText v)
+    resolveOne (var, Param p) = case Map.lookup p params of
+        Just pv -> Right (Text.unpack var, valueText pv.pvValue)
+        Nothing ->
+            Left $
+                "env variable '" <> var <> "' is bound to parameter '" <> p
+                    <> "', which has no value at load time (an MCP server starts once per agent tree, so only process-scope parameters can be used; set it with --set or give it a default)"
+    valueText (Aeson.String t) = Text.unpack t
+    valueText v = LChar8.unpack (Aeson.encode v)
+
+-- | The configured variables added on top of the inherited environment (they win on a clash).
+mergeMcpEnv :: [(String, String)] -> [(String, String)] -> [(String, String)]
+mergeMcpEnv extra inherited = Map.toList (Map.fromList extra `Map.union` Map.fromList inherited)
+
+startMcpServer ::
+    Tracer IO McpToolbox.Trace ->
+    TVar [ToolRegistration] ->
+    TVar [IO ()] ->
+    McpSimpleBinaryConfiguration ->
+    [(String, String)] ->
+    IO (Maybe LoadingError)
+startMcpServer tracer toolsTVar releaseTVar config extraEnv = do
+    let baseProc = System.Process.proc config.executable (map Text.unpack config.args)
+    -- The inherited environment, with the configured variables added on top.
+    -- Only set when there is something to add, so the default is unchanged.
+    proc <-
+        if null extraEnv
+            then pure baseProc
+            else do
+                inherited <- getEnvironment
+                pure baseProc{System.Process.env = Just (mergeMcpEnv extraEnv inherited)}
 
     -- Try to initialize the MCP toolbox with activation from config
     initResult <- try $ McpToolbox.initializeMcpToolbox tracer config.name proc config.mcpActivation

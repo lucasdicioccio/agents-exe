@@ -14,7 +14,7 @@ import Data.Conduit.TMChan
 import qualified Network.JSONRPC as Rpc
 import Prod.Tracer (Tracer, runTracer)
 import System.Exit (ExitCode)
-import System.Process (CreateProcess)
+import System.Process (CreateProcess (..))
 import UnliftIO (Async, MonadUnliftIO, async, atomically, liftIO, newEmptyTMVar, readTVar, takeTMVar, wait, withAsync, writeTVar)
 
 import Control.Monad (forM, liftM, unless)
@@ -44,17 +44,23 @@ initRuntime tracer proc = do
     inChan <- newTBMChanIO 1024 :: IO (TBMChan (Flush ByteString))
     let process :: IO ExitCode
         process = do
-            runTracer tracer (RunCommandStart proc)
+            runTracer tracer (RunCommandStart (redactEnv proc))
             (code, _, _) <-
                 sourceProcessWithStreams
                     proc
                     (sourceTBMChan inChan .| discardFlush .| dupToTraces tracer In)
                     (dupToTraces tracer Out .| sinkTBMChan outChan)
                     (dupToTraces tracer Err .| C.sinkNull)
-            runTracer tracer (RunCommandStopped proc code)
+            runTracer tracer (RunCommandStopped (redactEnv proc) code)
             pure code
     a <- async $ process
     pure $ Runtime a inChan outChan
+
+{- | The process description as traced: environment values are replaced, since
+they may carry secret parameters (the names stay, to show what was set).
+-}
+redactEnv :: CreateProcess -> CreateProcess
+redactEnv p = p{env = fmap (map (\(k, _) -> (k, "<redacted>"))) (env p)}
 
 dupToTraces :: Tracer IO RunTrace -> BufferStream -> ConduitT ByteString ByteString IO ()
 dupToTraces tracer s = do

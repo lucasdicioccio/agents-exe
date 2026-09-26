@@ -1499,6 +1499,7 @@ Example configuration:
     "name": "filesystem",
     "executable": "/usr/bin/mcp-filesystem",
     "args": ["--readonly"],
+    "env": {"API_TOKEN": {"tag": "Param", "contents": "api_token"}, "MODE": {"tag": "Literal", "contents": "ro"}},
     "lifetime": "conversation",
     "activation": {"tag": "first-n-steps", "steps": 5, "sticky": "sticky-if-used"}
   }
@@ -1515,6 +1516,13 @@ data McpSimpleBinaryConfiguration
     -- ^ Command-line arguments for the executable
     , mcpActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
+    , env :: Maybe (Map Text BindingValue)
+    {- ^ Extra environment variables for the server process, added to (and
+    overriding) the inherited environment. Values are 'Literal's or
+    'Param's; the server starts once per agent tree, so a 'Param' must be
+    resolvable at load time (process scope), and secret values never
+    appear in argv or traces.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 

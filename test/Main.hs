@@ -48,6 +48,7 @@ import qualified BindingsTests
 import qualified FileSandboxPredicateTests
 import qualified SkillsTests
 -- Import MCP Implementation tests
+import qualified McpEnvTests
 import qualified McpImplementationTests
 import qualified McpProgressTests
 -- Import ToolPortal tests
@@ -138,6 +139,7 @@ tests =
         , ModelCatalogTests.tests
         , McpImplementationTests.mcpImplementationTestSuite
         , McpProgressTests.tests
+        , McpEnvTests.tests
         , ToolPortalTests.toolPortalTestSuite
         , LuaToolboxSecurityTests.tests
         , LuaToolboxTests.luaToolboxTests
