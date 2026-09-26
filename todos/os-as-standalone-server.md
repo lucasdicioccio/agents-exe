@@ -569,7 +569,7 @@ why it is last.
   avoids the module cycle). A narrowed child is pinned live (never evicted);
   the narrowing is not persisted, so after a restart a resumed narrowed child
   runs un-narrowed (bindings may be secret).
-* `mailInToolResult`: partial-turn placeholders lack the round's mail.
+* `mailInToolResult`: done -- a partial turn holds the round's mail out of its query (`pMailInToolResult`) and renders it into the last placeholder (`partialTurnForLlm`); folded once when the round completes.
 * G11: secret params, watches and the run handle are volatile (D7 stands);
   since 2026-09-25 `recoverOnStartup` fails the running calls of a session
   whose required params were lost, with a `params_required` detail.

@@ -32,6 +32,7 @@ import System.Agents.Session.Step (
     calculatePartialTurnByteUsage,
     calculateUserTurnByteUsage,
     getPartialTurn,
+    partialTurnForLlm,
     runStepM,
  )
 import System.Agents.Tools.Cache (CachedResult (..), ToolCache (..), computeCacheKey, isUncacheableKey)
@@ -147,17 +148,19 @@ wakeSessionWith mStore mCache session responses = do
     makeTurn :: PartialUserTurnContent -> [TrackedToolCall] -> Turn
     makeTurn partial tracked
         | all (isFinalToolCallState . tcState) tracked =
-            let content = PartialUserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked (pUserMail partial)
-                completed = partialToolMessages content
+            let content = partial{pTrackedToolCalls = tracked}
+                -- The round's mail is folded into the last tool result now
+                -- (or the query), once, when it was held back from the query.
+                (query, completed) = partialTurnForLlm content
                 byteUsage =
                     calculateUserTurnByteUsage
                         (pUserPrompt partial)
                         (pUserTools partial)
-                        (pUserQuery partial)
+                        query
                         (map snd completed)
-             in UserTurn (UserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) completed (pUserMail partial)) (Just byteUsage)
+             in UserTurn (UserTurnContent (pUserPrompt partial) (pUserTools partial) query completed (pUserMail partial)) (Just byteUsage)
         | otherwise =
-            let content = PartialUserTurnContent (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked (pUserMail partial)
+            let content = partial{pTrackedToolCalls = tracked}
                 byteUsage = calculatePartialTurnByteUsage (pUserPrompt partial) (pUserTools partial) (pUserQuery partial) tracked
              in PartialUserTurn content (Just byteUsage)
 

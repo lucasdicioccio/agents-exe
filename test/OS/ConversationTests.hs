@@ -1157,7 +1157,7 @@ toolCallStatusTests =
                         }
             let session =
                     Session.Session
-                        { Session.turns = [Session.PartialUserTurn (Session.PartialUserTurnContent (Session.SystemPrompt "test") [] Nothing [tracked] []) Nothing]
+                        { Session.turns = [Session.PartialUserTurn (Session.PartialUserTurnContent (Session.SystemPrompt "test") [] Nothing [tracked] [] False) Nothing]
                         , Session.sessionId = sessId
                         , Session.forkedFromSessionId = Nothing
                         , Session.turnId = turnId

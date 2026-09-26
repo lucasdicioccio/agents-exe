@@ -257,7 +257,7 @@ orphanedCallResolves = do
                 , tcEntityId = Just (EntityId UUID.nil)
                 , tcDeliveredLate = False
                 }
-    let partial = PartialUserTurnContent (SystemPrompt "test") [] Nothing [tracked] []
+    let partial = PartialUserTurnContent (SystemPrompt "test") [] Nothing [tracked] [] False
     let s0 = (sessionWithCalls [tracked.tcCall]){turns = [PartialUserTurn partial Nothing, llmTurnWith [tracked.tcCall]]}
     let agent = mkAgent world YieldWhenAllDone (\_ _ -> pure $ TextResponse "unused")
     (_, s1) <- stepOk agent s0
@@ -461,8 +461,8 @@ activityViewPrune = do
     t <- getCurrentTime
     let done = applyToolCallActivity (activity t ToolCallCompleted) Map.empty
         runningCall = trackedCall Running
-        stillRunning = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [runningCall] []) Nothing]}
-        caughtUp = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [trackedCall Completed] []) Nothing]}
+        stillRunning = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [runningCall] [] False) Nothing]}
+        caughtUp = (sessionWithCalls []){turns = [PartialUserTurn (PartialUserTurnContent (SystemPrompt "p") [] Nothing [trackedCall Completed] [] False) Nothing]}
     Map.size (pruneToolCallViews stillRunning done) @?= 1
     Map.size (pruneToolCallViews caughtUp done) @?= 0
     let started = applyToolCallActivity (activity t ToolCallStarted) Map.empty
@@ -799,7 +799,7 @@ placeholderIncludesChildSessionId :: Assertion
 placeholderIncludesChildSessionId = do
     childSid <- newSessionId
     let tc = (trackedCall Running){tcChildSessionId = Just childSid}
-        content = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [tc] []
+        content = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [tc] [] False
     case partialToolMessages content of
         [(_, JsonResponse (Object obj))] ->
             KeyMap.lookup "childSessionId" obj @?= Just (toJSON childSid)
@@ -809,7 +809,7 @@ placeholderIncludesChildSessionId = do
 placeholderOmitsChildSessionIdByDefault :: Assertion
 placeholderOmitsChildSessionIdByDefault = do
     let tc = trackedCall Running
-        content = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [tc] []
+        content = PartialUserTurnContent (SystemPrompt "sys") [] Nothing [tc] [] False
     case partialToolMessages content of
         [(_, JsonResponse (Object obj))] ->
             assertBool "no childSessionId key" (not (KeyMap.member "childSessionId" obj))
@@ -875,7 +875,7 @@ markdownPartialTurn :: Assertion
 markdownPartialTurn = do
     let done = (trackedCall Completed){tcCall = mkCall "call_done" "done", tcResult = Just (TextResponse "done-output")}
         running = (trackedCall Running){tcCall = mkCall "call_run" "run"}
-        partial = PartialUserTurnContent (SystemPrompt "p") [] Nothing [done, running] []
+        partial = PartialUserTurnContent (SystemPrompt "p") [] Nothing [done, running] [] False
         sess = (sessionWithCalls []){turns = [PartialUserTurn partial Nothing]}
         opts =
             SessionPrintOptions

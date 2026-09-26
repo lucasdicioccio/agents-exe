@@ -304,7 +304,7 @@ sessionLeftRunning sid = do
     let running =
             TrackedToolCall callId slowCall Running Nothing Nothing (AppliedPolicy (RunAsync Nothing) Nothing) Nothing False Nothing Nothing Nothing
         llm = LlmTurn (LlmTurnContent (LlmResponse Nothing Nothing Aeson.Null Nothing) [slowCall]) Nothing
-        partial = PartialUserTurn (PartialUserTurnContent (SystemPrompt "sys") [] Nothing [running] []) Nothing
+        partial = PartialUserTurn (PartialUserTurnContent (SystemPrompt "sys") [] Nothing [running] [] False) Nothing
     pure sess0{turns = partial : llm : sess0.turns}
 
 recoveryTest :: Assertion

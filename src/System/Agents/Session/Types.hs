@@ -1664,7 +1664,13 @@ data PartialUserTurnContent = PartialUserTurnContent
     , pTrackedToolCalls :: [TrackedToolCall]
     -- ^ All tool calls in this turn with their lifecycle state
     , pUserMail :: [Envelope]
-    -- ^ Mail folded into 'pUserQuery' (see 'userMail').
+    -- ^ Mail of this turn (see 'userMail').
+    , pMailInToolResult :: Bool
+    {- ^ The agent has @mailInToolResult@ on: 'pUserMail' is /not/ in
+    'pUserQuery' but rendered into the last placeholder or result when the
+    turn is shown to the LLM (@Session.Step.partialTurnForLlm@), and once
+    when the round completes. When off, the mail is already in 'pUserQuery'.
+    -}
     }
     deriving (Show, Eq, Ord, Generic)
 
@@ -1677,6 +1683,7 @@ instance ToJSON PartialUserTurnContent where
             , "trackedToolCalls" .= content.pTrackedToolCalls
             ]
                 ++ ["userMail" .= content.pUserMail | not (null content.pUserMail)]
+                ++ ["mailInToolResult" .= True | content.pMailInToolResult]
 
 instance FromJSON PartialUserTurnContent where
     parseJSON = Aeson.withObject "PartialUserTurnContent" $ \v ->
@@ -1689,6 +1696,7 @@ instance FromJSON PartialUserTurnContent where
                 <*> trackedV .:? "userQuery"
                 <*> trackedV .: "trackedToolCalls"
                 <*> trackedV .:? "userMail" .!= []
+                <*> trackedV .:? "mailInToolResult" .!= False
 
         parseLegacy legacyV = do
             prompt <- legacyV .: "userPrompt"
@@ -1700,7 +1708,7 @@ instance FromJSON PartialUserTurnContent where
             unless (null continuations) $
                 fail "Legacy pending continuations cannot be migrated; use the new durable format"
             tracked <- migrateLegacyPartialTurn completed pending
-            pure $ PartialUserTurnContent prompt tools query tracked []
+            pure $ PartialUserTurnContent prompt tools query tracked [] False
 
 -- | Convert a legacy partial turn (completed + pending calls) into tracked calls.
 migrateLegacyPartialTurn ::

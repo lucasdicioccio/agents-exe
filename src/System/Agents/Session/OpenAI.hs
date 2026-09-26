@@ -23,6 +23,7 @@ import qualified System.Agents.LLMs.OpenAI as OpenAI
 
 import System.Agents.Media.Types (ContentPart (..), MediaAttachment (..))
 import System.Agents.Session.Base
+import System.Agents.Session.Step (partialTurnForLlm)
 import System.Agents.ToolSchema
 
 -------------------------------------------------------------------------------
@@ -301,13 +302,12 @@ mkOpenAICompletion config completion = do
         -- Partial user turns: one tool message per call, with a placeholder
         -- for calls that were still running when the LLM saw this turn
         let
-            mQuery = turn.pUserQuery
+            (mQuery, toolResponses) = partialTurnForLlm turn
             -- Extract media from the query
             mediaAttachments = case mQuery of
                 Nothing -> []
                 Just (UserQuery _ media) -> media
             userMsg = userQueryToMessages mQuery mediaAttachments
-            toolResponses = partialToolMessages turn
             toolMsgs = concatMap toolResponseToMessages toolResponses
          in
             toolMsgs ++ userMsg
