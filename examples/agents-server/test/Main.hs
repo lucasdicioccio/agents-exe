@@ -872,6 +872,9 @@ uiPageTest = do
             , -- attachments: the picker, and the key the API wants
               "type='file'"
             , "mediaPayload"
+            , -- the parameter form: rendered from the descriptor, sent as params
+              "showParams"
+            , "paramValues"
             ]
 
 {- | @EventSource@ cannot set headers, so the event stream also takes the
