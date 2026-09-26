@@ -1,5 +1,7 @@
 # agq — Agent Queue
 
+> **Status: frozen.** `agq` is in maintenance mode: no new features are planned, and bug fixes only when something breaks. Prefer an external planning and claiming workflow for new work; the part worth keeping is running an agent on a task (worktree, hooks, session storage, PR).
+
 A standalone Haskell binary that schedules and runs agentic tasks with DAG dependency enforcement, tag-based locking, and GitHub issue integration.
 
 - Tasks declare dependencies by **name**; `agq` only schedules a task once all its deps are `done`.
