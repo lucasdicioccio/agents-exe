@@ -29,15 +29,20 @@ data SessionIndexOptions = SessionIndexOptions
     { optIndexOperation :: IndexOperation
     , optIndexDbPath :: Maybe FilePath
     , optIndexSessionStore :: SessionStore.SessionStore
+    , optIndexSessionsDb :: Maybe FilePath
+    -- ^ SQLite sessions database to index too (default: next to the sessions directory, when present)
     , optIndexIncludeToolOutputs :: Bool
     }
     deriving (Show, Eq)
 
 -- | Handle the session-index command
 handleSessionIndex :: SessionIndexOptions -> IO ()
-handleSessionIndex opts = do
-    let config = buildIndexConfig opts
+handleSessionIndex opts =
+    SessionStore.withStoredSessions opts.optIndexSessionStore opts.optIndexSessionsDb $ \catalog _ ->
+        runIndexOperation opts (buildIndexConfig opts catalog)
 
+runIndexOperation :: SessionIndexOptions -> SearchIndexConfig -> IO ()
+runIndexOperation opts config =
     case opts.optIndexOperation of
         IndexBuild -> do
             Text.putStrLn "Building search index..."
@@ -56,11 +61,11 @@ handleSessionIndex opts = do
             Text.putStrLn "Index removed."
 
 -- | Build the search index configuration from options.
-buildIndexConfig :: SessionIndexOptions -> SearchIndexConfig
-buildIndexConfig opts =
+buildIndexConfig :: SessionIndexOptions -> SessionStore.SessionCatalog -> SearchIndexConfig
+buildIndexConfig opts catalog =
     SearchIndexConfig
         { indexDbPath = fromMaybe ".agents-search.db" opts.optIndexDbPath
-        , indexSessionStore = opts.optIndexSessionStore
+        , indexCatalog = catalog
         , indexIncludeToolOutputs = opts.optIndexIncludeToolOutputs
         }
 

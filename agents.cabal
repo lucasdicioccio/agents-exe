@@ -568,6 +568,7 @@ test-suite agents-tests
                     , HostLegacySessionTests
                     , SessionEditTests
                     , SessionDurableTests
+                    , SessionSearchBackendTests
                     , SessionMetadataTests
                     , SessionPrintTests
                     , SkillsTests

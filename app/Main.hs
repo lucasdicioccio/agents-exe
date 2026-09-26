@@ -869,6 +869,7 @@ parseSessionIndexOptions sessionStore =
         <$> parseIndexOperation
         <*> optional (strOption (long "db-path" <> metavar "PATH" <> help "Path to search index database"))
         <*> pure sessionStore
+        <*> optional (strOption (long "sessions-db" <> metavar "PATH" <> help "SQLite sessions database to include (default: agents-server.db next to the sessions directory, when it exists)"))
         <*> switch (long "include-tool-outputs" <> help "Include tool outputs in the index")
 
 parseIndexOperation :: Parser IndexOperation
@@ -891,6 +892,7 @@ parseSessionSearchOptions sessionStore =
         <$> strArgument (metavar "QUERY" <> help "Search query text")
         <*> optional (strOption (long "db-path" <> metavar "PATH" <> help "Path to search index database"))
         <*> pure sessionStore
+        <*> optional (strOption (long "sessions-db" <> metavar "PATH" <> help "SQLite sessions database to include (default: agents-server.db next to the sessions directory, when it exists)"))
         <*> optional parseDateFilter
         <*> many (strOption (long "tool" <> metavar "TOOL" <> help "Filter by tool name (can be specified multiple times)"))
         <*> optional (strOption (long "agent" <> metavar "AGENT" <> help "Filter by agent slug"))
@@ -1128,6 +1130,7 @@ parseSessionCompleteCommand =
     SessionDurableCmd.SessionComplete
         <$> parseContinuationTokenArgument
         <*> strArgument (metavar "RESULTFILE" <> help "Path to a JSON or plain-text result file")
+        <*> optional (strOption (long "sessions-db" <> metavar "PATH" <> help "SQLite sessions database to look in (default: agents-server.db next to the sessions directory, when it exists)"))
 
 parseSessionRunIsolatedCommand :: Parser SessionDurableCmd.SessionDurableCommand
 parseSessionRunIsolatedCommand =

@@ -47,6 +47,10 @@ module System.Agents.SessionStore (
     CatalogEntry (..),
     fileCatalog,
     backendCatalog,
+    unionCatalog,
+    defaultSessionsDatabase,
+    withSqliteBackendIfPresent,
+    withStoredSessions,
     isFileBusy,
 
     -- * File Backend
@@ -111,7 +115,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
 import Data.Time (UTCTime, getCurrentTime)
 import qualified Data.UUID as UUID
-import Database.SQLite.Simple (Connection, Only (..), Query (..), execute, execute_, query, query_, withTransaction, (:.) (..))
+import Database.SQLite.Simple (Connection, Only (..), Query (..), execute, execute_, query, query_, withConnection, withTransaction, (:.) (..))
 import Database.SQLite.Simple.QQ (sql)
 import Database.SQLite.Simple.ToField (toField)
 import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, getModificationTime, listDirectory, removeFile)
@@ -1136,6 +1140,8 @@ data CatalogEntry = CatalogEntry
     -- ^ 'Nothing' when the session cannot be read, e.g. a locked file.
     , ceBusy :: Bool
     -- ^ Being written: a locked file, or a running session.
+    , cePath :: Maybe FilePath
+    -- ^ The file holding the session; 'Nothing' outside the file store.
     }
 
 {- | Read-only access to stored sessions, for tools that inspect them.
@@ -1167,6 +1173,7 @@ fileCatalog store =
                         , ceUpdatedAt = Just info.sessionInfoModTime
                         , ceSession = mSess
                         , ceBusy = busy
+                        , cePath = Just info.sessionInfoPath
                         }
         , catRead = readSession store
         }
@@ -1185,9 +1192,64 @@ backendCatalog backend =
                         , ceUpdatedAt = Just meta.smUpdatedAt
                         , ceSession = mSess
                         , ceBusy = meta.smStatus == StatusRunning
+                        , cePath = Nothing
                         }
         , catRead = sbLoad backend . conversationIdToSessionId
         }
+
+{- | Several catalogs as one: sessions are deduplicated by conversation ID,
+the earliest catalog winning, and read from the first catalog that has them.
+-}
+unionCatalog :: [SessionCatalog] -> SessionCatalog
+unionCatalog cats =
+    SessionCatalog
+        { catList = do
+            entries <- concat <$> mapM catList cats
+            pure $ dedupeEntries entries
+        , catRead = \cid -> firstJust [catRead c cid | c <- cats]
+        }
+  where
+    dedupeEntries :: [CatalogEntry] -> [CatalogEntry]
+    dedupeEntries = go []
+      where
+        go :: [ConversationId] -> [CatalogEntry] -> [CatalogEntry]
+        go _ [] = []
+        go seen (e : es)
+            | e.ceConversationId `elem` seen = go seen es
+            | otherwise = e : go (e.ceConversationId : seen) es
+    firstJust [] = pure Nothing
+    firstJust (a : as) = a >>= maybe (firstJust as) (pure . Just)
+
+{- | Where @agents-exe serve@ and the TUI keep their SQLite sessions, unless
+told otherwise: next to the sessions directory.
+-}
+defaultSessionsDatabase :: SessionStore -> FilePath
+defaultSessionsDatabase store = store.sessionWritePrefix </> "agents-server.db"
+
+{- | Open the SQLite sessions database if there is one, without creating it,
+and run the action with its backend. Migrates the schema like a host does.
+-}
+withSqliteBackendIfPresent :: FilePath -> (Maybe SessionBackend -> IO a) -> IO a
+withSqliteBackendIfPresent path action = do
+    exists <- doesFileExist path
+    if not exists
+        then action Nothing
+        else withConnection path $ \conn -> do
+            _ <- query_ conn "PRAGMA busy_timeout = 5000" :: IO [Only Int]
+            mkSqliteSessionStore conn >>= action . Just
+
+{- | The sessions a CLI command can see: those in the SQLite database (the
+given path, else 'defaultSessionsDatabase') when it exists, then those in
+the file store. The backend is passed too, for commands that write back.
+-}
+withStoredSessions ::
+    SessionStore ->
+    Maybe FilePath ->
+    (SessionCatalog -> Maybe SessionBackend -> IO a) ->
+    IO a
+withStoredSessions store mdb action =
+    withSqliteBackendIfPresent (fromMaybe (defaultSessionsDatabase store) mdb) $ \mBackend ->
+        action (unionCatalog (maybe [] (pure . backendCatalog) mBackend <> [fileCatalog store])) mBackend
 
 -- | Whether a file is locked by a writer, so that it cannot be opened now.
 isFileBusy :: FilePath -> IO Bool
