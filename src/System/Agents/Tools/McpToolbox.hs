@@ -9,13 +9,14 @@ module System.Agents.Tools.McpToolbox (
 
     -- * Initialization
     initializeMcpToolbox,
+    stopMcpToolbox,
 
     -- * Synchronization
     waitForInitialDiscovery,
     waitForInitialDiscoveryTimeout,
 ) where
 
-import Control.Concurrent.Async (Async, async)
+import Control.Concurrent.Async (Async, async, cancel)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar, takeMVar, tryTakeMVar)
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TBMChan (newTBMChanIO, readTBMChan, writeTBMChan)
@@ -55,7 +56,15 @@ data Toolbox = Toolbox
     Stored from the McpSimpleBinaryConfiguration and applied to all tools
     from this MCP server during registration.
     -}
+    , stopToolbox :: IO ()
+    -- ^ Ends the client loop and the server's process; see 'stopMcpToolbox'.
     }
+
+{- | Stop the client loop and the server's child process. Calls still waiting
+on the toolbox never get an answer, so stop it only once nothing uses it.
+-}
+stopMcpToolbox :: Toolbox -> IO ()
+stopMcpToolbox = stopToolbox
 
 {- | Wait for the initial tool discovery to complete.
 This blocks until the first 'ToolsRefreshed' event is received from the MCP server.
@@ -108,7 +117,8 @@ initializeMcpToolbox ttracer tname proc mbActivation = do
     mcpRt <- McpClient.initRuntime rtTracer proc
     let props = LoopProps loopTracer nextToolCall
     ajob <- async (McpClient.runClient clientTracer mcpRt (McpClient.defaultLoop props))
-    pure $ Toolbox tname ajob discoveredTools doCallTool initialDiscoveryMVar mbActivation
+    let stop = cancel ajob >> cancel mcpRt.processAsync
+    pure $ Toolbox tname ajob discoveredTools doCallTool initialDiscoveryMVar mbActivation stop
 
 {- | Tracer that stores discovered tools in the TVar and signals completion
 via the MVar on the first 'ToolsRefreshed' event.

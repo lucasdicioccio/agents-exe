@@ -37,6 +37,7 @@ module System.Agents.AgentTree (
     loadAgentTreeConfig,
     loadAgentTree,
     loadAgentTreeFromConfig,
+    releaseAgentNode,
     LoadAgentResult (..),
     withAgentTree,
     LoadingError (..),
@@ -77,7 +78,7 @@ module System.Agents.AgentTree (
     autoEnableSkills,
 ) where
 
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, writeTVar)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, swapTVar, writeTVar)
 import Control.Monad (unless)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -243,6 +244,10 @@ data OSAgentNode = OSAgentNode
     agent-level, §7): the ones whose argument reappears in the schema when
     the parameter is unbound for the current session. Written once by
     'loadAgentToolboxes', alongside 'osNodeParams'; empty until then.
+    -}
+    , osNodeRelease :: TVar [IO ()]
+    {- ^ Actions that stop what loading this node's toolboxes started (MCP
+    server processes). Run once by 'releaseAgentNode'.
     -}
     }
 
@@ -710,6 +715,7 @@ createSingleAgent _props _graph registry (_agentSlug, node) = do
     toolsTVar <- newTVarIO []
     paramsTVar <- newTVarIO Map.empty
     exposeBindingsTVar <- newTVarIO []
+    releaseTVar <- newTVarIO []
 
     -- Create node
     let osNode =
@@ -721,6 +727,7 @@ createSingleAgent _props _graph registry (_agentSlug, node) = do
                 , osNodeTools = toolsTVar
                 , osNodeParams = paramsTVar
                 , osNodeExposeBindings = exposeBindingsTVar
+                , osNodeRelease = releaseTVar
                 }
 
     pure $ Right osNode
@@ -775,6 +782,7 @@ loadAgentToolboxes props nodeMap (nodeSlug, node) =
                     props.processParams
                     agent
                     (osNodeTools osNode)
+                    (osNodeRelease osNode)
             atomically $ writeTVar (osNodeParams osNode) resolvedParams
             -- Agent-level bindings (§8.1, Phase 6): applied after every
             -- toolbox has registered its tools, since @tool@ here matches
@@ -1371,10 +1379,20 @@ loadAgentTreeFromConfig props baseDir agent = do
         Right nodeMap -> do
             toolErrors <- wireToolReferences props graph nodeMap
             case NonEmpty.nonEmpty toolErrors of
-                Just errs -> pure $ Errors errs
+                Just errs -> mapM_ releaseAgentNode nodeMap >> pure (Errors errs)
                 Nothing -> case buildAgentTree graph nodeMap of
-                    Left errs -> pure $ Errors errs
+                    Left errs -> mapM_ releaseAgentNode nodeMap >> pure (Errors errs)
                     Right tree -> pure $ Initialized tree{osTreeRegistry = registry}
+
+{- | Stop what loading a node (and its helpers) started: its MCP servers.
+Each action runs once; releasing again does nothing. Sessions still using
+the node lose those tools, so release it only once none does.
+-}
+releaseAgentNode :: OSAgentNode -> IO ()
+releaseAgentNode node = do
+    actions <- atomically $ swapTVar (osNodeRelease node) []
+    sequence_ actions
+    mapM_ releaseAgentNode (osNodeChildren node)
 
 -- | Run an action with a loaded agent tree.
 withAgentTree :: Props -> (LoadAgentResult -> IO a) -> IO a

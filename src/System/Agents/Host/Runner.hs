@@ -117,7 +117,7 @@ import Prod.Tracer (contramap, runTracer)
 import System.Timeout (timeout)
 
 import System.Agents.AgentFactory (AgentDeps (..), AgentRole (..), buildAgent)
-import System.Agents.AgentTree (OSAgentNode (..))
+import System.Agents.AgentTree (OSAgentNode (..), releaseAgentNode)
 import qualified System.Agents.Tools.Bindings as Bindings
 import System.Agents.Tools.Bindings.Types (Binding (..), BindingValue (..), ScopedBinding (..), WhenUnbound (..))
 import qualified System.Agents.Base as Base
@@ -252,6 +252,11 @@ data LiveSession = LiveSession
     that agent, so an eviction, which would rebuild the agent from the
     session's slug alone, is refused while this is set.
     -}
+    , lsNode :: TVar (Maybe OSAgentNode)
+    {- ^ The root node 'lsAgent' was built from, so that a replaced or deleted
+    stored agent's node is only released once no session uses it
+    ('retireWhenUnused').
+    -}
     }
 
 -- | A versioned write lost to a writer outside this runner.
@@ -285,7 +290,21 @@ newSessionRunnerWith config host = do
             evictIdle runner
     let runner = SessionRunner host live events reaper watches seqVar ring ringSize
     atomically $ putTMVar self runner
+    setStoredNodeRetirement host (retireWhenUnused runner)
     pure runner
+
+{- | Release a node an edit took out of service (its MCP servers stop) once no
+live session runs an agent built from it. A session that has not been evicted
+keeps its agent, so this waits for eviction, like the "keep the previous
+version" rule of 'putStoredAgent'.
+-}
+retireWhenUnused :: SessionRunner -> OSAgentNode -> IO ()
+retireWhenUnused runner node = void $ async $ do
+    atomically $ do
+        lives <- readTVar runner.srLive
+        used <- traverse (readTVar . (.lsNode)) (Map.elems lives)
+        when (any (maybe False (\n -> osNodeTools n == osNodeTools node)) used) retry
+    releaseAgentNode node
 
 -- | How often idle sessions are looked for: half the idle time, within bounds.
 reaperInterval :: NominalDiffTime -> Int
@@ -340,6 +359,7 @@ getLive runner sid = do
             <*> newTVarIO Map.empty
             <*> newTVarIO False
             <*> newTVarIO False
+            <*> newTVarIO Nothing
 
 lookupLive :: SessionRunner -> SessionId -> IO (Maybe LiveSession)
 lookupLive runner sid = Map.lookup sid <$> readTVarIO runner.srLive
@@ -592,6 +612,7 @@ the agent.
 -}
 newAgent :: SessionRunner -> LiveSession -> OSAgentNode -> IO RunnerAgent
 newAgent runner live node = do
+    atomically $ writeTVar live.lsNode (Just node)
     let host = runner.srHost
         sid = live.lsSessionId
     let deps0
