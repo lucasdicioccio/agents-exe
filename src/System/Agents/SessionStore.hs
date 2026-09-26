@@ -32,6 +32,10 @@ module System.Agents.SessionStore (
     SessionLabels (..),
     noLabels,
     SessionMeta (..),
+    SessionSecurity (..),
+    noSecurity,
+    encodeSecurity,
+    decodeSecurity,
     freshSessionMeta,
     SessionQuery (..),
     allSessionsQuery,
@@ -92,6 +96,7 @@ module System.Agents.SessionStore (
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, bracket, catch, try)
 import Control.Monad (filterM, forM, forM_, unless)
+import qualified Data.Aeson.Types as AesonTypes
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
@@ -210,8 +215,43 @@ data SessionMeta = SessionMeta
     reach this field; they live only in the caller's in-memory session
     state.
     -}
+    , smSecurity :: SessionSecurity
+    {- ^ Whether the session is sealed and the digest of its session token
+    (@todos/tool-partial-application.md@ §5.1). Persisted with the session,
+    but only 'ssSealed' is ever serialized to a client: the digest never
+    leaves the server ('Aeson.ToJSON' omits it).
+    -}
     }
     deriving (Show, Eq)
+
+{- | The delegation controls of a session (@todos/tool-partial-application.md@
+§5.1): @seal@ freezes its parameters against everyone but its owner, and a
+session token is a bearer credential valid for that one session only.
+-}
+data SessionSecurity = SessionSecurity
+    { ssSealed :: Bool
+    -- ^ Parameters on messages, resumes and continuations are refused for non-owners.
+    , ssTokenDigest :: Maybe Text
+    -- ^ Lowercase hex SHA-256 of the session token, when one was minted. The token itself is never stored.
+    }
+    deriving (Show, Eq)
+
+-- | Not sealed, no session token.
+noSecurity :: SessionSecurity
+noSecurity = SessionSecurity False Nothing
+
+-- | The JSON kept in the @security@ column.
+encodeSecurity :: SessionSecurity -> Text
+encodeSecurity sec =
+    TextEnc.decodeUtf8 . LByteString.toStrict . Aeson.encode $
+        Aeson.object ["sealed" Aeson..= sec.ssSealed, "token_digest" Aeson..= sec.ssTokenDigest]
+
+-- | Read the @security@ column back; anything unreadable is 'noSecurity'.
+decodeSecurity :: Text -> SessionSecurity
+decodeSecurity txt =
+    fromMaybe noSecurity $ do
+        v <- Aeson.decodeStrict' (TextEnc.encodeUtf8 txt)
+        AesonTypes.parseMaybe (Aeson.withObject "security" $ \o -> SessionSecurity <$> (fromMaybe False <$> o Aeson..:? "sealed") <*> o Aeson..:? "token_digest") v
 
 instance Aeson.ToJSON SessionMeta where
     toJSON m =
@@ -226,6 +266,7 @@ instance Aeson.ToJSON SessionMeta where
             , "created_at" Aeson..= m.smCreatedAt
             , "updated_at" Aeson..= m.smUpdatedAt
             , "params" Aeson..= m.smParams
+            , "sealed" Aeson..= m.smSecurity.ssSealed
             ]
 
 instance Aeson.FromJSON SessionMeta where
@@ -241,6 +282,7 @@ instance Aeson.FromJSON SessionMeta where
             <*> v Aeson..: "created_at"
             <*> v Aeson..: "updated_at"
             <*> (fromMaybe Map.empty <$> v Aeson..:? "params")
+            <*> ((\sealed -> SessionSecurity (fromMaybe False sealed) Nothing) <$> v Aeson..:? "sealed")
 
 -- | Metadata for a session that was never stored (version 0).
 freshSessionMeta :: SessionId -> UTCTime -> SessionMeta
@@ -256,6 +298,7 @@ freshSessionMeta sid now =
         , smCreatedAt = now
         , smUpdatedAt = now
         , smParams = Map.empty
+        , smSecurity = noSecurity
         }
 
 {- | The metadata an unconditional store ('sbStoreLabelled') writes, given the
@@ -508,6 +551,8 @@ sessionMigrations =
         execute_ conn [sql| CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner, updated_at) |]
     , Migration 4 $ \conn ->
         execute_ conn [sql| ALTER TABLE sessions ADD COLUMN params TEXT NOT NULL DEFAULT '{}' |]
+    , Migration 5 $ \conn ->
+        execute_ conn [sql| ALTER TABLE sessions ADD COLUMN security TEXT NOT NULL DEFAULT '{}' |]
     ]
 
 -- | Create or migrate the SQLite session schema.
@@ -548,12 +593,12 @@ encodeSession = TextEnc.decodeUtf8 . LByteString.toStrict . Aeson.encode
 
 -- | Columns read into a 'SessionMeta', in 'MetaRow' order.
 metaColumns :: Text
-metaColumns = "session_id, agent_slug, parent_session_id, owner, status, status_detail, version, created_at, updated_at, params"
+metaColumns = "session_id, agent_slug, parent_session_id, owner, status, status_detail, version, created_at, updated_at, params, security"
 
-type MetaRow = (Text, Maybe Text, Maybe Text, Maybe Text, Text) :. (Maybe Text, Int, UTCTime, UTCTime, Text)
+type MetaRow = (Text, Maybe Text, Maybe Text, Maybe Text, Text) :. (Maybe Text, Int, UTCTime, UTCTime, Text, Text)
 
 metaFromRow :: MetaRow -> Maybe SessionMeta
-metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, updated, params)) = do
+metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, updated, params, security)) = do
     uuid <- UUID.fromText sid
     pure
         SessionMeta
@@ -567,6 +612,7 @@ metaFromRow ((sid, agent, parent, owner, status) :. (detail, version, created, u
             , smCreatedAt = created
             , smUpdatedAt = updated
             , smParams = fromMaybe Map.empty (Aeson.decodeStrict' (TextEnc.encodeUtf8 params))
+            , smSecurity = decodeSecurity security
             }
 
 -- | JSON-encode a map of session parameters for the @params@ column.
@@ -612,15 +658,15 @@ sqliteCompareAndStore conn meta sess = do
     let sid = sessionIdText meta.smSessionId
         columns =
             (now, encodeSession sess, meta.smAgent, sessionIdText <$> meta.smParent)
-                :. (meta.smOwner, sessionStatusText meta.smStatus, meta.smStatusDetail, encodeParams meta.smParams)
+                :. (meta.smOwner, sessionStatusText meta.smStatus, meta.smStatusDetail, encodeParams meta.smParams, encodeSecurity meta.smSecurity)
     rows <-
         if meta.smVersion == 0
             then
                 query
                     conn
                     [sql| INSERT INTO sessions
-                            (session_id, created_at, updated_at, json, agent_slug, parent_session_id, owner, status, status_detail, version, params)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                            (session_id, created_at, updated_at, json, agent_slug, parent_session_id, owner, status, status_detail, version, params, security)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                           ON CONFLICT(session_id) DO UPDATE SET
                             updated_at = excluded.updated_at,
                             json = excluded.json,
@@ -630,7 +676,8 @@ sqliteCompareAndStore conn meta sess = do
                             status = excluded.status,
                             status_detail = excluded.status_detail,
                             version = sessions.version + 1,
-                            params = excluded.params
+                            params = excluded.params,
+                            security = excluded.security
                           WHERE sessions.version = 0
                           RETURNING version, created_at |]
                     ((sid, now) :. columns)
@@ -639,7 +686,7 @@ sqliteCompareAndStore conn meta sess = do
                     conn
                     [sql| UPDATE sessions SET
                             updated_at = ?, json = ?, agent_slug = ?, parent_session_id = ?,
-                            owner = ?, status = ?, status_detail = ?, version = version + 1, params = ?
+                            owner = ?, status = ?, status_detail = ?, version = version + 1, params = ?, security = ?
                           WHERE session_id = ? AND version = ?
                           RETURNING version, created_at |]
                     (columns :. (sid, meta.smVersion))

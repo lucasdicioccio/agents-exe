@@ -43,6 +43,8 @@ module System.Agents.Host.Runner (
     createSession,
     createSessionAs,
     createSessionAsWithParent,
+    createSessionSecured,
+    updateSessionSecurity,
     spawnSession,
     sessionOwner,
     postMessage,
@@ -156,9 +158,11 @@ import System.Agents.Session.Wake (WakeOutcome (..), findSessionForToken, wakeSe
 import System.Agents.SessionStore (
     SessionMeta (..),
     SessionQuery (..),
+    SessionSecurity (..),
     VersionConflict,
     allSessionsQuery,
     freshSessionMeta,
+    noSecurity,
     sessionIdToConversationId,
  )
 import System.Agents.ToolRegistration (ToolRegistration (..))
@@ -688,6 +692,7 @@ serverRunSubagent runner rootNode parentSid slug narrowing prompt =
                     slug
                     node
                     (if narrowed then Just adjust else Nothing)
+                    noSecurity
                     (Just (NewMessage prompt [] False))
                     (Just UntilBlocked)
                     Map.empty
@@ -1311,27 +1316,52 @@ mail, not by handing its final result back to the caller).
 -}
 createSessionAsWithParent :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
 createSessionAsWithParent runner parent owner slug message mode supplied =
+    createSessionSecured runner parent owner slug message mode supplied noSecurity
+
+{- | 'createSessionAsWithParent' with the delegation controls of
+@todos/tool-partial-application.md@ §5.1: whether the session is sealed, and
+the digest of the session token minted for it (the token itself is never
+seen here). Recorded with the session from its very first version.
+-}
+createSessionSecured :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> SessionSecurity -> IO (Either RunnerError SessionMeta)
+createSessionSecured runner parent owner slug message mode supplied security =
     lookupAgent runner.srHost slug >>= \case
         Nothing -> pure $ Left $ UnknownAgent slug
-        Just node -> createSessionForNode runner parent owner slug node message mode supplied
+        Just node -> createSessionForNodeWith runner parent owner slug node Nothing security message mode supplied
 
-{- | Like 'createSessionAsWithParent', given an already-resolved
-'OSAgentNode' instead of a slug to look up on the host's root registry.
-Factored out for Phase 5 (@todos/os-as-standalone-server.md@ G10): a
-@prompt_agent_\<slug\>@ call already has the exact (possibly narrowed) node
-it wants to run in hand, and must not go through 'lookupAgent', which only
-knows about root-registered agents, not a caller's own declared helpers.
+{- | Change a session's delegation controls (e.g. revoke its session token)
+at any time, also while a run is active: the new value is stored with a
+compare-and-store on the session's current version (retried a few times when
+the run stores in between), and the run's own next store carries it on, since
+it starts from the latest stored version.
 -}
-createSessionForNode :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> OSAgentNode -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
-createSessionForNode runner parent owner slug node = createSessionForNodeWith runner parent owner slug node Nothing
+updateSessionSecurity :: SessionRunner -> SessionId -> (SessionSecurity -> SessionSecurity) -> IO (Either RunnerError SessionMeta)
+updateSessionSecurity runner sid change =
+    withLive runner sid $ \live -> attempt live (3 :: Int)
+  where
+    attempt live n =
+        loadLatest runner live >>= \case
+            Nothing -> pure $ Left $ UnknownSession sid
+            Just (sess, meta) ->
+                store runner live meta{smSecurity = change meta.smSecurity} sess meta.smStatus meta.smStatusDetail >>= \case
+                    Right meta' -> pure (Right meta')
+                    Left conflict
+                        | n > 1 -> attempt live (n - 1)
+                        | otherwise -> pure (Left (Conflict conflict))
 
-{- | 'createSessionForNode' for a narrowed helper: the built agent is passed
-through the given adjustment (its parameter overlay and inherited bindings)
-and kept as the session's agent, which then may not be evicted
-('lsNarrowed').
+{- | Like 'createSessionSecured', given an already-resolved 'OSAgentNode'
+instead of a slug to look up on the host's root registry. Factored out for
+Phase 5 (@todos/os-as-standalone-server.md@ G10): a @prompt_agent_\<slug\>@
+call already has the exact (possibly narrowed) node it wants to run in
+hand, and must not go through 'lookupAgent', which only knows about
+root-registered agents, not a caller's own declared helpers.
+
+For a narrowed helper the built agent is passed through the given
+adjustment (its parameter overlay and inherited bindings) and kept as the
+session's agent, which then may not be evicted ('lsNarrowed').
 -}
-createSessionForNodeWith :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> OSAgentNode -> Maybe (RunnerAgent -> RunnerAgent) -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
-createSessionForNodeWith runner parent owner slug node adjust message mode supplied = do
+createSessionForNodeWith :: SessionRunner -> Maybe SessionId -> Maybe Text -> Text -> OSAgentNode -> Maybe (RunnerAgent -> RunnerAgent) -> SessionSecurity -> Maybe NewMessage -> Maybe RunMode -> Map ParamName Aeson.Value -> IO (Either RunnerError SessionMeta)
+createSessionForNodeWith runner parent owner slug node adjust security message mode supplied = do
     sid <- newSessionId
     withLive runner sid $ \live -> do
       for_ adjust $ \f -> do
@@ -1343,7 +1373,7 @@ createSessionForNodeWith runner parent owner slug node adjust message mode suppl
             Left err -> pure (Left err)
             Right overlay -> do
                 now <- getCurrentTime
-                let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner, smParent = parent}
+                let meta0 = (freshSessionMeta sid now){smAgent = Just slug, smOwner = owner, smParent = parent, smSecurity = security}
                 sessionAgent runner live meta0 >>= \case
                     Left err -> pure (Left err)
                     Right agent -> case missingRequiredParams node agent overlay of

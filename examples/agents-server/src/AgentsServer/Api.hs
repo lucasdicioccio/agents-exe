@@ -34,7 +34,7 @@ import qualified Data.CaseInsensitive as CI
 import Data.Foldable (asum)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -45,7 +45,7 @@ import Network.HTTP.Types
 import Network.Wai
 import Text.Read (readMaybe)
 
-import AgentsServer.Auth (AuthTokens, authenticate, bearerToken)
+import AgentsServer.Auth (AuthTokens, authenticate, bearerToken, mintSessionToken, tokenDigest)
 import AgentsServer.Mcp (McpContext (..), handleMcp)
 import AgentsServer.OpenApi (apiDocument)
 import AgentsServer.UI (uiPage)
@@ -59,7 +59,7 @@ import System.Agents.Protocol (
  )
 import System.Agents.Session.Base (ContinuationToken (..), Priority (..), Session, SessionId (..), SessionStatus (..), UserToolResponse (..), parseSessionStatus, pendingDeferredCalls)
 import System.Agents.Session.Wake (findSessionForToken)
-import System.Agents.SessionStore (SessionMeta (..), SessionQuery (..), allSessionsQuery)
+import System.Agents.SessionStore (SessionMeta (..), SessionQuery (..), SessionSecurity (..), allSessionsQuery)
 import System.Agents.Tools.Params.Types (ParamName)
 
 data ServerEnv = ServerEnv
@@ -195,8 +195,9 @@ route env req = case (requestMethod req, path) of
     ("GET", []) | env.envUI -> pure uiResponse
     _ -> do
         checkOrigin env req
-        caller <- authenticateRequest env req path
-        routeAuthenticated env req caller path
+        identify env req path >>= \case
+            AsOwner caller -> routeAuthenticated env req caller path
+            AsSession sid -> routeSessionToken env req sid path
   where
     path = filter (not . Text.null) (pathInfo req)
 
@@ -206,6 +207,23 @@ uiResponse =
         status200
         [(hContentType, "text/html; charset=utf-8")]
         (LByteString.fromStrict (Text.encodeUtf8 uiPage))
+
+{- | What a session token holder may do (@todos/tool-partial-application.md@
+§5.1), on the one session the token is bound to: read it and its events,
+post a message and cancel a run. Never parameters (on messages either),
+listing, continuations, agents, mail, forking or deleting. 'identify' only
+accepts the token on its own session's paths, so any other session is a 401.
+-}
+routeSessionToken :: ServerEnv -> Request -> SessionId -> [Text] -> IO Response
+routeSessionToken env req sid path = case (requestMethod req, path) of
+    ("GET", ["v1", "sessions", s]) | ours s -> getH env req sid
+    ("GET", ["v1", "sessions", s, "events"]) | ours s -> eventsH env req sid
+    ("POST", ["v1", "sessions", s, "messages"]) | ours s -> messagesH env req ParamsForbidden sid
+    ("POST", ["v1", "sessions", s, "cancel"]) | ours s -> cancelH env sid
+    _ -> throwIO $ ApiError status403 "forbidden" "a session token only reads, messages and cancels its own session"
+  where
+    SessionId ownUuid = sid
+    ours s = UUID.fromText s == Just ownUuid
 
 routeAuthenticated :: ServerEnv -> Request -> Caller -> [Text] -> IO Response
 routeAuthenticated env req caller path = case (requestMethod req, path) of
@@ -217,7 +235,8 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
     ("GET", ["v1", "sessions"]) -> listSessionsH env req caller
     ("GET", ["v1", "sessions", sid]) -> withSession sid (getH env req)
     ("DELETE", ["v1", "sessions", sid]) -> withSession sid (deleteH env req)
-    ("POST", ["v1", "sessions", sid, "messages"]) -> withSession sid (messagesH env req)
+    ("POST", ["v1", "sessions", sid, "messages"]) -> withSession sid (messagesH env req ParamsAllowed)
+    ("DELETE", ["v1", "sessions", sid, "token"]) -> withSession sid (revokeTokenH env)
     ("POST", ["v1", "sessions", sid, "resume"]) -> withSession sid (resumeH env req)
     ("POST", ["v1", "sessions", sid, "cancel"]) -> withSession sid (cancelH env)
     ("POST", ["v1", "sessions", sid, "cancel-attached"]) -> withSession sid (cancelAttachedH env)
@@ -248,7 +267,7 @@ routeAuthenticated env req caller path = case (requestMethod req, path) of
         ["v1", "agents", _] -> True
         ["v1", "sessions"] -> True
         ["v1", "sessions", _] -> True
-        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "mail", "fork", "events", "params"]
+        ["v1", "sessions", _, action] -> action `elem` ["messages", "resume", "cancel", "cancel-attached", "pause", "pending", "mail", "fork", "events", "params", "token"]
         ["v1", "events"] -> True
         ["v1", "continuations", _] -> True
         ["mcp"] -> True
@@ -360,18 +379,35 @@ preflightHeaders =
     , ("Access-Control-Max-Age", "600")
     ]
 
+-- | Who is calling: an owner, or the holder of one session's token.
+data Identity = AsOwner Caller | AsSession SessionId
+
 {- | The bearer token of a request. The event stream also accepts it as an
 @access_token@ query parameter, because @EventSource@ cannot set headers;
 no other endpoint does, and the request log records no query strings.
+
+With tokens in use, a token is an owner's (from the tokens file) or, on a
+@\/v1\/sessions\/:id\/...@ path, the session token minted for session @:id@
+(its digest is kept with the session, and compared here). Anything else is a
+401, the same for an unknown session as for a wrong token.
 -}
-authenticateRequest :: ServerEnv -> Request -> [Text] -> IO Caller
-authenticateRequest env req path = case env.envAuth of
-    Nothing -> pure (Caller Nothing)
-    Just tokens ->
-        case asum [headerToken, queryToken] >>= authenticate tokens of
-            Just owner -> pure (Caller (Just owner))
-            Nothing -> throwIO $ ApiError status401 "unauthorized" "a valid bearer token is required"
+identify :: ServerEnv -> Request -> [Text] -> IO Identity
+identify env req path = case env.envAuth of
+    Nothing -> pure (AsOwner (Caller Nothing))
+    Just tokens -> case asum [headerToken, queryToken] of
+        Nothing -> unauthorized
+        Just token -> case authenticate tokens token of
+            Just owner -> pure (AsOwner (Caller (Just owner)))
+            Nothing -> case path of
+                ("v1" : "sessions" : sidText : _) | Just uuid <- UUID.fromText sidText -> do
+                    let sid = SessionId uuid
+                    stored <- getSession env.envRunner sid
+                    case stored >>= (.ssTokenDigest) . (.smSecurity) . snd of
+                        Just digest | digest == tokenDigest token -> pure (AsSession sid)
+                        _ -> unauthorized
+                _ -> unauthorized
   where
+    unauthorized = throwIO $ ApiError status401 "unauthorized" "a valid bearer token is required"
     headerToken = lookup hAuthorization (requestHeaders req) >>= bearerToken
     queryToken = case path of
         ["v1", "sessions", _, "events"] -> Text.encodeUtf8 <$> param "access_token" (queryParams req)
@@ -454,25 +490,34 @@ createH :: ServerEnv -> Request -> Caller -> IO Response
 createH env req (Caller owner) = do
     w <- waitParams req
     body <- jsonBody req
-    (agent, msg, mode, params, parent) <- parseBody body $ \o -> do
+    (agent, msg, mode, params, parent, seal, wantToken) <- parseBody body $ \o -> do
         agent <- o .: "agent"
         msg <- optionalMessageFields o
         mode <- runField o
         params <- paramsField o
         parent <- o .:? "parent"
-        pure (agent, msg, mode, params, parent)
+        seal <- fromMaybe False <$> o .:? "seal"
+        wantToken <- fromMaybe False <$> o .:? "session_token"
+        pure (agent, msg, mode, params, parent, seal, wantToken)
+    when (wantToken && isNothing env.envAuth) $
+        badRequest "session_token needs authentication (--auth-tokens): without it every caller already has full access"
+    -- The token is shown once, here; only its digest is stored.
+    minted <- if wantToken then Just <$> mintSessionToken else pure Nothing
     -- A parent must be one the caller can see (same answer as for an
     -- unknown session otherwise, see 'authorize'). Owner-wise the child
     -- is still the caller's: 'sessionOwner' walks up to the root anyway.
     mapM_ (authorize env (Caller owner)) parent
-    meta <- orThrow $ createSessionAsWithParent env.envRunner parent owner agent msg mode params
+    meta <- orThrow $ createSessionSecured env.envRunner parent owner agent msg mode params (SessionSecurity seal (tokenDigest . Text.encodeUtf8 <$> minted))
     let sid = meta.smSessionId
     view <- afterRun env w sid
     pure $
         responseLBS
             status201
             [(hContentType, jsonType), ("Location", "/v1/sessions/" <> Text.encodeUtf8 (showId sid))]
-            (Aeson.encode view)
+            (Aeson.encode (withToken minted view))
+  where
+    withToken (Just token) (Aeson.Object o) = Aeson.Object (KeyMap.insert "session_token" (Aeson.String token) o)
+    withToken _ v = v
 
 listSessionsH :: ServerEnv -> Request -> Caller -> IO Response
 listSessionsH env req caller@(Caller owner) = do
@@ -527,11 +572,18 @@ deleteH env req sid = do
     plan <- orThrow $ deleteSession env.envRunner sid (if dryRun then DryRun else DeleteForReal)
     pure $ json status200 (Aeson.toJSON plan)
 
-messagesH :: ServerEnv -> Request -> SessionId -> IO Response
-messagesH env req sid = do
+-- | Whether a request may carry @params@: a session token holder never may.
+data ParamsPolicy = ParamsAllowed | ParamsForbidden
+
+messagesH :: ServerEnv -> Request -> ParamsPolicy -> SessionId -> IO Response
+messagesH env req policy sid = do
     w <- waitParams req
     body <- jsonBody req
     (msg, mode, params) <- parseBody body $ \o -> (,,) <$> messageFields o <*> runField o <*> paramsField o
+    case policy of
+        ParamsForbidden
+            | not (null params) -> throwIO $ ApiError status403 "forbidden_params" "a session token cannot set parameters"
+        _ -> pure ()
     _ <- orThrowLapsed $ postMessage env.envRunner sid msg mode params
     runResponse <$> afterRun env w sid
 
@@ -601,6 +653,14 @@ paramsPutH env req sid = do
         _ <- o .: "params" :: Aeson.Parser Aeson.Value
         paramsField o
     _ <- orThrow $ setSessionParams env.envRunner sid params
+    json status200 <$> loadView env sid
+
+{- | @DELETE /v1/sessions/:id/token@ (owner only, as every route reaching
+'routeAuthenticated'): revoke the session's token. Works also during a run.
+-}
+revokeTokenH :: ServerEnv -> SessionId -> IO Response
+revokeTokenH env sid = do
+    _ <- orThrow $ updateSessionSecurity env.envRunner sid (\sec -> sec{ssTokenDigest = Nothing})
     json status200 <$> loadView env sid
 
 pendingH :: ServerEnv -> SessionId -> IO Response

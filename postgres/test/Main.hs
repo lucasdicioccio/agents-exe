@@ -105,7 +105,7 @@ migrationsTest baseUrl = withDatabase baseUrl $ \url -> do
     withPostgresStores url $ \_ -> pure ()
     bracket (connectPostgreSQL url) close $ \conn -> do
         rows <- query_ conn "SELECT component, version FROM schema_migrations ORDER BY component, version" :: IO [(Text, Int)]
-        rows @?= [("agents", 1), ("continuations", 1), ("session_mail", 1), ("sessions", 1), ("sessions", 2)]
+        rows @?= [("agents", 1), ("continuations", 1), ("session_mail", 1), ("sessions", 1), ("sessions", 2), ("sessions", 3)]
 
 casTest :: String -> Assertion
 casTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
@@ -113,7 +113,7 @@ casTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \store
     sid <- newSessionId
     sess <- newSessionFromPrompt sid (SystemPrompt "sys") [] (UserQuery "hello" [])
     now <- getCurrentTime
-    let meta0 = (freshSessionMeta sid now){smAgent = Just "agent", smOwner = Just "alice"}
+    let meta0 = (freshSessionMeta sid now){smAgent = Just "agent", smOwner = Just "alice", smSecurity = SessionSecurity True (Just "digest-1")}
     m1 <- expectRight =<< backend.sbCompareAndStore meta0 sess
     m1.smVersion @?= 1
     again <- backend.sbCompareAndStore meta0 sess
@@ -127,6 +127,8 @@ casTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \store
     Just (_, loaded) <- backend.sbLoadMeta sid
     (loaded.smVersion, loaded.smStatus, loaded.smAgent, loaded.smOwner) @?= (3, StatusRunning, Just "agent", Just "alice")
     loaded.smCreatedAt @?= m1.smCreatedAt
+    -- the session's security is stored with it and survives unconditional stores
+    loaded.smSecurity @?= SessionSecurity True (Just "digest-1")
     listed <- backend.sbList
     map fst listed @?= [sid]
     backend.sbDelete sid

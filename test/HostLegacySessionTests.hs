@@ -22,7 +22,7 @@ import Test.Tasty.HUnit
 import System.Agents.Host (defaultHostConfig, hcLegacySessionDirs, hostBackend, withHost)
 import System.Agents.Session.Base (SessionStatus (..), newSessionFromPrompt, newSessionId)
 import System.Agents.Session.Types (Session (..), SystemPrompt (..), UserQuery (..))
-import System.Agents.SessionStore (SessionMeta (..), mkFileSessionStore, sbCompareAndStore, sbLoad)
+import System.Agents.SessionStore (SessionMeta (..), mkFileSessionStore, noSecurity, sbCompareAndStore, sbLoad)
 
 tests :: TestTree
 tests =
@@ -55,6 +55,7 @@ legacySessionReadableTest =
                     , smCreatedAt = now
                     , smUpdatedAt = now
                     , smParams = Map.empty
+                    , smSecurity = noSecurity
                     }
         stored <- sbCompareAndStore legacyBackend meta sess
         case stored of

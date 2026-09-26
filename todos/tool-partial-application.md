@@ -21,7 +21,7 @@ persisted; message-scope values applied for one run only, never stored;
 `agentView`'s `"parameters"` self-description (`bound`/`pinned`, never a
 value); `agents-server --set`/`--set-json`/`--pin`/`--pin-json` (mirroring
 `agents-exe`) so an operator can lock a container to one tenant. Not done
-from Phase 4: `seal`, session tokens, the chat page's parameter form, and the generated OpenAPI
+from Phase 4: the chat page's parameter form, and the generated OpenAPI
 document's request/response schemas (`AgentsServer/Types.hs`/`Routes.hs`
 are a separate hand-maintained layer used only for `/openapi.json` and
 were not updated with the new fields — the real handlers in `Api.hs` are
@@ -30,7 +30,15 @@ fully wired and correct; this is a documentation-only gap).
 parameters are no longer bound as failed with a `params_required` message
 (§5's documented recovery behaviour; done 2026-09-25, which also made the
 persisted non-secret session values seed the live session back after a
-restart or an eviction, as §5 always said they would). Since then:
+restart or an eviction, as §5 always said they would). `seal` and session
+tokens (§5.1) are done: `seal`/`session_token` on `POST /v1/sessions`, a
+`security` column (sealed flag and token SHA-256 digest, never the token) on
+both backends, session-token routing limited to its own session's read,
+messages, events and cancel, and `DELETE /v1/sessions/:id/token`. Deviations:
+the token is only honoured on `/v1/sessions/:id/...` paths of its own session
+(anything else is a 401, so no probing); `seal` exempts the owner as §5.1 says,
+so today it only matters against session-token holders, who never may set
+parameters anyway; a fork or child does not inherit either. Since then:
 `PUT /v1/sessions/:id/params`, `409 params_required` on a message or resume
 to an existing session, and `params` on `POST /v1/sessions/:id/fork` (which
 lacks §5.2's `fork` on session creation and the CLI's `--fork`; required
