@@ -51,6 +51,8 @@ module System.Agents.ToolRegistration (
     mcp2LLMName,
     openapi2LLMName,
     postgrest2LLMName,
+    capToolName,
+    maxToolNameLength,
     sqlite2LLMName,
     system2LLMName,
     developer2LLMName,
@@ -66,6 +68,7 @@ module System.Agents.ToolRegistration (
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
+import Crypto.Hash (Digest, SHA256 (..), hashWith)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64 as B64
 import Data.ByteString.Lazy (toStrict)
@@ -211,7 +214,26 @@ openapi2LLMName :: Text -> Text -> OpenAI.ToolName
 openapi2LLMName tboxName operationId =
     let normalizedToolbox = normalizeForLLM tboxName
         normalizedOpId = normalizeForLLM operationId
-     in OpenAI.ToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId)
+     in OpenAI.ToolName (capToolName ("openapi_" <> normalizedToolbox <> "_" <> normalizedOpId))
+
+-- | The longest tool name providers accept.
+maxToolNameLength :: Int
+maxToolNameLength = 64
+
+{- | Keep a generated tool name within 'maxToolNameLength': a longer name is
+cut and ends with a hash of the whole name, so it stays deterministic and
+two names cut at the same place stay distinct.
+
+>>> capToolName "openapi_petstore_getPet"
+"openapi_petstore_getPet"
+-}
+capToolName :: Text -> Text
+capToolName name
+    | Text.length name <= maxToolNameLength = name
+    | otherwise = Text.take (maxToolNameLength - suffixLength - 1) name <> "_" <> Text.take suffixLength digest
+  where
+    suffixLength = 10
+    digest = Text.pack (show (hashWith SHA256 (Text.encodeUtf8 name) :: Digest SHA256))
 
 -- naming policy for PostgREST tools
 postgrest2LLMName :: PostgRESToolbox.Toolbox -> PostgRESTool -> OpenAI.ToolName
@@ -221,7 +243,7 @@ postgrest2LLMName box tool =
         tableName = Text.dropWhile (== '/') tool.prtPath
         normalizedTable = normalizeForLLM tableName
         methodPart = Text.toLower $ methodToText tool.prtMethod
-     in OpenAI.ToolName (mconcat ["postgrest_", normalizedToolbox, "_", methodPart, "_", normalizedTable])
+     in OpenAI.ToolName (capToolName (mconcat ["postgrest_", normalizedToolbox, "_", methodPart, "_", normalizedTable]))
 
 {- | Naming policy for SQLite tools.
 
