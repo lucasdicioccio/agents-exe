@@ -9,7 +9,7 @@ bash @env@ calling mode end to end.
 module BindingsTests (tests) where
 
 import qualified Data.Aeson as Aeson
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -35,7 +35,10 @@ import System.Agents.Tools.Context (ToolExecutionContext (..), mkMinimalContext)
 import qualified System.Agents.Tools.Context as Context
 import System.Agents.Tools.Params.Types (ParamValue (..))
 import System.Agents.Base (ConversationId (..))
+import System.Agents.Session.Durable (ToolExecutor (..), cachedInProcessExecutor)
+import System.Agents.Tools.Cache (CacheScope (..), CachedResult (..), ToolCache (..), cacheScopeOf, computeCacheKey, computeScopedCacheKey, hashArguments, isUncacheableKey, mkSqliteToolCache, scopedCacheKey)
 import System.Agents.Session.Types (
+    LlmToolCall (..),
     LlmToolCall (..),
     Session (..),
     SessionId (..),
@@ -58,6 +61,7 @@ tests =
         , argumentMergeTests
         , paramBindingTests
         , exposeBindingTests
+        , cacheScopeTests
         , deriveAgentTableTests
         , specializeProcessParamsTests
         , resolveParamSecretsTests
@@ -481,3 +485,68 @@ bashEnvModeTests = testCase "env-mode argument reaches the script as an environm
             , "  exit 0"
             , "fi"
             ]
+
+-------------------------------------------------------------------------------
+-- Tool cache keys and bound values (G8)
+-------------------------------------------------------------------------------
+
+cacheScopeTests :: TestTree
+cacheScopeTests =
+    testGroup
+        "tool cache (G8)"
+        [ testCase "without parameters the key is the call's own, as before" $ do
+            cacheScopeOf Map.empty [] @?= Unscoped
+            computeScopedCacheKey Unscoped call @?= Just (computeCacheKey call)
+        , testCase "the same call under different bound values has different keys" $ do
+            let keyFor p = computeScopedCacheKey (cacheScopeOf (params p) []) call
+            keyFor "acme" @?= keyFor "acme"
+            assertBool "tenants differ" (keyFor "acme" /= keyFor "globex")
+            assertBool "scoped differs from unscoped" (keyFor "acme" /= Just (computeCacheKey call))
+        , testCase "a secret value disables caching" $ do
+            let scope = cacheScopeOf (Map.fromList [("token", ParamValue (Aeson.String "s3cret") True)]) []
+            scope @?= Uncacheable
+            computeScopedCacheKey scope call @?= Nothing
+            assertBool "the placeholder key is recognisable" (isUncacheableKey (scopedCacheKey scope call))
+            assertBool "an ordinary key is not" (not (isUncacheableKey (computeCacheKey call)))
+            -- ... and the secret never reaches the key
+            assertBool "no secret in the key" (not ("s3cret" `Text.isInfixOf` Text.pack (show (scopedCacheKey scope call))))
+        , testCase "inherited narrowing bindings scope the key too, secret ones disable caching" $ do
+            let inherited v secret = [ScopedBinding AgentHere Nothing "project" (Aeson.String v) secret]
+                keyFor v = computeScopedCacheKey (cacheScopeOf Map.empty (inherited v False)) call
+            assertBool "projects differ" (keyFor "p1" /= keyFor "p2")
+            cacheScopeOf Map.empty (inherited "p1" True) @?= Uncacheable
+        , testCase "argument hashes no longer collide on a shared 60-character prefix" $ do
+            let long suffix = Aeson.object ["query" Aeson..= (Text.replicate 80 "x" <> suffix)]
+            assertBool "different arguments, different hashes" (hashArguments (long "a") /= hashArguments (long "b"))
+        , testCase "end to end: tenant A's cached result does not answer tenant B" $ do
+            cache <- mkSqliteToolCache ":memory:"
+            runs <- newIORef (0 :: Int)
+            let exec = cachedInProcessExecutor cache $ \ctx _ -> do
+                    modifyIORef' runs (+ 1)
+                    pure $ TextResponse ("data for " <> Text.pack (show (fmap pvValue (Map.lookup "tenant" ctx.ctxParams))))
+                run p = execSync exec (ctxWithParams [("tenant", ParamValue (Aeson.String p) False)]) call
+            a1 <- run "acme"
+            a2 <- run "acme"
+            a1 @?= a2
+            readIORef runs >>= (@?= 1)
+            b <- run "globex"
+            readIORef runs >>= (@?= 2)
+            assertBool "B got B's data" (a1 /= b)
+        , testCase "end to end: a call under a secret value is never cached" $ do
+            cache <- mkSqliteToolCache ":memory:"
+            runs <- newIORef (0 :: Int)
+            let exec = cachedInProcessExecutor cache $ \_ _ -> modifyIORef' runs (+ 1) >> pure (TextResponse "ok")
+                secretCtx = ctxWithParams [("token", ParamValue (Aeson.String "s3cret") True)]
+            _ <- execSync exec secretCtx call
+            _ <- execSync exec secretCtx call
+            readIORef runs >>= (@?= 2)
+            found <- cacheLookup cache (computeCacheKey call)
+            fmap (const ()) found @?= Nothing
+        ]
+  where
+    params p = Map.fromList [("tenant", ParamValue (Aeson.String p) False)]
+    call =
+        LlmToolCall $
+            Aeson.object
+                [ "function" Aeson..= Aeson.object ["name" Aeson..= ("query_invoices" :: Text), "arguments" Aeson..= Aeson.object ["since" Aeson..= ("2026-01-01" :: Text)]]
+                ]

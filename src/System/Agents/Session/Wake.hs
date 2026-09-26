@@ -21,11 +21,12 @@ module System.Agents.Session.Wake (
     resumeSession,
 ) where
 
-import Control.Monad (filterM, forM_)
+import Control.Monad (filterM, forM_, unless)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 
 import System.Agents.Base (ConversationId)
-import System.Agents.Session.Async (ContinuationStore (..))
+import System.Agents.Session.Async (ContinuationStore (..), ToolContinuationSnapshot (..))
 import System.Agents.Session.Base
 import System.Agents.Session.Step (
     calculatePartialTurnByteUsage,
@@ -33,7 +34,7 @@ import System.Agents.Session.Step (
     getPartialTurn,
     runStepM,
  )
-import System.Agents.Tools.Cache (CachedResult (..), ToolCache (..), computeCacheKey)
+import System.Agents.Tools.Cache (CachedResult (..), ToolCache (..), computeCacheKey, isUncacheableKey)
 import Data.Time (getCurrentTime)
 
 {- | Wake a paused session by injecting external tool results.
@@ -132,7 +133,15 @@ wakeSessionWith mStore mCache session responses = do
                     Just result -> do
                         forM_ mCache $ \cache -> do
                             now <- getCurrentTime
-                            cache.cacheStore (computeCacheKey tc.tcCall) $ CachedResult result now Nothing
+                            -- Under the key the call was issued with (the continuation
+                            -- snapshot holds it, scoped by the call's bound values, or
+                            -- marked uncacheable): the call alone does not know them.
+                            snapKey <- case mStore of
+                                Just store -> fmap tcsCacheKey <$> csLoad store token
+                                Nothing -> pure Nothing
+                            let key = fromMaybe (computeCacheKey tc.tcCall) snapKey
+                            unless (isUncacheableKey key) $
+                                cache.cacheStore key $ CachedResult result now Nothing
                         pure $ tc{tcState = Completed, tcResult = Just result}
 
     makeTurn :: PartialUserTurnContent -> [TrackedToolCall] -> Turn

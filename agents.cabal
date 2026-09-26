@@ -217,6 +217,7 @@ library agents-lib
                       containers,
                       contravariant,
                       crypto-api,
+                      crypton,
                       data-default,
                       deepseq,
                       direct-sqlite,
