@@ -1,0 +1,30 @@
+# Per-user unit for agents-server, also listening on a Unix domain socket that
+# only you can reach (mode 0600). Install as ~/.config/systemd/user/agents-server.service
+# and put an agent file and an API keys file under ~/.config/agents-server/, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agents-server
+# From this machine:
+#   curl --unix-socket "$XDG_RUNTIME_DIR/agents-server.sock" http://localhost/healthz
+[Unit]
+Description=agents-server (user)
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/agents-server \
+    --agent-file %h/.config/agents-server/agent.json \
+    --api-keys %h/.config/agents-server/keys.json \
+    --db %S/agents-server/agents.db \
+    --bind 127.0.0.1 \
+    --port 8080 \
+    --socket %t/agents-server.sock \
+    --shutdown-grace 10
+Restart=on-failure
+RestartSec=2
+# Keep this above --shutdown-grace, or systemd may SIGKILL the server during its graceful stop.
+TimeoutStopSec=20
+# Creates ~/.local/state/agents-server (%S).
+StateDirectory=agents-server
+WorkingDirectory=%S/agents-server
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,29 @@
+# System-wide unit for agents-server. Install as /etc/systemd/system/agents-server.service
+# (see "Running as a service" in documentation/agents-server.md), then edit the
+# paths below to match your files.
+[Unit]
+Description=agents-server
+After=network.target
+
+[Service]
+Type=simple
+User=agents-server
+Group=agents-server
+ExecStart=/usr/local/bin/agents-server \
+    --agent-file /etc/agents-server/agent.json \
+    --api-keys /etc/agents-server/keys.json \
+    --db /var/lib/agents-server/agents.db \
+    --bind 127.0.0.1 \
+    --port 8080 \
+    --auth-tokens /etc/agents-server/tokens.json \
+    --shutdown-grace 10
+Restart=on-failure
+RestartSec=2
+# Keep this above --shutdown-grace, or systemd may SIGKILL the server during its graceful stop.
+TimeoutStopSec=20
+# Creates /var/lib/agents-server, owned by the service user.
+StateDirectory=agents-server
+WorkingDirectory=/var/lib/agents-server
+
+[Install]
+WantedBy=multi-user.target

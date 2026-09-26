@@ -892,6 +892,20 @@ described above (`--shutdown-grace` bounds it), and `recoverOnStartup` runs
 before the first request is accepted. A `systemd` unit only needs to point
 one at the right files and restart it on crash.
 
+Ready-made units live in `bundling/systemd/`:
+
+* `agents-server.service`: the system-wide unit below, for `agents-server`.
+  `sudo install -Dm644 bundling/systemd/agents-server.service /etc/systemd/system/agents-server.service`,
+  edit the paths, then `systemctl daemon-reload` and `enable --now`.
+* `agents-server.user.service`: a per-user unit that also listens on
+  `$XDG_RUNTIME_DIR/agents-server.sock` (`--socket`). `install -Dm644
+  bundling/systemd/agents-server.user.service ~/.config/systemd/user/agents-server.service`,
+  put `agent.json` and `keys.json` in `~/.config/agents-server/`, and the
+  binary at `~/.local/bin/agents-server`, then `systemctl --user daemon-reload`
+  and `systemctl --user enable --now agents-server`. The server creates and
+  owns its socket (it does not use systemd socket activation), so this is a
+  plain service, not a `.socket` unit.
+
 Create a user and directories for its state, put the agent files, API keys
 and token file somewhere readable, and write a unit. This one uses
 `agents-exe serve`, so agents-exe.cfg.json in `WorkingDirectory` can carry
