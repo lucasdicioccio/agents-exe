@@ -49,7 +49,8 @@ data Toolbox = Toolbox
     { name :: Text
     , job :: Async ()
     , toolsList :: TVar [ToolDescription]
-    , callTool :: ToolDescription -> Maybe Aeson.Object -> IO (McpClient.ToolCallResponse)
+    , callTool :: ToolDescription -> Maybe Aeson.Object -> Maybe McpClient.ProgressCallback -> IO (McpClient.ToolCallResponse)
+    -- ^ Calls a tool; the callback, if given, receives the server's progress notifications for this call.
     , initialDiscoveryDone :: MVar ()
     , mcpActivation :: Maybe Activation
     {- ^ Activation configuration for progressive disclosure.
@@ -93,13 +94,13 @@ initializeMcpToolbox ttracer tname proc mbActivation = do
     -- tool calls
     chan <- newTBMChanIO 30
     let nextToolCall = atomically $ readTBMChan chan
-    let doCallTool :: ToolDescription -> Maybe Aeson.Object -> IO McpClient.ToolCallResponse
-        doCallTool td param = do
+    let doCallTool :: ToolDescription -> Maybe Aeson.Object -> Maybe McpClient.ProgressCallback -> IO McpClient.ToolCallResponse
+        doCallTool td param onProgress = do
             let tc = McpClient.McpToolCall td.getToolDescription.name param
             mbox <- newEmptyMVar
             let done res = do
                     putMVar mbox res
-            let fullcall = McpClient.FullToolCall tc done
+            let fullcall = McpClient.FullToolCall tc onProgress done
             atomically $ writeTBMChan chan fullcall
             takeMVar mbox
 

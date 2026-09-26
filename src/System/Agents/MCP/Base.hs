@@ -639,12 +639,33 @@ data InitializedNotification = InitializedNotification
 data ProgressToken = TextProgressToken Text | NumberProgresstoken Float
     deriving (Show, Ord, Eq)
 
+instance ToJSON ProgressToken where
+    toJSON (TextProgressToken t) = Aeson.String t
+    toJSON (NumberProgresstoken n) = toJSON n
+
+instance FromJSON ProgressToken where
+    parseJSON v =
+        (TextProgressToken <$> parseJSON v)
+            <|> (NumberProgresstoken <$> parseJSON v)
+
 data ProgressNotification
     = ProgressNotification
     { progressToken :: ProgressToken
-    , progress :: Int
-    , total :: Maybe Int
+    , progress :: Double
+    -- ^ Progress so far; may be fractional and only ever increases.
+    , total :: Maybe Double
+    , message :: Maybe Text
+    -- ^ Human-readable status (added by later revisions of the spec).
     }
+    deriving (Show)
+
+instance FromJSON ProgressNotification where
+    parseJSON = withObject "ProgressNotification" $ \o ->
+        ProgressNotification
+            <$> o .: "progressToken"
+            <*> o .: "progress"
+            <*> o .:? "total"
+            <*> o .:? "message"
 
 data ResourceListChangedNotification = ResourceListChangedNotification
 

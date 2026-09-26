@@ -423,10 +423,11 @@ Example agent JSON:
 
 ### MCP / OpenAPI streaming (question from the plan)
 - OpenAPI tools wait for one complete HTTP response: nothing to stream.
-- MCP defines progress notifications and `ProgressNotification` exists in
-  `System.Agents.MCP.Base`, but `MCP.Client` ignores them. Forwarding them to
-  `ctxProgressCallback` would make MCP tools report progress like bash tools.
-  Not done.
+- Done: `MCP.Client` advertises a `_meta.progressToken` on `tools/call` when
+  the call has a progress callback, and forwards the server's
+  `notifications/progress` for that token to `ctxProgressCallback` (payload
+  `{progress, total?, message?}`), so MCP tools report progress like bash
+  tools (`tool.progressed` events, `get_tool_call_status`).
 
 ### Not done
 - **Tracing.** `Agent` carries no tracer (tracers live in the builders'

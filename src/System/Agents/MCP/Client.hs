@@ -4,17 +4,19 @@
 module System.Agents.MCP.Client where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad (when)
+import Control.Monad (forM, forM_, when)
 import Control.Monad.Logger (Loc, LogLevel, LogSource, LogStr, LoggingT (..), MonadLogger, MonadLoggerIO, logDebugN)
 import Control.Monad.Reader (MonadReader (..), ReaderT, ask, runReaderT)
 import Control.Monad.Trans (lift)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.Map.Strict as Map
 import Data.Conduit.TMChan
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Network.JSONRPC as Rpc
 import Prod.Tracer (Tracer, runTracer)
-import UnliftIO (MonadIO, MonadUnliftIO, async, liftIO, withAsync)
+import UnliftIO (MonadIO, MonadUnliftIO, TVar, async, atomically, liftIO, modifyTVar', newTVarIO, readTVar, readTVarIO, withAsync)
 
 import System.Agents.MCP.Base as Mcp
 import System.Agents.MCP.Client.Runtime
@@ -64,7 +66,8 @@ data ClientMsg
     = InitializeMsg Mcp.InitializeRequest
     | NotifyInitializedMsg Mcp.InitializedNotification
     | ListToolsRequestMsg Mcp.ListToolsRequest
-    | CallToolRequestMsg Mcp.CallToolRequest
+    | -- | A tool call, with the progress token (if any) advertised in @_meta@.
+      CallToolRequestMsg Mcp.CallToolRequest (Maybe Mcp.ProgressToken)
     deriving (Show)
 
 newtype InitializeResultRsp = InitializeResultRsp {getInitializeResult :: Mcp.InitializeResult}
@@ -80,11 +83,11 @@ instance Rpc.ToRequest ClientMsg where
     requestMethod (InitializeMsg _) = "initialize"
     requestMethod (NotifyInitializedMsg _) = "notifications/initialized"
     requestMethod (ListToolsRequestMsg _) = "tools/list"
-    requestMethod (CallToolRequestMsg _) = "tools/call"
+    requestMethod (CallToolRequestMsg _ _) = "tools/call"
     requestIsNotif (InitializeMsg _) = False
     requestIsNotif (NotifyInitializedMsg _) = True
     requestIsNotif (ListToolsRequestMsg _) = False
-    requestIsNotif (CallToolRequestMsg _) = False
+    requestIsNotif (CallToolRequestMsg _ _) = False
 
 instance Rpc.FromResponse InitializeResultRsp where
     parseResult "initialize" =
@@ -105,15 +108,23 @@ instance Aeson.ToJSON ClientMsg where
     toJSON (InitializeMsg msg) = Aeson.toJSON msg
     toJSON (NotifyInitializedMsg _) = Aeson.toJSON (Aeson.object [])
     toJSON (ListToolsRequestMsg msg) = Aeson.toJSON msg
-    toJSON (CallToolRequestMsg msg) = Aeson.toJSON msg
+    toJSON (CallToolRequestMsg msg mtoken) =
+        case (Aeson.toJSON msg, mtoken) of
+            (Aeson.Object o, Just token) ->
+                Aeson.Object $
+                    KeyMap.insert "_meta" (Aeson.object ["progressToken" Aeson..= token]) o
+            (v, _) -> v
 
 data ServerMsg
     = NotifyToolListChanged Mcp.ToolListChangedNotification
+    | NotifyProgress Mcp.ProgressNotification
     deriving (Show)
 
 instance Rpc.FromRequest ServerMsg where
     parseParams "notifications/tools/list_changed" =
         Just (fmap NotifyToolListChanged <$> Aeson.parseJSON)
+    parseParams "notifications/progress" =
+        Just (fmap NotifyProgress <$> Aeson.parseJSON)
     parseParams _ =
         Nothing
 
@@ -180,13 +191,32 @@ listTools ecursor =
 callTool ::
     Mcp.Name ->
     Maybe Aeson.Object ->
+    Maybe Mcp.ProgressToken ->
     Rpc.JSONRPCT McpStack (Maybe (Either Rpc.ErrorObj CallToolResultRsp))
-callTool tname arg =
+callTool tname arg mtoken =
     Rpc.sendRequest $
-        CallToolRequestMsg $
-            Mcp.CallToolRequest
+        CallToolRequestMsg
+            ( Mcp.CallToolRequest
                 tname
                 arg
+            )
+            mtoken
+
+-- | Receives a call's progress notifications, as JSON (see 'progressPayload').
+type ProgressCallback = Aeson.Value -> IO ()
+
+{- | The JSON reported to a 'ProgressCallback' for a @notifications/progress@:
+@progress@, plus @total@ and @message@ when the server sent them.
+-}
+progressPayload :: Mcp.ProgressNotification -> Aeson.Value
+progressPayload n =
+    Aeson.object $
+        ["progress" Aeson..= n.progress]
+            <> maybe [] (\t -> ["total" Aeson..= t]) n.total
+            <> maybe [] (\m -> ["message" Aeson..= m]) n.message
+
+-- | Progress callbacks of the calls in flight, by the token advertised to the server.
+type ProgressRegistry = TVar (Map.Map Mcp.ProgressToken ProgressCallback)
 
 enumerateTools ::
     Rpc.JSONRPCT McpStack ([Maybe (Either Rpc.ErrorObj ListToolsResultRsp)])
@@ -210,7 +240,7 @@ data McpToolCall
 type ToolCallResponse = Maybe (Either Rpc.ErrorObj CallToolResultRsp)
 
 data FullToolCall
-    = FullToolCall McpToolCall (ToolCallResponse -> IO ())
+    = FullToolCall McpToolCall (Maybe ProgressCallback) (ToolCallResponse -> IO ())
 
 data LoopTrace
     = StartToolCall Mcp.Name (Maybe Aeson.Object)
@@ -226,35 +256,31 @@ data LoopProps = LoopProps
 
 defaultLoop :: LoopProps -> ClientInfos -> Rpc.JSONRPCT McpStack ()
 defaultLoop props clientInfos = do
-    withAsync loopToolCalls $ \_ -> do
+    registry <- liftIO (newTVarIO Map.empty)
+    counter <- liftIO (newTVarIO (0 :: Int))
+    withAsync (loopToolCalls registry counter) $ \_ -> do
+        doRefreshTools
         if hasToolsChangedNotif
-            then do
-                doRefreshTools
-                loopEnumerateTools_Notif
-            else do
-                doRefreshTools
-                loopEnumerateTools_Poll
+            then loopServerMessages registry
+            else withAsync (loopServerMessages registry) $ \_ -> loopEnumerateTools_Poll
   where
-    waitToolChangeNotification :: Rpc.JSONRPCT McpStack Bool
-    waitToolChangeNotification = do
+    -- Reads what the server sends us: tool-list changes (when the server
+    -- announces them) and progress notifications. Ends when the connection
+    -- closes.
+    loopServerMessages :: ProgressRegistry -> Rpc.JSONRPCT McpStack ()
+    loopServerMessages registry = do
         mreq <- Rpc.receiveRequest
         case mreq of
-            Nothing -> do
-                debugString "no request received"
-                pure False
+            Nothing -> debugString "no request received"
             Just req -> do
-                msg <- handleReq req
-                case msg of
-                    Just (NotifyToolListChanged _) -> pure True
-                    _ -> pure False
-      where
-        handleReq :: Rpc.Request -> Rpc.JSONRPCT McpStack (Maybe ServerMsg)
-        handleReq req = do
-            debugShow req
-            let emsg = Rpc.fromRequest req :: Either Rpc.ErrorObj ServerMsg
-            case emsg of
-                (Left err) -> debugShow err >> pure Nothing
-                (Right msg) -> pure $ Just msg
+                debugShow req
+                case Rpc.fromRequest req :: Either Rpc.ErrorObj ServerMsg of
+                    Left err -> debugShow err
+                    Right (NotifyToolListChanged _) -> when hasToolsChangedNotif doRefreshTools
+                    Right (NotifyProgress n) -> do
+                        callbacks <- liftIO (readTVarIO registry)
+                        liftIO $ mapM_ ($ progressPayload n) (Map.lookup n.progressToken callbacks)
+                loopServerMessages registry
 
     hasToolsChangedNotif :: Bool
     hasToolsChangedNotif =
@@ -264,30 +290,31 @@ defaultLoop props clientInfos = do
     doRefreshTools = do
         enumerateTools >>= liftIO . runTracer props.tracer . ToolsRefreshed
 
-    loopEnumerateTools_Notif :: Rpc.JSONRPCT McpStack ()
-    loopEnumerateTools_Notif = do
-        changed <- waitToolChangeNotification
-        when changed $ do
-            doRefreshTools
-        loopEnumerateTools_Notif
-
     loopEnumerateTools_Poll :: Rpc.JSONRPCT McpStack ()
     loopEnumerateTools_Poll = do
-        doRefreshTools
         liftIO (threadDelay 30000000)
+        doRefreshTools
         loopEnumerateTools_Poll
 
-    loopToolCalls :: Rpc.JSONRPCT McpStack ()
-    loopToolCalls = do
+    loopToolCalls :: ProgressRegistry -> TVar Int -> Rpc.JSONRPCT McpStack ()
+    loopToolCalls registry counter = do
         tc <- liftIO props.waitToolCall
         case tc of
             Nothing -> do
                 liftIO $ runTracer props.tracer ExitingToolCallLoop
-            Just (FullToolCall (McpToolCall tname obj) resp) -> do
+            Just (FullToolCall (McpToolCall tname obj) mprogress resp) -> do
                 liftIO $ runTracer props.tracer (StartToolCall tname obj)
+                -- Only calls that want progress advertise a token.
+                mtoken <- liftIO $ forM mprogress $ \cb -> atomically $ do
+                    modifyTVar' counter (+ 1)
+                    n <- readTVar counter
+                    let token = Mcp.TextProgressToken ("agents-exe-" <> Text.pack (show n))
+                    modifyTVar' registry (Map.insert token cb)
+                    pure token
                 _ <- async $ do
-                    r <- callTool tname obj
+                    r <- callTool tname obj mtoken
                     liftIO $ do
+                        forM_ mtoken $ \token -> atomically (modifyTVar' registry (Map.delete token))
                         runTracer props.tracer (EndToolCall tname obj r)
                         resp r
-                loopToolCalls
+                loopToolCalls registry counter
