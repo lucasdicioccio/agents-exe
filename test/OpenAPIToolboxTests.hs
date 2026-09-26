@@ -34,6 +34,7 @@ import System.Agents.Tools.OpenAPI.Resolver as Resolver
 import System.Agents.Tools.OpenAPI.Types as Types
 import System.Agents.Tools.OpenAPIToolbox as Toolbox
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import qualified System.Agents.ToolRegistration as Registration
 
 -- -------------------------------------------------------------------------
 -- Test Entry Point
@@ -50,6 +51,7 @@ tests =
         , integrationTests
         , propertyTests
         , swaggerV2Tests
+        , toolNameCapTests
         ]
 
 -- -------------------------------------------------------------------------
@@ -868,3 +870,34 @@ mkSchema ::
     Schema
 mkSchema t d e p i a r req = Schema t d e p i a r req
 
+
+-- -------------------------------------------------------------------------
+-- Tool name length cap
+-- -------------------------------------------------------------------------
+
+toolNameCapTests :: TestTree
+toolNameCapTests =
+    testGroup
+        "tool name length cap"
+        [ testCase "a short name is left alone" $
+            Registration.capToolName "openapi_petstore_getPet" @?= "openapi_petstore_getPet"
+        , testCase "a name of exactly the limit is left alone" $
+            let name = Text.replicate Registration.maxToolNameLength "a"
+             in Registration.capToolName name @?= name
+        , testCase "a long name is cut to the limit, deterministically" $ do
+            let name = "openapi_" <> Text.replicate 200 "verylong"
+                capped = Registration.capToolName name
+            Text.length capped @?= Registration.maxToolNameLength
+            Registration.capToolName name @?= capped
+        , testCase "names that differ only past the cut stay distinct" $ do
+            let prefix = Text.replicate 70 "x"
+                a = Registration.capToolName (prefix <> "_listUsers")
+                b = Registration.capToolName (prefix <> "_listOrders")
+            assertBool "distinct" (a /= b)
+            assertBool "both within the limit" (all ((<= Registration.maxToolNameLength) . Text.length) [a, b])
+        , testCase "OpenAPI and PostgREST style names stay LLM-safe once capped" $ do
+            let OpenAI.ToolName n = Registration.openapi2LLMName "a_toolbox_with_a_long_name" (Text.replicate 80 "operation")
+            assertBool "within the limit" (Text.length n <= Registration.maxToolNameLength)
+            assertBool "keeps its prefix" ("openapi_a_toolbox_with_a_long_name_" `Text.isPrefixOf` n)
+            assertBool "only safe characters" (Text.all (\c -> c == '_' || c == '-' || c `elem` ['a' .. 'z'] || c `elem` ['A' .. 'Z'] || c `elem` ['0' .. '9']) n)
+        ]
