@@ -160,6 +160,17 @@ type SessionsAPI =
                                 :> "mail"
                                 :> QueryParam "unread" Bool
                                 :> Get '[JSON] MailListBody
+                            :<|> Summary "Set parameter values without running"
+                                :> Description
+                                    "Sets session-scope values, e.g. to rotate a credential or to supply \
+                                    \secrets again after a restart. A null value clears one. Starts no run."
+                                :> "params"
+                                :> ReqBody '[JSON] SetParamsBody
+                                :> Put '[JSON] SessionBody
+                            :<|> Summary "Revoke the session's token"
+                                :> Description "Works also during a run. Answers the session."
+                                :> "token"
+                                :> Delete '[JSON] SessionBody
                             :<|> Summary "Fork this session"
                                 :> Description
                                     "Copies the session, or a prefix of it up to and including one turn, into \

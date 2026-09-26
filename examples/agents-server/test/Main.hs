@@ -878,10 +878,26 @@ openApiTest = do
                 , "/v1/sessions/{id}/fork"
                 , "/v1/sessions/{id}/mail"
                 , "/v1/sessions/{id}/messages"
+                , "/v1/sessions/{id}/params"
                 , "/v1/sessions/{id}/pause"
                 , "/v1/sessions/{id}/pending"
                 , "/v1/sessions/{id}/resume"
+                , "/v1/sessions/{id}/token"
                 ]
+        -- Every body field the handlers read is documented.
+        let bodyProps name = case field "properties" (field name (field "schemas" (field "components" doc))) of
+                Aeson.Object o -> [Key.toText k | k <- KeyMap.keys o]
+                _ -> []
+            expectFields name fields =
+                mapM_
+                    (\f -> assertBool (Text.unpack (name <> " documents " <> f)) (f `elem` bodyProps name))
+                    fields
+        expectFields "CreateSessionBody" ["agent", "prompt", "media", "run", "parent", "params", "seal", "session_token"]
+        expectFields "MessageBody" ["prompt", "media", "run", "interrupt", "params"]
+        expectFields "ResumeBody" ["mode", "params"]
+        expectFields "ContinuationBody" ["result", "resume", "params"]
+        expectFields "ForkBody" ["at_turn", "agent", "params"]
+        expectFields "SetParamsBody" ["params"]
         let known = case field "schemas" (field "components" doc) of
                 Aeson.Object o -> [Key.toText k | k <- KeyMap.keys o]
                 _ -> []

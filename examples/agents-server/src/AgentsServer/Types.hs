@@ -20,6 +20,7 @@ module AgentsServer.Types (
     MessageBody (..),
     ResumeBody (..),
     ContinuationBody (..),
+    SetParamsBody (..),
     MediaItem (..),
 
     -- * Responses
@@ -47,6 +48,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Char (isUpper, toLower)
 import Data.Foldable (foldl')
+import Data.Map.Strict (Map)
 import qualified Data.HashMap.Strict.InsOrd as InsOrd
 import Data.OpenApi (
     NamedSchema (..),
@@ -183,6 +185,14 @@ instance ToHttpApiData ContinuationToken where
 -- Requests
 -------------------------------------------------------------------------------
 
+-- | The @params@ field several request bodies share: parameter name to value.
+paramsDoc :: OpenApi.Schema -> OpenApi.Schema
+paramsDoc =
+    says
+        "Parameter values, by name (see the agent's `params` in GET /v1/agents). \
+        \A null value clears a session-scope value. Session-scope values are kept \
+        \with the session; secret ones only in memory. A session token cannot set them."
+
 -- | An image or other attachment sent with a prompt.
 data MediaItem = MediaItem
     { miMime :: Text
@@ -217,6 +227,11 @@ data CreateSessionBody = CreateSessionBody
     what 'System.Agents.Host.Client.createSessionAsChild' and
     'System.Agents.Host.Client.spawnSession' send over HTTP.
     -}
+    , csParams :: Maybe (Map Text RawJson)
+    , csSeal :: Maybe Bool
+    -- ^ Seal the session: its conversation is no longer readable through the API.
+    , csSessionToken :: Maybe Bool
+    -- ^ Mint a token scoped to this session; shown once, in the answer's @session_token@.
     }
     deriving (Show, Eq, Generic)
 
@@ -233,6 +248,9 @@ instance ToSchema CreateSessionBody where
             , ("prompt", says "What to ask the agent. Absent: create an idle session with no turn yet.")
             , ("run", oneOfValues "How far the run should go." ["none", "step", "until_blocked"])
             , ("parent", says "Record the new session as a child of this session (lineage only). The caller must be able to see it.")
+            , ("params", paramsDoc)
+            , ("seal", says "Default false. Seal the session so its conversation cannot be read back through the API.")
+            , ("session_token", says "Default false. Mint a bearer token limited to this session; the answer carries it once, as `session_token`. Needs --auth-tokens.")
             ]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
 
@@ -242,6 +260,7 @@ data MessageBody = MessageBody
     , mbMedia :: Maybe [MediaItem]
     , mbRun :: Maybe Text
     , mbInterrupt :: Maybe Bool
+    , mbParams :: Maybe (Map Text RawJson)
     }
     deriving (Show, Eq, Generic)
 
@@ -264,13 +283,15 @@ instance ToSchema MessageBody where
                     \the agent's interruptCompletions on, cancel an in-flight LLM call) \
                     \and ask the model again with this message folded in."
                 )
+            , ("params", paramsDoc)
             ]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
 
 -- | @POST \/v1\/sessions\/:id\/resume@.
-newtype ResumeBody = ResumeBody
+data ResumeBody = ResumeBody
     { rbMode :: Maybe Text
     -- ^ @step@ or @until_blocked@ (the default).
+    , rbParams :: Maybe (Map Text RawJson)
     }
     deriving (Show, Eq, Generic)
 
@@ -283,7 +304,9 @@ instance Aeson.FromJSON ResumeBody where
 instance ToSchema ResumeBody where
     declareNamedSchema p =
         withFieldDocs
-            [("mode", oneOfValues "One step, or until the run is blocked (the default)." ["step", "until_blocked"])]
+            [ ("mode", oneOfValues "One step, or until the run is blocked (the default)." ["step", "until_blocked"])
+            , ("params", paramsDoc)
+            ]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
 
 {- | @POST \/v1\/continuations\/:token@. A JSON string is a text result;
@@ -293,6 +316,7 @@ data ContinuationBody = ContinuationBody
     { cbResult :: Aeson.Value
     , cbResume :: Maybe Bool
     -- ^ Start a run once the result is stored. Defaults to true.
+    , cbParams :: Maybe (Map Text RawJson)
     }
     deriving (Show, Eq, Generic)
 
@@ -315,6 +339,7 @@ instance ToSchema ContinuationBody where
                     , OpenApi._schemaProperties =
                         [ ("result", OpenApi.Inline (opaqueObject "The tool's result, as a string or a tagged object."))
                         , ("resume", boolRef)
+                        , ("params", OpenApi.Inline (paramsDoc (opaqueObject "")))
                         ]
                     }
 
@@ -386,6 +411,7 @@ or @at_turn: 0@, and an @agent@).
 data ForkBody = ForkBody
     { fbAtTurn :: Maybe Int
     , fbAgent :: Maybe Text
+    , fbParams :: Maybe (Map Text RawJson)
     }
     deriving (Show, Eq, Generic)
 
@@ -405,7 +431,25 @@ instance ToSchema ForkBody where
                     \session; 0 forks at the head (e.g. to continue with another agent)."
                 )
             , ("agent", says "Rebind the fork to another agent's slug; absent keeps the source's agent.")
+            , ("params", paramsDoc)
             ]
+            <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
+
+-- | @PUT \/v1\/sessions\/:id\/params@: set session-scope values without starting a run.
+newtype SetParamsBody = SetParamsBody
+    { spParams :: Map Text RawJson
+    }
+    deriving (Show, Eq, Generic)
+
+instance Aeson.ToJSON SetParamsBody where
+    toJSON = Aeson.genericToJSON (bodyOptions 2)
+
+instance Aeson.FromJSON SetParamsBody where
+    parseJSON = Aeson.genericParseJSON (bodyOptions 2)
+
+instance ToSchema SetParamsBody where
+    declareNamedSchema p =
+        withFieldDocs [("params", paramsDoc)]
             <$> genericDeclareNamedSchema (bodySchemaOptions 2) p
 
 -------------------------------------------------------------------------------
