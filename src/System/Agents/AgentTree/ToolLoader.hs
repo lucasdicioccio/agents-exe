@@ -147,12 +147,14 @@ loadAgentTools ::
     Agent ->
     -- | The agent node's tools TVar
     TVar [ToolRegistration] ->
+    -- | Where to add the actions that stop what the toolboxes started (MCP servers)
+    TVar [IO ()] ->
     {- | Returns the agent's resolved parameters (for the node's params TVar),
     the toolbox-level bindings with @whenUnbound: "expose"@ (§7, for the
     node's expose-bindings TVar) alongside any loading errors.
     -}
     IO (Params, [Bindings.Binding], [LoadingError])
-loadAgentTools tracer baseDir apiKeysFile sessionStore processParams agent toolsTVar = do
+loadAgentTools tracer baseDir apiKeysFile sessionStore processParams agent toolsTVar releaseTVar = do
     let decls = fromMaybe [] agent.parameters
     (resolvedParams, missingRequired) <- ParamsResolve.resolveProcessParameters apiKeysFile processParams decls
     let paramError =
@@ -161,7 +163,7 @@ loadAgentTools tracer baseDir apiKeysFile sessionStore processParams agent tools
             | not (null missingRequired)
             ]
     (bashErr, bashExpose) <- loadBashTools tracer resolvedParams agent toolsTVar
-    mcpErr <- loadMcpServers tracer agent toolsTVar
+    mcpErr <- loadMcpServers tracer agent toolsTVar releaseTVar
     (openApiErr, openApiExpose) <- loadOpenAPIToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
     (postgrestErr, postgrestExpose) <- loadPostgRESToolboxes tracer baseDir apiKeysFile resolvedParams agent toolsTVar
     builtinErr <- loadBuiltinToolboxes tracer sessionStore agent toolsTVar
@@ -289,14 +291,15 @@ loadMcpServers ::
     Tracer IO Trace ->
     Agent ->
     TVar [ToolRegistration] ->
+    TVar [IO ()] ->
     IO (Maybe LoadingError)
-loadMcpServers tracer agent toolsTVar = do
+loadMcpServers tracer agent toolsTVar releaseTVar = do
     let servers = fromMaybe [] (mcpServers agent)
 
     if null servers
         then pure Nothing
         else do
-            errors <- mapM (loadMcpServer (contramap McpToolboxTrace tracer) toolsTVar) servers
+            errors <- mapM (loadMcpServer (contramap McpToolboxTrace tracer) toolsTVar releaseTVar) servers
             pure $ collectFirstError errors
 
 {- | Load a single MCP server and register its tools.
@@ -305,9 +308,10 @@ Catches exceptions during initialization and returns a graceful error.
 loadMcpServer ::
     Tracer IO McpToolbox.Trace ->
     TVar [ToolRegistration] ->
+    TVar [IO ()] ->
     McpServerDescription ->
     IO (Maybe LoadingError)
-loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
+loadMcpServer tracer toolsTVar releaseTVar (McpSimpleBinary config) = do
     let proc = System.Process.proc config.executable (map Text.unpack config.args)
 
     -- Try to initialize the MCP toolbox with activation from config
@@ -319,6 +323,9 @@ loadMcpServer tracer toolsTVar (McpSimpleBinary config) = do
             let errMsg = Text.unpack config.name ++ ": Failed to initialize MCP server: " ++ show e
             pure $ Just $ McpLoadingError errMsg
         Right toolbox -> do
+            -- The server runs until the node is released (or right away, when
+            -- it never becomes usable).
+            atomically $ modifyTVar' releaseTVar (McpToolbox.stopMcpToolbox toolbox :)
             -- Wait for initial tool discovery with timeout
             discoveryResult <- McpToolbox.waitForInitialDiscoveryTimeout mcpInitTimeoutMicros toolbox
 

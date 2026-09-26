@@ -37,7 +37,7 @@ import qualified Network.Socket.ByteString as NSB
 import qualified Network.Wai as Wai
 import Network.Wai.Handler.Warp (testWithApplication)
 import Prod.Tracer (silent)
-import System.Directory (doesFileExist)
+import System.Directory (doesDirectoryExist, doesFileExist, getPermissions, setOwnerExecutable, setPermissions)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Timeout (timeout)
@@ -79,6 +79,7 @@ main =
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
             , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
             , testCase "without admin owners, storing agents is disabled" agentEditsDisabledTest
+            , testCase "replacing or deleting a stored agent stops its MCP server" storedAgentMcpReleaseTest
             , testCase "the openapi document covers every route and resolves" openApiTest
             , testCase "the chat page is served only when it is enabled" uiPageTest
             , testCase "EventSource may carry its token as a query parameter" accessTokenTest
@@ -763,6 +764,62 @@ storedAgentsTest = do
         (again, field "error" e1) @?= (404, "unknown_agent")
         (gone, e2) <- call bob "POST" "/v1/sessions" (Just (Aeson.object ["agent" .= ("helper" :: Text), "prompt" .= ("hi" :: Text)]))
         (gone, field "error" e2) @?= (404, "unknown_agent")
+
+{- | A stored agent's MCP server runs as long as a session uses that version
+of the agent, and stops when an edit replaces it and the last such session
+is gone, or when the agent is deleted.
+-}
+storedAgentMcpReleaseTest :: Assertion
+storedAgentMcpReleaseTest = withSystemTempDirectory "mcp-stub" $ \dir -> do
+    let script = dir </> "mcp-stub.sh"
+    writeFile script $
+        unlines
+            [ "#!/bin/bash"
+            , "echo $$ > \"$1\""
+            , "while IFS= read -r line; do"
+            , "  id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\" *: *\"\\{0,1\\}\\([0-9]*\\).*/\\1/p')"
+            , "  case \"$line\" in"
+            , "    *initialize*) printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"stub\",\"version\":\"0\"}}}\\n' \"$id\";;"
+            , "    *tools/list*) printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"tools\":[{\"name\":\"ping\",\"description\":\"p\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}}\\n' \"$id\";;"
+            , "  esac"
+            , "done"
+            ]
+    perms <- getPermissions script
+    setPermissions script (setOwnerExecutable True perms)
+    let tokens = authTokensFromList [("alice-token", "alice")]
+        withMcp n extra = Just $ storedConfig $ ["mcpServers" .= [Aeson.object ["tag" .= ("McpSimpleBinary" :: Text), "contents" .= Aeson.object ["name" .= ("stub" :: Text), "executable" .= script, "args" .= [dir </> ("pid" <> show (n :: Int))]]]]] <> extra
+        pidOf :: Int -> IO Text
+        pidOf n = do
+            let file = dir </> ("pid" <> show n)
+            ready <- waitUntil (doesFileExist file)
+            assertBool ("the stub " <> show n <> " started") ready
+            Text.strip . Text.pack <$> readFile file
+        alive pid = doesDirectoryExist ("/proc/" <> Text.unpack pid)
+        waitUntil check = go (100 :: Int)
+          where
+            go 0 = pure False
+            go k = check >>= \ok -> if ok then pure True else threadDelay 50_000 >> go (k - 1)
+    withServerConfig (Just tokens) "{}" (\c -> c{hcCompletion = Just (const mockCompletion)}) (\e -> e{envAdmins = ["alice"]}) $ \anonymous -> do
+        let alice = anonymous{srvToken = Just "alice-token"}
+        (created, _) <- call alice "PUT" "/v1/agents/helper" (withMcp 1 [])
+        created @?= 201
+        first <- pidOf 1
+        alive first >>= assertBool "the MCP server runs"
+        -- A session builds the agent, so the replaced version stays up for it.
+        (_, session) <- call alice "POST" "/v1/sessions?wait=true" (Just (Aeson.object ["agent" .= ("helper" :: Text), "prompt" .= ("hi" :: Text)]))
+        let sid = textField "session_id" session
+        (replaced, _) <- call alice "PUT" "/v1/agents/helper" (withMcp 2 ["announce" .= ("v2" :: Text)])
+        replaced @?= 200
+        second <- pidOf 2
+        threadDelay 300_000
+        alive first >>= assertBool "the replaced version stays up while a session uses it"
+        (deletedSession, _) <- call alice "DELETE" ("/v1/sessions/" <> sid) Nothing
+        deletedSession @?= 200
+        waitUntil (not <$> alive first) >>= assertBool "the replaced version stops once no session uses it"
+        alive second >>= assertBool "the current version keeps running"
+        (deleted, _) <- call alice "DELETE" "/v1/agents/helper" Nothing
+        deleted @?= 200
+        waitUntil (not <$> alive second) >>= assertBool "deleting the agent stops its MCP server"
 
 agentEditsDisabledTest :: Assertion
 agentEditsDisabledTest = withServer "{}" mockCompletion $ \srv -> do

@@ -31,13 +31,15 @@ module System.Agents.Host (
     AgentEditError (..),
     putStoredAgent,
     deleteStoredAgent,
+    setStoredNodeRetirement,
 ) where
 
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (Exception, throwIO)
 import Control.Monad (forM_)
 import Data.Foldable (toList)
+import Data.Maybe (isNothing)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -50,7 +52,7 @@ import System.FilePath ((</>))
 import System.Agents.AgentFactory (AgentDeps (..), Completion, SessionSink (..), defaultAgentDeps)
 import qualified System.Agents.AgentFactory as AgentFactory
 import System.Agents.AgentStore (AgentStore (..), StoredAgent (..), fileBasedFields, mkSqliteAgentStore)
-import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentTree (..), Props (..), formatLoadingError, loadAgentTreeFromConfig, readOpenApiKeysFile, withAgentTree)
+import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentTree (..), Props (..), formatLoadingError, loadAgentTreeFromConfig, readOpenApiKeysFile, releaseAgentNode, withAgentTree)
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.AgentTree.Trace (TreeTrace)
 import qualified System.Agents.Base as Base
@@ -216,7 +218,8 @@ withHostStores cfg stores tracer action = do
         agents <- indexBySlug roots
         loaded <- newTVarIO Map.empty
         lock <- newMVar ()
-        let storedAgents = StoredAgents stores.hsAgents loaded loadStored lock
+        retire <- newTVarIO releaseAgentNode
+        let storedAgents = StoredAgents stores.hsAgents loaded loadStored lock retire
         forM_ stores.hsAgents $ \agentStore -> do
             saved <- agentStore.asList
             forM_ saved $ \sa -> do
@@ -265,6 +268,11 @@ data StoredAgents = StoredAgents
     , stLoad :: Base.Agent -> IO (Either Text OSAgentNode)
     , stLock :: MVar ()
     -- ^ Serialises edits.
+    , stRetire :: TVar (OSAgentNode -> IO ())
+    {- ^ What to do with a node an edit took out of service. Stops its MCP
+    servers right away, until a session runner replaces it with one that
+    waits for the sessions still using the node ('retireStoredNode').
+    -}
     }
 
 -- | No stored agents, and no way to store any (e.g. for tests).
@@ -272,7 +280,8 @@ noStoredAgents :: IO StoredAgents
 noStoredAgents = do
     loaded <- newTVarIO Map.empty
     lock <- newMVar ()
-    pure $ StoredAgents Nothing loaded (\_ -> pure (Left "this host stores no agents")) lock
+    retire <- newTVarIO releaseAgentNode
+    pure $ StoredAgents Nothing loaded (\_ -> pure (Left "this host stores no agents")) lock retire
 
 data AgentSource = FromFile | FromDatabase StoredAgent
 
@@ -298,9 +307,21 @@ data AgentEditError
     | NoStoredAgent Text
     deriving (Show, Eq)
 
+{- | Choose what happens to a stored agent's node once an edit replaces or
+deletes it (see 'stRetire'). A session runner uses this to wait for the
+sessions that still use the node.
+-}
+setStoredNodeRetirement :: Host -> (OSAgentNode -> IO ()) -> IO ()
+setStoredNodeRetirement host retire = atomically $ writeTVar host.hostStoredAgents.stRetire retire
+
+-- | Hand a node an edit took out of service to 'stRetire'.
+retireStoredNode :: StoredAgents -> OSAgentNode -> IO ()
+retireStoredNode st node = readTVarIO st.stRetire >>= \retire -> retire node
+
 {- | Store an agent and load it, replacing a stored agent with its slug.
 Sessions that already built the previous version keep it until the runner
-drops them from memory. Returns whether the agent is new.
+drops them from memory; its MCP servers are stopped then, and not before
+('stRetire'). Returns whether the agent is new.
 -}
 putStoredAgent :: Host -> Maybe Text -> Base.Agent -> IO (Either AgentEditError (StoredAgent, Bool))
 putStoredAgent host by agent = case st.stStore of
@@ -316,9 +337,10 @@ putStoredAgent host by agent = case st.stStore of
                         Left err -> pure $ Left $ AgentFailedToLoad err
                         Right node -> do
                             sa <- agentStore.asPut by agent
-                            existed <- Map.member slug <$> readTVarIO st.stLoaded
+                            previous <- Map.lookup slug <$> readTVarIO st.stLoaded
                             atomically $ modifyTVar' st.stLoaded (Map.insert slug (sa, node))
-                            pure $ Right (sa, not existed)
+                            mapM_ (retireStoredNode st . snd) previous
+                            pure $ Right (sa, isNothing previous)
   where
     st = host.hostStoredAgents
 
@@ -333,7 +355,9 @@ deleteStoredAgent host slug = case st.stStore of
             then pure $ Left $ AgentDefinedByFile slug
             else do
                 removed <- agentStore.asDelete slug
+                previous <- Map.lookup slug <$> readTVarIO st.stLoaded
                 atomically $ modifyTVar' st.stLoaded (Map.delete slug)
+                mapM_ (retireStoredNode st . snd) previous
                 pure $ if removed then Right () else Left (NoStoredAgent slug)
   where
     st = host.hostStoredAgents
