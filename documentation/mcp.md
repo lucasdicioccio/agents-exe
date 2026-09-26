@@ -72,6 +72,35 @@ multiAgentsServer ::
 }
 ```
 
+### Environment variables (`env`)
+
+An MCP server can receive configuration, including secrets, through
+environment variables. `env` maps a variable name to a binding value: a
+literal, or a reference to an agent parameter (see
+[parameters-and-bindings.md](parameters-and-bindings.md)). The variables are
+added to the inherited environment (and win on a clash).
+
+```json
+{
+  "tag": "McpSimpleBinary",
+  "contents": {
+    "name": "github",
+    "executable": "/usr/bin/mcp-server-github",
+    "args": [],
+    "env": {
+      "GITHUB_TOKEN": {"tag": "Param", "contents": "github_token"},
+      "GITHUB_HOST": {"tag": "Literal", "contents": "github.com"}
+    }
+  }
+}
+```
+
+The server starts once per agent tree, so a `Param` must have a value at load
+time (process scope: `--set`, `--params-file`, or a default). A parameter with
+no such value, such as a session-scope one, is a load error. The values are not
+put on the command line, and the traced process description shows variable
+names only, so a secret parameter does not leak through `ps` or traces.
+
 ### Haskell Configuration Type
 
 ```haskell
@@ -82,6 +111,7 @@ data McpSimpleBinaryConfiguration = McpSimpleBinaryConfiguration
     { name :: Text           -- Display name
     , executable :: FilePath -- Path to server binary
     , args :: [Text]         -- Command line arguments
+    , env :: Maybe (Map Text BindingValue) -- Extra environment variables
     }
 ```
 

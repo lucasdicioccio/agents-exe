@@ -232,6 +232,10 @@ rather than on the command line — anything else would show up in `ps` and
 in traces regardless of how carefully the framework kept it from the model.
 `agents-exe check` refuses to load an agent that gets this wrong.
 
+An MCP server gets a secret through its `env` map (`{"tag": "Param", "contents": "name"}`);
+see [mcp.md](mcp.md). The server starts once per tree, so only process-scope
+parameters can be used there.
+
 ## Passing parameters to sub-agents (`with`)
 
 Parameter *values* never travel to a sub-agent implicitly — a name like
