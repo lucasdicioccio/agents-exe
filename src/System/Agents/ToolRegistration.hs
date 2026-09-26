@@ -1860,8 +1860,8 @@ mcpTool toolbox desc =
         }
   where
     call = ()
-    run _tracer _ctx (Aeson.Object v) = do
-        ret <- McpTools.callTool toolbox desc (Just v)
+    run _tracer ctx (Aeson.Object v) = do
+        ret <- McpTools.callTool toolbox desc (Just v) (Context.ctxProgressCallback ctx)
         case ret of
             (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
             err -> pure $ McpToolError call (mconcat ["calling error: ", show err])

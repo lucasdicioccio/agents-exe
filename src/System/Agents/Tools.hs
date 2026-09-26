@@ -54,6 +54,7 @@ import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
 import qualified System.Agents.Tools.IO as IOTools
 import qualified System.Agents.Tools.McpToolbox as McpTools
+import qualified System.Agents.Tools.Context as Context
 import qualified System.Agents.Tools.OpenAPI.Converter as OpenAPI
 import qualified System.Agents.Tools.OpenAPIToolbox as OpenAPIToolbox
 import qualified System.Agents.Tools.PostgREST.Converter as PostgREST
@@ -130,8 +131,8 @@ mcpTool toolbox desc =
         }
   where
     call = ()
-    run _tracer _ctx (Aeson.Object v) = do
-        ret <- McpTools.callTool toolbox desc (Just v)
+    run _tracer ctx (Aeson.Object v) = do
+        ret <- McpTools.callTool toolbox desc (Just v) (Context.ctxProgressCallback ctx)
         case ret of
             (Just (Right rsp)) -> pure $ extractContentsFromToolCall rsp
             err -> pure $ McpToolError call (mconcat ["calling error: ", show err])

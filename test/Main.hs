@@ -49,6 +49,7 @@ import qualified FileSandboxPredicateTests
 import qualified SkillsTests
 -- Import MCP Implementation tests
 import qualified McpImplementationTests
+import qualified McpProgressTests
 -- Import ToolPortal tests
 import qualified ToolPortalTests
 -- Import LuaToolbox security tests
@@ -136,6 +137,7 @@ tests =
         , ActivationSessionTests.activationSessionTestSuite
         , ModelCatalogTests.tests
         , McpImplementationTests.mcpImplementationTestSuite
+        , McpProgressTests.tests
         , ToolPortalTests.toolPortalTestSuite
         , LuaToolboxSecurityTests.tests
         , LuaToolboxTests.luaToolboxTests
