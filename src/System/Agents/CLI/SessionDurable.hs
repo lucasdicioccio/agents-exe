@@ -37,7 +37,7 @@ import Control.Monad (forM_)
 import Data.Map (Map)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Maybe (catMaybes, listToMaybe)
+import Data.Maybe (catMaybes, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
@@ -58,6 +58,7 @@ import System.Agents.Session.AgentConfig (applyAgentDurableConfig, buildToolCall
 import System.Agents.Session.Base
 import System.Agents.Session.Step (getPartialTurn, runStepM)
 import System.Agents.Session.Wake (resumeSession, wakeSession)
+import System.Agents.SessionStore (CatalogEntry (..))
 import qualified System.Agents.SessionStore as SessionStore
 import qualified System.Agents.Tools.Context as Ctx
 
@@ -78,7 +79,7 @@ data SessionDurableCommand
     | SessionPause SessionId
     | SessionResume SessionId
     | SessionPending SessionId
-    | SessionComplete ContinuationToken FilePath
+    | SessionComplete ContinuationToken FilePath (Maybe FilePath)
     | SessionRunIsolated SessionId
     deriving (Show)
 
@@ -252,7 +253,7 @@ handleSessionDurable store apiKeysFile agentFiles aliases opts =
         SessionPause sid -> handlePause store apiKeysFile agentFiles sid
         SessionResume sid -> handleResume store apiKeysFile agentFiles sid
         SessionPending sid -> handlePending store sid
-        SessionComplete token path -> handleComplete store token path
+        SessionComplete token path mdb -> handleComplete store mdb token path
         SessionRunIsolated sid -> handleRunIsolated store apiKeysFile agentFiles sid
 
 -- | Start a new durable session from a prompt.
@@ -374,18 +375,26 @@ handlePending store sid = do
                 Text.putStrLn $ "    token: " <> tokenTxt
                 Text.putStrLn $ "    disposition: " <> Text.pack (show disp)
 
--- | Complete a deferred call by injecting a result from a file.
-handleComplete :: SessionStore.SessionStore -> ContinuationToken -> FilePath -> IO ()
-handleComplete store token path = do
+{- | Complete a deferred call by injecting a result from a file.
+
+The session is looked up in the SQLite sessions database (when there is one,
+see 'SessionStore.withStoredSessions') as well as the file store, and written
+back where it was found.
+-}
+handleComplete :: SessionStore.SessionStore -> Maybe FilePath -> ContinuationToken -> FilePath -> IO ()
+handleComplete store mdb token path = SessionStore.withStoredSessions store mdb $ \catalog mBackend -> do
     bs <- LByteString.readFile path
     response <- case parseResultFile bs of
         Left err -> do
             Text.hPutStrLn stderr $ "Error reading result file: " <> err
             exitFailure
         Right resp -> pure resp
-    (sid, sess) <- findSessionForToken store token
+    (sid, sess) <- findSessionForToken catalog token
     updated <- wakeSession sess [(token, response)]
-    storeSessionById store sid updated
+    inBackend <- maybe (pure Nothing) (\b -> fmap (const b) <$> SessionStore.sbLoad b sid) mBackend
+    case inBackend of
+        Just backend -> SessionStore.sbStore backend sid updated
+        Nothing -> storeSessionById store sid updated
     case getPartialTurn updated of
         Nothing -> Text.putStrLn "Turn is now complete."
         Just _ -> Text.putStrLn "Turn is still partial."
@@ -488,22 +497,22 @@ formatToolCallId (ToolCallId uuid) = UUID.toText uuid
 -------------------------------------------------------------------------------
 
 -- | Find the session that contains a deferred call with the given token.
-findSessionForToken :: SessionStore.SessionStore -> ContinuationToken -> IO (SessionId, Session)
-findSessionForToken store token = do
-    sessions <- SessionStore.listSessions store
-    matches <- catMaybes <$> mapM loadAndCheck sessions
+findSessionForToken :: SessionStore.SessionCatalog -> ContinuationToken -> IO (SessionId, Session)
+findSessionForToken catalog token = do
+    entries <- SessionStore.catList catalog
+    let matches = mapMaybe loadAndCheck entries
     case matches of
         (sid, sess) : _ -> pure (sid, sess)
         [] -> do
             Text.hPutStrLn stderr $ "No session found containing token: " <> formatContinuationToken token
             exitFailure
   where
-    loadAndCheck (_path, mSess, convId) =
-        case mSess of
-            Nothing -> pure Nothing
+    loadAndCheck entry =
+        case entry.ceSession of
+            Nothing -> Nothing
             Just sess ->
-                let sid = SessionStore.conversationIdToSessionId convId
+                let sid = SessionStore.conversationIdToSessionId entry.ceConversationId
                  in if any (\(_, mTok, _, _) -> mTok == Just token) (extractDeferredCalls sess)
-                        then pure $ Just (sid, sess)
-                        else pure Nothing
+                        then Just (sid, sess)
+                        else Nothing
 

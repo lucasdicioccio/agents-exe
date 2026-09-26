@@ -32,6 +32,8 @@ data SessionSearchOptions = SessionSearchOptions
     { searchQueryText :: Text
     , searchDbPath :: Maybe FilePath
     , searchSessionStore :: SessionStore.SessionStore
+    , searchSessionsDb :: Maybe FilePath
+    -- ^ SQLite sessions database to search too (default: next to the sessions directory, when present)
     , searchDateFilter :: Maybe SearchTypes.DateFilter
     , searchTools :: [Text]
     , searchAgent :: Maybe Text
@@ -45,9 +47,13 @@ data SessionSearchOptions = SessionSearchOptions
 
 -- | Handle the session-search command
 handleSessionSearch :: SessionSearchOptions -> IO ()
-handleSessionSearch opts = do
+handleSessionSearch opts =
+    SessionStore.withStoredSessions opts.searchSessionStore opts.searchSessionsDb $ \catalog _ ->
+        searchWith opts (buildIndexConfig opts catalog)
+
+searchWith :: SessionSearchOptions -> SearchTypes.SearchIndexConfig -> IO ()
+searchWith opts config = do
     -- Check if index exists
-    let config = buildIndexConfig opts
     status <- checkIndexStatus config
 
     case status of
@@ -69,11 +75,11 @@ handleSessionSearch opts = do
     formatResults searchOpts result
 
 -- | Build the search index configuration from options.
-buildIndexConfig :: SessionSearchOptions -> SearchTypes.SearchIndexConfig
-buildIndexConfig opts =
+buildIndexConfig :: SessionSearchOptions -> SessionStore.SessionCatalog -> SearchTypes.SearchIndexConfig
+buildIndexConfig opts catalog =
     SearchTypes.SearchIndexConfig
         { SearchTypes.indexDbPath = fromMaybe ".agents-search.db" opts.searchDbPath
-        , SearchTypes.indexSessionStore = opts.searchSessionStore
+        , SearchTypes.indexCatalog = catalog
         , SearchTypes.indexIncludeToolOutputs = opts.searchIncludeToolOutputs
         }
 

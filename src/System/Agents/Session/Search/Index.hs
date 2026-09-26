@@ -47,7 +47,7 @@ import Database.SQLite.Simple (
     query_,
  )
 import Database.SQLite.Simple.QQ (sql)
-import System.Directory (createDirectoryIfMissing, doesFileExist, getModificationTime, removeFile)
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.FilePath (takeDirectory)
 
 import System.Agents.Base (ConversationId (..))
@@ -61,7 +61,7 @@ import System.Agents.Session.Types (
     UserQuery (..),
     UserToolResponse (..),
  )
-import qualified System.Agents.SessionStore as SessionStore
+import System.Agents.SessionStore (CatalogEntry (..), SessionCatalog (..))
 
 -------------------------------------------------------------------------------
 -- Index Creation and Schema
@@ -160,15 +160,13 @@ createSearchIndex config = do
     -- Create new index
     bracket (initializeIndex config.indexDbPath) close $ \conn -> do
         -- Get all sessions from store
-        sessions <- SessionStore.listSessions config.indexSessionStore
+        sessions <- listIndexable config
 
         -- Index each session
-        forM_ sessions $ \(path, mSession, convId) -> do
+        forM_ sessions $ \(path, mtime, mSession, convId) -> do
             case mSession of
                 Nothing -> pure () -- Skip unparseable sessions
-                Just session -> do
-                    mtime <- getMtime path
-                    indexSession conn config path mtime convId session
+                Just session -> indexSession conn config path mtime convId session
 
         -- Update metadata
         now <- getCurrentTime
@@ -192,14 +190,13 @@ updateSearchIndex config = do
                 execute_ conn "PRAGMA foreign_keys = ON"
 
                 -- Get all sessions from store
-                sessions <- SessionStore.listSessions config.indexSessionStore
+                sessions <- listIndexable config
 
                 -- Get indexed mtimes
                 indexedMtimes <- getIndexedMtimes conn
 
                 -- Process each session
-                forM_ sessions $ \(path, mSession, convId) -> do
-                    mtime <- getMtime path
+                forM_ sessions $ \(path, mtime, mSession, convId) -> do
                     let sessionIdText = conversationIdToText convId
 
                     case mSession of
@@ -210,7 +207,7 @@ updateSearchIndex config = do
                                     -- New session, add to index
                                     indexSession conn config path mtime convId session
                                 Just indexedMtime
-                                    | mtime > indexedMtime ->
+                                    | utcToEpoch mtime > utcToEpoch indexedMtime ->
                                         -- Modified session, re-index
                                         reindexSession conn config path mtime convId session
                                     | otherwise ->
@@ -218,7 +215,7 @@ updateSearchIndex config = do
                                         pure ()
 
                 -- Remove sessions that no longer exist
-                let currentIds = map (\(_, _, cid) -> conversationIdToText cid) sessions
+                let currentIds = map (\(_, _, _, cid) -> conversationIdToText cid) sessions
                 removeStaleSessions conn currentIds
 
                 -- Update metadata
@@ -240,14 +237,14 @@ checkIndexStatus config = do
         else handle (\e -> pure $ IndexError $ Text.pack $ show (e :: IOError)) $ do
             bracket (open config.indexDbPath) close $ \conn -> do
                 -- Get all sessions from store
-                sessions <- SessionStore.listSessions config.indexSessionStore
+                sessions <- listIndexable config
                 let totalSessions = length sessions
 
                 -- Get indexed mtimes
                 indexedMtimes <- getIndexedMtimes conn
 
                 -- Count stale sessions
-                staleCount <- countStaleSessions sessions indexedMtimes
+                let staleCount = countStaleSessions sessions indexedMtimes
 
                 if staleCount == 0
                     then pure IndexCurrent
@@ -567,10 +564,21 @@ ensureIndexExists config = do
     unless exists $ do
         createSearchIndex config
 
--- | Get file modification time.
-getMtime :: FilePath -> IO UTCTime
-getMtime path = do
-    getModificationTime path
+{- | The sessions to index: where each is stored (a file, else a @sqlite:@
+marker), when it was last updated, the session if readable, and its ID.
+-}
+listIndexable :: SearchIndexConfig -> IO [(FilePath, UTCTime, Maybe Session, ConversationId)]
+listIndexable config = do
+    entries <- catList config.indexCatalog
+    epoch <- pure $ posixSecondsToUTCTime 0
+    pure
+        [ ( fromMaybe ("sqlite:" <> Text.unpack (conversationIdToText e.ceConversationId)) e.cePath
+          , fromMaybe epoch e.ceUpdatedAt
+          , e.ceSession
+          , e.ceConversationId
+          )
+        | e <- entries
+        ]
 
 -- | Convert UTC time to epoch seconds.
 utcToEpoch :: UTCTime -> Int
@@ -590,17 +598,11 @@ getIndexedMtimes conn = do
     epochToUtc = posixSecondsToUTCTime . fromIntegral
 
 -- | Count stale sessions.
-countStaleSessions :: [(FilePath, Maybe Session, ConversationId)] -> [(Text, UTCTime)] -> IO Int
-countStaleSessions sessions indexedMtimes = do
-    let indexedMap = indexedMtimes
-    countStale 0 sessions indexedMap
+countStaleSessions :: [(FilePath, UTCTime, Maybe Session, ConversationId)] -> [(Text, UTCTime)] -> Int
+countStaleSessions sessions indexedMap =
+    length (filter stale sessions)
   where
-    countStale acc [] _ = pure acc
-    countStale acc ((path, _, convId) : rest) indexedMap = do
-        mtime <- getMtime path
-        let sessionIdText = conversationIdToText convId
-        case lookup sessionIdText indexedMap of
-            Nothing -> countStale (acc + 1) rest indexedMap
-            Just indexedMtime
-                | mtime > indexedMtime -> countStale (acc + 1) rest indexedMap
-                | otherwise -> countStale acc rest indexedMap
+    stale (_, mtime, _, convId) =
+        case lookup (conversationIdToText convId) indexedMap of
+            Nothing -> True
+            Just indexedMtime -> utcToEpoch mtime > utcToEpoch indexedMtime

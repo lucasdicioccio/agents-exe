@@ -36,6 +36,7 @@ import qualified PostgRESTParseTest
 import qualified SessionEditTests
 -- Import Session Durable CLI tests
 import qualified SessionDurableTests
+import qualified SessionSearchBackendTests
 import qualified AsyncToolCallsTests
 -- Import SessionPrint tests
 import qualified SessionPrintTests
@@ -124,6 +125,7 @@ tests =
         , SessionEditTests.tests
         , SessionEditTests.tests
         , SessionDurableTests.tests
+        , SessionSearchBackendTests.tests
         , AsyncToolCallsTests.tests
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests

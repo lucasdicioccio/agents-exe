@@ -32,7 +32,7 @@ import Data.Aeson (ToJSON)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
-import System.Agents.SessionStore (SessionStore)
+import System.Agents.SessionStore (SessionCatalog)
 
 -------------------------------------------------------------------------------
 -- Index Configuration
@@ -45,19 +45,19 @@ The index is stored as a SQLite database alongside session files.
 data SearchIndexConfig = SearchIndexConfig
     { indexDbPath :: FilePath
     -- ^ Path to the SQLite index database (default: .agents-search.db)
-    , indexSessionStore :: SessionStore
-    -- ^ Session store to index
+    , indexCatalog :: SessionCatalog
+    -- ^ Sessions to index
     , indexIncludeToolOutputs :: Bool
     -- ^ Whether to include tool outputs in the index
     }
-    deriving (Show, Eq)
+    deriving (Show)
 
 -- | Default search index configuration.
-defaultSearchIndexConfig :: SessionStore -> SearchIndexConfig
-defaultSearchIndexConfig store =
+defaultSearchIndexConfig :: SessionCatalog -> SearchIndexConfig
+defaultSearchIndexConfig catalog =
     SearchIndexConfig
         { indexDbPath = ".agents-search.db"
-        , indexSessionStore = store
+        , indexCatalog = catalog
         , indexIncludeToolOutputs = False
         }
 
