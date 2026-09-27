@@ -21,6 +21,7 @@ module System.Agents.Postgres (
     mkPostgresSessionStore,
     mkPostgresContinuationStore,
     mkPostgresMailStore,
+    mkPostgresWatchStore,
     mkPostgresAgentStore,
     isPostgresUrl,
 
@@ -32,6 +33,7 @@ module System.Agents.Postgres (
 import Control.Exception (bracket)
 import Control.Monad (forM_, unless, void)
 import qualified Data.Aeson as Aeson
+import Data.Aeson.Types (parseEither)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (isPrefixOf, sortOn)
@@ -64,6 +66,7 @@ import System.Agents.Host (HostStores (..))
 import System.Agents.Session.Async (ContinuationStore (..), ContinuationToken (..), ToolContinuationSnapshot (..))
 import System.Agents.Session.Base (Envelope (..), Session, SessionId (..), SessionStatus (..), UserToolResponse, messageIdText, parseSessionStatus, sessionStatusOf, sessionStatusText)
 import System.Agents.Session.Mailbox (MailStore (..))
+import System.Agents.Session.WatchStore (PersistedWatch (..), WatchStore (..), decodeWatchRequest, encodeWatchRequest)
 import System.Agents.SessionStore (
     SessionBackend (..),
     SessionLabels (..),
@@ -88,8 +91,9 @@ withPostgresStores url action =
         sessions <- mkPostgresSessionStore pool
         continuations <- mkPostgresContinuationStore pool
         mail <- mkPostgresMailStore pool
+        watches <- mkPostgresWatchStore pool
         agents <- mkPostgresAgentStore pool
-        action (HostStores sessions continuations mail (Just agents))
+        action (HostStores sessions continuations mail watches (Just agents))
 
 -- | A pool of at most the given number of connections, idle ones closed after a minute.
 openPostgresPool :: ByteString -> Int -> IO (Pool Connection)
@@ -479,6 +483,65 @@ loadMail conn sid = do
         query conn "SELECT body_json FROM session_mail WHERE session_id = ? ORDER BY seq ASC" (Only (sessionIdText sid)) ::
             IO [Only Text]
     pure $ mapMaybe (decodeJson . fromOnly) rows
+
+-------------------------------------------------------------------------------
+-- Watches (@todos/os-as-standalone-server.md@ G11)
+-------------------------------------------------------------------------------
+
+watchMigrations :: [PgMigration]
+watchMigrations =
+    [ PgMigration 1 $
+        statements
+            [ "CREATE TABLE IF NOT EXISTS session_watches (\
+              \ watch_id TEXT PRIMARY KEY,\
+              \ watcher_session_id TEXT NOT NULL,\
+              \ request_json TEXT NOT NULL,\
+              \ deadline TIMESTAMPTZ NOT NULL,\
+              \ created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+            , "CREATE INDEX IF NOT EXISTS idx_session_watches_watcher ON session_watches(watcher_session_id)"
+            ]
+    ]
+
+-- | A durable 'WatchStore' on the pool, after migrating its table. Mirrors
+-- "System.Agents.Session.WatchStore"'s SQLite implementation, reusing its
+-- 'WatchRequest' JSON shape ('encodeWatchRequest'\/'decodeWatchRequest') so
+-- the two backends agree on the wire format.
+mkPostgresWatchStore :: Pool Connection -> IO WatchStore
+mkPostgresWatchStore pool = do
+    runPostgresMigrations pool "session_watches" watchMigrations
+    let with = withResource pool
+    pure
+        WatchStore
+            { wsSave = \pw -> with $ \c -> saveWatch c pw
+            , wsDelete = \watchId -> with $ \c -> void $ execute c "DELETE FROM session_watches WHERE watch_id = ?" (Only watchId)
+            , wsLoadAll = with loadAllWatches
+            }
+
+saveWatch :: Connection -> PersistedWatch -> IO ()
+saveWatch conn pw =
+    void $
+        execute
+            conn
+            "INSERT INTO session_watches (watch_id, watcher_session_id, request_json, deadline)\
+            \ VALUES (?, ?, ?, ?)\
+            \ ON CONFLICT (watch_id) DO UPDATE SET\
+            \ watcher_session_id = excluded.watcher_session_id,\
+            \ request_json = excluded.request_json,\
+            \ deadline = excluded.deadline"
+            (pw.pwWatchId, sessionIdText pw.pwWatcher, encodeJson (encodeWatchRequest pw.pwRequest), pw.pwDeadline)
+
+loadAllWatches :: Connection -> IO [PersistedWatch]
+loadAllWatches conn = do
+    rows <-
+        query_ conn "SELECT watch_id, watcher_session_id, request_json, deadline FROM session_watches" ::
+            IO [(Text, Text, Text, UTCTime)]
+    pure $ mapMaybe decodeRow rows
+  where
+    decodeRow (watchId, watcherText, bodyJson, deadline) = do
+        watcherUuid <- UUID.fromText watcherText
+        value <- decodeJson bodyJson :: Maybe Aeson.Value
+        req <- either (const Nothing) Just (parseEither decodeWatchRequest value)
+        pure $ PersistedWatch watchId (SessionId watcherUuid) req deadline
 
 -------------------------------------------------------------------------------
 -- Agents

@@ -573,6 +573,34 @@ why it is last.
 * G11: secret params, watches and the run handle are volatile (D7 stands);
   since 2026-09-25 `recoverOnStartup` fails the running calls of a session
   whose required params were lost, with a `params_required` detail.
+  Since 2026-09-27, watches are also recovered: a `session_watches` table
+  (SQLite via `System.Agents.Session.WatchStore`, Postgres via
+  `System.Agents.Postgres.mkPostgresWatchStore`, both modeled directly on
+  `session_mail`/`MailStore`) persists each active `watch-session`
+  registration (watcher, `WatchRequest`, absolute deadline) alongside the
+  in-memory `WatchHandle`; `serverWatchSession` writes the row before
+  starting to forward, `serverUnwatchSession` and the forwarding loop's own
+  TTL expiry both delete it, and `recoverOnStartup` (via the new
+  `recoverWatches`) re-registers every row whose deadline has not yet
+  passed and drops the rest, exactly as an in-process TTL timeout would.
+  A `WatchRequest` carries no secret, so unlike session parameters this
+  needed no client resupply step -- D7's "durable storage" branch applies
+  here, not its "resupplied by the client" one. Events raised while no
+  process was watching are not replayed; a recovered watch only sees
+  events from the moment it is re-registered, same as any other live
+  subscriber.
+  The run handle (`lsRun`/`Async`) turned out not to need new work: eviction
+  already refuses to drop a `LiveSession` with an active run or a running
+  background call (`evictIdle`'s `lsRun`/`hasRunningCalls` checks), so it
+  is never actually lost to eviction; and a process restart was already
+  covered by `recoverOnStartup`'s existing orphaned/`params_required`
+  handling above. This is a deviation from the literal G11 wording ("the
+  run `Async`... [is] lost on restart or eviction") only in that the
+  eviction half of that claim no longer held by the time this phase
+  started -- no behavior change was needed there, only watches.
+  (`feat/g11-watch-recovery`, full `cabal test` suite green: 1248 tests in
+  `agents-tests`, 32 in `agents-server-tests`, 7 in `agents-postgres-tests`
+  including a migration-inventory test updated for the new table.)
 * TUI: selection among several pending calls (`select-pending`, Ctrl+O) and
   `fail-pending` (Ctrl+W) are done; a failed call completes with the text
   `Error: <reason>` rather than a new `UserToolResponse` variant. Still no view

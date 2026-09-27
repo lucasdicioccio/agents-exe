@@ -155,6 +155,7 @@ import System.Agents.Session.Step (
     runStepM,
  )
 import System.Agents.Session.Wake (WakeOutcome (..), findSessionForToken, wakeSessionWith)
+import System.Agents.Session.WatchStore (PersistedWatch (..), WatchStore (..))
 import System.Agents.SessionStore (
     SessionMeta (..),
     SessionQuery (..),
@@ -856,7 +857,10 @@ defaultWatchTtlSeconds = 600
 must be the target or one of its descendants, mirroring @send-message@'s
 own @mailScope: subtree@ default), capped per watcher, and forwarding
 matching events as 'WatchedEvent' mail until its TTL elapses or
-'serverUnwatchSession' is called.
+'serverUnwatchSession' is called. Persisted to 'hostWatches' first, so a
+restart's 'recoverOnStartup' can bring it back (G11,
+@todos/os-as-standalone-server.md@); a 'WatchRequest' holds no secret, so
+unlike session parameters (D7) it needs no client resupply step.
 -}
 serverWatchSession :: SessionRunner -> SessionId -> WatchRequest -> IO (Either Text Text)
 serverWatchSession runner watcherSid req = do
@@ -871,42 +875,57 @@ serverWatchSession runner watcherSid req = do
                 then pure $ Left "too many active watches for this session"
                 else do
                     watchId <- Text.pack . show <$> newContinuationToken
-                    next <- subscribeSession runner req.wrTarget
                     deadline <- addUTCTime (fromIntegral (fromMaybe defaultWatchTtlSeconds req.wrTtlSeconds)) <$> getCurrentTime
-                    handle <- async $ forwardLoop watchId next deadline
-                    atomically $ modifyTVar' runner.srWatches (Map.insert watchId (WatchHandle watcherSid handle))
+                    runner.srHost.hostWatches.wsSave (PersistedWatch watchId watcherSid req deadline)
+                    startWatch runner watchId watcherSid req deadline
                     pure $ Right watchId
+
+{- | Subscribe and spawn the forwarding thread for one watch, and register it
+in 'srWatches'. Shared by 'serverWatchSession' (a fresh registration, its row
+already saved by the caller) and 'recoverWatches' (a row loaded back from
+'hostWatches' after a restart): both just need a running 'WatchHandle' from
+here on.
+-}
+startWatch :: SessionRunner -> Text -> SessionId -> WatchRequest -> UTCTime -> IO ()
+startWatch runner watchId watcherSid req deadline = do
+    next <- subscribeSession runner req.wrTarget
+    handle <- async $ forwardLoop next deadline
+    atomically $ modifyTVar' runner.srWatches (Map.insert watchId (WatchHandle watcherSid handle))
   where
-    forwardLoop :: Text -> IO Event -> UTCTime -> IO ()
-    forwardLoop watchId next deadline = do
+    forwardLoop :: IO Event -> UTCTime -> IO ()
+    forwardLoop next currentDeadline = do
         now <- getCurrentTime
-        let remainingMicros = round (max 0 (diffUTCTime deadline now)) * 1_000_000
+        let remainingMicros = round (max 0 (diffUTCTime currentDeadline now)) * 1_000_000
         if remainingMicros <= 0
-            then dropWatch watchId
+            then dropWatch runner watchId
             else do
                 result <- timeout remainingMicros next
                 case result of
-                    Nothing -> dropWatch watchId
+                    Nothing -> dropWatch runner watchId
                     Just event -> do
-                        when (eventMatches req event) $ forwardEvent watcherSid req.wrTarget event
-                        forwardLoop watchId next deadline
+                        when (eventMatches req event) $ forwardEvent runner watcherSid req.wrTarget event
+                        forwardLoop next currentDeadline
 
-    dropWatch :: Text -> IO ()
-    dropWatch watchId = atomically $ modifyTVar' runner.srWatches (Map.delete watchId)
+-- | Forget a watch, in memory and in 'hostWatches' (its TTL elapsed, or
+-- its forwarding loop otherwise stopped by itself).
+dropWatch :: SessionRunner -> Text -> IO ()
+dropWatch runner watchId = do
+    atomically $ modifyTVar' runner.srWatches (Map.delete watchId)
+    runner.srHost.hostWatches.wsDelete watchId
 
-    forwardEvent :: SessionId -> SessionId -> Event -> IO ()
-    forwardEvent watcher target event = do
-        mTarget <- (serverMailRouter runner).mrLookup watcher
-        forM_ mTarget $ \(_, mb) ->
-            void $
-                mb.mbSend
-                    Outgoing
-                        { outId = Nothing
-                        , outFrom = FromSystem "watch-session"
-                        , outPriority = Normal
-                        , outHops = 0
-                        , outBody = WatchedEvent target (eventKind event.evBody) (watchedEventPayload event.evBody)
-                        }
+forwardEvent :: SessionRunner -> SessionId -> SessionId -> Event -> IO ()
+forwardEvent runner watcher target event = do
+    mTarget <- (serverMailRouter runner).mrLookup watcher
+    forM_ mTarget $ \(_, mb) ->
+        void $
+            mb.mbSend
+                Outgoing
+                    { outId = Nothing
+                    , outFrom = FromSystem "watch-session"
+                    , outPriority = Normal
+                    , outHops = 0
+                    , outBody = WatchedEvent target (eventKind event.evBody) (watchedEventPayload event.evBody)
+                    }
 
 -- | Stop a previously registered watch (§7).
 serverUnwatchSession :: SessionRunner -> Text -> IO Bool
@@ -915,9 +934,29 @@ serverUnwatchSession runner watchId = do
         table <- readTVar runner.srWatches
         writeTVar runner.srWatches (Map.delete watchId table)
         pure (Map.lookup watchId table)
+    runner.srHost.hostWatches.wsDelete watchId
     case mHandle of
         Nothing -> pure False
         Just wh -> cancel wh.whAsync >> pure True
+
+{- | Re-register every watch a previous process left active (G11,
+@todos/os-as-standalone-server.md@): loaded from 'hostWatches', one whose
+deadline has already passed is simply dropped (as if its own forwarding
+loop had timed it out), everything else gets a fresh subscription and
+forwarding thread via 'startWatch'. Events raised while no process was
+watching are not replayed -- like any other subscriber, a re-registered
+watch only sees what happens from here on.
+-}
+recoverWatches :: SessionRunner -> IO [Text]
+recoverWatches runner = do
+    persisted <- runner.srHost.hostWatches.wsLoadAll :: IO [PersistedWatch]
+    now <- getCurrentTime
+    fmap concat $ forM persisted $ \pw ->
+        if pw.pwDeadline <= now
+            then runner.srHost.hostWatches.wsDelete pw.pwWatchId >> pure []
+            else do
+                startWatch runner pw.pwWatchId pw.pwWatcher pw.pwRequest pw.pwDeadline
+                pure [pw.pwWatchId]
 
 {- | Whether an 'Event' matches a watch request's @events@\/@tool@ filter.
 'Nothing' for @wrEvents@ matches every kind; @wrTool@ only applies to the
@@ -2077,9 +2116,17 @@ a restart loses them): those calls are failed right away with a
 detail says the same, so a client resupplies them through @params@ on its
 next message or resume instead of retrying blind
 (@todos/tool-partial-application.md@ §5). Nothing is resumed.
+
+Also re-registers every watch a previous process left active
+('recoverWatches', G11); unlike the run handle and secret params above, a
+watch carries no state that must be resupplied, so this needs no detail on
+the session and is not reflected in the returned list of recovered
+sessions.
 -}
 recoverOnStartup :: SessionRunner -> IO [SessionId]
 recoverOnStartup runner = do
+    recoveredWatches <- recoverWatches runner
+    unless (null recoveredWatches) $ runTracer runner.srHost.hostTracer $ HostRecoveredWatches recoveredWatches
     let backend = runner.srHost.hostBackend
     stale <- backend.sbQuery allSessionsQuery{sqStatuses = Just [StatusRunning]}
     recovered <- forM stale $ \meta0 -> withLive runner meta0.smSessionId $ \live -> do

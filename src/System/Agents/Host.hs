@@ -60,6 +60,7 @@ import System.Agents.Session.Async (ContinuationStore, mkSqliteContinuationStore
 import System.Agents.Session.Mailbox (MailStore)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.Session.Types (SessionId)
+import System.Agents.Session.WatchStore (WatchStore, mkSqliteWatchStore)
 import System.Agents.SessionStore (FileSessionStore (..), SessionBackend, backendCatalog, fileSessionBackend, mkCompositeSessionStore, mkSqliteSessionStore)
 import System.Agents.Tools.Params.Types (ProcessParams)
 
@@ -78,6 +79,10 @@ data Host = Host
     , hostMail :: MailStore
     -- ^ Durable mail (@todos/session-mailbox.md@, Phase 3), one row per
     -- envelope ever accepted by any session this host runs.
+    , hostWatches :: WatchStore
+    -- ^ Durable @watch-session@ registrations (@todos/os-as-standalone-server.md@
+    -- G11), so 'System.Agents.Host.Runner.recoverOnStartup' can re-register
+    -- the ones still active after a restart.
     , hostTracer :: Tracer IO HostTrace
     , hostStreamTokens :: Bool
     -- ^ Whether the runner streams LLM answers as text deltas.
@@ -140,6 +145,9 @@ data HostTrace
     | -- | A recovered session whose running calls were failed because these
       -- required parameters are no longer bound (see 'Runner.recoverOnStartup').
       HostRecoveredParamsRequired !SessionId ![Text]
+    | -- | @watch-session@ registrations re-registered at boot, by watch id
+      -- (G11, @todos/os-as-standalone-server.md@; see 'Runner.recoverWatches').
+      HostRecoveredWatches ![Text]
     | -- | A runner event, by kind (e.g. @run.started@), for a session.
       HostRunnerTrace !Text !SessionId
     | -- | A stored agent that was not loaded, and why.
@@ -158,6 +166,7 @@ data HostStores = HostStores
     { hsSessions :: SessionBackend
     , hsContinuations :: ContinuationStore
     , hsMail :: MailStore
+    , hsWatches :: WatchStore
     , hsAgents :: Maybe AgentStore
     -- ^ 'Nothing': agents come from files only.
     }
@@ -176,8 +185,9 @@ withHost cfg tracer action =
         backend <- mkSqliteSessionStore conn
         store <- mkSqliteContinuationStore conn
         mail <- mkSqliteMailStore conn
+        watches <- mkSqliteWatchStore conn
         agents <- mkSqliteAgentStore conn
-        withHostStores cfg (HostStores backend store mail (Just agents)) tracer action
+        withHostStores cfg (HostStores backend store mail watches (Just agents)) tracer action
 
 {- | Like 'withHost', with stores the caller opened (e.g. on Postgres, with
 @agents-postgres@).
@@ -240,6 +250,7 @@ withHostStores cfg stores tracer action = do
                 , hostBackend = backend
                 , hostContinuations = store
                 , hostMail = stores.hsMail
+                , hostWatches = stores.hsWatches
                 , hostTracer = tracer
                 , hostStreamTokens = cfg.hcStreamTokens
                 , hostLiveSessionTtl = cfg.hcLiveSessionTtl
