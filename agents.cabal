@@ -169,6 +169,7 @@ library agents-lib
                     , System.Agents.Session.Durable
                     , System.Agents.Session.Mailbox
                     , System.Agents.Session.MailStore
+                    , System.Agents.Session.WatchStore
                     , System.Agents.Session.Isolation
                     , System.Agents.Session.Async
                     , System.Agents.Session.Async.Engine

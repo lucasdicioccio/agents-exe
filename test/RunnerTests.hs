@@ -68,6 +68,7 @@ import System.Agents.Session.Async (ContinuationStore (..), mkSqliteContinuation
 import System.Agents.Session.Base hiding (SessionProgress (..))
 import System.Agents.Session.Mailbox (Mailbox (..), MailboxInfo (..), MailRouter (..), newInMemoryMailbox, newMailRouter)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
+import System.Agents.Session.WatchStore (mkSqliteWatchStore)
 import System.Agents.SessionStore hiding (listSessions)
 import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM)
 import qualified System.Agents.Tools.IO as IOTools
@@ -125,6 +126,8 @@ tests =
         , testCase "watch-session does not forward a non-matching event" watchSessionFilterTest
         , testCase "unwatch-session stops forwarding" unwatchSessionTest
         , testCase "watch-session refuses a target outside the watcher's subtree" watchSessionScopeDenialTest
+        , testCase "a watch survives a restart via recoverOnStartup" watchSurvivesRestartTest
+        , testCase "a watch whose deadline passed is not recovered" expiredWatchNotRecoveredTest
         , testCase "list-sessions merges live MailRouter entries with the persisted catalog" listSessionsMergeTest
         , testCase "run's spawn-session resolves a helper slug into a registered child session" oneShotSpawnSessionTest
         , testCase "run's spawn-session refuses an unknown helper slug" oneShotSpawnSessionUnknownSlugTest
@@ -1824,6 +1827,66 @@ watchSessionScopeDenialTest = do
             Left _ -> pure ()
             Right _ -> assertFailure "expected watching an unrelated session to be refused"
 
+{- | A watch survives a restart (G11, @todos/os-as-standalone-server.md@): its
+process's runner registers it, the process goes away (simulated by
+'shutdownSessionRunner', which cancels the forwarding thread without ever
+running 'dropWatch', leaving the row in 'hostWatches'), a fresh runner on
+the same host recovers it via 'recoverOnStartup', and it goes on forwarding
+matching events to the watcher's mailbox.
+-}
+watchSurvivesRestartTest :: Assertion
+watchSurvivesRestartTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (const mockCompletion)
+    sid <- withSessionRunner host $ \runner1 -> do
+        meta <- expectRight =<< createSession runner1 "test-agent" (message "hello") (Just UntilBlocked)
+        _ <- expectRight =<< awaitRun runner1 meta.smSessionId 5
+        _ <-
+            expectRight
+                =<< serverWatchSession
+                    runner1
+                    meta.smSessionId
+                    WatchRequest{wrTarget = meta.smSessionId, wrEvents = Just ["run.started"], wrTool = Nothing, wrTtlSeconds = Just 300}
+        pure meta.smSessionId
+    -- runner1 (and its in-memory watch) is gone; only the persisted row is left.
+    withSessionRunner host $ \runner2 -> do
+        recovered <- recoverOnStartup runner2
+        recovered @?= []
+        _ <- expectRight =<< postMessage runner2 sid (message "again") (Just UntilBlocked) Map.empty
+        _ <- expectRight =<< awaitRun runner2 sid 5
+        mb <- newDurableMailbox host.hostMail sid
+        waitUntil (any isWatchedEvent <$> atomically (mbUnread mb 0))
+        unread <- atomically (mbUnread mb 0)
+        assertBool "watch survived the restart" (any isWatchedEvent unread)
+
+{- | A watch whose deadline passed while no process was watching is dropped
+on recovery rather than resurrected: 'recoverWatches' treats an expired row
+exactly as an in-process watch's own TTL timeout would.
+-}
+expiredWatchNotRecoveredTest :: Assertion
+expiredWatchNotRecoveredTest = do
+    node <- testNode "{}"
+    host <- testHost [node] (const mockCompletion)
+    sid <- withSessionRunner host $ \runner1 -> do
+        meta <- expectRight =<< createSession runner1 "test-agent" (message "hello") (Just UntilBlocked)
+        _ <- expectRight =<< awaitRun runner1 meta.smSessionId 5
+        _ <-
+            expectRight
+                =<< serverWatchSession
+                    runner1
+                    meta.smSessionId
+                    WatchRequest{wrTarget = meta.smSessionId, wrEvents = Just ["run.started"], wrTool = Nothing, wrTtlSeconds = Just 0}
+        threadDelay 50_000
+        pure meta.smSessionId
+    withSessionRunner host $ \runner2 -> do
+        _ <- recoverOnStartup runner2
+        _ <- expectRight =<< postMessage runner2 sid (message "again") (Just UntilBlocked) Map.empty
+        _ <- expectRight =<< awaitRun runner2 sid 5
+        threadDelay 200_000
+        mb <- newDurableMailbox host.hostMail sid
+        unread <- atomically (mbUnread mb 0)
+        assertBool "an expired watch must not be recovered" (not (any isWatchedEvent unread))
+
 -- | A dummy tool portal for tests that need a valid 'ToolExecutionContext'.
 dummyPortal :: ToolPortal
 dummyPortal _ _ =
@@ -1851,6 +1914,7 @@ testHost nodes complete = do
     backend <- mkSqliteSessionStore conn
     store <- mkSqliteContinuationStore conn
     mail <- mkSqliteMailStore conn
+    watches <- mkSqliteWatchStore conn
     let deps = (defaultAgentDeps []){adContinuationStore = Just store, adCompletion = Just complete}
     stored <- noStoredAgents
     pure
@@ -1862,6 +1926,7 @@ testHost nodes complete = do
             , hostBackend = backend
             , hostContinuations = store
             , hostMail = mail
+            , hostWatches = watches
             , hostTracer = silent
             , hostStreamTokens = False
             , hostProcessParams = mempty

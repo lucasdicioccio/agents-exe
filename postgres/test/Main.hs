@@ -105,7 +105,7 @@ migrationsTest baseUrl = withDatabase baseUrl $ \url -> do
     withPostgresStores url $ \_ -> pure ()
     bracket (connectPostgreSQL url) close $ \conn -> do
         rows <- query_ conn "SELECT component, version FROM schema_migrations ORDER BY component, version" :: IO [(Text, Int)]
-        rows @?= [("agents", 1), ("continuations", 1), ("session_mail", 1), ("sessions", 1), ("sessions", 2), ("sessions", 3)]
+        rows @?= [("agents", 1), ("continuations", 1), ("session_mail", 1), ("sessions", 1), ("sessions", 2), ("sessions", 3), ("session_watches", 1)]
 
 casTest :: String -> Assertion
 casTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
