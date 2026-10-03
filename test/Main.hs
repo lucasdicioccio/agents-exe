@@ -92,6 +92,7 @@ import qualified MediaContentPartTests
 import qualified OpenAIStreamTests
 import qualified ProtocolTests
 import qualified RunnerTests
+import qualified System.Environment as Env
 import qualified HostClientTests
 import qualified HttpClientTests
 import qualified HostLegacySessionTests
@@ -103,8 +104,17 @@ import qualified TuiDraftTests
 import qualified TuiFileBrowserTests
 import qualified TuiPendingTests
 
+{- | Run sequentially unless asked otherwise: several tests change the
+process working directory, and tasty >=1.5.4 turns its default @-j@ into
+real parallelism (@+RTS -N@), which makes them race.
+-}
 main :: IO ()
-main = defaultMain tests
+main = do
+    threads <- Env.lookupEnv "TASTY_NUM_THREADS"
+    case threads of
+        Nothing -> Env.setEnv "TASTY_NUM_THREADS" "1"
+        Just _ -> pure ()
+    defaultMain tests
 
 tests :: TestTree
 tests =

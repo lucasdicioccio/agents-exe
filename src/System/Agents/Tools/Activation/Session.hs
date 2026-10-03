@@ -50,7 +50,6 @@ module System.Agents.Tools.Activation.Session (
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
-import Data.Foldable (foldl')
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import Data.Set (Set)

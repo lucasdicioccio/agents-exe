@@ -286,7 +286,7 @@ buildToolNameMapping ::
     -- | Map from normalized name to NameMapping
     Map Text NameMapping
 buildToolNameMapping toolboxName tools =
-    fst $ foldl' addTool (Map.empty, Set.empty) tools
+    fst $ strictFoldl addTool (Map.empty, Set.empty) tools
   where
     addTool :: (Map Text NameMapping, Set Text) -> InternalTool -> (Map Text NameMapping, Set Text)
     addTool (mapping, used) tool =
@@ -303,10 +303,10 @@ buildToolNameMapping toolboxName tools =
     getOperationIdOrFallback tool =
         fromMaybe (toolName tool) (opOperationId (toolOperation tool))
 
-    -- Local foldl' to avoid import
-    foldl' :: (a -> b -> a) -> a -> [b] -> a
-    foldl' _f z [] = z
-    foldl' f z (x : xs) = let z' = f z x in z' `seq` foldl' f z' xs
+    -- Local strict left fold to avoid import
+    strictFoldl :: (a -> b -> a) -> a -> [b] -> a
+    strictFoldl _f z [] = z
+    strictFoldl f z (x : xs) = let z' = f z x in z' `seq` strictFoldl f z' xs
 
 {- | Find a tool by its normalized LLM name.
 

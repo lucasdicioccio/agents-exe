@@ -22,8 +22,8 @@ module AgentsServer.OpenApi (
 ) where
 
 import Control.Lens ((%~), (&), (.~), (?~))
-import Data.HashMap.Strict.InsOrd (InsOrdHashMap)
-import qualified Data.HashMap.Strict.InsOrd as InsOrd
+import Data.HashMap.Strict.InsOrd.Compat (InsOrdHashMap)
+import qualified Data.HashMap.Strict.InsOrd.Compat as InsOrd
 import Data.OpenApi
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
