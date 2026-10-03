@@ -75,6 +75,10 @@ data Mailbox = Mailbox
     -- removes anything; a reader is a cursor, not a consumer.
     , mbTrim :: Cursor -> IO ()
     -- ^ Garbage-collect envelopes at or below the given cursor.
+    , mbSync :: IO ()
+    {- ^ Pick up mail that another process accepted for this session in the
+    durable store. Does nothing for an in-memory mailbox.
+    -}
     }
 
 -- | Default bound on unread envelopes a mailbox holds before refusing new
@@ -112,6 +116,7 @@ newInMemoryMailbox = do
             { mbSend = sendImpl envelopesVar nextSeqVar
             , mbUnread = unreadImpl envelopesVar
             , mbTrim = trimImpl envelopesVar
+            , mbSync = pure ()
             }
 
 sendImpl :: TVar (Seq Envelope) -> TVar Int -> Outgoing -> IO (Either SendError Receipt)
@@ -148,12 +153,16 @@ hops, body_json, accepted_at)@ per the spec.
 
 'msAppend' persists one already-sequenced envelope (idempotent on 'envId',
 mirroring 'sendImpl' — a backend can implement this with an upsert keyed on
-@(session_id, id)@ that does nothing on conflict); 'msLoad' returns a
+@(session_id, id)@ that does nothing on conflict) and answers with the
+envelope as it is stored. A store written by one process stores the envelope
+as given. A store shared by several processes (Postgres) may give it a later
+'envSeq', when another process appended since this one last looked, or
+answer with the envelope already stored under that id. 'msLoad' returns a
 session's envelopes in ascending 'envSeq' order, to hydrate the in-memory
 front on session load.
 -}
 data MailStore = MailStore
-    { msAppend :: SessionId -> Envelope -> IO ()
+    { msAppend :: SessionId -> Envelope -> IO Envelope
     , msLoad :: SessionId -> IO [Envelope]
     }
 
@@ -174,19 +183,50 @@ newDurableMailbox store sid = do
     envelopesVar <- newTVarIO (Seq.fromList persisted)
     let nextSeq = 1 + Foldable.foldl' (\acc e -> max acc e.envSeq) 0 persisted
     nextSeqVar <- newTVarIO nextSeq
+    trimmedVar <- newTVarIO 0
     lock <- newMVar ()
+    let front = DurableFront store sid envelopesVar nextSeqVar trimmedVar
     pure
         Mailbox
-            { mbSend = durableSendImpl lock store sid envelopesVar nextSeqVar
+            { mbSend = durableSendImpl lock front
             , mbUnread = unreadImpl envelopesVar
-            , mbTrim = trimImpl envelopesVar
+            , mbTrim = \cur -> do
+                atomically $ modifyTVar' trimmedVar (max cur)
+                trimImpl envelopesVar cur
+            , mbSync = withMVar lock $ \() -> mergeFromStore front
             }
 
-durableSendImpl :: MVar () -> MailStore -> SessionId -> TVar (Seq Envelope) -> TVar Int -> Outgoing -> IO (Either SendError Receipt)
-durableSendImpl lock store sid envelopesVar nextSeqVar outgoing = withMVar lock $ \() -> do
+-- | The in-memory front of a durable mailbox.
+data DurableFront = DurableFront
+    { dfStore :: MailStore
+    , dfSession :: SessionId
+    , dfEnvelopes :: TVar (Seq Envelope)
+    , dfNextSeq :: TVar Int
+    , dfTrimmed :: TVar Cursor
+    -- ^ Envelopes at or below this cursor were trimmed; a merge leaves them out.
+    }
+
+{- | Add to the front what the store holds and the front does not: mail
+another process accepted for the session (call under the mailbox's lock).
+-}
+mergeFromStore :: DurableFront -> IO ()
+mergeFromStore front = do
+    persisted <- front.dfStore.msLoad front.dfSession
+    atomically $ do
+        es <- readTVar front.dfEnvelopes
+        trimmed <- readTVar front.dfTrimmed
+        let known :: Envelope -> Bool
+            known e = Foldable.any ((== e.envId) . envId) es
+            fresh = [e | e <- persisted, e.envSeq > trimmed, not (known e)]
+        when (not (null fresh)) $
+            writeTVar front.dfEnvelopes (Seq.sortOn (.envSeq) (es <> Seq.fromList fresh))
+        modifyTVar' front.dfNextSeq (max (1 + Foldable.foldl' (\acc e -> max acc e.envSeq) 0 persisted))
+
+durableSendImpl :: MVar () -> DurableFront -> Outgoing -> IO (Either SendError Receipt)
+durableSendImpl lock front outgoing = withMVar lock $ \() -> do
     mid <- maybe newMessageId pure outgoing.outId
     now <- getCurrentTime
-    es <- readTVarIO envelopesVar
+    es <- readTVarIO front.dfEnvelopes
     case Foldable.find ((== mid) . envId) es of
         Just existing -> pure $ Right $ Receipt mid existing.envSeq True
         Nothing
@@ -194,7 +234,7 @@ durableSendImpl lock store sid envelopesVar nextSeqVar outgoing = withMVar lock 
             | Seq.length es >= mailboxMaxUnread && not (exemptFromBound outgoing.outBody) ->
                 pure $ Left MailboxFull
             | otherwise -> do
-                n <- readTVarIO nextSeqVar
+                n <- readTVarIO front.dfNextSeq
                 let envelope =
                         Envelope
                             { envId = mid
@@ -205,11 +245,20 @@ durableSendImpl lock store sid envelopesVar nextSeqVar outgoing = withMVar lock 
                             , envSentAt = now
                             , envBody = outgoing.outBody
                             }
-                store.msAppend sid envelope
-                atomically $ do
-                    writeTVar nextSeqVar (n + 1)
-                    writeTVar envelopesVar (es Seq.|> envelope)
-                pure $ Right $ Receipt mid n False
+                stored <- front.dfStore.msAppend front.dfSession envelope
+                if stored.envSeq == n
+                    then do
+                        atomically $ do
+                            writeTVar front.dfNextSeq (n + 1)
+                            writeTVar front.dfEnvelopes (es Seq.|> stored)
+                        pure $ Right $ Receipt mid n False
+                    else do
+                        -- Another process appended in between: the front is
+                        -- behind the store. Catching up before publishing
+                        -- keeps the front free of gaps below its newest
+                        -- envelope, so a reader's cursor never skips mail.
+                        mergeFromStore front
+                        pure $ Right $ Receipt mid stored.envSeq False
 
 unreadImpl :: TVar (Seq Envelope) -> Cursor -> STM [Envelope]
 unreadImpl envelopesVar cur = do

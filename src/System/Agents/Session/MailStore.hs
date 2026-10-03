@@ -63,7 +63,7 @@ mailSchemaStatements =
 
 -- | Append one envelope. A no-op if @(session_id, id)@ already exists
 -- (idempotent accept, per §1).
-sqliteAppendMail :: Connection -> SessionId -> Envelope -> IO ()
+sqliteAppendMail :: Connection -> SessionId -> Envelope -> IO Envelope
 sqliteAppendMail conn (SessionId sid) envelope = do
     let MessageId mid = envelope.envId
         bodyJson = TextEnc.decodeUtf8 $ LBS.toStrict $ Aeson.encode envelope
@@ -73,6 +73,7 @@ sqliteAppendMail conn (SessionId sid) envelope = do
               VALUES (?, ?, ?, ?)
               ON CONFLICT(session_id, id) DO NOTHING |]
         (UUID.toText sid, envelope.envSeq, UUID.toText mid, bodyJson)
+    pure envelope
 
 -- | Load a session's envelopes, in ascending 'envSeq' order.
 sqliteLoadMail :: Connection -> SessionId -> IO [Envelope]

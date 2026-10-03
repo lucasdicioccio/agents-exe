@@ -653,6 +653,8 @@ this spec; `lsParams` stays volatile and the TUI resupplies from its
 D8. **Out of scope:** several servers on one Postgres, mid-tool-call
 durability for `RunAsync` calls, per-owner API keys. They are documented as
 unsupported in `documentation/agents-server.md` and are not needed for attach.
+(Several servers on one Postgres was done since, with run leases: see
+`todos/web-server-embedding.md`, Remaining later work.)
 
 ## Related docs
 

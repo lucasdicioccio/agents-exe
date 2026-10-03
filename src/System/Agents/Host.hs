@@ -56,6 +56,7 @@ import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentT
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.AgentTree.Trace (TreeTrace)
 import qualified System.Agents.Base as Base
+import System.Agents.Host.Coordination (Coordination, noCoordination)
 import System.Agents.Session.Async (ContinuationStore, mkSqliteContinuationStore)
 import System.Agents.Session.Mailbox (MailStore)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
@@ -83,6 +84,10 @@ data Host = Host
     -- ^ Durable @watch-session@ registrations (@todos/os-as-standalone-server.md@
     -- G11), so 'System.Agents.Host.Runner.recoverOnStartup' can re-register
     -- the ones still active after a restart.
+    , hostCoordination :: Coordination
+    {- ^ Run leases and signals shared with the other processes on the same
+    database, if any ("System.Agents.Host.Coordination").
+    -}
     , hostTracer :: Tracer IO HostTrace
     , hostStreamTokens :: Bool
     -- ^ Whether the runner streams LLM answers as text deltas.
@@ -148,6 +153,13 @@ data HostTrace
     | -- | @watch-session@ registrations re-registered at boot, by watch id
       -- (G11, @todos/os-as-standalone-server.md@; see 'Runner.recoverWatches').
       HostRecoveredWatches ![Text]
+    | -- | Sessions whose run another process stopped renewing, taken over
+      -- by this one (see 'Runner.takeOverExpired').
+      HostTookOverSessions ![SessionId]
+    | -- | A run stopped here because another process took the session over.
+      HostRunLeaseLost !SessionId
+    | -- | A heartbeat that failed (e.g. the database is unreachable), and why.
+      HostCoordinationFailed !Text
     | -- | A runner event, by kind (e.g. @run.started@), for a session.
       HostRunnerTrace !Text !SessionId
     | -- | A stored agent that was not loaded, and why.
@@ -169,6 +181,8 @@ data HostStores = HostStores
     , hsWatches :: WatchStore
     , hsAgents :: Maybe AgentStore
     -- ^ 'Nothing': agents come from files only.
+    , hsCoordination :: Coordination
+    -- ^ 'noCoordination' unless other processes share the stores.
     }
 
 {- | Load the agents, open and migrate the SQLite database, and run the action.
@@ -187,7 +201,7 @@ withHost cfg tracer action =
         mail <- mkSqliteMailStore conn
         watches <- mkSqliteWatchStore conn
         agents <- mkSqliteAgentStore conn
-        withHostStores cfg (HostStores backend store mail watches (Just agents)) tracer action
+        withHostStores cfg (HostStores backend store mail watches (Just agents) noCoordination) tracer action
 
 {- | Like 'withHost', with stores the caller opened (e.g. on Postgres, with
 @agents-postgres@).
@@ -251,6 +265,7 @@ withHostStores cfg stores tracer action = do
                 , hostContinuations = store
                 , hostMail = stores.hsMail
                 , hostWatches = stores.hsWatches
+                , hostCoordination = stores.hsCoordination
                 , hostTracer = tracer
                 , hostStreamTokens = cfg.hcStreamTokens
                 , hostLiveSessionTtl = cfg.hcLiveSessionTtl

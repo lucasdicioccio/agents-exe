@@ -1,5 +1,7 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 {- | Sessions and continuations in Postgres.
@@ -8,6 +10,12 @@ The schema and the semantics match the SQLite stores in @agents-lib@:
 versioned compare-and-store, metadata columns, and component-scoped
 migrations in @schema_migrations@. Connections come from a pool, so the
 stores can be used from many threads.
+
+Several processes may run sessions on one database. 'withPostgresStores'
+gives each a 'Coordination': a lease per run in the @run_owner@ and
+@run_lease_until@ columns of @sessions@, measured on the database's clock,
+and a @NOTIFY@ on the @agents_sessions@ channel for each session written
+and each mail accepted, which the other processes @LISTEN@ to.
 
 @
 withPostgresStores "postgresql://localhost/agents" $ \\stores ->
@@ -25,28 +33,44 @@ module System.Agents.Postgres (
     mkPostgresAgentStore,
     isPostgresUrl,
 
+    -- * Several processes on one database
+    PgInstance (..),
+    newPgInstance,
+    mkPostgresSessionStoreAs,
+    mkPostgresMailStoreAs,
+    mkPostgresCoordination,
+    PgListener,
+    withPgListener,
+
     -- * Migrations
     PgMigration (..),
     runPostgresMigrations,
 ) where
 
-import Control.Exception (bracket)
-import Control.Monad (forM_, unless, void)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.MVar (newEmptyMVar, readMVar, tryPutMVar)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO, stateTVar)
+import Control.Exception (SomeAsyncException, SomeException, bracket, fromException, throwIO, try)
+import Control.Monad (forM_, forever, unless, void, when)
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Types (parseEither)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (isPrefixOf, sortOn)
-import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, mapMaybe)
 import Data.Pool (Pool, defaultPoolConfig, destroyAllResources, newPool, withResource)
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
-import Data.Time (UTCTime (..), getCurrentTime)
+import Data.Time (NominalDiffTime, UTCTime (..), getCurrentTime)
 import qualified Data.UUID as UUID
+import qualified Data.UUID.V4 as UUID
 import Database.PostgreSQL.Simple (
     Connection,
+    In (..),
     Only (..),
     Query,
     close,
@@ -58,11 +82,14 @@ import Database.PostgreSQL.Simple (
     withTransaction,
     (:.) (..),
  )
+import Database.PostgreSQL.Simple.Notification (Notification (..), getNotification)
 import Database.PostgreSQL.Simple.ToField (Action, ToField (..))
+import System.Timeout (timeout)
 
 import System.Agents.AgentStore (AgentStore (..), StoredAgent (..))
 import qualified System.Agents.Base as Base
 import System.Agents.Host (HostStores (..))
+import System.Agents.Host.Coordination (Coordination (..), LeaseResult (..), SessionSignal (..))
 import System.Agents.Session.Async (ContinuationStore (..), ContinuationToken (..), ToolContinuationSnapshot (..))
 import System.Agents.Session.Base (Envelope (..), Session, SessionId (..), SessionStatus (..), UserToolResponse, messageIdText, parseSessionStatus, sessionStatusOf, sessionStatusText)
 import System.Agents.Session.Mailbox (MailStore (..))
@@ -83,17 +110,23 @@ import System.Agents.SessionStore (
 -------------------------------------------------------------------------------
 
 {- | Open a pool on a connection string (a @postgresql://@ URL or
-@key=value@ pairs), migrate, and run the action with the two stores.
+@key=value@ pairs), migrate, and run the action with the stores.
+
+The stores come with the 'Coordination' that lets other processes use the
+same database: this process gets a fresh 'PgInstance', and one more
+connection, outside the pool, listens to what the others write.
 -}
 withPostgresStores :: ByteString -> (HostStores -> IO a) -> IO a
 withPostgresStores url action =
     bracket (openPostgresPool url 10) destroyAllResources $ \pool -> do
-        sessions <- mkPostgresSessionStore pool
+        me <- newPgInstance
+        sessions <- mkPostgresSessionStoreAs me pool
         continuations <- mkPostgresContinuationStore pool
-        mail <- mkPostgresMailStore pool
+        mail <- mkPostgresMailStoreAs me pool
         watches <- mkPostgresWatchStore pool
         agents <- mkPostgresAgentStore pool
-        action (HostStores sessions continuations mail watches (Just agents))
+        withPgListener url me $ \listener ->
+            action (HostStores sessions continuations mail watches (Just agents) (mkPostgresCoordination me pool listener))
 
 -- | A pool of at most the given number of connections, idle ones closed after a minute.
 openPostgresPool :: ByteString -> Int -> IO (Pool Connection)
@@ -169,6 +202,14 @@ sessionMigrations =
         statements
             [ "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS security TEXT NOT NULL DEFAULT '{}'"
             ]
+    , -- The run lease: which process runs the session, and until when
+      -- without a renewal. Both NULL when no run holds the session.
+      PgMigration 4 $
+        statements
+            [ "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS run_owner TEXT"
+            , "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS run_lease_until TIMESTAMPTZ"
+            , "CREATE INDEX IF NOT EXISTS idx_sessions_run_lease ON sessions(run_lease_until) WHERE run_owner IS NOT NULL"
+            ]
     ]
 
 continuationMigrations :: [PgMigration]
@@ -193,20 +234,35 @@ continuationMigrations =
 -- Sessions
 -------------------------------------------------------------------------------
 
--- | A session backend on the pool, after migrating its table.
+{- | A session backend on the pool, after migrating its table. It signals
+nothing: for a database only this process runs sessions on. See
+'mkPostgresSessionStoreAs'.
+-}
 mkPostgresSessionStore :: Pool Connection -> IO SessionBackend
-mkPostgresSessionStore pool = do
+mkPostgresSessionStore = mkPostgresSessionStoreAs silentInstance
+
+{- | Like 'mkPostgresSessionStore', signalling each write and each deletion
+to the other processes on the database, as coming from the given instance.
+-}
+mkPostgresSessionStoreAs :: PgInstance -> Pool Connection -> IO SessionBackend
+mkPostgresSessionStoreAs me pool = do
     runPostgresMigrations pool "sessions" sessionMigrations
     let with = withResource pool
+        stored c sid = signal c me SessionStored sid
     pure
         SessionBackend
-            { sbStore = \sid sess -> with $ \c -> storeLabelled c noLabels sid sess
+            { sbStore = \sid sess -> with $ \c -> storeLabelled c noLabels sid sess >> stored c sid
             , sbLoad = \sid -> fmap fst <$> with (\c -> loadMeta c sid)
             , sbList = with listSessions
-            , sbDelete = \sid -> with $ \c -> void $ execute c "DELETE FROM sessions WHERE session_id = ?" (Only (sessionIdText sid))
-            , sbStoreLabelled = \labels sid sess -> with $ \c -> storeLabelled c labels sid sess
+            , sbDelete = \sid -> with $ \c -> do
+                void $ execute c "DELETE FROM sessions WHERE session_id = ?" (Only (sessionIdText sid))
+                stored c sid
+            , sbStoreLabelled = \labels sid sess -> with $ \c -> storeLabelled c labels sid sess >> stored c sid
             , sbLoadMeta = \sid -> with $ \c -> loadMeta c sid
-            , sbCompareAndStore = \meta sess -> with $ \c -> compareAndStore c meta sess
+            , sbCompareAndStore = \meta sess -> with $ \c -> do
+                result <- compareAndStore c meta sess
+                when (either (const False) (const True) result) $ stored c meta.smSessionId
+                pure result
             , sbQuery = \q -> with $ \c -> querySessions c q
             }
 
@@ -456,26 +512,54 @@ mailMigrations =
 -- | A durable 'MailStore' on the pool, after migrating its table. Mirrors
 -- "System.Agents.Session.MailStore"'s SQLite implementation: one row per
 -- envelope, the envelope itself serialized whole into @body_json@,
--- idempotent on @(session_id, id)@.
+-- idempotent on @(session_id, id)@. It signals nothing; see
+-- 'mkPostgresMailStoreAs'.
 mkPostgresMailStore :: Pool Connection -> IO MailStore
-mkPostgresMailStore pool = do
+mkPostgresMailStore = mkPostgresMailStoreAs silentInstance
+
+{- | Like 'mkPostgresMailStore', signalling each accepted envelope to the
+other processes on the database, as coming from the given instance.
+-}
+mkPostgresMailStoreAs :: PgInstance -> Pool Connection -> IO MailStore
+mkPostgresMailStoreAs me pool = do
     runPostgresMigrations pool "session_mail" mailMigrations
     let with = withResource pool
     pure
         MailStore
-            { msAppend = \sid envelope -> with $ \c -> appendMail c sid envelope
+            { msAppend = \sid envelope -> with $ \c -> do
+                stored <- appendMail c sid envelope
+                signal c me MailAccepted sid
+                pure stored
             , msLoad = \sid -> with $ \c -> loadMail c sid
             }
 
-appendMail :: Connection -> SessionId -> Envelope -> IO ()
-appendMail conn sid envelope =
-    void $
-        execute
-            conn
-            "INSERT INTO session_mail (session_id, seq, id, body_json)\
-            \ VALUES (?, ?, ?, ?)\
-            \ ON CONFLICT (session_id, id) DO NOTHING"
-            (sessionIdText sid, envelope.envSeq, messageIdText envelope.envId, encodeJson envelope)
+{- | Append an envelope, and answer with it as stored.
+
+Several processes may append to one session, each numbering from what it
+last loaded. So the sequence number is settled here, under a lock on the
+session's mail held for the transaction: the envelope keeps its number when
+that is past every stored one, and takes the next free one otherwise. An id
+that is already stored answers with the envelope stored under it.
+-}
+appendMail :: Connection -> SessionId -> Envelope -> IO Envelope
+appendMail conn sid envelope = withTransaction conn $ do
+    _ <- query conn "SELECT pg_advisory_xact_lock(hashtextextended(?, 7236871069110195829))::text" (Only (sessionIdText sid)) :: IO [Only Text]
+    existing <-
+        query conn "SELECT body_json FROM session_mail WHERE session_id = ? AND id = ?" (sessionIdText sid, messageIdText envelope.envId) ::
+            IO [Only Text]
+    case mapMaybe (decodeJson . fromOnly) existing of
+        (found : _) -> pure found
+        [] -> do
+            latest <- query conn "SELECT COALESCE(MAX(seq), 0) FROM session_mail WHERE session_id = ?" (Only (sessionIdText sid)) :: IO [Only Int]
+            let stored = envelope{envSeq = max envelope.envSeq (1 + maybe 0 fromOnly (listToMaybe latest))}
+            void $
+                execute
+                    conn
+                    "INSERT INTO session_mail (session_id, seq, id, body_json)\
+                    \ VALUES (?, ?, ?, ?)\
+                    \ ON CONFLICT (session_id, id) DO NOTHING"
+                    (sessionIdText sid, stored.envSeq, messageIdText stored.envId, encodeJson stored)
+            pure stored
 
 loadMail :: Connection -> SessionId -> IO [Envelope]
 loadMail conn sid = do
@@ -581,3 +665,168 @@ mkPostgresAgentStore pool = do
                 pure $ StoredAgent agent now by
             , asDelete = \slug -> with $ \c -> (> 0) <$> execute c "DELETE FROM agents WHERE slug = ?" (Only slug)
             }
+
+-------------------------------------------------------------------------------
+-- Several processes on one database
+-------------------------------------------------------------------------------
+
+{- | The name of one process among those sharing a database: the owner it
+writes in @run_owner@, and the origin of the signals it sends, which is how
+a process recognises (and skips) its own.
+-}
+newtype PgInstance = PgInstance {pgInstanceName :: Text}
+    deriving (Show, Eq)
+
+-- | A fresh, unique instance name.
+newPgInstance :: IO PgInstance
+newPgInstance = PgInstance . UUID.toText <$> UUID.nextRandom
+
+-- | The instance of a store that signals nothing.
+silentInstance :: PgInstance
+silentInstance = PgInstance ""
+
+-- | The channel every process on the database listens to.
+signalChannel :: Text
+signalChannel = "agents_sessions"
+
+signalName :: SessionSignal -> Text
+signalName = \case
+    MailAccepted -> "mail"
+    SessionStored -> "stored"
+
+-- | Tell the other processes about a session. The payload is @origin kind session@.
+signal :: Connection -> PgInstance -> SessionSignal -> SessionId -> IO ()
+signal conn me kind sid =
+    unless (me == silentInstance) $ do
+        let payload = Text.unwords [me.pgInstanceName, signalName kind, sessionIdText sid]
+        _ <- query conn "SELECT pg_notify(?, ?)::text" (signalChannel, payload) :: IO [Only Text]
+        pure ()
+
+parseSignal :: ByteString -> Maybe (PgInstance, SessionSignal, SessionId)
+parseSignal payload = case Text.words (TextEnc.decodeUtf8Lenient payload) of
+    [origin, kind, sid] -> do
+        uuid <- UUID.fromText sid
+        parsed <- case kind of
+            "mail" -> Just MailAccepted
+            "stored" -> Just SessionStored
+            _ -> Nothing
+        pure (PgInstance origin, parsed, SessionId uuid)
+    _ -> Nothing
+
+-- | The handlers called for each signal from another process.
+newtype PgListener = PgListener (TVar (Map.Map Int (SessionId -> SessionSignal -> IO ())))
+
+{- | Listen to the other processes' signals for as long as the action runs,
+on a connection of its own. A connection that breaks is opened again after a
+second; the signals sent in between are lost, which is why a runner also
+looks at the store on a timer.
+
+Waits (at most five seconds) for the first @LISTEN@, so that a signal sent
+right after this returns is heard.
+-}
+withPgListener :: ByteString -> PgInstance -> (PgListener -> IO a) -> IO a
+withPgListener url me action = do
+    handlers <- newTVarIO Map.empty
+    listening <- newEmptyMVar
+    let dispatch :: Notification -> IO ()
+        dispatch notification =
+            forM_ (parseSignal notification.notificationData) $ \(origin, kind, sid) ->
+                unless (origin == me) $ do
+                    current <- readTVarIO handlers
+                    forM_ (Map.elems current) $ \handler -> handler sid kind
+        session = bracket (connectPostgreSQL url) close $ \conn -> do
+            void $ execute_ conn (fromString ("LISTEN " <> Text.unpack signalChannel))
+            void $ tryPutMVar listening ()
+            forever $ getNotification conn >>= dispatch
+        loop =
+            forever $
+                try session >>= \case
+                    Left (e :: SomeException)
+                        | isJust (fromException e :: Maybe SomeAsyncException) -> throwIO e
+                        | otherwise -> threadDelay 1000000
+                    Right () -> pure ()
+    withAsync loop $ \_ -> do
+        _ <- timeout 5000000 (readMVar listening)
+        action (PgListener handlers)
+
+{- | Run leases on the @sessions@ table, and the listener's signals.
+
+Every time is the database's (@now()@), so the processes need not agree on
+the clock.
+-}
+mkPostgresCoordination :: PgInstance -> Pool Connection -> PgListener -> Coordination
+mkPostgresCoordination me pool (PgListener handlers) =
+    Coordination
+        { coEnabled = True
+        , coInstance = owner
+        , coAcquire = \sid ttl -> with $ \c -> do
+            taken <-
+                query
+                    c
+                    "UPDATE sessions SET run_owner = ?, run_lease_until = now() + (? * interval '1 second')\
+                    \ WHERE session_id = ?\
+                    \ AND (run_owner IS NULL OR run_owner = ? OR run_lease_until IS NULL OR run_lease_until < now())\
+                    \ RETURNING session_id"
+                    (owner, seconds ttl, sessionIdText sid, owner) ::
+                    IO [Only Text]
+            if not (null taken)
+                then pure LeaseAcquired
+                else do
+                    holder <- query c "SELECT run_owner FROM sessions WHERE session_id = ?" (Only (sessionIdText sid)) :: IO [Only (Maybe Text)]
+                    pure $ case holder of
+                        [] -> LeaseNoSession
+                        (Only by : _) -> LeaseHeldBy (fromMaybe "" by)
+        , coRenew = \sids ttl ->
+            if null sids
+                then pure []
+                else with $ \c -> do
+                    rows <-
+                        query
+                            c
+                            "UPDATE sessions SET run_lease_until = now() + (? * interval '1 second')\
+                            \ WHERE run_owner = ? AND session_id IN ?\
+                            \ RETURNING session_id"
+                            (seconds ttl, owner, In (map sessionIdText sids)) ::
+                            IO [Only Text]
+                    pure (sessionIds rows)
+        , coRelease = \sid -> with $ \c ->
+            void $
+                execute
+                    c
+                    "UPDATE sessions SET run_owner = NULL, run_lease_until = NULL WHERE session_id = ? AND run_owner = ?"
+                    (sessionIdText sid, owner)
+        , coHolder = \sid -> with $ \c -> do
+            rows <-
+                query
+                    c
+                    "SELECT run_owner FROM sessions\
+                    \ WHERE session_id = ? AND run_owner IS NOT NULL AND run_owner <> ? AND run_lease_until >= now()"
+                    (sessionIdText sid, owner) ::
+                    IO [Only Text]
+            pure (fromOnly <$> listToMaybe rows)
+        , coExpired = with $ \c ->
+            sessionIds
+                <$> query
+                    c
+                    "SELECT session_id FROM sessions\
+                    \ WHERE status = 'running' AND run_owner IS NOT NULL AND run_owner <> ? AND run_lease_until < now()"
+                    (Only owner)
+        , coAbandoned = with $ \c ->
+            sessionIds
+                <$> query_
+                    c
+                    "SELECT session_id FROM sessions\
+                    \ WHERE status = 'running' AND (run_owner IS NULL OR run_lease_until IS NULL OR run_lease_until < now())"
+        , coListen = \handler -> do
+            key <- atomically $ stateTVar handlers $ \current ->
+                let k = maybe 0 ((+ 1) . fst) (Map.lookupMax current) in (k, Map.insert k handler current)
+            pure $ atomically $ modifyTVar' handlers (Map.delete key)
+        }
+  where
+    with :: (Connection -> IO a) -> IO a
+    with = withResource pool
+    owner = me.pgInstanceName
+    seconds :: NominalDiffTime -> Double
+    seconds = realToFrac
+    sessionIds :: [Only Text] -> [SessionId]
+    sessionIds rows = [SessionId uuid | Only sid <- rows, Just uuid <- [UUID.fromText sid]]

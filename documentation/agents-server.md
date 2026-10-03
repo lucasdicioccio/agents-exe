@@ -680,10 +680,49 @@ Postgres instead of SQLite. The server creates its tables on start
 database must exist and the user must be allowed to create tables. The logs show the URL
 without its user and password.
 
-Several servers may share one Postgres database: every write is versioned,
-so a conflicting write is detected and refused (`409 conflict`). Runs are
-not coordinated between servers, though: route all requests for a session to
-the same server.
+#### Several servers on one database
+
+Several servers may share one Postgres database, and a request for a session
+may go to any of them. A session's run is on one server at a time:
+
+* The server that starts a run takes a **lease** on the session (the
+  `run_owner` and `run_lease_until` columns of `sessions`) and renews it
+  every 10 seconds while the run lasts. The lease is given back when the run
+  stops. Times are the database's, so the servers' clocks need not agree.
+* While another server holds the lease, the session is busy here too. A
+  message is accepted as mail for the run, as it is on the server that runs
+  it. `resume` and deleting answer `409 run_in_progress`. `cancel` asks the
+  owner to stop, which it does at its next step, not at once. A completed
+  deferred call is queued for the run. `GET /v1/sessions/:id?wait=true`
+  waits for the run wherever it is.
+* A server that dies stops renewing. Once its lease is 30 seconds old,
+  another server **takes the session over**: it stores the session as a
+  restart would (the interrupted step is lost, its background calls are
+  orphaned, the status is the one the turns imply) and logs
+  `sessions.taken_over`. Nothing is resumed: resume the session, on any
+  server, to continue. Secret parameters lived in the dead server's memory
+  and must be supplied again.
+* A server that was only cut off (from the database, or by a long pause)
+  and comes back after its session was taken over stops its run without
+  storing anything, and logs `run.lease_lost`.
+* Servers tell each other what they write with `LISTEN`/`NOTIFY` (channel
+  `agents_sessions`), on one extra connection per server. Mail accepted by
+  one server reaches the run on another at once. Each stored version of a
+  session is announced as `session.updated` on every server's event
+  streams, and a session that stops running as `run.stopped`. The other
+  events of a run (`text.delta`, `tool.*`, `run.started`, ...) are only on
+  the streams of the server that runs it: follow a session's events on the
+  server you started its run on.
+
+All the servers must run a version with leases: an older one neither takes
+nor honours them. A server started with other servers already running
+recovers only the sessions no live server holds.
+
+Not shared between servers: agent files and `--set` parameters (give every
+server the same ones), and stored agents edited while the servers run (a
+server loads them at startup). A `watch-session` registration is followed
+by the server that runs the watched session, if it knows the registration: a
+server knows the ones made on it and the ones stored when it started.
 
 ---
 
@@ -1116,6 +1155,5 @@ non-admin token). The token goes in `Authorization` on commands and in
 ## Not yet supported
 
 * Per-owner API keys: all owners share the server's keys.
-* Coordinating runs between several servers sharing a Postgres database.
 
 See `todos/web-server-embedding.md` for the design and the planned work.

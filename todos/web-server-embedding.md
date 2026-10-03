@@ -922,7 +922,8 @@ and the riskier ones come after the ones they build on. Choices marked
   running status; queries (agent, owner, parent, status, limit, before); 16
   concurrent CAS with exactly one winner; and a runner flow (deferred call,
   completion, token already completed, cascade delete).
-* Not done: coordinating runs between servers (lease column).
+* Coordinating runs between servers came later: see "Several server
+  processes on one Postgres database" under Remaining later work.
 
 ### Phase 11: token streaming ✅
 
@@ -1030,8 +1031,42 @@ Deviations from the plan:
 * **Per-owner API keys and isolation**: build agents per owner, including
   sub-agent tools; default policy `runIsolated` for bash and MCP tools, backed
   by `dockerRunner`.
-* **Several server processes on one Postgres database**: live-run ownership
-  through a lease column (`run_owner`, `run_lease_until`).
+* ~~**Several server processes on one Postgres database**: live-run ownership
+  through a lease column (`run_owner`, `run_lease_until`).~~ Done:
+  * `System.Agents.Host.Coordination`: what a host needs from a shared
+    database (acquire, renew, release a run lease; who holds it; which
+    running sessions lost their owner; signals from the other processes).
+    `noCoordination` is the single-process case (SQLite, the TUI) and
+    changes nothing there. `HostStores.hsCoordination`,
+    `Host.hostCoordination`.
+  * `agents-postgres`: migration 4 adds `run_owner` and `run_lease_until`
+    to `sessions`; lease times are the database's `now()`. Each process
+    gets a random instance name. Session writes and accepted mail are
+    announced with `pg_notify` on `agents_sessions`; one connection outside
+    the pool listens and reconnects.
+  * The runner takes the lease in `startRun` and releases it wherever a run
+    ends. A heartbeat (every third of `rcLeaseTtl`, default 30 s) renews,
+    stops runs whose lease was taken (`abandonRun`, nothing stored), syncs
+    the mail of running sessions, and takes over expired sessions
+    (`takeOverExpired`, same recovery as `recoverOnStartup`, nothing
+    resumed). `recoverOnStartup` only recovers sessions without a live
+    lease. A run held elsewhere is busy: `postMessage` and `completeCall`
+    go to mail, `resume` and `deleteSession` are refused, `cancelRun` posts
+    `StopRun`, `awaitRun` waits on forwarded events.
+  * Writes are fenced by the versioned compare-and-store, not by the lease:
+    a takeover stores a version, so the previous owner's next write
+    conflicts, and `failRun` stores nothing once the lease is gone.
+  * Mail: `msAppend` answers with the envelope as stored. Postgres settles
+    `seq` under an advisory lock per session, since two processes each
+    number from what they last loaded; `mbSync` merges what others
+    appended.
+  * Events: only `session.updated`, `run.stopped` and `session.deleted` are
+    forwarded to the other servers. Text deltas and tool events stay on the
+    owner. A watch skips the forwarded copies (`srRemoteEvents`), so a
+    registration known to two servers yields one mail per event.
+  * Not done: resuming a taken-over run by itself; sharing stored-agent
+    edits and `watch-session` registrations between servers; an
+    `agents-server` flag for the lease duration.
 * **Database agents with files or sub-agents**: tool directories stored with
   the agent; `extraAgents` naming other stored agents.
 * **Stopping a stored agent's MCP servers** when it is replaced or deleted.
