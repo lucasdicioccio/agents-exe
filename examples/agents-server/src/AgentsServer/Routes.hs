@@ -65,8 +65,11 @@ type AgentsAPI =
                             :<|> Summary "Store or replace an agent"
                                 :> Description
                                     "The body is what goes under `contents` in an agent file; the slug \
-                                    \comes from the path. Needs an owner named by --admin-owners. A \
-                                    \stored agent cannot use fields that refer to files."
+                                    \comes from the path. Needs an owner named by --admin-owners. An \
+                                    \optional `files` object gives the files of the agent's bash tools \
+                                    \(contents by path, relative like `toolDirectory`), and \
+                                    \`extraAgents` name other stored agents by slug. The other fields \
+                                    \that refer to files cannot be used."
                                 :> ReqBody '[JSON] RawJson
                                 :> Put '[JSON] AgentBody
                             :<|> Summary "Delete a stored agent"

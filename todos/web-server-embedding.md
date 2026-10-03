@@ -1026,6 +1026,42 @@ Deviations from the plan:
   below the pinned 2.16, and 3.2.5 (which allows it) was published after the
   pinned index date. Every previously pinned version is unchanged.
 
+### Database agents with tools and helpers ✅
+
+Lifts the two refusals of Phase 12 that decision 10 recorded.
+
+* **Tool files are stored with the agent.** `StoredAgent.saFiles` (contents
+  by relative path; column `files`, SQLite and Postgres migration 2);
+  `asPut` takes them. `PUT /v1/agents/:slug` reads them from a `files` object
+  in the body, and `config.files` shows them.
+* **Loading writes them to disk.** Each load of a stored agent gets its own
+  directory under a temporary directory of the host
+  (`materializeToolFiles`); the loaded configuration's `toolDirectory` and
+  `bashToolboxes` paths point there. The directory is removed when the node
+  is released, and with the host.
+* **`extraAgents` name stored agents by slug** (`path` is now optional in
+  the JSON, and refused for a stored agent). `resolveHelpers` computes what
+  an agent reaches; `AgentTree.loadAgentTreeFromConfigs` loads the root and
+  those helpers as one tree, so each root has its own copy of its helpers,
+  like roots from files.
+* `putStoredAgentWithFiles`; `AgentEditError` gains `AgentInvalidPaths`,
+  `AgentHelperError` (`UnknownHelper`, `HelperCycle`), and `AgentInUse`.
+* Choices made here (*default*, none was planned in detail):
+  * **Cycles are refused**, self-reference included, although agent files
+    allow them: an edit is checked against the agents stored at that time,
+    and a helper must exist first, so a cycle can only be an error.
+  * **Replacing a helper reloads its dependents**; a dependent that fails to
+    load again keeps its previous version, and the failure is traced.
+  * **A helper in use cannot be deleted** (`409 agent_in_use`).
+  * **Only stored agents can be named**, not agents from files.
+  * `openApiToolboxes`, `postgrestToolboxes`, `skillSources`, and
+    `autoEnableSkills` are still refused.
+* Tests: runner level (a stored agent with a tool directory and a stored
+  helper with a single tool, run end to end, across a restart, and after
+  replacing the helper; unknown helper, cycles, paths); server (`files` in
+  and out, `unknown_helper`, `helper_cycle`, `agent_invalid_paths`,
+  `agent_in_use`, a session that runs the tool); Postgres (files round-trip).
+
 ## Remaining later work
 
 * **Per-owner API keys and isolation**: build agents per owner, including
@@ -1067,8 +1103,8 @@ Deviations from the plan:
   * Not done: resuming a taken-over run by itself; sharing stored-agent
     edits and `watch-session` registrations between servers; an
     `agents-server` flag for the lease duration.
-* **Database agents with files or sub-agents**: tool directories stored with
-  the agent; `extraAgents` naming other stored agents.
+* ~~**Database agents with files or sub-agents**~~: done, see
+  [Database agents with tools and helpers](#database-agents-with-tools-and-helpers).
 * **Stopping a stored agent's MCP servers** when it is replaced or deleted.
 * **Dispatching through servant**, replacing the wai router (see Phase 13).
 

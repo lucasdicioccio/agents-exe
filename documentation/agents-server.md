@@ -566,8 +566,8 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `POST /mcp` | JSON-RPC message or batch | `200` JSON-RPC answer, or `202` | see [MCP over HTTP](#mcp-over-http) |
 | `GET /v1/agents` | | `200 [{slug, description, model, system_prompt, tools, parameters, helpers, source, …}]` | |
 | `GET /v1/agents/:slug` | | `200` agent (same shape) | 404 `unknown_agent` |
-| `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
-| `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` |
+| `PUT /v1/agents/:slug` | agent configuration | `201` (new) or `200` agent | 403 `agent_edits_disabled` / `forbidden`, 400 `agent_uses_files` / `agent_invalid_paths` / `unknown_helper` / `helper_cycle` / `agent_failed_to_load` / `bad_request`, 409 `agent_defined_by_file` |
+| `DELETE /v1/agents/:slug` | | `200 {deleted}` | 403, 404 `unknown_agent`, 409 `agent_defined_by_file` / `agent_in_use` |
 | `POST /v1/sessions?wait=&timeout=` | `{agent, prompt?, media?, run?, params?, parent?, seal?, session_token?}` | `201` session (with `session_token` once, when asked), with a `Location` header | 404 `unknown_agent`, 404 `unknown_session` (parent), 400 `bad_request`, see [Parameters](#parameters) and [Session tokens](#session-tokens-and-sealed-sessions) |
 | `DELETE /v1/sessions/:id/token` | none | `200` session | 404; revokes the session's token, also during a run |
 | `GET /v1/sessions?agent=&status=&parent=&limit=&before=` | | `200 {sessions, next_before}` | 400 `bad_request` |
@@ -745,11 +745,11 @@ curl -X PUT localhost:8080/v1/agents/helper -H 'Authorization: Bearer <admin tok
 
 * The body is what goes under `contents` in an agent file. The slug comes
   from the path.
-* A stored agent cannot use anything that refers to files:
-  `toolDirectory`, `bashToolboxes`, `openApiToolboxes`,
-  `postgrestToolboxes`, `extraAgents`, `skillSources`, `autoEnableSkills`
+* A stored agent cannot use `openApiToolboxes`, `postgrestToolboxes`,
+  `skillSources`, or `autoEnableSkills`, which refer to files on the server
   (`400 agent_uses_files`). Builtin toolboxes and MCP servers work, as do the
-  execution mode and tool-call policy.
+  execution mode and tool-call policy. Bash tools and helpers work as
+  described below.
 * The agent is loaded before it is stored: if an MCP server fails to start,
   the answer is `400 agent_failed_to_load` and nothing is stored.
 * A slug used by an agent file cannot be stored (`409
@@ -764,6 +764,65 @@ curl -X PUT localhost:8080/v1/agents/helper -H 'Authorization: Bearer <admin tok
   fail with `unknown_agent` until an agent with that slug exists again.
 * MCP servers started for a stored agent keep running when the agent is
   replaced or deleted, until the server stops.
+
+### Bash tools of a stored agent
+
+The files of a stored agent's bash tools are stored with it. Next to the
+configuration's fields, the body takes a `files` object: contents by path.
+
+```json
+{
+  "apiKeyId": "openai", "flavor": "OpenAIv1",
+  "modelUrl": "https://api.openai.com/v1", "modelName": "gpt-4o-mini",
+  "announce": "greets people", "systemPrompt": ["You greet."],
+  "toolDirectory": "tools",
+  "files": {
+    "tools/greet.sh": "#!/bin/sh\n..."
+  }
+}
+```
+
+For instance, to send a configuration (`greeter.json`, without `files`) with
+a script from disk:
+
+```bash
+jq --rawfile greet tools/greet.sh '. + {files: {"tools/greet.sh": $greet}}' greeter.json \
+  | curl -X PUT localhost:8080/v1/agents/greeter -H 'Authorization: Bearer <admin token>' -d @-
+```
+
+* `toolDirectory` and the paths of `bashToolboxes` are relative to the
+  directory the files are written to. Paths, of tools and of files, are
+  relative and without `..` (`400 agent_invalid_paths`); `bashToolboxes`
+  entries take no `root`.
+* When the agent is loaded, the server writes the files to a temporary
+  directory of its own, makes each one executable, and loads the tools from
+  there. The directory goes away with that version of the agent, and with
+  the server. Tools run on the server's machine, as the server's user: this
+  is the reason storing agents needs an admin owner.
+* Files are text (UTF-8). A `PUT` replaces the agent and all its files: send
+  `files` again to keep them. `GET /v1/agents/:slug` shows them under
+  `config.files`, so that `config` can be sent back as a body.
+
+### Helpers of a stored agent
+
+`extraAgents` of a stored agent name other stored agents by slug, without a
+`path`; `with` and `narrowable` work as in agent files.
+
+```json
+{"extraAgents": [{"slug": "greeter"}]}
+```
+
+* A helper must be stored before the agent that names it (`400
+  unknown_helper`). Agents from files cannot be named.
+* The references of stored agents cannot form a cycle, and an agent cannot
+  name itself (`400 helper_cycle`). This is stricter than agent files.
+* Replacing a helper reloads the stored agents that reach it, so that new
+  sessions call the new version.
+* An agent that others name as a helper cannot be deleted (`409
+  agent_in_use`): delete or change the agents that name it first.
+* At startup, a stored agent whose helpers cannot be resolved (for instance
+  because an agent file now has a helper's slug) is skipped, and logged as
+  `agents.stored_skipped`.
 
 ---
 

@@ -34,6 +34,7 @@ import Control.Concurrent.STM (atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (bracket)
 import Control.Monad (void)
 import Data.List (group, sortOn)
+import qualified Data.List as List
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
@@ -56,6 +57,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import AgentFactoryTests (mockCompletion, testNode)
+import System.Agents.AgentStore (HelperError (..), StoredAgent (..))
 import System.Agents.AgentFactory
 import System.Agents.AgentTree (OSAgentNode (..))
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
@@ -103,6 +105,8 @@ tests =
         , testCase "withHost loads agents and serves sessions from a database file" withHostTest
         , testCase "a subscriber skips other sessions' events" subscribeFilterTest
         , testCase "stored agents survive a restart; a file agent hides a stored one" storedAgentsTest
+        , testCase "a stored agent runs its stored bash tools and its stored helpers" storedAgentToolsTest
+        , testCase "a stored agent's helpers must be stored and must not form a cycle" storedAgentHelperErrorsTest
         , testCase "the server's MailRouter resolves a stored session on demand" serverMailRouterTest
         , testCase "send-message delivers agent-to-agent mail the recipient can read" sendMessageTest
         , testCase "send-message refuses a recipient outside the sender's subtree" sendMessageScopeDenialTest
@@ -629,8 +633,8 @@ storedAgentsTest =
             fmap snd first @?= Right True
             second <- putStoredAgent host (Just "alice") helper
             fmap snd second @?= Right False
-            withFiles <- decodeAgent (config "files" ", \"toolDirectory\": \"tools\"")
-            fmap snd <$> putStoredAgent host Nothing withFiles >>= (@?= Left (AgentUsesFiles ["toolDirectory"]))
+            withFiles <- decodeAgent (config "files" ", \"autoEnableSkills\": [\"some-skill\"]")
+            fmap snd <$> putStoredAgent host Nothing withFiles >>= (@?= Left (AgentUsesFiles ["autoEnableSkills"]))
             smoke <- decodeAgent (config "smoke" "")
             fmap snd <$> putStoredAgent host Nothing smoke >>= (@?= Left (AgentDefinedByFile "smoke"))
             withSessionRunner host $ \runner -> do
@@ -656,6 +660,119 @@ storedAgentsTest =
             deleteStoredAgent host "helper" >>= (@?= Left (NoStoredAgent "helper"))
         withHost (cfg ["smoke"]) silent $ \host ->
             Map.keys <$> hostAllAgents host >>= (@?= ["smoke"])
+
+-- | A stored agent's configuration, as JSON, with extra fields.
+storedAgentJson :: String -> String -> IO Base.Agent
+storedAgentJson slug extra =
+    either (assertFailure . ("bad config: " <>)) pure $
+        Aeson.eitherDecode $
+            LBS8.pack $
+                "{\"slug\": \""
+                    <> slug
+                    <> "\", \"apiKeyId\": \"none\", \"flavor\": \"OpenAIv1\", "
+                    <> "\"modelUrl\": \"http://127.0.0.1:1\", \"modelName\": \"mock\", \"announce\": \"test\", "
+                    <> "\"systemPrompt\": [\"You are a test\"], "
+                    <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runSync\"}, \"rules\": []}"
+                    <> extra
+                    <> "}"
+
+-- | A bash tool that prints a line, and appends it to a file when given one.
+storedTool :: String -> String -> Maybe FilePath -> Text
+storedTool slug line marker =
+    Text.pack $
+        unlines
+            [ "#!/bin/sh"
+            , "case \"$1\" in"
+            , "  describe) echo '{\"slug\": \"" <> slug <> "\", \"description\": \"a stored tool\", \"args\": []}' ;;"
+            , "  run) echo '" <> line <> "'" <> maybe "" (\f -> "; echo '" <> line <> "' >> '" <> f <> "'") marker <> " ;;"
+            , "esac"
+            ]
+
+{- | The acceptance case of stored tool directories and helpers: a stored
+agent whose bash tool comes from its stored files, and whose helper is
+another stored agent with a stored bash tool of its own. Both survive a
+restart, and replacing the helper reaches the agent that calls it.
+-}
+storedAgentToolsTest :: Assertion
+storedAgentToolsTest =
+    withSystemTempDirectory "agents-stored-tools" $ \dir -> do
+        let keysFile = dir </> "keys.json"
+            marker = dir </> "helper-ran"
+            complete :: OSAgentNode -> Completion
+            complete node c
+                | not (null c.completeToolResponses) = mockCompletion c
+                | Base.slug node.osNodeConfig == "boss" =
+                    pure
+                        ( LlmResponse Nothing Nothing Aeson.Null Nothing
+                        , [openAICall "call_1" "bash_greet" "{}", openAICall "call_2" "io_prompt_agent_helper" "{\"what\": \"help\"}"]
+                        )
+                | otherwise = pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [openAICall "call_3" "bash_shout" "{}"])
+            cfg = (defaultHostConfig [] keysFile (dir </> "agents.db")){hcCompletion = Just complete}
+            runBoss host = withSessionRunner host $ \runner -> do
+                meta <- expectRight =<< createSession runner "boss" (message "go") (Just UntilBlocked)
+                (idle, _) <- expectRight =<< awaitRun runner meta.smSessionId 10
+                idle.smStatus @?= StatusIdle
+                responseTexts <$> currentSession runner meta.smSessionId
+            helperRuns = lines <$> readFile marker
+        writeFile keysFile "{}"
+        helper <- storedAgentJson "helper" ", \"bashToolboxes\": [{\"tag\": \"SingleTool\", \"contents\": {\"Path\": \"bin/shout.sh\"}}]"
+        boss <- storedAgentJson "boss" ", \"toolDirectory\": \"tools\", \"extraAgents\": [{\"slug\": \"helper\"}]"
+        let bossFiles = Map.fromList [("tools/greet.sh", storedTool "greet" "hello from a stored tool" Nothing)]
+            helperFiles line = Map.fromList [("bin/shout.sh", storedTool "shout" line (Just marker))]
+        withHost cfg silent $ \host -> do
+            -- The helper has to exist before the agent that names it.
+            fmap snd <$> putStoredAgentWithFiles host Nothing boss bossFiles
+                >>= (@?= Left (AgentHelperError (UnknownHelper "boss" "helper")))
+            fmap snd <$> putStoredAgentWithFiles host Nothing helper (helperFiles "first") >>= (@?= Right True)
+            fmap snd <$> putStoredAgentWithFiles host Nothing boss bossFiles >>= (@?= Right True)
+            texts <- runBoss host
+            assertBool ("the stored bash tool ran: " <> show texts) (any ("hello from a stored tool" `Text.isInfixOf`) texts)
+            helperRuns >>= (@?= ["first"])
+            -- Replacing the helper reloads the agent that calls it.
+            fmap snd <$> putStoredAgentWithFiles host Nothing helper (helperFiles "second") >>= (@?= Right False)
+            _ <- runBoss host
+            helperRuns >>= (@?= ["first", "second"])
+            deleteStoredAgent host "helper" >>= (@?= Left (AgentInUse "helper" ["boss"]))
+        -- After a restart both are back, files included.
+        withHost cfg silent $ \host -> do
+            agents <- hostAllAgents host
+            Map.keys agents @?= ["boss", "helper"]
+            [Map.keys sa.saFiles | (FromDatabase sa, _) <- Map.elems agents] @?= [["tools/greet.sh"], ["bin/shout.sh"]]
+            texts <- runBoss host
+            assertBool ("the stored bash tool ran: " <> show texts) (any ("hello from a stored tool" `Text.isInfixOf`) texts)
+            helperRuns >>= (@?= ["first", "second", "second"])
+            deleteStoredAgent host "boss" >>= (@?= Right ())
+            deleteStoredAgent host "helper" >>= (@?= Right ())
+
+storedAgentHelperErrorsTest :: Assertion
+storedAgentHelperErrorsTest =
+    withSystemTempDirectory "agents-stored-helpers" $ \dir -> do
+        let keysFile = dir </> "keys.json"
+            cfg = (defaultHostConfig [] keysFile (dir </> "agents.db")){hcCompletion = Just (const mockCompletion)}
+            refs slugs = ", \"extraAgents\": [" <> List.intercalate ", " ["{\"slug\": \"" <> s <> "\"}" | s <- slugs] <> "]"
+            put host slug extra files = do
+                agent <- storedAgentJson slug extra
+                fmap snd <$> putStoredAgentWithFiles host Nothing agent (Map.fromList files)
+        writeFile keysFile "{}"
+        withHost cfg silent $ \host -> do
+            put host "a" (refs ["nobody"]) [] >>= (@?= Left (AgentHelperError (UnknownHelper "a" "nobody")))
+            put host "a" (refs ["a"]) [] >>= (@?= Left (AgentHelperError (HelperCycle ["a", "a"])))
+            put host "c" "" [] >>= (@?= Right True)
+            put host "b" (refs ["c"]) [] >>= (@?= Right True)
+            put host "a" (refs ["b", "c"]) [] >>= (@?= Right True)
+            -- c -> a would close the cycle c -> a -> b -> c.
+            put host "c" (refs ["a"]) [] >>= (@?= Left (AgentHelperError (HelperCycle ["c", "a", "b", "c"])))
+            -- The refused edit left the stored agents as they were.
+            agents <- hostAllAgents host
+            [(slug, map (Base.slug . (.osNodeConfig)) node.osNodeChildren) | (slug, (_, node)) <- Map.toList agents]
+                @?= [("a", ["b", "c"]), ("b", ["c"]), ("c", [])]
+            -- Paths stay inside the agent's own directory, and a helper takes no path.
+            put host "d" ", \"toolDirectory\": \"../tools\"" []
+                >>= (@?= Left (AgentInvalidPaths ["toolDirectory '../tools' must be a relative path without '..'"]))
+            put host "d" "" [("/etc/tool.sh", "")]
+                >>= (@?= Left (AgentInvalidPaths ["file '/etc/tool.sh' must be a relative path without '..'"]))
+            put host "d" ", \"extraAgents\": [{\"slug\": \"c\", \"path\": \"c.json\"}]" []
+                >>= (@?= Left (AgentInvalidPaths ["extraAgents entry 'c' names a stored agent by slug and takes no path"]))
 
 -- | 'serverMailRouter' (@todos/session-mailbox.md@, Phase 4) resolves any
 -- stored session on demand, without needing prior registration.

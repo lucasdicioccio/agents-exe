@@ -113,7 +113,7 @@ migrationsTest baseUrl = withDatabase baseUrl $ \url -> do
     withPostgresStores url $ \_ -> pure ()
     bracket (connectPostgreSQL url) close $ \conn -> do
         rows <- query_ conn "SELECT component, version FROM schema_migrations ORDER BY component, version" :: IO [(Text, Int)]
-        rows @?= [("agents", 1), ("continuations", 1), ("session_mail", 1), ("sessions", 1), ("sessions", 2), ("sessions", 3), ("sessions", 4), ("session_watches", 1)]
+        rows @?= [("agents", 1), ("agents", 2), ("continuations", 1), ("session_mail", 1), ("sessions", 1), ("sessions", 2), ("sessions", 3), ("sessions", 4), ("session_watches", 1)]
 
 casTest :: String -> Assertion
 casTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
@@ -230,11 +230,12 @@ agentStoreTest :: String -> Assertion
 agentStoreTest baseUrl = withDatabase baseUrl $ \url -> withPostgresStores url $ \stores -> do
     agentStore <- maybe (assertFailure "no agent store") pure stores.hsAgents
     agent <- either (assertFailure . ("bad config: " <>)) pure (Aeson.parseEither Aeson.parseJSON agentConfig)
-    first <- agentStore.asPut (Just "alice") agent
+    first <- agentStore.asPut (Just "alice") agent Map.empty
     first.saUpdatedBy @?= Just "alice"
-    _ <- agentStore.asPut Nothing agent
+    let files = Map.fromList [("tools/greet.sh", "#!/bin/sh\necho hello\n")]
+    _ <- agentStore.asPut Nothing agent files
     listed <- agentStore.asList
-    map (\sa -> (Base.slug sa.saConfig, sa.saUpdatedBy)) listed @?= [("pg-test", Nothing)]
+    map (\sa -> (Base.slug sa.saConfig, sa.saUpdatedBy, sa.saFiles)) listed @?= [("pg-test", Nothing, files)]
     agentStore.asDelete "pg-test" >>= (@?= True)
     agentStore.asDelete "pg-test" >>= (@?= False)
     agentStore.asList >>= (@?= 0) . length

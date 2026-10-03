@@ -7,6 +7,7 @@ module System.Agents.Base where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), (.!=), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
 import Data.Maybe (catMaybes)
@@ -98,7 +99,8 @@ data ExtraAgentRef
     { extraAgentSlug :: AgentSlug
     -- ^ The slug to use when referring to this agent
     , extraAgentPath :: FilePath
-    -- ^ Path to the agent's JSON configuration file
+    -- ^ Path to the agent's JSON configuration file. Empty for an agent
+    -- stored in a database, whose helpers are found by slug.
     , extraAgentWith :: Maybe (Map ParamName BindingValue)
     {- ^ Fills the referenced agent's parameters for every call made through
     this reference (@todos/tool-partial-application.md@, §7, Phase 5). Keys
@@ -140,12 +142,23 @@ extraAgentRefOptions =
         | take (length prefix) str == prefix = drop (length prefix) str
         | otherwise = str
 
+-- An empty path is left out: see 'FromJSON'.
 instance ToJSON ExtraAgentRef where
-    toJSON = Aeson.genericToJSON extraAgentRefOptions
-    toEncoding = Aeson.genericToEncoding extraAgentRefOptions
+    toJSON ref = case Aeson.genericToJSON extraAgentRefOptions ref of
+        Aeson.Object o | null ref.extraAgentPath -> Aeson.Object (KeyMap.delete "path" o)
+        value -> value
+    toEncoding ref
+        | null ref.extraAgentPath = Aeson.toEncoding (toJSON ref)
+        | otherwise = Aeson.genericToEncoding extraAgentRefOptions ref
 
+{- | @path@ may be absent, and is then empty: an agent stored in a database
+names its helpers by slug alone (see "System.Agents.AgentStore"). An agent
+file still needs it.
+-}
 instance FromJSON ExtraAgentRef where
-    parseJSON = Aeson.genericParseJSON extraAgentRefOptions
+    parseJSON = Aeson.withObject "ExtraAgentRef" $ \o ->
+        Aeson.genericParseJSON extraAgentRefOptions $
+            Aeson.Object (KeyMap.insertWith (\_ given -> given) "path" (Aeson.String "") o)
 
 -------------------------------------------------------------------------------
 -- Bash Toolbox Configuration
