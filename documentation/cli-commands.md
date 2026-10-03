@@ -251,6 +251,66 @@ agents-exe tui --attach unix:///run/agents/agents.sock
 agents-exe tui --attach https://agents.example --token-file ~/.agents-token
 ```
 
+### spectate
+
+Watch a running server: a read-only, live dashboard.
+
+```bash
+agents-exe spectate --attach URL|PATH [--token TOKEN | --token-file FILE]
+```
+
+`spectate` is one more client of a running `agents-exe serve`/`agents-server`,
+like `tui --attach`, except that it only reads: it follows the server's
+event feed and changes nothing. It is made for watching one long run, on a
+fixed screen:
+
+- **agents** (top left): the tree of sessions and of the sub-agent calls
+  they make, indented by depth, each with its state and for how long.
+- **tool calls** (bottom left): the calls running now, with elapsed time
+  and the latest progress a background call reported, then the ones that
+  finished recently.
+- **text** (right): what the model writes in one session, with the user
+  queries it answers. By default the pane follows the session that wrote
+  last; selecting a row of the tree pins it to that session.
+
+The events carry no timestamp, so every duration is measured by
+`spectate` from the moment it received the event; a run that started
+before `spectate` attached counts from the attach. Text arrives as the
+model writes it when the server runs with `--stream-tokens`, and turn by
+turn otherwise. A sub-agent call that runs inside its caller's tool call
+(rather than as a session of its own) is in the tree, but has no event
+stream and so no text; and a session already running when `spectate`
+attaches shows its text from its next turn on.
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|--------------|
+| `--attach URL\|PATH` | required | The server to watch. Same forms as `tui --attach`: `http://HOST:PORT`, `https://...`, `unix:///path/to.sock`, or a bare socket path. |
+| `--token TOKEN` | none | Bearer token, when the server runs with `--auth-tokens`. `spectate` then sees that owner's sessions only. |
+| `--token-file FILE` | none | The same, read from a file. |
+
+**Keyboard Shortcuts:**
+- `Up` / `Down` (or `k` / `j`) - Select a session in the tree; the text pane shows it
+- `f` - Follow the session that writes, again
+- `PgUp` / `PgDn` - Scroll the text
+- `q`, `Esc` or `Ctrl+C` - Quit (the runs go on)
+
+**Examples:**
+
+```bash
+# In one terminal: a server, and a TUI or any other client driving it
+agents-exe serve --socket /run/agents/agents.sock --stream-tokens
+agents-exe tui --attach /run/agents/agents.sock
+
+# In another: watch
+agents-exe spectate --attach /run/agents/agents.sock
+```
+
+A TUI started without `--attach` runs its agents in its own process and
+exposes no endpoint, so there is nothing for `spectate` to attach to: run
+`agents-exe serve` and attach both.
+
 ### mcp-server
 
 Start an MCP (Model Context Protocol) server.

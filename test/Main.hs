@@ -102,6 +102,7 @@ import qualified MailboxTests
 import qualified ConfigLoaderTests
 import qualified TuiDraftTests
 import qualified TuiFileBrowserTests
+import qualified SpectateTests
 import qualified TuiPendingTests
 
 {- | Run sequentially unless asked otherwise: several tests change the
@@ -175,6 +176,7 @@ tests =
         , TuiDraftTests.tests
         , TuiFileBrowserTests.tests
         , TuiPendingTests.tests
+        , SpectateTests.tests
         ]
 
 openAIRateLimitTests :: TestTree

@@ -539,6 +539,19 @@ values travel as `params` on each create and message, as the chat page's
 do. See [tui.md](tui.md#architecture) for what differs from the embedded
 TUI.
 
+### Watching with spectate
+
+`agents-exe spectate --attach` takes the same addresses and tokens, and
+only reads: it lists the running sessions once (`GET /v1/sessions`), then
+follows `GET /v1/events` and shows the session tree, the tool calls and
+the model's text live. With `--stream-tokens` the text arrives as it is
+written; without, turn by turn from `session.updated`. See
+[cli-commands.md](cli-commands.md#spectate).
+
+```sh
+agents-exe spectate --attach unix:///run/agents/agents.sock
+```
+
 ---
 
 ## API reference
