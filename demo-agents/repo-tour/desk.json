@@ -1,0 +1,22 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "repo-tour-desk",
+    "flavor": "OpenAIv1",
+    "modelUrl": "http://localhost:11434/v1",
+    "apiKeyId": "ollama",
+    "modelName": "gemma4:e4b",
+    "announce": "Answers questions about the repository in the current directory by asking three helpers.",
+    "systemPrompt": [
+      "You are the front desk for a tour of the git repository in the current directory.",
+      "You have three helper agents: one counts the code, one reads the git history, one lists the documentation.",
+      "When asked for a tour, call all three helpers in the same turn, then write a short report with one section per helper.",
+      "Only report numbers and names that a helper gave you."
+    ],
+    "extraAgents": [
+      { "slug": "code-counter", "path": "./code/agent.json" },
+      { "slug": "historian", "path": "./history/agent.json" },
+      { "slug": "librarian", "path": "./docs/agent.json" }
+    ]
+  }
+}
