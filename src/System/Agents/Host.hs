@@ -29,30 +29,36 @@ module System.Agents.Host (
     hostAllAgents,
     lookupAgent,
     AgentEditError (..),
+    formatHelperError,
     putStoredAgent,
+    putStoredAgentWithFiles,
     deleteStoredAgent,
     setStoredNodeRetirement,
 ) where
 
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTVar)
-import Control.Exception (Exception, throwIO)
-import Control.Monad (forM_)
+import Control.Exception (Exception, IOException, throwIO, try)
+import Control.Monad (forM_, zipWithM)
 import Data.Foldable (toList)
+import Data.IORef (atomicModifyIORef', newIORef)
+import Data.List (partition)
 import Data.Maybe (isNothing)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Time (NominalDiffTime)
+import Data.Time (NominalDiffTime, getCurrentTime)
 import Database.SQLite.Simple (Only (..), query_, withConnection)
 import Prod.Tracer (Tracer, contramap, runTracer)
+import System.Directory (removePathForcibly)
 import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
 
 import System.Agents.AgentFactory (AgentDeps (..), Completion, SessionSink (..), defaultAgentDeps)
 import qualified System.Agents.AgentFactory as AgentFactory
-import System.Agents.AgentStore (AgentStore (..), StoredAgent (..), fileBasedFields, mkSqliteAgentStore)
-import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentTree (..), Props (..), formatLoadingError, loadAgentTreeFromConfig, readOpenApiKeysFile, releaseAgentNode, withAgentTree)
+import System.Agents.AgentStore (AgentStore (..), HelperError (..), StoredAgent (..), ToolFiles, fileBasedFields, materializeToolFiles, mkSqliteAgentStore, referencedSlugs, resolveHelpers, storedPathErrors)
+import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentTree (..), Props (..), formatLoadingError, loadAgentTreeFromConfigs, readOpenApiKeysFile, releaseAgentNode, withAgentTree)
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.AgentTree.Trace (TreeTrace)
 import qualified System.Agents.Base as Base
@@ -234,27 +240,46 @@ withHostStores cfg stores tracer action = do
             withAgentTree (props file) $ \case
                 Errors errs -> throwIO $ AgentLoadFailed file (show errs)
                 Initialized tree -> loadAll rest $ \roots -> k (tree.osTreeRoot : roots)
-        loadStored agent =
-            loadAgentTreeFromConfig (props ("<database>" </> Text.unpack (Base.slug agent) <> ".json")) "." agent >>= \case
-                Errors errs -> pure $ Left $ Text.intercalate "; " (map (`formatLoadingError` Map.empty) (toList errs))
-                Initialized tree -> pure $ Right tree.osTreeRoot
-    loadAll cfg.hcAgentFiles $ \roots -> do
+        -- Each load of a stored agent gets a directory of its own under
+        -- 'filesRoot', holding the tool files of the agent and its helpers;
+        -- it goes away with the node ('releaseAgentNode').
+        loadStored filesRoot counter sa helpers = do
+            n <- atomicModifyIORef' counter (\i -> (i + 1, i)) :: IO Int
+            let dir = filesRoot </> show n
+                discard = removePathForcibly dir
+                place :: Int -> StoredAgent -> IO (FilePath, Base.Agent)
+                place i agent = let agentDir = dir </> show i in (,) agentDir <$> materializeToolFiles agentDir agent
+                file = "<database>" </> Text.unpack (Base.slug sa.saConfig) <> ".json"
+            result <- try $ do
+                root <- place 0 sa
+                others <- zipWithM place [1 ..] helpers
+                loadAgentTreeFromConfigs (props file) root others
+            case result of
+                Left err -> discard >> pure (Left $ Text.pack $ show (err :: IOException))
+                Right (Errors errs) -> discard >> pure (Left $ Text.intercalate "; " (map (`formatLoadingError` Map.empty) (toList errs)))
+                Right (Initialized tree) -> do
+                    atomically $ modifyTVar' tree.osTreeRoot.osNodeRelease (++ [discard])
+                    pure $ Right tree.osTreeRoot
+    loadAll cfg.hcAgentFiles $ \roots -> withSystemTempDirectory "agents-stored" $ \filesRoot -> do
         agents <- indexBySlug roots
         loaded <- newTVarIO Map.empty
         lock <- newMVar ()
         retire <- newTVarIO releaseAgentNode
-        let storedAgents = StoredAgents stores.hsAgents loaded loadStored lock retire
+        counter <- newIORef 0
+        let storedAgents = StoredAgents stores.hsAgents loaded (loadStored filesRoot counter) lock retire
         forM_ stores.hsAgents $ \agentStore -> do
             saved <- agentStore.asList
-            forM_ saved $ \sa -> do
-                let slug = Base.slug sa.saConfig
-                    skip = runTracer tracer . HostStoredAgentSkipped slug
-                if Map.member slug agents
-                    then skip "an agent file has the same slug"
-                    else
-                        loadStored sa.saConfig >>= \case
-                            Left err -> skip err
-                            Right node -> atomically $ modifyTVar' loaded (Map.insert slug (sa, node))
+            let (hidden, usable) = partition (\sa -> Map.member (Base.slug sa.saConfig) agents) saved
+                available = Map.fromList [(Base.slug sa.saConfig, sa) | sa <- usable]
+                skip sa = runTracer tracer . HostStoredAgentSkipped (storedSlug sa)
+            forM_ hidden $ \sa -> skip sa "an agent file has the same slug"
+            forM_ usable $ \sa ->
+                case resolveHelpers available sa.saConfig of
+                    Left err -> skip sa (formatHelperError err)
+                    Right helpers ->
+                        loadStored filesRoot counter sa helpers >>= \case
+                            Left err -> skip sa err
+                            Right node -> atomically $ modifyTVar' loaded (Map.insert (Base.slug sa.saConfig) (sa, node))
         action
             Host
                 { hostAgents = agents
@@ -291,7 +316,8 @@ withHostStores cfg stores tracer action = do
 data StoredAgents = StoredAgents
     { stStore :: Maybe AgentStore
     , stLoaded :: TVar (Map Text (StoredAgent, OSAgentNode))
-    , stLoad :: Base.Agent -> IO (Either Text OSAgentNode)
+    , stLoad :: StoredAgent -> [StoredAgent] -> IO (Either Text OSAgentNode)
+    -- ^ Load an agent with the stored agents it reaches ('resolveHelpers').
     , stLock :: MVar ()
     -- ^ Serialises edits.
     , stRetire :: TVar (OSAgentNode -> IO ())
@@ -307,7 +333,7 @@ noStoredAgents = do
     loaded <- newTVarIO Map.empty
     lock <- newMVar ()
     retire <- newTVarIO releaseAgentNode
-    pure $ StoredAgents Nothing loaded (\_ -> pure (Left "this host stores no agents")) lock retire
+    pure $ StoredAgents Nothing loaded (\_ _ -> pure (Left "this host stores no agents")) lock retire
 
 data AgentSource = FromFile | FromDatabase StoredAgent
 
@@ -329,9 +355,21 @@ data AgentEditError
     | AgentDefinedByFile Text
     | -- | The configuration uses these file-based fields.
       AgentUsesFiles [Text]
+    | -- | A tool path or a file path leaves the agent's directory, or a
+      -- helper is named with a path: one message per problem.
+      AgentInvalidPaths [Text]
+    | -- | An @extraAgents@ entry names no stored agent, or closes a cycle.
+      AgentHelperError HelperError
     | AgentFailedToLoad Text
     | NoStoredAgent Text
+    | -- | The agent cannot be deleted: these stored agents name it as a helper.
+      AgentInUse Text [Text]
     deriving (Show, Eq)
+
+formatHelperError :: HelperError -> Text
+formatHelperError = \case
+    UnknownHelper from slug -> from <> " names " <> slug <> " in extraAgents, which is not a stored agent"
+    HelperCycle slugs -> "extraAgents of stored agents form a cycle: " <> Text.intercalate " -> " slugs
 
 {- | Choose what happens to a stored agent's node once an edit replaces or
 deletes it (see 'stRetire'). A session runner uses this to wait for the
@@ -350,40 +388,79 @@ drops them from memory; its MCP servers are stopped then, and not before
 ('stRetire'). Returns whether the agent is new.
 -}
 putStoredAgent :: Host -> Maybe Text -> Base.Agent -> IO (Either AgentEditError (StoredAgent, Bool))
-putStoredAgent host by agent = case st.stStore of
+putStoredAgent host by agent = putStoredAgentWithFiles host by agent Map.empty
+
+{- | 'putStoredAgent', with the files of the agent's bash tools: its
+@toolDirectory@ and @bashToolboxes@ paths are relative to the directory
+these files are written to when the agent is loaded.
+
+The agent's @extraAgents@ name stored agents that exist already, and may
+not lead back to it. Stored agents that reach this one as a helper are
+loaded again, so that they call the new version.
+-}
+putStoredAgentWithFiles :: Host -> Maybe Text -> Base.Agent -> ToolFiles -> IO (Either AgentEditError (StoredAgent, Bool))
+putStoredAgentWithFiles host by agent files = case st.stStore of
     Nothing -> pure $ Left EditsUnsupported
     Just agentStore -> withMVar st.stLock $ \_ -> do
+        now <- getCurrentTime
+        loaded <- readTVarIO st.stLoaded
         let slug = Base.slug agent
-        if Map.member slug host.hostAgents
-            then pure $ Left $ AgentDefinedByFile slug
-            else case fileBasedFields agent of
-                fields@(_ : _) -> pure $ Left $ AgentUsesFiles fields
-                [] ->
-                    st.stLoad agent >>= \case
-                        Left err -> pure $ Left $ AgentFailedToLoad err
-                        Right node -> do
-                            sa <- agentStore.asPut by agent
-                            previous <- Map.lookup slug <$> readTVarIO st.stLoaded
-                            atomically $ modifyTVar' st.stLoaded (Map.insert slug (sa, node))
-                            mapM_ (retireStoredNode st . snd) previous
-                            pure $ Right (sa, isNothing previous)
+            candidate = StoredAgent agent files now by
+            available = Map.insert slug candidate (Map.map fst loaded)
+            checked
+                | Map.member slug host.hostAgents = Left $ AgentDefinedByFile slug
+                | fields@(_ : _) <- fileBasedFields agent = Left $ AgentUsesFiles fields
+                | errs@(_ : _) <- storedPathErrors agent files = Left $ AgentInvalidPaths errs
+                | otherwise = either (Left . AgentHelperError) Right (resolveHelpers available agent)
+        case checked of
+            Left err -> pure $ Left err
+            Right helpers ->
+                st.stLoad candidate helpers >>= \case
+                    Left err -> pure $ Left $ AgentFailedToLoad err
+                    Right node -> do
+                        sa <- agentStore.asPut by agent files
+                        let previous = Map.lookup slug loaded
+                        atomically $ modifyTVar' st.stLoaded (Map.insert slug (sa, node))
+                        mapM_ (retireStoredNode st . snd) previous
+                        reloadDependents (Map.insert slug sa (Map.map fst loaded)) slug
+                        pure $ Right (sa, isNothing previous)
   where
     st = host.hostStoredAgents
+    -- A dependent that does not load again keeps its previous version.
+    reloadDependents available slug =
+        forM_ (Map.toList available) $ \(other, sa) ->
+            case resolveHelpers available sa.saConfig of
+                Right helpers | other /= slug, slug `elem` map storedSlug helpers -> do
+                    st.stLoad sa helpers >>= \case
+                        Left err -> runTracer host.hostTracer $ HostStoredAgentSkipped other ("not reloaded after " <> slug <> " changed: " <> err)
+                        Right node -> do
+                            previous <- Map.lookup other <$> readTVarIO st.stLoaded
+                            atomically $ modifyTVar' st.stLoaded (Map.insert other (sa, node))
+                            mapM_ (retireStoredNode st . snd) previous
+                _ -> pure ()
 
 {- | Remove a stored agent. Its sessions stay; runs on them fail until an
-agent with the slug exists again.
+agent with the slug exists again. An agent that other stored agents name as
+a helper is not removed.
 -}
 deleteStoredAgent :: Host -> Text -> IO (Either AgentEditError ())
 deleteStoredAgent host slug = case st.stStore of
     Nothing -> pure $ Left EditsUnsupported
-    Just agentStore -> withMVar st.stLock $ \_ ->
+    Just agentStore -> withMVar st.stLock $ \_ -> do
+        loaded <- readTVarIO st.stLoaded
+        let referrers = [other | (other, (sa, _)) <- Map.toList loaded, other /= slug, slug `elem` referencedSlugs sa.saConfig]
         if Map.member slug host.hostAgents
             then pure $ Left $ AgentDefinedByFile slug
-            else do
-                removed <- agentStore.asDelete slug
-                previous <- Map.lookup slug <$> readTVarIO st.stLoaded
-                atomically $ modifyTVar' st.stLoaded (Map.delete slug)
-                mapM_ (retireStoredNode st . snd) previous
-                pure $ if removed then Right () else Left (NoStoredAgent slug)
+            else
+                if not (null referrers)
+                    then pure $ Left $ AgentInUse slug referrers
+                    else do
+                        removed <- agentStore.asDelete slug
+                        atomically $ modifyTVar' st.stLoaded (Map.delete slug)
+                        mapM_ (retireStoredNode st . snd) (Map.lookup slug loaded)
+                        pure $ if removed then Right () else Left (NoStoredAgent slug)
   where
     st = host.hostStoredAgents
+
+storedSlug :: StoredAgent -> Text
+storedSlug sa = Base.slug sa.saConfig

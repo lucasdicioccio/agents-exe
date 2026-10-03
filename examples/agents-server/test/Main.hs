@@ -78,6 +78,7 @@ main =
             , testCase "CORS: --cors-origin '*' is refused at startup with --auth-tokens" corsWildcardStartupTest
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
             , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
+            , testCase "a stored agent carries its bash tools and names stored helpers" storedAgentFilesTest
             , testCase "without admin owners, storing agents is disabled" agentEditsDisabledTest
             , testCase "replacing or deleting a stored agent stops its MCP server" storedAgentMcpReleaseTest
             , testCase "the openapi document covers every route and resolves" openApiTest
@@ -751,7 +752,7 @@ storedAgentsTest = do
         let refused extra path code = do
                 (status, e) <- call alice "PUT" path (helper extra)
                 (path, status, field "error" e) @?= (path, fst code, snd code)
-        refused ["toolDirectory" .= ("tools" :: Text)] "/v1/agents/files" (400, "agent_uses_files")
+        refused ["autoEnableSkills" .= ["some-skill" :: Text]] "/v1/agents/files" (400, "agent_uses_files")
         refused [] "/v1/agents/server-test" (409, "agent_defined_by_file")
         refused ["slug" .= ("other" :: Text)] "/v1/agents/helper" (400, "bad_request")
         (sessionStatus, session) <- call bob "POST" "/v1/sessions?wait=true" (Just (Aeson.object ["agent" .= ("helper" :: Text), "prompt" .= ("hi" :: Text)]))
@@ -827,6 +828,58 @@ agentEditsDisabledTest = withServer "{}" mockCompletion $ \srv -> do
     (status, field "error" err) @?= (403, "agent_edits_disabled")
 
 -- | An agent configuration that needs no files, with extra fields.
+{- | A stored agent with a bash tool among its stored files, and a stored
+helper: the tool runs in a session, and wrong references are refused.
+-}
+storedAgentFilesTest :: Assertion
+storedAgentFilesTest = do
+    let tokens = authTokensFromList [("alice-token", "alice")]
+        complete = firstThen [toolCall "call_1" "bash_greet"]
+    withServerConfig (Just tokens) "{}" (\c -> c{hcCompletion = Just (const complete)}) (\e -> e{envAdmins = ["alice"]}) $ \anonymous -> do
+        let alice = anonymous{srvToken = Just "alice-token"}
+            put slug extra = call alice "PUT" ("/v1/agents/" <> slug) (Just (storedConfig extra))
+            helpers slugs = "extraAgents" .= [Aeson.object ["slug" .= s] | s <- slugs :: [Text]]
+            files = Aeson.object ["tools/greet.sh" .= greetTool]
+            refused answer code = fmap (fmap (field "error")) answer >>= (@?= code)
+        refused (put "boss" [helpers ["helper"]]) (400, "unknown_helper")
+        (helperStatus, _) <- put "helper" []
+        helperStatus @?= 201
+        (created, boss) <- put "boss" ["toolDirectory" .= ("tools" :: Text), "files" .= files, helpers ["helper"], runSync]
+        created @?= 201
+        field "helpers" boss @?= Aeson.toJSON ["helper" :: Text]
+        field "files" (field "config" boss) @?= files
+        assertBool "the stored tool is listed" ("bash_greet" `elem` map (field "name") (arrayField "tools" boss))
+        refused (put "helper" [helpers ["boss"]]) (400, "helper_cycle")
+        refused (put "other" ["toolDirectory" .= ("/usr/bin" :: Text)]) (400, "agent_invalid_paths")
+        refused (call alice "DELETE" "/v1/agents/helper" Nothing) (409, "agent_in_use")
+        (sessionStatus, session) <- call alice "POST" "/v1/sessions?wait=true" (Just (Aeson.object ["agent" .= ("boss" :: Text), "prompt" .= ("hi" :: Text)]))
+        (sessionStatus, field "status" session) @?= (201, "idle")
+        (_, final) <- call alice "GET" ("/v1/sessions/" <> textField "session_id" session) Nothing
+        let transcript = LByteString.toStrict (Aeson.encode (field "session" final))
+        assertBool "the stored tool ran" ("hello from a stored tool" `ByteString.isInfixOf` transcript)
+        (bossDeleted, _) <- call alice "DELETE" "/v1/agents/boss" Nothing
+        (helperDeleted, _) <- call alice "DELETE" "/v1/agents/helper" Nothing
+        (bossDeleted, helperDeleted) @?= (200, 200)
+  where
+    runSync = "toolCallPolicyConfig" .= Aeson.object ["default" .= Aeson.object ["tag" .= ("runSync" :: Text)], "rules" .= ([] :: [Aeson.Value])]
+    greetTool :: Text
+    greetTool =
+        Text.unlines
+            [ "#!/bin/sh"
+            , "case \"$1\" in"
+            , "  describe) echo '{\"slug\": \"greet\", \"description\": \"greets\", \"args\": []}' ;;"
+            , "  run) echo 'hello from a stored tool' ;;"
+            , "esac"
+            ]
+    toolCall :: Text -> Text -> LlmToolCall
+    toolCall callId name =
+        LlmToolCall $
+            Aeson.object
+                [ "id" .= callId
+                , "type" .= ("function" :: Text)
+                , "function" .= Aeson.object ["name" .= name, "arguments" .= ("{}" :: Text)]
+                ]
+
 storedConfig :: [Aeson.Pair] -> Aeson.Value
 storedConfig extra =
     case (base, Aeson.object extra) of

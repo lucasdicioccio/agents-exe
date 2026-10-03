@@ -108,6 +108,7 @@ import Control.Applicative ((<|>))
 import Data.Dynamic (fromDynamic)
 import Data.Foldable (for_, toList)
 import Data.List (nub)
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe, isJust)
@@ -2172,7 +2173,13 @@ agentDescriptor runner slug (source, node) = do
                 }
         (src, updatedAt, updatedBy, config) = case source of
             FromFile -> ("file", Nothing, Nothing, Nothing)
-            FromDatabase sa -> ("database", Just sa.saUpdatedAt, sa.saUpdatedBy, Just (Aeson.toJSON sa.saConfig))
+            FromDatabase sa -> ("database", Just sa.saUpdatedAt, sa.saUpdatedBy, Just (storedConfig sa))
+        -- What was stored, in the shape it is stored in: the configuration,
+        -- with the files of its bash tools under @files@ when it has any.
+        storedConfig :: StoredAgent -> Aeson.Value
+        storedConfig sa = case Aeson.toJSON sa.saConfig of
+            Aeson.Object o | not (Map.null sa.saFiles) -> Aeson.Object (KeyMap.insert "files" (Aeson.toJSON sa.saFiles) o)
+            value -> value
     pure
         AgentDescriptor
             { adSlug = slug

@@ -37,6 +37,7 @@ module System.Agents.AgentTree (
     loadAgentTreeConfig,
     loadAgentTree,
     loadAgentTreeFromConfig,
+    loadAgentTreeFromConfigs,
     releaseAgentNode,
     LoadAgentResult (..),
     withAgentTree,
@@ -1360,29 +1361,43 @@ has no sub-agents, and any file-based tools it names resolve against the
 given directory. 'props.rootAgentFile' is not read.
 -}
 loadAgentTreeFromConfig :: Props -> FilePath -> Agent -> IO LoadAgentResult
-loadAgentTreeFromConfig props baseDir agent = do
+loadAgentTreeFromConfig props baseDir agent = loadAgentTreeFromConfigs props (baseDir, agent) []
+
+{- | Like 'loadAgentTreeFromConfig', for a root agent and the agents it
+reaches through @extraAgents@, all held in memory, each with its directory.
+A reference is resolved by slug among the given agents (its @path@ is not
+read), and a slug that is not among them is an error.
+-}
+loadAgentTreeFromConfigs :: Props -> (FilePath, Agent) -> [(FilePath, Agent)] -> IO LoadAgentResult
+loadAgentTreeFromConfigs props root helpers = do
     registry <- newAgentRegistry
-    let agentSlug = AgentsBase.slug agent
-        node =
-            AgentConfigNode
-                { nodeFile = baseDir </> (Text.unpack agentSlug <> ".json")
-                , nodeConfig = agent
-                , nodeChildren = []
-                , nodeExtraRefs = []
-                , nodeExtraWith = Map.empty
-                , nodeExtraNarrowable = Map.empty
-                }
-        graph = AgentConfigGraph (Map.singleton agentSlug node) (Map.singleton agentSlug []) agentSlug
-    agentsResult <- createAgents props graph registry
-    case agentsResult of
+    let rootSlug = AgentsBase.slug (snd root)
+        toNode (baseDir, agent) =
+            let refs = Maybe.fromMaybe [] (extraAgents agent)
+             in AgentConfigNode
+                    { nodeFile = baseDir </> (Text.unpack (AgentsBase.slug agent) <> ".json")
+                    , nodeConfig = agent
+                    , nodeChildren = []
+                    , nodeExtraRefs = map extraAgentSlug refs
+                    , nodeExtraWith = Map.fromList [(r.extraAgentSlug, w) | r <- refs, Just w <- [r.extraAgentWith]]
+                    , nodeExtraNarrowable = Map.fromList [(r.extraAgentSlug, n) | r <- refs, Just n <- [r.extraAgentNarrowable]]
+                    }
+        -- The root wins over a helper with its slug.
+        nodes = Map.fromList [(AgentsBase.slug (snd a), toNode a) | a <- helpers ++ [root]]
+        graph = AgentConfigGraph nodes (Map.map (.nodeExtraRefs) nodes) rootSlug
+    case validateReferences graph of
         Left errs -> pure $ Errors errs
-        Right nodeMap -> do
-            toolErrors <- wireToolReferences props graph nodeMap
-            case NonEmpty.nonEmpty toolErrors of
-                Just errs -> mapM_ releaseAgentNode nodeMap >> pure (Errors errs)
-                Nothing -> case buildAgentTree graph nodeMap of
-                    Left errs -> mapM_ releaseAgentNode nodeMap >> pure (Errors errs)
-                    Right tree -> pure $ Initialized tree{osTreeRegistry = registry}
+        Right () -> do
+            agentsResult <- createAgents props graph registry
+            case agentsResult of
+                Left errs -> pure $ Errors errs
+                Right nodeMap -> do
+                    toolErrors <- wireToolReferences props graph nodeMap
+                    case NonEmpty.nonEmpty toolErrors of
+                        Just errs -> mapM_ releaseAgentNode nodeMap >> pure (Errors errs)
+                        Nothing -> case buildAgentTree graph nodeMap of
+                            Left errs -> mapM_ releaseAgentNode nodeMap >> pure (Errors errs)
+                            Right tree -> pure $ Initialized tree{osTreeRegistry = registry}
 
 {- | Stop what loading a node (and its helpers) started: its MCP servers.
 Each action runs once; releasing again does nothing. Sessions still using

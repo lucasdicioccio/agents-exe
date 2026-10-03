@@ -49,7 +49,8 @@ import AgentsServer.Auth (AuthTokens, authenticate, bearerToken, mintSessionToke
 import AgentsServer.Mcp (McpContext (..), handleMcp)
 import AgentsServer.OpenApi (apiDocument)
 import AgentsServer.UI (uiPage)
-import System.Agents.Host (AgentEditError (..), Host (..), deleteStoredAgent, hostAllAgents, putStoredAgent)
+import System.Agents.AgentStore (HelperError (..))
+import System.Agents.Host (AgentEditError (..), Host (..), deleteStoredAgent, formatHelperError, hostAllAgents, putStoredAgentWithFiles)
 import System.Agents.Host.Runner hiding (getAgent, listAgents)
 import qualified System.Agents.Host.Runner as Runner
 import System.Agents.Protocol (
@@ -450,7 +451,8 @@ getAgentH env slug =
         Just descriptor -> pure $ json status200 descriptor
 
 {- | Store an agent. The body is the @contents@ of an agent file; its slug
-is the one in the path.
+is the one in the path. A @files@ object next to the configuration's fields
+gives the files of the agent's bash tools, contents by relative path.
 -}
 putAgentH :: ServerEnv -> Request -> Maybe Text -> Text -> IO Response
 putAgentH env req by slug = do
@@ -458,8 +460,9 @@ putAgentH env req by slug = do
     case KeyMap.lookup "slug" body of
         Just (Aeson.String other) | other /= slug -> badRequest ("the body's slug is " <> other <> ", the path's " <> slug)
         _ -> pure ()
-    agent <- parseBody (KeyMap.insert "slug" (Aeson.String slug) body) (Aeson.parseJSON . Aeson.Object)
-    putStoredAgent env.envHost by agent >>= \case
+    files <- parseBody body (\o -> fromMaybe Map.empty <$> o .:? "files")
+    agent <- parseBody (KeyMap.insert "slug" (Aeson.String slug) (KeyMap.delete "files" body)) (Aeson.parseJSON . Aeson.Object)
+    putStoredAgentWithFiles env.envHost by agent files >>= \case
         Left err -> throwIO $ fromEditError err
         Right (_, created) ->
             getAgentH env slug >>= \rsp ->
@@ -476,6 +479,10 @@ fromEditError = \case
     EditsUnsupported -> ApiError status403 "agent_edits_disabled" "this server stores no agents"
     AgentDefinedByFile slug -> ApiError status409 "agent_defined_by_file" (slug <> " comes from an agent file and cannot be changed over the API")
     AgentUsesFiles fields -> ApiError status400 "agent_uses_files" ("stored agents cannot use file-based fields: " <> Text.intercalate ", " fields)
+    AgentInvalidPaths errs -> ApiError status400 "agent_invalid_paths" (Text.intercalate "; " errs)
+    AgentHelperError err@(UnknownHelper _ _) -> ApiError status400 "unknown_helper" (formatHelperError err)
+    AgentHelperError err@(HelperCycle _) -> ApiError status400 "helper_cycle" (formatHelperError err)
+    AgentInUse slug referrers -> ApiError status409 "agent_in_use" (slug <> " is a helper of " <> Text.intercalate ", " referrers)
     AgentFailedToLoad err -> ApiError status400 "agent_failed_to_load" err
     NoStoredAgent slug -> ApiError status404 "unknown_agent" ("no stored agent named " <> slug)
 

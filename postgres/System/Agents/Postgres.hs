@@ -641,6 +641,9 @@ agentMigrations =
               \ updated_at TIMESTAMPTZ NOT NULL,\
               \ updated_by TEXT)"
             ]
+    , -- The files of the agent's bash tools: a JSON object, contents by path.
+      PgMigration 2 $
+        statements ["ALTER TABLE agents ADD COLUMN IF NOT EXISTS files TEXT NOT NULL DEFAULT '{}'"]
     ]
 
 -- | An agent store on the pool, after migrating its table.
@@ -651,18 +654,24 @@ mkPostgresAgentStore pool = do
     pure
         AgentStore
             { asList = with $ \c -> do
-                rows <- query_ c "SELECT json, updated_at, updated_by FROM agents ORDER BY slug" :: IO [(Text, UTCTime, Maybe Text)]
-                pure [StoredAgent agent updated by | (json, updated, by) <- rows, Just agent <- [decodeJson json]]
-            , asPut = \by agent -> with $ \c -> do
+                rows <- query_ c "SELECT json, files, updated_at, updated_by FROM agents ORDER BY slug" :: IO [(Text, Text, UTCTime, Maybe Text)]
+                pure
+                    [ StoredAgent agent storedFiles updated by
+                    | (json, files, updated, by) <- rows
+                    , Just agent <- [decodeJson json]
+                    , Just storedFiles <- [decodeJson files]
+                    ]
+            , asPut = \by agent files -> with $ \c -> do
                 now <- nowMicros
                 void $
                     execute
                         c
-                        "INSERT INTO agents (slug, json, updated_at, updated_by) VALUES (?, ?, ?, ?)\
+                        "INSERT INTO agents (slug, json, files, updated_at, updated_by) VALUES (?, ?, ?, ?, ?)\
                         \ ON CONFLICT (slug) DO UPDATE SET\
-                        \ json = excluded.json, updated_at = excluded.updated_at, updated_by = excluded.updated_by"
-                        (Base.slug agent, encodeJson agent, now, by)
-                pure $ StoredAgent agent now by
+                        \ json = excluded.json, files = excluded.files,\
+                        \ updated_at = excluded.updated_at, updated_by = excluded.updated_by"
+                        (Base.slug agent, encodeJson agent, encodeJson files, now, by)
+                pure $ StoredAgent agent files now by
             , asDelete = \slug -> with $ \c -> (> 0) <$> execute c "DELETE FROM agents WHERE slug = ?" (Only slug)
             }
 
