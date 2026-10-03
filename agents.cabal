@@ -190,6 +190,7 @@ library agents-lib
                     , System.Agents.AgentFactory
                     , System.Agents.AgentStore
                     , System.Agents.Host
+                    , System.Agents.Host.Coordination
                     , System.Agents.Host.Runner
                     , System.Agents.Host.Client
                     , System.Agents.Host.Client.Http
@@ -340,9 +341,12 @@ library agents-postgres
     build-depends:    base >=4.20,
                       agents-lib,
                       aeson,
+                      async,
                       bytestring,
+                      containers,
                       postgresql-simple,
                       resource-pool,
+                      stm,
                       text,
                       time,
                       uuid
@@ -567,6 +571,7 @@ test-suite agents-tests
                     , OpenAIStreamTests
                     , ProtocolTests
                     , RunnerTests
+                    , RunnerCoordinationTests
                     , HostClientTests
                     , HttpClientTests
                     , HostLegacySessionTests

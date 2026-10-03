@@ -62,6 +62,7 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (AgentId (..))
 import qualified System.Agents.Base as Base
 import System.Agents.Host
+import System.Agents.Host.Coordination (noCoordination)
 import System.Agents.Host.Runner
 import System.Agents.OneShot (oneShotSpawnSession)
 import System.Agents.Session.Async (ContinuationStore (..), mkSqliteContinuationStore)
@@ -1024,7 +1025,7 @@ replayUnavailableTest :: Assertion
 replayUnavailableTest = do
     node <- testNode "{}"
     host <- testHost [node] (\_ c -> mockCompletion c)
-    withSessionRunner_ (newSessionRunnerWith (RunnerConfig 2) host) $ \runner -> do
+    withSessionRunner_ (newSessionRunnerWith defaultRunnerConfig{rcEventRingSize = 2} host) $ \runner -> do
         meta <- expectRight =<< createSession runner "test-agent" (message "hi") (Just UntilBlocked)
         let sid = meta.smSessionId
         _ <- expectRight =<< awaitRun runner sid 5
@@ -1927,6 +1928,7 @@ testHost nodes complete = do
             , hostContinuations = store
             , hostMail = mail
             , hostWatches = watches
+            , hostCoordination = noCoordination
             , hostTracer = silent
             , hostStreamTokens = False
             , hostProcessParams = mempty

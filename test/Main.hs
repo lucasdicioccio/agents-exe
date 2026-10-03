@@ -91,6 +91,7 @@ import qualified ContinuationConsistencyTests
 import qualified MediaContentPartTests
 import qualified OpenAIStreamTests
 import qualified ProtocolTests
+import qualified RunnerCoordinationTests
 import qualified RunnerTests
 import qualified System.Environment as Env
 import qualified HostClientTests
@@ -168,6 +169,7 @@ tests =
         , OpenAIStreamTests.tests
         , ProtocolTests.tests
         , RunnerTests.tests
+        , RunnerCoordinationTests.tests
         , HostClientTests.tests
         , HttpClientTests.tests
         , HostLegacySessionTests.tests

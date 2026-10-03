@@ -181,7 +181,8 @@ Two implementations:
   accepted_at`), SQLite and Postgres, fronted by the same `TVar` so
   `mbUnread` stays STM. The runner is single-process per session already
   (second writers are detected), so the `TVar` front is sound; a multi-process
-  Postgres deployment would fill it from `LISTEN/NOTIFY`, later.
+  Postgres deployment fills it from `LISTEN/NOTIFY` (`mbSync`, with the
+  sequence numbers settled by the database).
 
 Bounded: `mailboxMaxUnread` (default 256). A full mailbox refuses with
 `MailboxFull`; the sender's tool call fails, which is the backpressure.

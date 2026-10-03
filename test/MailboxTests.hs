@@ -251,7 +251,7 @@ newFakeMailStore = do
     ref <- newIORef []
     pure
         MailStore
-            { msAppend = \_sid envelope -> atomicModifyIORef' ref (\es -> (es ++ [envelope], ()))
+            { msAppend = \_sid envelope -> atomicModifyIORef' ref (\es -> (es ++ [envelope], envelope))
             , msLoad = \_sid -> readIORef ref
             }
 

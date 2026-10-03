@@ -70,6 +70,10 @@ module System.Agents.Host.Runner (
     awaitRun,
     recoverOnStartup,
 
+    -- * Several processes on one database
+    heartbeat,
+    takeOverExpired,
+
     -- * Deletion
     DeleteMode (..),
     DeletionPlan (..),
@@ -96,7 +100,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, async, cancel, waitCatch)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
-import Control.Exception (Exception, SomeAsyncException, SomeException, bracket, displayException, fromException, onException, throwIO, try)
+import Control.Exception (Exception, SomeAsyncException, SomeException, bracket, displayException, finally, fromException, onException, throwIO, try)
 import Control.Monad (filterM, forM, forM_, forever, unless, void, when)
 import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=))
@@ -106,7 +110,7 @@ import Data.Foldable (for_, toList)
 import Data.List (nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromMaybe, isJust)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
@@ -123,6 +127,7 @@ import System.Agents.Tools.Bindings.Types (Binding (..), BindingValue (..), Scop
 import qualified System.Agents.Base as Base
 import System.Agents.AgentStore (StoredAgent (..))
 import System.Agents.Host
+import System.Agents.Host.Coordination (Coordination (..), LeaseResult (..), SessionSignal (..))
 import System.Agents.OS.Events (OSEmission (..))
 import System.Agents.Protocol (
     AgentDescriptor (..),
@@ -189,15 +194,21 @@ JSON. Re-exported here unchanged so nothing outside this module (and
 -}
 
 -- | Tunables for a 'SessionRunner', beyond the 'Host' it runs.
-newtype RunnerConfig = RunnerConfig
+data RunnerConfig = RunnerConfig
     { rcEventRingSize :: Int
     -- ^ How many past events 'subscribe'\/'subscribeSTM' can replay from,
     -- per server (not per session). Default 4096.
+    , rcLeaseTtl :: NominalDiffTime
+    {- ^ How long a run lease lasts without being renewed, when several
+    processes share the database ('hostCoordination'). The runner renews
+    every third of it, so a process that dies loses its runs to another one
+    within this time, plus a third. Default 30 seconds; at least one.
+    -}
     }
     deriving (Show, Eq)
 
 defaultRunnerConfig :: RunnerConfig
-defaultRunnerConfig = RunnerConfig{rcEventRingSize = 4096}
+defaultRunnerConfig = RunnerConfig{rcEventRingSize = 4096, rcLeaseTtl = 30}
 
 -- | A subscription's @after@ is older than every event still in the ring:
 -- the caller missed some, and should fall back to a fresh snapshot.
@@ -219,6 +230,20 @@ data SessionRunner = SessionRunner
     , srRing :: TVar (Seq Event)
     -- ^ Bounded history of recent events (oldest first), for replay.
     , srRingSize :: Int
+    , srLeaseTtl :: NominalDiffTime
+    -- ^ See 'rcLeaseTtl'.
+    , srSignals :: TVar (Set.Set (SessionId, SessionSignal))
+    -- ^ Signals from other processes, waiting for 'signalWorker'.
+    , srRemoteRunning :: TVar (Set.Set SessionId)
+    -- ^ Sessions last seen running on another process (see 'forwardStored').
+    , srRemoteEvents :: TVar (Set.Set EventSeq)
+    {- ^ The events still in the ring that report what another process did
+    ('forwardStored'). A watch skips them: the process that runs the
+    session forwards its own.
+    -}
+    , srBackground :: [Async ()]
+    -- ^ The heartbeat and the signal worker; none without coordination.
+    , srStopListening :: IO ()
     }
 
 -- | One active watch: who is watching, and the thread forwarding matches.
@@ -283,13 +308,35 @@ newSessionRunnerWith config host = do
     ring <- newTVarIO Seq.empty
     let ttl = host.hostLiveSessionTtl
         ringSize = max 1 config.rcEventRingSize
+        coordination = host.hostCoordination
+        leaseTtl = max 1 config.rcLeaseTtl
+    signals <- newTVarIO Set.empty
+    remoteRunning <- newTVarIO Set.empty
+    remoteEvents <- newTVarIO Set.empty
     self <- newEmptyTMVarIO
     reaper <- async $ do
         runner <- atomically $ readTMVar self
         forever $ do
             threadDelay (reaperInterval ttl)
             evictIdle runner
-    let runner = SessionRunner host live events reaper watches seqVar ring ringSize
+    background <-
+        if not coordination.coEnabled
+            then pure []
+            else do
+                beat <- async $ do
+                    runner <- atomically $ readTMVar self
+                    forever $ do
+                        threadDelay (heartbeatInterval leaseTtl)
+                        heartbeat runner
+                worker <- async $ do
+                    runner <- atomically $ readTMVar self
+                    forever $ signalWorker runner
+                pure [beat, worker]
+    stopListening <-
+        if coordination.coEnabled
+            then coordination.coListen $ \sid signal -> atomically $ modifyTVar' signals (Set.insert (sid, signal))
+            else pure (pure ())
+    let runner = SessionRunner host live events reaper watches seqVar ring ringSize leaseTtl signals remoteRunning remoteEvents background stopListening
     atomically $ putTMVar self runner
     setStoredNodeRetirement host (retireWhenUnused runner)
     pure runner
@@ -315,6 +362,8 @@ reaperInterval ttl = max 50_000 (min 60_000_000 (round (realToFrac ttl * 500_000
 shutdownSessionRunner :: SessionRunner -> IO ()
 shutdownSessionRunner runner = do
     cancel runner.srReaper
+    runner.srStopListening
+    mapM_ cancel runner.srBackground
     watches <- Map.elems <$> readTVarIO runner.srWatches
     forM_ watches $ \wh -> cancel wh.whAsync
     lives <- Map.elems <$> readTVarIO runner.srLive
@@ -446,12 +495,22 @@ emit runner sid body = do
 -- up live (needed once a session's 'LiveSession' is already gone, e.g.
 -- 'SessionDeleted').
 emitOwned :: SessionRunner -> SessionId -> Maybe Text -> EventBody -> IO ()
-emitOwned runner sid owner body = do
+emitOwned = emitFrom False
+
+-- | Like 'emitOwned', for something another process did ('srRemoteEvents').
+emitRemote :: SessionRunner -> SessionId -> Maybe Text -> EventBody -> IO ()
+emitRemote = emitFrom True
+
+emitFrom :: Bool -> SessionRunner -> SessionId -> Maybe Text -> EventBody -> IO ()
+emitFrom remote runner sid owner body = do
     atomically $ do
         n <- nextEventSeq <$> readTVar runner.srSeq
         writeTVar runner.srSeq n
         let ev = Event n (Just sid) owner body
+            EventSeq latest = n
+            oldestKept = EventSeq (latest - fromIntegral runner.srRingSize)
         modifyTVar' runner.srRing (pushRing runner.srRingSize ev)
+        when remote $ modifyTVar' runner.srRemoteEvents (Set.insert n . Set.filter (> oldestKept))
         writeTChan runner.srEvents ev
     case body of
         -- One per token: too many, and too revealing, for the logs.
@@ -903,7 +962,11 @@ startWatch runner watchId watcherSid req deadline = do
                 case result of
                     Nothing -> dropWatch runner watchId
                     Just event -> do
-                        when (eventMatches req event) $ forwardEvent runner watcherSid req.wrTarget event
+                        -- With several processes on the database, the one
+                        -- that runs the target forwards; a copy of its
+                        -- events seen here would be forwarded twice.
+                        remote <- Set.member event.evSeq <$> readTVarIO runner.srRemoteEvents
+                        when (eventMatches req event && not remote) $ forwardEvent runner watcherSid req.wrTarget event
                         forwardLoop next currentDeadline
 
 -- | Forget a watch, in memory and in 'hostWatches' (its TTL elapsed, or
@@ -1133,17 +1196,25 @@ startRun :: SessionRunner -> LiveSession -> RunMode -> Params -> Session -> Sess
 startRun runner live mode overlay sess meta =
     sessionAgent runner live meta >>= \case
         Left err -> pure (Left err)
-        Right agent0 -> do
-            let agent = withParams overlay agent0
-            store runner live meta sess StatusRunning Nothing >>= \case
-                Left conflict -> pure (Left (Conflict conflict))
-                Right meta' -> do
-                    emit runner live.lsSessionId $ RunStarted mode
-                    -- The run's first step waits for this lock, so lsRun is set
-                    -- before the run can finish and clear it.
-                    handle <- async $ runLoop runner live mode agent
-                    atomically $ writeTVar live.lsRun (Just handle)
-                    pure (Right meta')
+        Right agent0 ->
+            acquireRun runner live.lsSessionId >>= \case
+                False -> pure (Left (RunInProgress live.lsSessionId))
+                True -> do
+                    let agent = withParams overlay agent0
+                    -- Mail another process accepted while the session was not
+                    -- running here.
+                    when runner.srHost.hostCoordination.coEnabled $ syncMail live
+                    store runner live meta sess StatusRunning Nothing >>= \case
+                        Left conflict -> do
+                            releaseRun runner live.lsSessionId
+                            pure (Left (Conflict conflict))
+                        Right meta' -> do
+                            emit runner live.lsSessionId $ RunStarted mode
+                            -- The run's first step waits for this lock, so lsRun is set
+                            -- before the run can finish and clear it.
+                            handle <- async $ runLoop runner live mode agent
+                            atomically $ writeTVar live.lsRun (Just handle)
+                            pure (Right meta')
 
 {- | Step a session until it should stop.
 
@@ -1198,6 +1269,7 @@ runLoop runner live mode agent0 = do
                             | otherwise = sessionStatusOf sess
                     _ <- storeOrThrow runner live meta sess status
                     atomically $ writeTVar live.lsRun Nothing
+                    releaseRun runner sid
                     when (status == StatusWaitingExternal) $
                         emit runner sid $
                             CallsDeferred (pendingDeferredCalls sess)
@@ -1340,12 +1412,19 @@ sessionMailbox runner sid = do
 -- | Record a failed run: the last stored version, marked failed.
 failRun :: SessionRunner -> LiveSession -> Text -> IO ()
 failRun runner live reason = withMVar live.lsLock $ \_ -> do
-    loaded <- loadLatest runner live
-    for_ loaded $ \(sess, meta) ->
-        void $ store runner live meta sess StatusFailed (Just reason)
-    atomically $ writeTVar live.lsRun Nothing
-    emit runner live.lsSessionId $ SessionFailed reason
-    emit runner live.lsSessionId $ RunStopped StatusFailed
+    ours <- stillHoldsRun runner live.lsSessionId
+    if ours
+        then do
+            loaded <- loadLatest runner live
+            for_ loaded $ \(sess, meta) ->
+                void $ store runner live meta sess StatusFailed (Just reason)
+            atomically $ writeTVar live.lsRun Nothing
+            releaseRun runner live.lsSessionId
+            emit runner live.lsSessionId $ SessionFailed reason
+            emit runner live.lsSessionId $ RunStopped StatusFailed
+        else -- Another process took the session over: what failed here is its
+        -- write meeting ours. The session is theirs, so nothing is stored.
+            stopLocally runner live
 
 -------------------------------------------------------------------------------
 -- Operations
@@ -1488,7 +1567,8 @@ postMessage :: SessionRunner -> SessionId -> NewMessage -> Maybe RunMode -> Map 
 postMessage runner sid message mode supplied =
     withLive runner sid $ \live -> do
         active <- readTVarIO live.lsRun
-        if isJust active
+        elsewhere <- if isJust active then pure False else heldElsewhere runner sid
+        if isJust active || elsewhere
             then acceptAsMail live
             else
                 withIdle runner live $ \sess meta ->
@@ -1619,7 +1699,8 @@ withIdle ::
     IO (Either RunnerError a)
 withIdle runner live action = do
     active <- readTVarIO live.lsRun
-    if isJust active
+    elsewhere <- if isJust active then pure False else heldElsewhere runner live.lsSessionId
+    if isJust active || elsewhere
         then pure $ Left $ RunInProgress live.lsSessionId
         else
             loadLatest runner live >>= \case
@@ -1648,15 +1729,23 @@ completeCall runner token result autoResume supplied = do
                                 Left err -> pure (Left err)
                                 Right overlay -> do
                                     active <- readTVarIO live.lsRun
-                                    if isJust active then enqueue live else applyNow live overlay node
+                                    elsewhere <- if isJust active then pure False else heldElsewhere runner sid
+                                    if isJust active
+                                        then latestOrThrow live >>= enqueue live
+                                        else
+                                            if elsewhere
+                                                then -- Another process runs it: its run applies the result.
+                                                    loadLatest runner live >>= maybe (pure (Left (UnknownSession sid))) (enqueue live)
+                                                else applyNow live overlay node
   where
-    enqueue live = do
-        (sess, meta) <- latestOrThrow live
+    enqueue :: LiveSession -> (Session, SessionMeta) -> IO (Either RunnerError SessionMeta)
+    enqueue live (sess, meta) = do
         outcome <- wakeSessionWith Nothing Nothing sess [(token, result)]
         mMailbox <- sessionMailbox runner live.lsSessionId
         alreadyQueued <- case mMailbox of
             Nothing -> pure False
             Just mb -> do
+                when runner.srHost.hostCoordination.coEnabled mb.mbSync
                 unread <- atomically (mbUnread mb sess.mailCursor)
                 pure $ any isSameToken unread
         classify outcome alreadyQueued $ do
@@ -1743,13 +1832,19 @@ cancelRun runner sid = do
                 atomically $ writeTVar live.lsRun Nothing
                 let status = sessionStatusOf sess2
                 result <- store runner live meta1 sess2 status Nothing
+                releaseRun runner sid
                 emit runner sid $ RunStopped status
                 pure $ either (Left . Conflict) Right result
 
     noRun =
         runner.srHost.hostBackend.sbLoadMeta sid >>= \case
             Nothing -> pure $ Left $ UnknownSession sid
-            Just _ -> pure $ Left $ NoActiveRun sid
+            Just _ -> do
+                elsewhere <- heldElsewhere runner sid
+                if elsewhere
+                    then -- The run is another process's: ask it to stop.
+                        sendControlMail runner sid StopRun
+                    else pure $ Left $ NoActiveRun sid
 
 {- | Hard-cancel every tool call currently attached to a session: posts
 'CancelAllAttached' 'Control' mail, which the runner loop reacts to on its
@@ -2015,7 +2110,7 @@ with each result's metadata replaced by this process's own live, cached
 copy when the session is live here, so a caller sees a status this process
 just set (e.g. 'StatusRunning') without waiting for the next store to
 land. A session live in another process is unaffected: only this
-process's 'srLive' is consulted.
+process's 'srLive' is consulted, and only for sessions it is running.
 -}
 listSessions :: SessionRunner -> SessionQuery -> IO [SessionMeta]
 listSessions runner query = do
@@ -2027,7 +2122,11 @@ listSessions runner query = do
         mLive <- lookupLive runner meta.smSessionId
         case mLive of
             Nothing -> pure meta
-            Just live -> maybe meta snd <$> readTVarIO live.lsLatest
+            Just live -> do
+                -- Only while it runs here: an idle session's cached copy may
+                -- be behind what another process stored since.
+                active <- readTVarIO live.lsRun
+                if isJust active then maybe meta snd <$> readTVarIO live.lsLatest else pure meta
 
 {- | Every root agent this host knows, as an 'AgentDescriptor' (G6, the
 "agent details" gap row: model, system prompt, tool activation, helpers --
@@ -2096,15 +2195,41 @@ the session's lock, and never affects the run.
 -}
 awaitRun :: SessionRunner -> SessionId -> NominalDiffTime -> IO (Either RunnerError (SessionMeta, Bool))
 awaitRun runner sid limit = do
+    started <- getCurrentTime
     mLive <- lookupLive runner sid
     mRun <- maybe (pure Nothing) (readTVarIO . (.lsRun)) mLive
     for_ mRun $ \handle -> timeout (micros limit) (waitCatch handle)
     active <- maybe (pure False) (fmap isJust . readTVarIO . (.lsRun)) mLive
+    elsewhere <- if active || isJust mRun then pure False else heldElsewhere runner sid
+    when elsewhere $ awaitElsewhere (addUTCTime limit started)
+    stillElsewhere <- if elsewhere then heldElsewhere runner sid else pure False
     getSession runner sid >>= \case
         Nothing -> pure $ Left $ UnknownSession sid
-        Just (_, meta) -> pure $ Right (meta, active)
+        Just (_, meta) -> pure $ Right (meta, active || (stillElsewhere && meta.smStatus == StatusRunning))
   where
     micros t = max 0 (round (realToFrac t * 1_000_000 :: Double))
+
+    -- The run is another process's: wait for a version it stores that is
+    -- not running any more ('forwardStored' turns its writes into events
+    -- here), looking at the store every second in case a signal was lost.
+    awaitElsewhere :: UTCTime -> IO ()
+    awaitElsewhere deadline = do
+        next <- subscribeSession runner sid
+        let loop = do
+                now <- getCurrentTime
+                running <- maybe False ((== StatusRunning) . (.smStatus) . snd) <$> getSession runner sid
+                when (running && now < deadline) $ do
+                    let slice = min 1 (diffUTCTime deadline now)
+                    _ <- timeout (micros slice) (waitStopped next)
+                    loop
+        loop
+
+    waitStopped :: IO Event -> IO ()
+    waitStopped next =
+        next >>= \ev -> case ev.evBody of
+            SessionUpdated meta _ | meta.smStatus /= StatusRunning -> pure ()
+            SessionDeleted _ -> pure ()
+            _ -> waitStopped next
 
 {- | Mark sessions left running by a previous process as they are.
 
@@ -2128,32 +2253,233 @@ recoverOnStartup runner = do
     recoveredWatches <- recoverWatches runner
     unless (null recoveredWatches) $ runTracer runner.srHost.hostTracer $ HostRecoveredWatches recoveredWatches
     let backend = runner.srHost.hostBackend
-    stale <- backend.sbQuery allSessionsQuery{sqStatuses = Just [StatusRunning]}
-    recovered <- forM stale $ \meta0 -> withLive runner meta0.smSessionId $ \live -> do
-        active <- readTVarIO live.lsRun
-        if isJust active
-            then pure Nothing
-            else
-                loadLatest runner live >>= \case
-                    Just (sess, meta) | meta.smStatus == StatusRunning -> do
-                        lost <- lostRequiredParams runner live meta
-                        let (failedSess, failedIds) = failRunningCalls (TextResponse (lostParamsMessage lost)) sess
-                            (stored, detail)
-                                | null lost || null failedIds = (sess, Nothing)
-                                | otherwise = (failedSess, Just ("params_required: " <> Text.intercalate ", " lost))
-                        result <- store runner live meta stored (sessionStatusOf stored) detail
-                        for_ detail $ \_ ->
-                            runTracer runner.srHost.hostTracer $ HostRecoveredParamsRequired meta.smSessionId lost
-                        pure $ either (const Nothing) (const (Just meta.smSessionId)) result
-                    _ -> pure Nothing
-    let sids = [sid | Just sid <- recovered]
+        coordination = runner.srHost.hostCoordination
+    -- With other processes on the database, a running session may well be
+    -- running: only those nobody holds a lease on were left behind.
+    stale <-
+        if coordination.coEnabled
+            then coordination.coAbandoned
+            else map (.smSessionId) <$> backend.sbQuery allSessionsQuery{sqStatuses = Just [StatusRunning]}
+    sids <- catMaybes <$> mapM (recoverSession runner) stale
     unless (null sids) $ runTracer runner.srHost.hostTracer $ HostRecoveredSessions sids
     pure sids
+
+{- | Store a session left running by a process that is gone with the status
+its turns imply, as 'recoverOnStartup' describes. 'Nothing' when there was
+nothing to recover: the session runs here, another process holds its lease,
+or it is not stored as running any more.
+
+The session's lease is held while this stores, and released afterwards:
+nothing is resumed, so the session is free for whichever process is asked to
+run it next.
+-}
+recoverSession :: SessionRunner -> SessionId -> IO (Maybe SessionId)
+recoverSession runner sid = withLive runner sid $ \live -> do
+    active <- readTVarIO live.lsRun
+    if isJust active
+        then pure Nothing
+        else
+            acquireRun runner sid >>= \case
+                False -> pure Nothing
+                True -> attempt live (3 :: Int) `finally` releaseRun runner sid
   where
+    attempt live n =
+        loadLatest runner live >>= \case
+            Just (sess, meta) | meta.smStatus == StatusRunning -> do
+                lost <- lostRequiredParams runner live meta
+                let (failedSess, failedIds) = failRunningCalls (TextResponse (lostParamsMessage lost)) sess
+                    (stored, detail)
+                        | null lost || null failedIds = (sess, Nothing)
+                        | otherwise = (failedSess, Just ("params_required: " <> Text.intercalate ", " lost))
+                store runner live meta stored (sessionStatusOf stored) detail >>= \case
+                    Right _ -> do
+                        for_ detail $ \_ ->
+                            runTracer runner.srHost.hostTracer $ HostRecoveredParamsRequired meta.smSessionId lost
+                        pure (Just meta.smSessionId)
+                    -- The previous owner may still be writing its last step.
+                    Left _ | n > 1 -> attempt live (n - 1)
+                    Left _ -> pure Nothing
+            _ -> pure Nothing
+
     lostParamsMessage lost =
         "tool call orphaned by a restart: its result is lost, and the session's required parameter(s) "
             <> Text.intercalate ", " lost
             <> " are no longer bound (secret values are never persisted). Supply them again in \"params\" with the next message or resume before retrying."
+
+-------------------------------------------------------------------------------
+-- Several processes on one database
+-------------------------------------------------------------------------------
+
+{- | Take the session's run lease, or keep it. 'False' when another process
+holds it (or the session is gone). Always 'True' without coordination.
+-}
+acquireRun :: SessionRunner -> SessionId -> IO Bool
+acquireRun runner sid
+    | not coordination.coEnabled = pure True
+    | otherwise = (== LeaseAcquired) <$> coordination.coAcquire sid runner.srLeaseTtl
+  where
+    coordination = runner.srHost.hostCoordination
+
+{- | Give the session's run lease back. A failure (the database is
+unreachable) is traced and otherwise ignored: the lease expires by itself.
+-}
+releaseRun :: SessionRunner -> SessionId -> IO ()
+releaseRun runner sid =
+    when coordination.coEnabled $
+        guarded runner (coordination.coRelease sid)
+  where
+    coordination = runner.srHost.hostCoordination
+
+-- | Whether another process holds the session's run lease.
+heldElsewhere :: SessionRunner -> SessionId -> IO Bool
+heldElsewhere runner sid
+    | not coordination.coEnabled = pure False
+    | otherwise = isJust <$> coordination.coHolder sid
+  where
+    coordination = runner.srHost.hostCoordination
+
+{- | Whether this process still holds the session's run lease (renewing it).
+When the database cannot say, it does: the caller's own write then fails the
+same way.
+-}
+stillHoldsRun :: SessionRunner -> SessionId -> IO Bool
+stillHoldsRun runner sid
+    | not coordination.coEnabled = pure True
+    | otherwise =
+        try (coordination.coRenew [sid] runner.srLeaseTtl) >>= \case
+            Right held -> pure (sid `elem` held)
+            Left (e :: SomeException)
+                | isJust (fromException e :: Maybe SomeAsyncException) -> throwIO e
+                | otherwise -> pure True
+  where
+    coordination = runner.srHost.hostCoordination
+
+-- | Run an action, tracing a failure instead of throwing it.
+guarded :: SessionRunner -> IO () -> IO ()
+guarded runner action =
+    try action >>= \case
+        Right () -> pure ()
+        Left (e :: SomeException)
+            | isJust (fromException e :: Maybe SomeAsyncException) -> throwIO e
+            | otherwise -> runTracer runner.srHost.hostTracer $ HostCoordinationFailed (Text.pack (displayException e))
+
+-- | How often leases are renewed: a third of their duration.
+heartbeatInterval :: NominalDiffTime -> Int
+heartbeatInterval ttl = max 50_000 (round (realToFrac ttl * 1_000_000 / 3 :: Double))
+
+{- | One round of what a runner does periodically when other processes share
+its database: renew the leases of the runs it has, stop the runs whose lease
+another process took, pick up their mail, and take over the sessions whose
+owner stopped renewing ('takeOverExpired'). Runs every third of
+'rcLeaseTtl'; exported so that tests need not wait for it.
+-}
+heartbeat :: SessionRunner -> IO ()
+heartbeat runner = guarded runner $ do
+    lives <- Map.elems <$> readTVarIO runner.srLive
+    running <- fmap catMaybes $ forM lives $ \live -> fmap ((,) live) <$> readTVarIO live.lsRun
+    unless (null running) $ do
+        held <- coordination.coRenew (map ((.lsSessionId) . fst) running) runner.srLeaseTtl
+        forM_ running $ \(live, handle) ->
+            if live.lsSessionId `elem` held
+                then syncMail live
+                else abandonRun runner live handle
+    void $ takeOverExpired runner
+  where
+    coordination = runner.srHost.hostCoordination
+
+{- | Recover the sessions stored as running whose owner stopped renewing its
+lease: each is stored with the status its turns imply, exactly as
+'recoverOnStartup' does for the sessions a restart interrupted, and is then
+free to be resumed on any process. Answers with the sessions taken over.
+-}
+takeOverExpired :: SessionRunner -> IO [SessionId]
+takeOverExpired runner = do
+    expired <- runner.srHost.hostCoordination.coExpired
+    taken <- catMaybes <$> mapM (recoverSession runner) expired
+    unless (null taken) $ runTracer runner.srHost.hostTracer $ HostTookOverSessions taken
+    pure taken
+
+{- | Stop a run whose lease another process took, without storing anything:
+the session is the other process's now.
+-}
+abandonRun :: SessionRunner -> LiveSession -> Async () -> IO ()
+abandonRun runner live handle = do
+    -- A run that finished and released its lease since the heartbeat looked
+    -- is not one that lost it.
+    current <- readTVarIO live.lsRun
+    when (current == Just handle) $ do
+        -- Not under the lock: the run takes it to store its steps.
+        cancel handle
+        withMVar live.lsLock $ \_ -> do
+            owned <- readTVarIO live.lsRun
+            when (owned == Just handle) $ stopLocally runner live
+
+{- | Forget a run this process no longer owns (call under the session's
+lock, with the run's thread stopped or stopping): its engine is shut down,
+and nothing is stored.
+-}
+stopLocally :: SessionRunner -> LiveSession -> IO ()
+stopLocally runner live = do
+    mAgent <- readTVarIO live.lsAgent
+    forM_ (mAgent >>= (.ctxAsyncEngine)) shutdownAsyncEngine
+    atomically $ do
+        writeTVar live.lsAgent (fmap (\a -> a{ctxAsyncEngine = Nothing}) mAgent)
+        writeTVar live.lsRun Nothing
+    runTracer runner.srHost.hostTracer $ HostRunLeaseLost live.lsSessionId
+    loaded <- loadLatest runner live
+    emit runner live.lsSessionId $ RunStopped (maybe StatusFailed ((.smStatus) . snd) loaded)
+
+-- | Pick up the mail other processes accepted for a session held here.
+syncMail :: LiveSession -> IO ()
+syncMail live = do
+    mAgent <- readTVarIO live.lsAgent
+    forM_ (mAgent >>= (.ctxMailbox)) (.mbSync)
+
+{- | Handle the signals received from other processes since the last time.
+Blocks until there is one. Signals about the same session collapse, so a
+burst of writes costs one load.
+-}
+signalWorker :: SessionRunner -> IO ()
+signalWorker runner = do
+    batch <- atomically $ do
+        pending <- readTVar runner.srSignals
+        when (Set.null pending) retry
+        writeTVar runner.srSignals Set.empty
+        pure pending
+    forM_ (Set.toList batch) $ \(sid, signal) -> guarded runner $ case signal of
+        MailAccepted -> lookupLive runner sid >>= mapM_ syncMail
+        SessionStored -> forwardStored runner sid
+
+{- | Tell this process's subscribers about a version another process stored:
+a 'SessionUpdated' with it, and a 'RunStopped' when the session was last seen
+running and is not any more. A session that is gone was deleted there: it is
+dropped from memory here and reported as 'SessionDeleted'.
+
+The other events of a run (text deltas, tool calls) stay on the process that
+runs it.
+-}
+forwardStored :: SessionRunner -> SessionId -> IO ()
+forwardStored runner sid =
+    runner.srHost.hostBackend.sbLoadMeta sid >>= \case
+        Just (sess, meta) -> do
+            emitRemote runner sid meta.smOwner $ SessionUpdated meta (headTurn sess)
+            wasRunning <- atomically $ do
+                seen <- readTVar runner.srRemoteRunning
+                writeTVar runner.srRemoteRunning $
+                    if meta.smStatus == StatusRunning then Set.insert sid seen else Set.delete sid seen
+                pure (Set.member sid seen)
+            when (wasRunning && meta.smStatus /= StatusRunning) $
+                emitRemote runner sid meta.smOwner $
+                    RunStopped meta.smStatus
+        Nothing -> do
+            owner <- ownerOfLive runner sid
+            atomically $ modifyTVar' runner.srRemoteRunning (Set.delete sid)
+            mLive <- lookupLive runner sid
+            forM_ mLive $ \live -> withMVar live.lsLock $ \_ -> do
+                active <- readTVarIO live.lsRun
+                evicted <- readTVarIO live.lsEvicted
+                unless (isJust active || evicted) $ dropLive runner live
+            emitRemote runner sid owner (SessionDeleted sid)
 
 {- | Delete a session with all its sub-sessions and their continuations.
 
@@ -2184,7 +2510,8 @@ deleteSession runner sid mode =
     deleteAll (s : rest) removed = do
         deleted <- withLive runner s $ \live -> do
             active <- readTVarIO live.lsRun
-            if isJust active
+            elsewhere <- if isJust active then pure False else heldElsewhere runner s
+            if isJust active || elsewhere
                 then pure $ Left $ RunInProgress s
                 else do
                     mOwner <- ownerOfLive runner s
@@ -2222,4 +2549,6 @@ deleteSession runner sid mode =
             _ -> pure []
 
     hasActiveRun :: SessionId -> IO Bool
-    hasActiveRun s = lookupLive runner s >>= maybe (pure False) (fmap isJust . readTVarIO . (.lsRun))
+    hasActiveRun s = do
+        here <- lookupLive runner s >>= maybe (pure False) (fmap isJust . readTVarIO . (.lsRun))
+        if here then pure True else heldElsewhere runner s
