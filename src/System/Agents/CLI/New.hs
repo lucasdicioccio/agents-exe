@@ -19,8 +19,14 @@ module System.Agents.CLI.New (
     NewModelsSubcommand (..),
     ModelPreset (..),
     ToolLanguage (..),
+    ConfigUpdateMode (..),
     -- Exported for testing
     buildAgentConfig,
+    workspaceSandboxName,
+    defaultWorkspaceSandbox,
+    agentListedInConfig,
+    addAgentFileToConfig,
+    configEntryForAgent,
     defaultPresets,
     defaultSystemPrompt,
     toolLanguageToExtension,
@@ -29,7 +35,9 @@ module System.Agents.CLI.New (
 ) where
 
 import Control.Monad (unless, when)
+import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -37,10 +45,19 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import qualified Data.Vector as Vector
+import System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory)
 import System.Exit (exitFailure)
-import System.FilePath (takeDirectory, (<.>), (</>))
-import System.IO (stderr)
+import System.FilePath (
+    dropTrailingPathSeparator,
+    makeRelative,
+    normalise,
+    takeDirectory,
+    takeExtension,
+    (<.>),
+    (</>),
+ )
+import System.IO (hFlush, hIsTerminalDevice, stderr, stdin, stdout)
 import System.Posix.Files (ownerExecuteMode, ownerReadMode, ownerWriteMode, setFileMode, unionFileModes)
 
 import System.Agents.Base (
@@ -49,7 +66,15 @@ import System.Agents.Base (
     BuiltinToolboxDescription (..),
     DeveloperToolCapability (..),
     DeveloperToolboxDescription (..),
+    FileSandboxConfig (..),
+    FileSandboxSpec (..),
+    SqliteToolboxDescription (..),
+    SqliteVersioningConfig (..),
+    SystemToolCapability (..),
+    SystemToolboxDescription (..),
  )
+import System.Agents.CLI.ConfigLoader (AgentsExeConfig (..), locateAgentsExeConfig)
+import System.Agents.FileSandbox.Predicate (PathPredicate (..))
 import System.Agents.CLI.New.ModelCatalog (
     ModelCatalog (..),
     catalogEntriesText,
@@ -62,7 +87,24 @@ import System.Agents.CLI.New.ModelCatalog (
     updateModelCatalogFromUrl,
  )
 
--- | Default developer toolbox configuration for new agents.
+-- | Name of the file sandbox a new agent declares and its toolboxes share.
+workspaceSandboxName :: Text
+workspaceSandboxName = "workspace"
+
+{- | The file sandbox of a new agent: read and write access to the directory
+the agent runs in, and everything below it.
+-}
+defaultWorkspaceSandbox :: FileSandboxConfig
+defaultWorkspaceSandbox =
+    FileSandboxConfig
+        { fsbPredicate = DirectoryRecursive "./"
+        , fsbMaxFileSize = Just (50 * 1024 * 1024)
+        , fsbName = Nothing
+        }
+
+{- | Default developer toolbox configuration for new agents: the scaffolding
+tools, plus file reading and editing within the workspace sandbox.
+-}
 defaultDeveloperToolbox :: BuiltinToolboxDescription
 defaultDeveloperToolbox =
     DeveloperToolbox $
@@ -74,10 +116,48 @@ defaultDeveloperToolbox =
                 , DevToolValidateAgent
                 , DevToolCreateAgent
                 , DevToolCreateTool
+                , DevToolReadFileRange
+                , DevToolWriteFileRange
+                , DevToolPatchFile
                 ]
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
-            , developerToolboxFileSandbox = Nothing -- Uses default: deny all
+            , developerToolboxFileSandbox = Just (NamedFileSandbox workspaceSandboxName)
             , developerToolboxBuildCommand = Nothing
+            }
+
+-- | Default system toolbox for new agents: listing the workspace's directories.
+defaultSystemToolbox :: BuiltinToolboxDescription
+defaultSystemToolbox =
+    SystemToolbox $
+        SystemToolboxDescription
+            { systemToolboxName = "system"
+            , systemToolboxDescription = "Working directory and directory listings"
+            , systemToolboxCapabilities =
+                [ SystemToolWorkingDirectory
+                , SystemToolListDirectory
+                ]
+            , systemToolboxEnvVarFilter = Nothing
+            , systemToolboxActivation = Nothing
+            , systemToolboxSessionIntrospectionScope = Nothing
+            , systemToolboxSessionIntrospectionMaxResults = Nothing
+            , systemToolboxSessionIntrospectionIncludeToolOutputs = Nothing
+            , systemToolboxFileSandbox = Just (NamedFileSandbox workspaceSandboxName)
+            , systemToolboxCommandFilter = Nothing
+            }
+
+-- | Path of a new agent's memory database, relative to where the agent runs.
+defaultMemoryPath :: Text -> FilePath
+defaultMemoryPath agentSlug = "./" <> Text.unpack agentSlug <> "-memory.sqlite"
+
+-- | Default memory for new agents: a read-write SQLite database.
+defaultMemoryToolbox :: Text -> BuiltinToolboxDescription
+defaultMemoryToolbox agentSlug =
+    SqliteToolbox $
+        SqliteToolboxDescription
+            { sqliteToolboxName = "memory"
+            , sqliteToolboxDescription = "Notes and facts to remember across conversations"
+            , sqliteToolboxVersioning = SqliteReadWrite (defaultMemoryPath agentSlug)
+            , sqliteToolboxActivation = Nothing
             }
 
 -- | Model preset configurations
@@ -96,7 +176,19 @@ data NewAgentOptions = NewAgentOptions
     , newAgentModel :: Maybe Text
     -- ^ Optional model name override. When given, the provider preset is
     -- inferred from the model catalog.
+    , newAgentConfigUpdate :: ConfigUpdateMode
+    -- ^ What to do when the new agent is not listed in @agents-exe.cfg.json@.
     }
+    deriving (Show, Eq)
+
+-- | Whether to add a new agent to @agents-exe.cfg.json@ when it is not listed.
+data ConfigUpdateMode
+    = -- | Ask on an interactive terminal, otherwise only say how to do it
+      ConfigUpdateAsk
+    | -- | Add it without asking
+      ConfigUpdateAlways
+    | -- | Leave the config file alone
+      ConfigUpdateNever
     deriving (Show, Eq)
 
 -- | Programming language for tool scaffolding
@@ -260,8 +352,13 @@ buildAgentConfig catalog opts = do
                 , mcpServers = Just []
                 , openApiToolboxes = Nothing
                 , postgrestToolboxes = Nothing
-                , builtinToolboxes = Just [defaultDeveloperToolbox]
-                , fileSandboxes = Nothing
+                , builtinToolboxes =
+                    Just
+                        [ defaultDeveloperToolbox
+                        , defaultSystemToolbox
+                        , defaultMemoryToolbox opts.newAgentSlug
+                        ]
+                , fileSandboxes = Just (Map.singleton workspaceSandboxName defaultWorkspaceSandbox)
                 , extraAgents = Nothing
                 , skillSources = Nothing
                 , autoEnableSkills = Nothing
@@ -348,6 +445,119 @@ handleNewAgent force catalog opts = do
             Text.putStrLn $ "Model: " <> agent.modelName
             Text.putStrLn $ "Preset: " <> presetName
             Text.putStrLn $ "Provider: " <> Text.pack (show agent.flavor)
+            Text.putStrLn "Files: read/write under ./ (file sandbox 'workspace')"
+            Text.putStrLn $ "Memory: " <> Text.pack (defaultMemoryPath agent.slug)
+
+            reportConfigCoverage opts
+
+{- | Whether an agent file is loaded by a config, either named in
+@agentsFiles@ or sitting directly in one of the @agentsDirectories@ (which
+only pick up @.json@ and template files, and do not recurse).
+
+Config paths are resolved against the working directory, as the loader does.
+-}
+agentListedInConfig ::
+    -- | Working directory (absolute)
+    FilePath ->
+    AgentsExeConfig ->
+    -- | Agent file
+    FilePath ->
+    Bool
+agentListedInConfig cwd cfg agentFile =
+    agentPath `elem` fmap absolute cfg.agentsFiles
+        || ( takeExtension agentPath == ".json"
+                && takeDirectory agentPath `elem` fmap absolute cfg.agentsDirectories
+           )
+  where
+    agentPath = absolute agentFile
+    absolute = dropTrailingPathSeparator . normalise . (cwd </>)
+
+{- | The @agentsFiles@ entry for an agent file: relative when the config file
+sits in the working directory, absolute otherwise (config paths are resolved
+against the working directory, not against the config file).
+-}
+configEntryForAgent ::
+    -- | Working directory (absolute)
+    FilePath ->
+    -- | Config file
+    FilePath ->
+    -- | Agent file
+    FilePath ->
+    FilePath
+configEntryForAgent cwd configPath agentFile
+    | configDir == dropTrailingPathSeparator (normalise cwd) = "./" <> makeRelative cwd agentPath
+    | otherwise = agentPath
+  where
+    configDir = dropTrailingPathSeparator (normalise (takeDirectory (cwd </> configPath)))
+    agentPath = normalise (cwd </> agentFile)
+
+-- | Append an entry to the @agentsFiles@ of a config, keeping every other field.
+addAgentFileToConfig :: FilePath -> Aeson.Value -> Either String Aeson.Value
+addAgentFileToConfig entry (Aeson.Object obj) =
+    case KeyMap.lookup "agentsFiles" obj of
+        Nothing -> Right (withFiles (Vector.singleton entryValue))
+        Just (Aeson.Array files) -> Right (withFiles (Vector.snoc files entryValue))
+        Just _ -> Left "agentsFiles is not an array"
+  where
+    entryValue = Aeson.String (Text.pack entry)
+    withFiles files = Aeson.Object (KeyMap.insert "agentsFiles" (Aeson.Array files) obj)
+addAgentFileToConfig _ _ = Left "the config file is not a JSON object"
+
+{- | Tell whether the new agent is picked up by @agents-exe.cfg.json@, and
+offer to add it to @agentsFiles@ when it is not.
+-}
+reportConfigCoverage :: NewAgentOptions -> IO ()
+reportConfigCoverage opts = do
+    cwd <- getCurrentDirectory
+    located <- locateAgentsExeConfig
+    case located of
+        Nothing ->
+            Text.putStrLn $
+                "No agents-exe.cfg.json found: use --agent-file "
+                    <> Text.pack opts.newAgentFilePath
+                    <> ", or create a config with 'agents-exe config local init'."
+        Just configPath -> do
+            decoded <- Aeson.eitherDecodeFileStrict' configPath
+            case decoded >>= \value -> (,) value <$> fromResult (Aeson.fromJSON value) of
+                Left err ->
+                    Text.hPutStrLn stderr $
+                        "Warning: cannot read " <> Text.pack configPath <> ": " <> Text.pack err
+                Right (value, cfg)
+                    | agentListedInConfig cwd cfg opts.newAgentFilePath ->
+                        Text.putStrLn $ "Listed in: " <> Text.pack configPath
+                    | otherwise -> do
+                        let entry = configEntryForAgent cwd configPath opts.newAgentFilePath
+                        Text.putStrLn $ "Not listed in: " <> Text.pack configPath
+                        accepted <- case opts.newAgentConfigUpdate of
+                            ConfigUpdateAlways -> pure True
+                            ConfigUpdateNever -> pure False
+                            ConfigUpdateAsk -> do
+                                interactive <- hIsTerminalDevice stdin
+                                if interactive then askYesNo "Add it to agentsFiles?" else pure False
+                        if accepted
+                            then case addAgentFileToConfig entry value of
+                                Left err -> do
+                                    Text.hPutStrLn stderr $
+                                        "Error: cannot update " <> Text.pack configPath <> ": " <> Text.pack err
+                                    exitFailure
+                                Right updated -> do
+                                    LByteString.writeFile configPath (Aeson.encodePretty updated)
+                                    Text.putStrLn $ "Added " <> Text.pack entry <> " to agentsFiles"
+                            else
+                                Text.putStrLn $
+                                    "Add \"" <> Text.pack entry <> "\" to its agentsFiles, or re-run with --add-to-config."
+  where
+    fromResult :: Aeson.Result a -> Either String a
+    fromResult (Aeson.Success a) = Right a
+    fromResult (Aeson.Error err) = Left err
+
+-- | Ask a yes/no question on the terminal; anything but y/yes is a no.
+askYesNo :: Text -> IO Bool
+askYesNo question = do
+    Text.putStr (question <> " [y/N] ")
+    hFlush stdout
+    answer <- Text.toLower . Text.strip <$> Text.getLine
+    pure (answer `elem` ["y", "yes"])
 
 -- | Handle the new tool command
 handleNewTool :: Bool -> NewToolOptions -> IO ()
