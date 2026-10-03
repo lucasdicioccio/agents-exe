@@ -1,0 +1,8 @@
+packages: .
+
+-- tramaj-hs (agent files as tramaj programs) is not on Hackage yet.
+source-repository-package
+  type: git
+  location: https://github.com/lucasdicioccio/tramaj.git
+  tag: 9f2a6212844f539581f743cdeb7574986150dc3f
+  subdir: tramaj-hs

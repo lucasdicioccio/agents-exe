@@ -62,6 +62,7 @@ import System.Agents.CLI.Aliases (
     resolveAliases,
  )
 import qualified System.Agents.FileLoader as FileLoader
+import qualified System.Agents.FileLoader.Template as Template
 import System.Agents.Host (HostConfig (..), defaultHostConfig)
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
@@ -160,6 +161,9 @@ data AgentsExeConfig = AgentsExeConfig
     , cfgSelfDescribeDescription :: Maybe String
     , cfgKeymapPath :: Maybe FilePath
     , cfgSessions :: Maybe SessionsConfig
+    , cfgTramajLibraries :: [FilePath]
+    -- ^ Directories of @.tramaj@ libraries for agent templates, each file a
+    -- library named after it.
     }
     deriving (Show, Generic)
 
@@ -175,6 +179,7 @@ instance Aeson.FromJSON AgentsExeConfig where
             <*> v Aeson..:? "selfDescribeDescription"
             <*> v Aeson..:? "keymap"
             <*> v Aeson..:? "sessions"
+            <*> v Aeson..:? "tramajLibraries" Aeson..!= []
 
 -- | Locate the agents-exe.cfg.json by traversing up the directory tree
 locateAgentsExeConfig :: IO (Maybe FilePath)
@@ -199,9 +204,9 @@ locateAgentsExeConfig = do
 data ResolvedConfig = ResolvedConfig
     { rcConfigDir :: FilePath
     , rcAgentFiles :: [FilePath]
-    -- ^ @agentsFiles@ plus every @.json@ file under each @agentsDirectories@
-    -- entry, or the default agents directory's contents when there is no
-    -- config file.
+    -- ^ @agentsFiles@ plus every @.json@ and @.tramaj@ file under each
+    -- @agentsDirectories@ entry, or the default agents directory's contents
+    -- when there is no config file.
     , rcLogJsonHttpEndpoint :: Maybe String
     , rcLogJsonFilepath :: Maybe FilePath
     , rcLogRawFilepath :: Maybe FilePath
@@ -210,6 +215,9 @@ data ResolvedConfig = ResolvedConfig
     , rcSelfDescribeSlug :: Maybe String
     , rcSelfDescribeDescription :: Maybe String
     , rcKeymapPath :: Maybe FilePath
+    , rcTemplateLibraries :: FileLoader.TemplateLibraries
+    -- ^ The libraries a @.tramaj@ agent file may import: the files under
+    -- each @tramajLibraries@ directory, over the standard library.
     }
 
 {- | Locate and load @agents-exe.cfg.json@ (see 'locateAgentsExeConfig'), or
@@ -240,7 +248,12 @@ loadAgentsExeConfig defaultConfigDir = do
                         Just prefix -> buildSimpleSessionStore prefix
                         Nothing -> buildDefaultSessionStore defaultCfgDir
 
-                jsonPathss <- traverse FileLoader.listJsonDirectory obj.agentsDirectories
+                jsonPathss <- traverse FileLoader.listAgentDirectory obj.agentsDirectories
+                libraries <-
+                    either
+                        (\err -> error ("failed to load tramajLibraries of " <> agentsexecfgpath <> ": " <> err))
+                        pure
+                        =<< Template.loadLibraryDirectories obj.cfgTramajLibraries
                 pure $
                     ResolvedConfig
                         (fromMaybe defaultCfgDir obj.agentsConfigDir)
@@ -253,10 +266,11 @@ loadAgentsExeConfig defaultConfigDir = do
                         obj.cfgSelfDescribeSlug
                         obj.cfgSelfDescribeDescription
                         obj.cfgKeymapPath
+                        libraries
 
     initWithoutAgentsExeConfig :: FilePath -> IO ResolvedConfig
     initWithoutAgentsExeConfig pconfigdir = do
-        jsonPaths <- FileLoader.listJsonDirectory (pconfigdir </> "default")
+        jsonPaths <- FileLoader.listAgentDirectory (pconfigdir </> "default")
 
         -- Create sessions directory for storing conversations when outside projects
         -- This ensures session files are properly persisted instead of being written
@@ -276,39 +290,53 @@ loadAgentsExeConfig defaultConfigDir = do
                 Nothing
                 Nothing
                 Nothing
+                FileLoader.standardLibraries
 
 -------------------------------------------------------------------------------
 -- Agent file resolution
 -------------------------------------------------------------------------------
 
 -- | Resolve agent files based on optional slug selection
-resolveAgentFiles :: [FilePath] -> Maybe Text -> IO (Either Text [FilePath])
-resolveAgentFiles files Nothing = pure $ Right files
-resolveAgentFiles files (Just agentSlug) = do
+resolveAgentFiles :: FileLoader.TemplateEnv -> [FilePath] -> Maybe Text -> IO (Either Text [FilePath])
+resolveAgentFiles _ files Nothing = pure $ Right files
+resolveAgentFiles templateEnv files (Just agentSlug) = do
     -- Load all agents to find matching slug
-    agentsWithFiles <- mapM loadAgentWithFile files
+    loaded <- mapM loadAgentWithFile files
+    let agentsWithFiles = [x | Right x <- loaded]
+        unevaluated = [x | Left x <- loaded]
     case find (\(_, agent) -> agentSlug == agent.slug) agentsWithFiles of
         Just (file, _) -> pure $ Right [file]
         Nothing -> do
             -- Build error message with available slugs
             let availableSlugs = map (\(f, a) -> (a.slug, f)) agentsWithFiles
-            pure $ Left $ formatSlugNotFoundError agentSlug availableSlugs
+            pure $ Left $ formatSlugNotFoundError agentSlug availableSlugs unevaluated
   where
-    loadAgentWithFile :: FilePath -> IO (FilePath, Agent)
+    -- A template that does not evaluate (say, for want of a parameter another
+    -- agent has no use for) must not stop the selection of that other agent:
+    -- its slug is unknown, so it is set aside and named if nothing matches.
+    loadAgentWithFile :: FilePath -> IO (Either (FilePath, String) (FilePath, Agent))
     loadAgentWithFile file = do
-        result <- Aeson.eitherDecodeFileStrict' file
+        result <- FileLoader.readAgentDescriptionFile templateEnv file
         case result of
-            Left err -> error $ "Failed to parse agent file " ++ file ++ ": " ++ err
-            Right (AgentDescription agent) -> pure (file, agent)
+            Left err
+                | FileLoader.isTemplateFile file -> pure (Left (file, err))
+                | otherwise -> error $ "Failed to parse agent file " ++ file ++ ": " ++ err
+            Right (AgentDescription agent) -> pure (Right (file, agent))
 
-    formatSlugNotFoundError :: Text -> [(Text, FilePath)] -> Text
-    formatSlugNotFoundError targetSlug available =
+    formatSlugNotFoundError :: Text -> [(Text, FilePath)] -> [(FilePath, String)] -> Text
+    formatSlugNotFoundError targetSlug available unevaluated =
         Text.unlines $
             [ "Error: Agent '" <> targetSlug <> "' not found."
             , ""
             , "Available agents:"
             ]
                 ++ map (\(s, f) -> "  - " <> s <> " (" <> Text.pack f <> ")") available
+                ++ ( if null unevaluated
+                        then []
+                        else
+                            ["", "Templates that did not evaluate:"]
+                                ++ map (\(f, err) -> "  - " <> Text.pack f <> ": " <> Text.pack err) unevaluated
+                   )
 
 -------------------------------------------------------------------------------
 -- API keys and params files
@@ -360,6 +388,7 @@ hostConfigFromResolved :: ResolvedConfig -> [FilePath] -> FilePath -> FilePath -
 hostConfigFromResolved rc explicitAgentFiles apiKeysFile dbPath =
     (defaultHostConfig agentFiles apiKeysFile dbPath)
         { hcLegacySessionDirs = rc.rcSessionStore.sessionReadPrefixes
+        , hcTemplateLibraries = rc.rcTemplateLibraries
         }
   where
     agentFiles = case explicitAgentFiles of

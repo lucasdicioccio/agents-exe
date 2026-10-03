@@ -101,6 +101,7 @@ import qualified DurableWorkflowTests
 import qualified NarrowingTests
 import qualified MailboxTests
 import qualified ConfigLoaderTests
+import qualified TemplateTests
 import qualified TuiDraftTests
 import qualified TuiFileBrowserTests
 import qualified SpectateTests
@@ -175,6 +176,7 @@ tests =
         , HostLegacySessionTests.tests
         , MailboxTests.tests
         , ConfigLoaderTests.tests
+        , TemplateTests.tests
         , TuiDraftTests.tests
         , TuiFileBrowserTests.tests
         , TuiPendingTests.tests

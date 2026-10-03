@@ -448,7 +448,14 @@ data Props = Props
     -- ^ Operator-supplied parameter values (@--set@/@--set-json@/@--pin@/@--pin-json@/
     -- @--params-file@), resolved against each agent's declared parameters
     -- (see @todos/tool-partial-application.md@). Defaults to empty.
+    , templateLibraries :: FileLoader.TemplateLibraries
+    -- ^ Libraries a @.tramaj@ agent file may import; at least
+    -- 'FileLoader.standardLibraries'. A template's @$ctx@ is 'processParams'.
     }
+
+-- | What 'Props' evaluates a @.tramaj@ agent file with.
+templateEnv :: Props -> FileLoader.TemplateEnv
+templateEnv props = FileLoader.TemplateEnv props.templateLibraries props.processParams
 
 -------------------------------------------------------------------------------
 -- Phase 0: Configuration Discovery
@@ -520,7 +527,7 @@ bfsDiscovery props ((filePath, mParent) : queue) visited = do
             bfsDiscovery props queue visited'
         Nothing -> do
             -- Load the agent config
-            loadResult <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) filePath
+            loadResult <- FileLoader.loadAgentFile (contramap DataLoadingTrace tracer) (templateEnv props) filePath
             case loadResult of
                 Left err -> pure $ Left (NonEmpty.singleton $ AgentLoadingError err)
                 Right (AgentDescription agent) -> do
@@ -591,7 +598,7 @@ discoverChildFiles rootDir agent = do
     let allDirs = maybeToList legacyDir ++ bashToolboxDirs
 
     -- Scan all directories for JSON files
-    allFiles <- mapM FileLoader.listJsonDirectory allDirs
+    allFiles <- mapM FileLoader.listAgentDirectory allDirs
     pure $ concat allFiles
 
 maybeToList :: Maybe a -> [a]
@@ -1279,7 +1286,7 @@ loadAgentTreeConfig ::
     IO (Either (NonEmpty.NonEmpty LoadingError) AgentConfigTree)
 loadAgentTreeConfig props = do
     let tracer = props.interactiveTracer
-    boss <- FileLoader.loadJsonFile (contramap DataLoadingTrace tracer) props.rootAgentFile
+    boss <- FileLoader.loadAgentFile (contramap DataLoadingTrace tracer) (templateEnv props) props.rootAgentFile
     case boss of
         Left err ->
             pure $ Left (NonEmpty.singleton (AgentLoadingError err))
@@ -1293,7 +1300,7 @@ loadAgentTreeConfig props = do
             let allDirs = legacyToolDirs ++ bashToolboxDirs
 
             -- Collect child configs from all directories
-            subConfigs <- concat <$> mapM FileLoader.listJsonDirectory allDirs
+            subConfigs <- concat <$> mapM FileLoader.listAgentDirectory allDirs
 
             let propz = [props{rootAgentFile = c} | c <- subConfigs]
             (kos, oks) <- fmap Either.partitionEithers $ traverse loadAgentTreeConfig propz

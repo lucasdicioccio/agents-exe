@@ -17,7 +17,7 @@ module System.Agents.CLI.Check (
 ) where
 
 import Control.Concurrent.STM (readTVarIO)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy.Char8 as LBS8
@@ -28,6 +28,7 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
@@ -53,6 +54,8 @@ data ToolsOutputMode
 -- | Options for the check command
 data CheckOptions = CheckOptions
     { toolsOutputMode :: ToolsOutputMode
+    , showConfig :: Bool
+    -- ^ Print the agent file's JSON; for a @.tramaj@ template, the JSON it evaluates to.
     }
     deriving (Show, Eq)
 
@@ -65,13 +68,16 @@ handleCheck ::
     FilePath ->
     -- | Operator-supplied parameter values (@--set@/@--pin@)
     Params.ProcessParams ->
+    -- | Libraries @.tramaj@ agent files may import
+    FileLoader.TemplateLibraries ->
     -- | List of agent files to check
     [FilePath] ->
     IO ()
-handleCheck tracer opts apiKeysFile processParams agentFiles = do
+handleCheck tracer opts apiKeysFile processParams templateLibraries agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
 
     forM_ agentFiles $ \agentFile -> do
+        when opts.showConfig $ printEvaluatedConfig (FileLoader.TemplateEnv templateLibraries processParams) agentFile
         AgentTree.withAgentTree
             AgentTree.Props
                 { AgentTree.apiKeys = apiKeys
@@ -81,12 +87,24 @@ handleCheck tracer opts apiKeysFile processParams agentFiles = do
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps SessionStore.defaultSessionStore apiKeys)
                 , AgentTree.sessionCatalog = SessionStore.fileCatalog SessionStore.defaultSessionStore
                 , AgentTree.processParams = processParams
+                , AgentTree.templateLibraries = templateLibraries
                 }
             $ \result -> case result of
                 AgentTree.Errors errs -> mapM_ print errs
                 AgentTree.Initialized tree -> do
                     -- Print agent check information
                     printAgentCheckOS opts tree
+
+{- | Print the JSON an agent file holds, as loading sees it: a @.tramaj@
+template is evaluated first. A file that does not load prints nothing here;
+loading reports the error.
+-}
+printEvaluatedConfig :: FileLoader.TemplateEnv -> FilePath -> IO ()
+printEvaluatedConfig env agentFile = do
+    result <- FileLoader.readAgentValueFile env agentFile
+    case result of
+        Left _ -> pure ()
+        Right (value, _) -> LBS8.putStrLn (Aeson.encodePretty value)
 
 -- | Print agent check information using OS-native structures
 printAgentCheckOS :: CheckOptions -> AgentTree.OSAgentTree -> IO ()

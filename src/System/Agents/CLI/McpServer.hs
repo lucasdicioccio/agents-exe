@@ -29,6 +29,7 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import qualified System.Agents.FileLoader as FileLoader
 import System.Agents.CLI.TraceUtils (traceUsefulPromptStderr)
 import qualified System.Agents.MCP.Server as McpServer
 import qualified System.Agents.SessionStore as SessionStore
@@ -92,10 +93,12 @@ handleMcpServer ::
     SessionStore.SessionStore ->
     -- | Path to API keys file
     FilePath ->
+    -- | Libraries @.tramaj@ agent files may import
+    FileLoader.TemplateLibraries ->
     -- | List of agent files to expose
     [FilePath] ->
     IO ()
-handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
+handleMcpServer tracer sessionStore apiKeysFile templateLibraries agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     let ttTracer = Prod.contramap AgentTreeTrace tracer
         oneAgent agentFilePath = do
@@ -112,6 +115,7 @@ handleMcpServer tracer sessionStore apiKeysFile agentFiles = do
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps sessionStore apiKeys)
                     , AgentTree.sessionCatalog = SessionStore.fileCatalog sessionStore
                     , AgentTree.processParams = mempty
+                    , AgentTree.templateLibraries = templateLibraries
                     }
     -- Use traverse to sequence the IO actions for creating Props
     agentPropsList <- traverse oneAgent agentFiles

@@ -1,0 +1,218 @@
+# Agent templates
+
+An agent file can be a [tramaj](https://github.com/lucasdicioccio/tramaj)
+program instead of JSON. The program is evaluated once, when the agent is
+loaded, and must produce the JSON an agent file holds. From there on nothing
+changes: the value goes through the same parser as a `.json` file, and
+`check`, `run`, `tui`, `serve` and the rest see an ordinary agent.
+
+Use a template when several agents should share a sandbox or a toolbox, or
+when one agent definition should vary with a value the operator picks.
+
+- [A first template](#a-first-template)
+- [Where templates are found](#where-templates-are-found)
+- [Parameters: `$ctx`](#parameters-ctx)
+- [Libraries](#libraries)
+- [The `agents` library](#the-agents-library)
+- [Seeing the result](#seeing-the-result)
+- [Limits](#limits)
+
+## A first template
+
+`agents/coder.tramaj`:
+
+```
+@a=import("agents", {}).vals
+
+@code=$a.sandbox({
+  name: "code",
+  allow: $a.under($ctx.workspace, ["src", "test"]),
+  deny: [$a.pattern("*.key")]
+})
+
+$a.agent({
+  slug: "coder",
+  apiKeyId: "main-key",
+  flavor: "OpenAIv1",
+  modelUrl: "https://api.openai.com/v1",
+  modelName: "gpt-4o",
+  announce: "edits code under the workspace",
+  systemPrompt: ["You edit code under `$ctx.workspace`."],
+  parameters: [{name: "workspace", description: "root of the checkout"}],
+  builtinToolboxes: [
+    $a.developer-toolbox({
+      name: "dev",
+      capabilities: ["read-file-range", "write-file-range", "patch-file"],
+      sandbox: $code
+    }),
+    $a.lua-toolbox({name: "lua", sandbox: $code})
+  ]
+})
+```
+
+```bash
+agents-exe --set workspace=/srv/app check --agent-file agents/coder.tramaj
+```
+
+`@name=expr` binds a name, `$name` reads it, and the last expression is the
+result. `$code` is written once and used by two toolboxes. The language
+itself (objects, arrays, lambdas, `map`, `branch`, string interpolation with
+backticks) is described in tramaj's
+[reference](https://github.com/lucasdicioccio/tramaj/blob/main/specs/reference.md).
+
+One program is one agent. The result is the whole agent file, envelope
+included (`{"tag": "OpenAIAgentDescription", "contents": {...}}`), which is
+what `$a.agent({...})` builds.
+
+## Where templates are found
+
+Wherever a `.json` agent file is, under the extension `.tramaj`:
+
+- `--agent-file path/to/agent.tramaj`;
+- `agentsFiles` and `agentsDirectories` in `agents-exe.cfg.json`;
+- the default directory, `~/.config/agents-exe/default`;
+- an agent's tool directories, where sub-agents are discovered;
+- the `path` of an `extraAgents` entry.
+
+`--agent SLUG` evaluates templates to learn their slugs. A template that does
+not evaluate (a parameter it needs has no value, say) is set aside there, so
+that it does not prevent selecting another agent.
+
+## Parameters: `$ctx`
+
+A template's `$ctx` holds the process parameters: the values given with
+`--set`, `--set-json`, `--pin`, `--pin-json` and `--params-file` (see
+[Parameters, bindings, and narrowing sub-agents](parameters-and-bindings.md)).
+`$ctx.workspace` is the value of `--set workspace=...`.
+
+A template declares what it reads, in the `parameters` of the agent it
+produces, as an agent declares the parameters its bindings use. Loading
+fails when the template:
+
+| reads | error |
+|---|---|
+| a parameter with no value | names the parameter and the `--set` flag to give |
+| a parameter absent from `parameters` | undeclared parameter |
+| a parameter declared with scope `session` or `message` | a template is evaluated once, at load, and those have no value then |
+| a parameter declared `secret` | the value would be written into the configuration; bind it to a tool argument instead |
+| `$ctx` as a whole (`lookup($ctx, ...)`, `has($ctx, ...)`) | each parameter is read by name, so that the reads can be checked |
+
+Evaluation happens at load and only then. A value that changes per session
+or per message stays a parameter binding; it is not something a template
+can read.
+
+A declared `default` is not seen by the template: only values the operator
+supplied are in `$ctx`.
+
+## Libraries
+
+A library is a tramaj file whose top-level bindings other programs read:
+
+`libs/team.tramaj`:
+
+```
+@a=import("agents", {}).vals
+@code=$a.sandbox({name: "code", allow: $a.under($ctx.workspace, ["src", "test"])})
+@dev=$a.developer-toolbox({name: "dev", capabilities: ["read-file-range"], sandbox: $code})
+null
+```
+
+An agent template imports it by file name, passing what the library reads
+from its own `$ctx`:
+
+```
+@a=import("agents", {}).vals
+@team=import("team", {workspace: ctx(workspace)}).vals
+
+$a.agent({
+  slug: "reviewer",
+  ...
+  parameters: [{name: "workspace"}],
+  builtinToolboxes: [$team.dev]
+})
+```
+
+`ctx(workspace)` hands the template's own `$ctx.workspace` to the library,
+and counts as a read of `workspace`.
+
+Library directories are listed in `agents-exe.cfg.json`:
+
+```json
+{
+  "agentsDirectories": ["./agents"],
+  "tramajLibraries": ["./libs"]
+}
+```
+
+Every `.tramaj` file of a listed directory is a library named after the file
+(`libs/team.tramaj` is `team`). When two directories hold the same name, the
+earlier one wins, and a directory wins over the built-in `agents` library. A
+library that does not parse stops startup, with its file name.
+
+Keep library directories apart from agent directories: in an agent
+directory, every `.tramaj` file is loaded as an agent.
+
+## The `agents` library
+
+Always available, as `import("agents", {})`. Every function takes one object;
+fields marked optional may be left out.
+
+**Path predicates**
+
+| function | result |
+|---|---|
+| `dir(path)` | the directory and everything below it |
+| `dir-shallow(path)` | the directory's own files |
+| `dir-exactly(path)` | the directory itself |
+| `file(path)` | one file |
+| `pattern(glob)` | file names matching a glob |
+| `extensions([ext])` | file extensions, without the dot |
+| `any-of([p])`, `all-of([p])`, `none-of([p])` | combinations |
+| `allow-all`, `deny-all` | constants |
+| `under(root, [path])` | a list: `dir` of each path below `root` |
+
+**Sandboxes**
+
+`sandbox({allow, deny, name, maxFileSize})`: `allow` is a list of predicates
+and is required; `deny`, `name` and `maxFileSize` are optional. A path is
+allowed when an `allow` entry matches and no `deny` entry does.
+
+**Toolboxes**
+
+| function | fields |
+|---|---|
+| `developer-toolbox` | `name`, `capabilities`; optional `description`, `sandbox`, `activation`, `buildCommand` |
+| `system-toolbox` | `name`, `capabilities`; optional `description`, `sandbox`, `activation`, `envVarFilter`, `commandFilter` |
+| `lua-toolbox` | `name`; optional `description`, `maxMemoryMB`, `maxExecutionTimeSeconds`, `allowedTools`, `allowedHosts`, `sandbox`, `activation` |
+| `tools-dir` | `path`; optional `filter`, `activation`, `bindings` (a `bashToolboxes` entry) |
+| `tool` | `path`; optional `activation`, `bindings` (a `bashToolboxes` entry) |
+| `mcp` | `name`, `executable`; optional `args`, `activation`, `env` (an `mcpServers` entry) |
+| `helper` | `slug`, `path`; optional `with`, `narrowable` (an `extraAgents` entry) |
+
+**Agent**
+
+`agent({...})` wraps an agent's fields in the file's envelope.
+
+Anything the library has no function for is written as the plain JSON object
+it is: a template's objects are JSON objects.
+
+## Seeing the result
+
+```bash
+agents-exe --set workspace=/srv/app check --show-config --agent-file agents/coder.tramaj
+```
+
+prints the JSON the template evaluated to, then the usual `check` line.
+`--show-config` prints a `.json` agent file as it is.
+
+## Limits
+
+- `mcp-server`, `tool-call` and `session` take no process parameters, so a
+  template that reads `$ctx` does not load there. `session` also sees the
+  built-in library only.
+- The developer toolbox's `validate-agent` and `create-agent` tools read
+  JSON agent files only.
+- Agents stored through `agents-server`'s API are JSON; a stored agent
+  cannot be a template yet, and there are no stored libraries.
+- Plain `agents-server` has the built-in library only. `agents-exe serve`
+  adds the `tramajLibraries` of `agents-exe.cfg.json`.

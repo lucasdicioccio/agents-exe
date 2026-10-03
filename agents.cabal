@@ -65,6 +65,7 @@ library agents-lib
                     , System.Agents.FileSandbox.Predicate
                     , System.Agents.FileLoader
                     , System.Agents.FileLoader.JSON
+                    , System.Agents.FileLoader.Template
                     , System.Agents.FileNotification
                     , System.Agents.Media.Types
                     , System.Agents.OS
@@ -240,6 +241,7 @@ library agents-lib
                       indexed-traversable,
                       json-rpc,
                       lens,
+                      megaparsec,
                       network,
                       network-uri,
                       monad-logger,
@@ -260,6 +262,7 @@ library agents-lib
                       temporary,
                       text,
                       time,
+                      tramaj-hs,
                       unix,
                       unliftio,
                       unordered-containers,
@@ -542,6 +545,7 @@ test-suite agents-tests
                     , AgentFactoryTests
                     , BindingsTests
                     , ConfigLoaderTests
+                    , TemplateTests
                     , NarrowingTests
                     , ContinuationConsistencyTests
                     , AsyncToolCallsTests

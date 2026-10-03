@@ -546,6 +546,7 @@ Absent this file, agents load from `~/.config/agents-exe/default`.
 - [TUI Guide](documentation/tui.md) - Terminal UI documentation
 - [MCP Documentation](documentation/mcp.md) - Model Context Protocol integration
 - [agents-server](documentation/agents-server.md) - Agents over HTTP, with sessions in SQLite
+- [Agent Templates](documentation/agent-templates.md) - Write an agent file as a tramaj program: shared sandboxes and toolboxes, values picked by the operator
 - [Parameters, Bindings & Narrowing Sub-Agents](documentation/parameters-and-bindings.md) - Bind tool arguments to declared parameters, keep secrets out of the model, and narrow sub-agents at call time
 
 # Roadmap
