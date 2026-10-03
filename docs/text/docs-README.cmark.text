@@ -189,6 +189,8 @@ See [Durable Workflows How-To](/docs-durable-workflows-howto.html ) for a full w
 
 - [Session Management](/docs-sessions.html ) - Session lifecycle and persistence
 
+- [Agent Templates](/docs-agent-templates.html ) - Write an agent file as a tramaj program: shared sandboxes and toolboxes, values picked by the operator
+
 - [Parameters, Bindings & Narrowing Sub-Agents](/docs-parameters-and-bindings.html ) - Bind tool arguments to declared parameters, keep secrets out of the model, and narrow sub-agents at call time
 
 - [Durable Workflows How-To](/docs-durable-workflows-howto.html ) - Resumable async execution

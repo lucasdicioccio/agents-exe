@@ -1,0 +1,174 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - See it work: four agents on one screen</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/demo.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="how-to, demo, multi-agent, sub-agents, spectate, serve, ollama"><meta name="description" content="A root agent asks three helper agents at once, each runs its own tool, and a read-only dashboard shows all four sessions while they work. Recorded on a laptop with a local model, and reproducible from the repository."><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - See it work: four agents on one screen"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="A root agent asks three helper agents at once, each runs its own tool, and a read-only dashboard shows all four sessions while they work. Recorded on a laptop with a local model, and reproducible from the repository."><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - See it work: four agents on one screen"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/demo.html"><meta property="og:description" content="A root agent asks three helper agents at once, each runs its own tool, and a read-only dashboard shows all four sessions while they work. Recorded on a laptop with a local model, and reproducible from the repository."><meta name="article:published_time" content="2026-10-03T12:00:00Z"><meta name="article:modified_time" content="2026-10-03T12:00:00Z"><meta name="ks:article_json" content="/agents-exe/json/demo.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/demo.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-03T12:00:00Z","datePublished":"2026-10-03T12:00:00Z","description":"A root agent asks three helper agents at once, each runs its own tool, and a read-only dashboard shows all four sessions while they work. Recorded on a laptop with a local model, and reproducible from the repository.","headline":"See it work: four agents on one screen","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/demo.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="how-to"><meta name="article:tag" content="demo"><meta name="article:tag" content="multi-agent"><meta name="article:tag" content="sub-agents"><meta name="article:tag" content="spectate"><meta name="article:tag" content="serve"><meta name="article:tag" content="ollama"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>See it work: four agents on one screen</h1><p>On <span>Sat, 03 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1217 words, 5 code snippets, 10 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/getting-started.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/how-to.html"><span class="topic-name">how-to</span><span class="topic-count">2/3</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/comparison.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><h2 id="see-it-work-four-agents-on-one-screen">See it work: four agents on one screen</h2>
+<p>One prompt, “Give me the tour.”, goes to a front-desk agent. It asks three
+helper agents in the same turn; each helper runs a command-line tool of its
+own and reports back; the desk writes the answer. While that happens,
+<code>agents-exe spectate</code> shows the four sessions and their tool calls live.</p>
+<p>Everything on this page was recorded on 2026-10-03 from a build of <code>main</code>,
+on a laptop, against a local model served by <a href="https://ollama.com/">Ollama</a>
+(<code>gemma4:e4b</code>). No hosted API and no real API key are involved, so you can
+run the same thing; the agents are in
+<a href="https://github.com/lucasdicioccio/agents-exe/tree/main/demo-agents/repo-tour"><code>demo-agents/repo-tour/</code></a>.</p>
+<h3 id="the-screen-mid-run">The screen, mid-run</h3>
+<p>The two frames below are unedited text captures of the <code>spectate</code> terminal
+(100 columns by 24 rows), taken during one run.</p>
+<p>1 minute 46 seconds in: the historian has returned, the code counter and
+the librarian are still working. Each helper is a session of its own, listed
+under the session that called it.</p>
+<pre><code>┌────────────────── agents ─────────────────┐┌──────────── text: librarian (following) ────────────┐
+│* repo-tour-desk  90669359  running 1m46s  ││                                                     │
+│  - historian  326ce547  returned 18s      ││                                                     │
+│  * code-counter  401bf8a5  running 1m07s  ││                                                     │
+│  * librarian  fae942c5  running 1m07s     ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘│                                                     │
+┌──────────────── tool calls ───────────────┐│                                                     │
+│* io_prompt_agent_code-counter  repo-tour-d││                                                     │
+│* io_prompt_agent_librarian  repo-tour-desk││                                                     │
+│- io_prompt_agent_historian  repo-tour-desk││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ http://localhost:8765 | 3/4 sessions running | 2 tool calls | 27 events | up/down select, f follow,
+</code></pre>
+<p>3 minutes 49 seconds in: the three helpers have returned and the desk is
+writing its answer, which streams into the right-hand pane.</p>
+<pre><code>┌────────────────── agents ─────────────────┐┌────────── text: repo-tour-desk (following) ─────────┐
+│* repo-tour-desk  90669359  running 3m49s  ││housing 66,172 lines.                                │
+│  - historian  326ce547  returned 2m21s    ││*   **`test`**: Dedicated testing area with 55 files │
+│  - code-counter  401bf8a5  returned 1m55s ││and 23,934 lines.                                    │
+│  - librarian  fae942c5  returned 51s      ││*   **`examples`**: Includes 12 files and 5,188 lines│
+│                                           ││for demonstration purposes.                          │
+│                                           ││*   **`tui`**: Contains 29 files, totaling 8,234     │
+│                                           ││lines.                                               │
+│                                           ││*   Other areas include `agq` (6 files, 2,247 lines),│
+│                                           ││`app`, `bench`, `postgres`, and `src`.               │
+│                                           ││                                                     │
+│                                           ││### 📜 Git History (Historian)
+│                                           ││The repository has a robust development history      │
+└───────────────────────────────────────────┘│spanning **722 commits**. Recent activity shows      │
+┌──────────────── tool calls ───────────────┐│significant focus on improving stability and         │
+│- io_prompt_agent_librarian  repo-tour-desk││capability:                                          │
+│- io_prompt_agent_code-counter  repo-tour-d││*   **Key Focus:** Coordinating runs across servers  │
+│- io_prompt_agent_historian  repo-tour-desk││on Postgres with a lease (2026-10-03) and adding a   │
+│                                           ││read-only live dashboard called 'spectate'           │
+│                                           ││(2026-10-03).                                        │
+│                                           ││*   **Recent Upgrades:** The codebase has been       │
+│                                           ││upgraded to                                          │
+│───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ http://localhost:8765 | 1/4 sessions running | 0 tool calls | 363 events | up/down select, f follow
+</code></pre>
+<p>(The border is broken on the line that holds an emoji, a wide character the
+pane does not account for. It is left as captured.)</p>
+<blockquote>
+<p><strong>Placeholder, not recorded yet:</strong> an animated recording (asciinema or
+GIF) of this run, and a screenshot of the interactive TUI
+(<code>agents-exe tui</code>), would show this better than still text frames.
+Neither exists yet, and nothing on this page stands in for them.</p>
+</blockquote>
+<h3 id="the-agents">The agents</h3>
+<p>Four JSON files and three shell scripts:</p>
+<table>
+<tr><th>Agent</th><th>File</th><th>Its tool</th></tr>
+<tr><td><code>repo-tour-desk</code></td><td><code>desk.json</code></td><td>none of its own; three helpers under <code>extraAgents</code></td></tr>
+<tr><td><code>code-counter</code></td><td><code>code/agent.json</code></td><td><code>count_haskell</code>: tracked <code>.hs</code> files and lines, per directory</td></tr>
+<tr><td><code>historian</code></td><td><code>history/agent.json</code></td><td><code>recent_commits</code>: commit count and the latest non-merge commits</td></tr>
+<tr><td><code>librarian</code></td><td><code>docs/agent.json</code></td><td><code>list_docs</code>: the pages under <code>documentation/</code> with their titles</td></tr>
+</table>
+<p>A helper reaches the model as a function (<code>io_prompt_agent_&lt;slug&gt;</code> in the
+frames above), the same way a tool does; see <a href="/agents-exe/docs-tools.html">tools</a>. Each
+tool is an executable that answers <code>describe</code> with its interface and <code>run</code>
+with its output; see <a href="/agents-exe/docs-binary-tool.html">executable tools</a>.</p>
+<h3 id="run-it-yourself">Run it yourself</h3>
+<p>You need <code>agents-exe</code> built from the repository
+(<a href="/agents-exe/getting-started.html">getting started</a>), Ollama running locally, and the
+model (<code>ollama pull gemma4:e4b</code>). Another model that your Ollama serves and
+that supports tool calls may work if you change <code>modelName</code> in the four JSON
+files; only <code>gemma4:e4b</code> was tried for this page. Run from the root of the
+repository: the tools describe the repository in the current directory, and
+the helpers’ tool directories are given relative to it.</p>
+<pre><code class="language-sh"># one shot: the answer on stdout
+agents-exe --api-keys demo-agents/repo-tour/keys.json \
+  --agent-file demo-agents/repo-tour/desk.json \
+  run --prompt &quot;Give me the tour.&quot;
+</code></pre>
+<p><code>keys.json</code> holds a dummy key: Ollama does not check it, and agents-exe
+looks one up for each agent’s <code>apiKeyId</code>.</p>
+<p>To watch it as above, use three terminals:</p>
+<pre><code class="language-sh"># 1. a server, with sessions in a SQLite file
+agents-exe --api-keys demo-agents/repo-tour/keys.json \
+  --agent-file demo-agents/repo-tour/desk.json \
+  serve --db /tmp/repo-tour.db --port 8765 --stream-tokens
+
+# 2. the read-only dashboard
+agents-exe spectate --attach http://localhost:8765
+
+# 3. start a session
+curl -s -X POST localhost:8765/v1/sessions \
+  -d '{&quot;agent&quot;: &quot;repo-tour-desk&quot;, &quot;prompt&quot;: &quot;Give me the tour.&quot;}'
+</code></pre>
+<p>The server has no authentication unless you give it <code>--auth-tokens</code>, and
+binds to <code>127.0.0.1</code> by default; see
+<a href="/agents-exe/docs-agents-server.html">agents-server</a> before exposing it.</p>
+<h3 id="what-the-recorded-run-did">What the recorded run did</h3>
+<ul>
+<li>The desk’s first turn asked for the three helpers in one go; the server
+created three child sessions, each linked to the desk’s session as its
+parent.
+</li>
+<li>The run took 4 minutes 15 seconds from the session’s creation to its last
+update. That is the pace of an 8-billion-parameter model on a laptop, with
+the three helpers sharing one Ollama. It says nothing about agents-exe
+with a hosted model, which was not measured.
+</li>
+<li>After the server was stopped and started again on the same database file,
+<code>GET /v1/sessions</code> still listed the four sessions with their parent links.
+</li>
+</ul>
+<p>The desk’s answer, verbatim:</p>
+<pre><code>Welcome to the tour of the repository! I've gathered information from our specialists on the codebase, history, and documentation to give you a comprehensive overview.
+
+### 💻 Codebase Structure (Code Counter)
+The repository is quite large and complex, containing a total of **290 Haskell files** and approximately **109,118 lines of code**. The code is distributed across several specialized sections:
+*   **`src`**: The core logic hub with 184 files, housing 66,172 lines.
+*   **`test`**: Dedicated testing area with 55 files and 23,934 lines.
+*   **`examples`**: Includes 12 files and 5,188 lines for demonstration purposes.
+*   **`tui`**: Contains 29 files, totaling 8,234 lines.
+*   Other areas include `agq` (6 files, 2,247 lines), `app`, `bench`, `postgres`, and `src`.
+
+### 📜 Git History (Historian)
+The repository has a robust development history spanning **722 commits**. Recent activity shows significant focus on improving stability and capability:
+*   **Key Focus:** Coordinating runs across servers on Postgres with a lease (2026-10-03) and adding a read-only live dashboard called 'spectate' (2026-10-03).
+*   **Recent Upgrades:** The codebase has been upgraded to GHC 9.10.3 and the 'topicgraph' module was updated (2026-09-28).
+*   **Pattern:** There is consistent activity related to systemd units and API documentation over the past week.
+
+### 📚 Documentation (Librarian)
+The documentation is extensive and well-structured, covering the entire lifecycle of the Agents Framework. It is organized by architectural components and usage guides.
+*   **Core Topics:** The docs cover system architecture, agent lifecycle (sessions, durable workflows), and tool integration. Specific guides are available for handling state (OS Model API), multi-agent interactions, and advanced workflows (SQQ agent flow/DAG).
+*   **Getting Started Guide:** You should begin with `documentation/README.md` for a high-level overview.
+*   **How to Use:** For integration, consult the material on `tools.md` and `binary-tool.md`. For stateful processes, refer to `durable-workflows-howto.md`.
+</code></pre>
+<p>The file and line counts, the commit count and the commit subjects match
+what the three tools print. The prose around them is a small model’s: it
+lists <code>src</code> twice, and its “Pattern” line is its own reading of two commit
+subjects. The mechanics shown above do not depend on the model.</p>
+<h3 id="where-next">Where next</h3>
+<ul>
+<li><a href="/agents-exe/docs-tui.html">The TUI</a>, and the
+<a href="/agents-exe/docs-cli-commands.html">CLI reference</a>, which documents <code>spectate</code>.
+</li>
+<li><a href="/agents-exe/docs-agents-server.html">agents-server</a>: the HTTP API used in step 3,
+the event stream <code>spectate</code> follows, and sub-agents as sessions.
+</li>
+<li><a href="/agents-exe/comparison.html">How agents-exe compares</a> with other agent frameworks.
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

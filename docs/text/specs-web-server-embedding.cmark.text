@@ -651,7 +651,7 @@ Recorded 2026-09-19, when the user asked to continue with the later work. Each i
 
 - Tests (`agents-postgres-tests`, threaded): a throwaway cluster (`initdb` + `pg_ctl` from `pg_config --bindir`, a free port on 127.0.0.1), one fresh database per test; `AGENTS_TEST_POSTGRES_URL` uses an existing server instead, and without either the suite skips. They cover migrations running once; CAS with conflicts, labels, and the kept running status; queries (agent, owner, parent, status, limit, before); 16 concurrent CAS with exactly one winner; and a runner flow (deferred call, completion, token already completed, cascade delete).
 
-- Not done: coordinating runs between servers (lease column).
+- Coordinating runs between servers came later: see "Several server processes on one Postgres database" under Remaining later work.
 
 
 ### Phase 11: token streaming ✅
@@ -718,13 +718,56 @@ Deviations from the plan:
 - `openapi3` needed the freeze's `index-state` bumped: 3.2.4 caps QuickCheck below the pinned 2.16, and 3.2.5 (which allows it) was published after the pinned index date. Every previously pinned version is unchanged.
 
 
+### Database agents with tools and helpers ✅
+
+Lifts the two refusals of Phase 12 that decision 10 recorded.
+
+- **Tool files are stored with the agent.** `StoredAgent.saFiles` (contents by relative path; column `files`, SQLite and Postgres migration 2); `asPut` takes them. `PUT /v1/agents/:slug` reads them from a `files` object in the body, and `config.files` shows them.
+
+- **Loading writes them to disk.** Each load of a stored agent gets its own directory under a temporary directory of the host (`materializeToolFiles`); the loaded configuration's `toolDirectory` and `bashToolboxes` paths point there. The directory is removed when the node is released, and with the host.
+
+- **`extraAgents` name stored agents by slug** (`path` is now optional in the JSON, and refused for a stored agent). `resolveHelpers` computes what an agent reaches; `AgentTree.loadAgentTreeFromConfigs` loads the root and those helpers as one tree, so each root has its own copy of its helpers, like roots from files.
+
+- `putStoredAgentWithFiles`; `AgentEditError` gains `AgentInvalidPaths`, `AgentHelperError` (`UnknownHelper`, `HelperCycle`), and `AgentInUse`.
+
+- Choices made here (_default_, none was planned in detail):
+- - **Cycles are refused**, self-reference included, although agent files allow them: an edit is checked against the agents stored at that time, and a helper must exist first, so a cycle can only be an error.
+
+- **Replacing a helper reloads its dependents**; a dependent that fails to load again keeps its previous version, and the failure is traced.
+
+- **A helper in use cannot be deleted** (`409 agent_in_use`).
+
+- **Only stored agents can be named**, not agents from files.
+
+- `openApiToolboxes`, `postgrestToolboxes`, `skillSources`, and `autoEnableSkills` are still refused.
+
+
+
+- Tests: runner level (a stored agent with a tool directory and a stored helper with a single tool, run end to end, across a restart, and after replacing the helper; unknown helper, cycles, paths); server (`files` in and out, `unknown_helper`, `helper_cycle`, `agent_invalid_paths`, `agent_in_use`, a session that runs the tool); Postgres (files round-trip).
+
+
 ## Remaining later work
 
 - **Per-owner API keys and isolation**: build agents per owner, including sub-agent tools; default policy `runIsolated` for bash and MCP tools, backed by `dockerRunner`.
 
-- **Several server processes on one Postgres database**: live-run ownership through a lease column (`run_owner`, `run_lease_until`).
+- ~~**Several server processes on one Postgres database**: live-run ownership through a lease column (`run_owner`, `run_lease_until`).~~ Done:
+- - `System.Agents.Host.Coordination`: what a host needs from a shared database (acquire, renew, release a run lease; who holds it; which running sessions lost their owner; signals from the other processes). `noCoordination` is the single-process case (SQLite, the TUI) and changes nothing there. `HostStores.hsCoordination`, `Host.hostCoordination`.
 
-- **Database agents with files or sub-agents**: tool directories stored with the agent; `extraAgents` naming other stored agents.
+- `agents-postgres`: migration 4 adds `run_owner` and `run_lease_until` to `sessions`; lease times are the database's `now()`. Each process gets a random instance name. Session writes and accepted mail are announced with `pg_notify` on `agents_sessions`; one connection outside the pool listens and reconnects.
+
+- The runner takes the lease in `startRun` and releases it wherever a run ends. A heartbeat (every third of `rcLeaseTtl`, default 30 s) renews, stops runs whose lease was taken (`abandonRun`, nothing stored), syncs the mail of running sessions, and takes over expired sessions (`takeOverExpired`, same recovery as `recoverOnStartup`, nothing resumed). `recoverOnStartup` only recovers sessions without a live lease. A run held elsewhere is busy: `postMessage` and `completeCall` go to mail, `resume` and `deleteSession` are refused, `cancelRun` posts `StopRun`, `awaitRun` waits on forwarded events.
+
+- Writes are fenced by the versioned compare-and-store, not by the lease: a takeover stores a version, so the previous owner's next write conflicts, and `failRun` stores nothing once the lease is gone.
+
+- Mail: `msAppend` answers with the envelope as stored. Postgres settles `seq` under an advisory lock per session, since two processes each number from what they last loaded; `mbSync` merges what others appended.
+
+- Events: only `session.updated`, `run.stopped` and `session.deleted` are forwarded to the other servers. Text deltas and tool events stay on the owner. A watch skips the forwarded copies (`srRemoteEvents`), so a registration known to two servers yields one mail per event.
+
+- Not done: resuming a taken-over run by itself; sharing stored-agent edits and `watch-session` registrations between servers; an `agents-server` flag for the lease duration.
+
+
+
+- ~~**Database agents with files or sub-agents**~~: done, see [Database agents with tools and helpers](#database-agents-with-tools-and-helpers ).
 
 - **Stopping a stored agent's MCP servers** when it is replaced or deleted.
 

@@ -6,6 +6,8 @@ The `todos/` directory holds the design documents behind the larger features (du
 
 - [**Async Tool Calls Implementation Progress**](/specs-async-tool-calls-progress.html ), _Status:_ no status line yet
 
+- [**Spec: bash tools v2, long-running tool processes**](/specs-bash-tools-v2.html ), _Status:_ proposal, 2026-09-25, from issue #539 and a robot-chat conversation
+
 - [**Plan: Durable execution from the CLI**](/specs-durable-workflows-cli-start-plan.html ), _Status:_ no status line yet
 
 - [**Plan: Durable Workflows for agents-exe**](/specs-durable-workflows.html ), _Status:_ no status line yet

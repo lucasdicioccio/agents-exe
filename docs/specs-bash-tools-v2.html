@@ -1,0 +1,389 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: bash tools v2, long-running tool processes</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: proposal, 2026-09-25, from issue &amp;#35;539 and a robot-chat conversation"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: bash tools v2, long-running tool processes"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: proposal, 2026-09-25, from issue &amp;#35;539 and a robot-chat conversation"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: bash tools v2, long-running tool processes"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html"><meta property="og:description" content="Status: proposal, 2026-09-25, from issue &amp;#35;539 and a robot-chat conversation"><meta name="article:published_time" content="2026-10-03T10:37:53Z"><meta name="article:modified_time" content="2026-10-03T10:37:53Z"><meta name="ks:article_json" content="/agents-exe/json/specs-bash-tools-v2.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-bash-tools-v2.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-03T10:37:53Z","datePublished":"2026-10-03T10:37:53Z","description":"Status: proposal, 2026-09-25, from issue &#35;539 and a robot-chat conversation","headline":"Spec: bash tools v2, long-running tool processes","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: bash tools v2, long-running tool processes</h1><p>On <span>Sat, 03 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 2728 words, 4 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-session-mailbox.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">12/12</span></a><span class="topic-nav topic-next-link"><span class="topic-nav-boundary">|</span></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/bash-tools-v2.md"><code>todos/bash-tools-v2.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="spec-bash-tools-v2-long-running-tool-processes">Spec: bash tools v2, long-running tool processes</h2>
+<p>Status: proposal, 2026-09-25, from issue #539 and a robot-chat conversation
+the same day. Nothing implemented. The v1 protocol (<code>documentation/binary-tool.md</code>)
+stays valid unchanged: a tool that does not say otherwise is a v1 tool.</p>
+<h3 id="goal">Goal</h3>
+<p>A bash tool today is one process per call: <code>describe</code> once, then <code>run</code> with
+the arguments, stdin written once and closed, stdout collected until exit,
+and that stdout is the tool result. Progress exists (<code>tool.progressed</code>
+events carry each line as it arrives, see <code>runProcessReportingOutput</code>), but
+the model only ever sees the final stdout, and a tool cannot be talked to
+while it runs.</p>
+<p>v2 lets a tool declare that it is a <strong>process</strong> rather than a function:</p>
+<ul>
+<li>it may keep running after answering, streaming information out in
+chunks the runtime understands (a declared event shape);
+</li>
+<li>its stdin may stay open, the runtime feeding it JSON events shaped as the
+tool declares, so the model (or another tool, or mail) can keep talking to
+it;
+</li>
+<li>from the model’s perspective such a tool is stateful: starting it returns
+a handle (start it twice and there are two handles, each addressable on
+its own); the tool family gets one typed <code>send</code> tool taking a handle and
+an event, and one shared system tool (<code>processes</code>: list, status, tail,
+stop) serves every family, so process management never multiplies the
+session’s tools;
+</li>
+<li>the tool declares how it wants to be run, in the spirit of a systemd
+unit or a daemontools service directory: the user to run as, an envdir,
+a run directory, timeouts, what to do when it exits.
+</li>
+</ul>
+<p>The runtime change is large (D2 below says how it lands in slices); the
+protocol change is small, and this document is mostly the protocol.</p>
+<h3 id="1-the-describe-document-v2">1. The <code>describe</code> document, v2</h3>
+<p>A v2 tool adds <code>&quot;protocol&quot;: 2</code> to its <code>describe</code> output. Everything v1
+defines keeps its meaning (<code>slug</code>, <code>description</code>, <code>args</code>, <code>empty-result</code>).
+Three optional objects and one flag (<code>check</code>, §1.5) are new.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;protocol&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;log_watcher&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;check&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;Follows a log file and reports matching lines&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;args&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;path&quot;</span><span class="fu">,</span> <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">,</span> <span class="dt">&quot;backing_type&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;arity&quot;</span><span class="fu">:</span> <span class="st">&quot;single&quot;</span><span class="fu">,</span> <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;dashdashspace&quot;</span><span class="fu">,</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;the file to follow&quot;</span> <span class="fu">}</span> <span class="ot">]</span><span class="fu">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;process&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;stream&quot;</span><span class="fu">,</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;output&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;framing&quot;</span><span class="fu">:</span> <span class="st">&quot;jsonl&quot;</span><span class="fu">,</span> <span class="dt">&quot;event&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;object&quot;</span><span class="fu">,</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;properties&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;line&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">},</span> <span class="dt">&quot;level&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">}</span> <span class="fu">},</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;required&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;line&quot;</span><span class="ot">]</span> <span class="fu">}</span> <span class="fu">},</span></span>
+<span id="14"><a href="#14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;input&quot;</span><span class="fu">:</span>  <span class="fu">{</span> <span class="dt">&quot;framing&quot;</span><span class="fu">:</span> <span class="st">&quot;jsonl&quot;</span><span class="fu">,</span> <span class="dt">&quot;event&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;object&quot;</span><span class="fu">,</span></span>
+<span id="15"><a href="#15" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;properties&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;op&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;enum&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;pattern&quot;</span><span class="ot">,</span> <span class="st">&quot;pause&quot;</span><span class="ot">,</span> <span class="st">&quot;resume&quot;</span><span class="ot">]</span><span class="fu">},</span></span>
+<span id="16"><a href="#16" aria-hidden="true" tabindex="-1"></a>                                <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;string&quot;</span><span class="fu">}</span> <span class="fu">},</span></span>
+<span id="17"><a href="#17" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;required&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;op&quot;</span><span class="ot">]</span> <span class="fu">}</span> <span class="fu">},</span></span>
+<span id="18"><a href="#18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;ready&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;kind&quot;</span><span class="fu">:</span> <span class="st">&quot;line&quot;</span><span class="fu">,</span> <span class="dt">&quot;match&quot;</span><span class="fu">:</span> <span class="st">&quot;^ready$&quot;</span> <span class="fu">}</span></span>
+<span id="19"><a href="#19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="20"><a href="#20" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;runtime&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="21"><a href="#21" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;run_as&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;user&quot;</span><span class="fu">:</span> <span class="st">&quot;logs&quot;</span><span class="fu">,</span> <span class="dt">&quot;group&quot;</span><span class="fu">:</span> <span class="st">&quot;logs&quot;</span> <span class="fu">},</span></span>
+<span id="22"><a href="#22" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;sandbox&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;fs&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;read&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;/var/log&quot;</span><span class="ot">]</span><span class="fu">,</span> <span class="dt">&quot;write&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;state&quot;</span><span class="ot">]</span> <span class="fu">},</span> <span class="dt">&quot;net&quot;</span><span class="fu">:</span> <span class="st">&quot;none&quot;</span> <span class="fu">},</span></span>
+<span id="23"><a href="#23" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;envdir&quot;</span><span class="fu">:</span> <span class="st">&quot;env&quot;</span><span class="fu">,</span></span>
+<span id="24"><a href="#24" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;environment&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;LC_ALL&quot;</span><span class="fu">:</span> <span class="st">&quot;C&quot;</span> <span class="fu">},</span></span>
+<span id="25"><a href="#25" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;rundir&quot;</span><span class="fu">:</span> <span class="st">&quot;state&quot;</span><span class="fu">,</span></span>
+<span id="26"><a href="#26" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;timeout&quot;</span><span class="fu">:</span> <span class="fu">{</span> <span class="dt">&quot;start&quot;</span><span class="fu">:</span> <span class="dv">10</span><span class="fu">,</span> <span class="dt">&quot;stop&quot;</span><span class="fu">:</span> <span class="dv">5</span><span class="fu">,</span> <span class="dt">&quot;idle&quot;</span><span class="fu">:</span> <span class="kw">null</span> <span class="fu">},</span></span>
+<span id="27"><a href="#27" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;on_exit&quot;</span><span class="fu">:</span> <span class="st">&quot;report&quot;</span><span class="fu">,</span></span>
+<span id="28"><a href="#28" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;cancel&quot;</span><span class="fu">:</span> <span class="st">&quot;SIGTERM&quot;</span></span>
+<span id="29"><a href="#29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="30"><a href="#30" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><h4 id="11-process-what-kind-of-process-this-is">1.1 <code>process</code>: what kind of process this is</h4>
+<table>
+<tr><th>Field</th><th>Values</th><th>Meaning</th></tr>
+<tr><td><code>mode</code></td><td><code>oneshot</code> (default), <code>stream</code>, <code>service</code></td><td><code>oneshot</code> is v1: run to completion, stdout is the result. <code>stream</code>: the result is the sequence of output events until exit; the call completes when the process exits. <code>service</code>: the process is expected to outlive the call; starting it returns a handle and the model works with it through the process tool (§3).</td></tr>
+<tr><td><code>output.framing</code></td><td><code>jsonl</code> (default for v2), <code>lines</code>, <code>chunks</code></td><td>How stdout is cut into events: one JSON object per line, one text line per event, or raw chunks as they arrive (binary-safe, for tools that produce no lines).</td></tr>
+<tr><td><code>output.event</code></td><td>a JSON Schema</td><td>The shape of one output event under <code>jsonl</code>. Validated by the runtime; an event that does not match is delivered as an <code>invalid</code> event carrying the raw line, never dropped silently. Optional under <code>lines</code>/<code>chunks</code>.</td></tr>
+<tr><td><code>input.framing</code></td><td><code>jsonl</code> (default), <code>lines</code></td><td>How the runtime writes events to stdin. Absent <code>input</code>: stdin gets the v1 <code>mode: stdin</code> arguments and is closed, as today.</td></tr>
+<tr><td><code>input.event</code></td><td>a JSON Schema</td><td>What the runtime accepts to send to this process; also the schema of the <code>event</code> argument of the family's typed <code>send</code> tool (§2.4).</td></tr>
+<tr><td><code>digest</code></td><td><code>{"per": "round"}</code>, <code>{"per": "events", "n": N}</code>, <code>{"per": "seconds", "n": N}</code> (default <code>round</code>)</td><td>For a <code>service</code>: how chatty output is folded into mail (§2.3). Declared by the tool, per tool, because its author knows what an event is worth.</td></tr>
+<tr><td><code>ready</code></td><td><code>{"kind": "line", "match": REGEX}</code>, <code>{"kind": "exit"}</code>, <code>{"kind": "immediate"}</code></td><td>When the process counts as started: a stdout line matching (its first events are still delivered), its exit (a <code>oneshot</code>), or right away. Bounded by <code>runtime.timeout.start</code>.</td></tr>
+</table>
+<p>stderr is never part of the result. It is captured into the process’s
+bounded output ring (§2.3) and traced, as today.</p>
+<h4 id="12-runtime-how-to-run-it">1.2 <code>runtime</code>: how to run it</h4>
+<p>Every field is optional; an absent field keeps v1 behaviour (run as the
+agents-exe process, its environment plus the session context variables,
+its working directory, no timeouts beyond the call’s, cancellation kills
+the process group).</p>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>run_as</code></td><td><code>{"user", "group"}</code>: run the process as this user and group. The runtime uses one mechanism it was configured with (<code>setpriv</code>, <code>sudo -u</code>, <code>runuser</code>, or a refusal when none is configured); the tool never names the mechanism. Same shape and reasoning as salmon's <code>RunAs</code>/<code>Mechanism</code> (<code>multi-user-privilege-separation.md</code> there).</td></tr>
+<tr><td><code>sandbox</code></td><td><code>{"fs": {"read": [...], "write": [...]}, "net": "host"\|"none", "tmp": "shared"\|"private"}</code>: what the process may touch (§1.4). Enforced by one operator-configured mechanism, <code>bwrap</code> or <code>landlock</code>; never images or containers.</td></tr>
+<tr><td><code>envdir</code></td><td>A subdirectory name under the operator's explicit <code>--envdir-root</code>, read the daemontools way: one file per variable, file name is the name, file content is the value. Read at start; absent files are absent variables. Lets an operator provision secrets without touching the tool or the checkout. There is no implicit default location: a tool that declares <code>envdir</code> while no <code>--envdir-root</code> was given fails to load with a <code>LoadingError</code> naming the field.</td></tr>
+<tr><td><code>environment</code></td><td>Literal variables, added last (they win over <code>envdir</code>).</td></tr>
+<tr><td><code>rundir</code></td><td>A directory, relative to the tool's directory, created if missing and made the process's working directory; where a <code>service</code> keeps its state.</td></tr>
+<tr><td><code>timeout</code></td><td><code>start</code>: seconds to reach <code>ready</code> or fail the start; <code>stop</code>: seconds between the cancel signal and <code>SIGKILL</code>; <code>idle</code>: seconds without any output or input event after which a <code>service</code> is stopped (<code>null</code>: never).</td></tr>
+<tr><td><code>on_exit</code></td><td>For a <code>service</code>: <code>report</code> (default: the model is told, the handle becomes final), <code>restart</code> (bring it back, bounded by a small backoff; every restart is an event), <code>fail</code> (the call that started it fails if it has not completed yet).</td></tr>
+<tr><td><code>cancel</code></td><td>The signal sent first on cancel/stop: <code>SIGTERM</code> (default), <code>SIGINT</code>, or a JSON event <code>{"send": {...}}</code> written to stdin before the signal, for tools that prefer a polite request.</td></tr>
+</table>
+<h4 id="13-commands-and-help-several-actions-in-one-binary-from-539">1.3 <code>commands</code> and <code>help</code>: several actions in one binary (from #539)</h4>
+<p>Out of scope of the process story but part of the same <code>describe</code> bump:
+<code>&quot;commands&quot;: [ {&quot;name&quot;, &quot;description&quot;, &quot;args&quot;} ]</code> lets one binary expose
+several tools (<code>slug.name</code> each), and <code>help</code> (<code>./tool help [command]</code>)
+gives the runtime a longer text to disclose on demand rather than in every
+system prompt. A <code>setup</code> step (<code>./tool setup</code>) that provisions the tool’s
+own dependencies is left for a later spec: it is an operator concern, not a
+runtime one.</p>
+<h4 id="14-sandbox-what-the-process-may-touch-without-images">1.4 <code>sandbox</code>: what the process may touch, without images</h4>
+<p>A small declaration, no more: <code>fs.read</code> and <code>fs.write</code> are lists of paths
+(absolute, or relative to the tool’s directory), <code>net</code> is <code>host</code> (default)
+or <code>none</code>, <code>tmp</code> is <code>shared</code> (default) or <code>private</code>. Everything not listed
+is not granted; the tool’s own directory is always readable so it can run.
+Like <code>run_as</code>, the tool names what it needs and the <strong>operator</strong> names how
+it is enforced (<code>--sandbox bwrap</code>, <code>--sandbox landlock</code> or <code>--sandbox auto</code>);
+a tool that declares <code>sandbox</code> with no mechanism configured fails to load
+with a <code>LoadingError</code>, it never runs unconfined by silence. There is <strong>no
+silent default</strong>: the two mechanisms give different guarantees (bubblewrap
+hides paths and really cuts the network, Landlock denies access and covers
+TCP only), so picking one for the operator could quietly weaken what a tool
+asked for.</p>
+<p><code>--sandbox auto</code> is the explicit opt-in to “per tool, the strongest
+mechanism that can honour every declared field”: bubblewrap first, then
+Landlock, and a tool declaring <code>net: none</code> or <code>tmp: private</code> skips Landlock
+rather than being weakened, failing to load when no mechanism qualifies.
+It is the ordered-backends idea of §1.5 applied to mechanisms, and
+<code>agents-exe check --probe</code> prints what <code>auto</code> resolved to for each tool. <code>sandbox</code> composes with
+<code>run_as</code> (the sandbox is set up for the process that runs as that user).</p>
+<ul>
+<li><strong>bubblewrap</strong> builds a mount namespace: only the declared paths (plus the
+minimum to exec the tool) exist, <code>net: none</code> is a network namespace,
+<code>tmp: private</code> a fresh tmpfs, and the process dies with agents-exe. It
+needs unprivileged user namespaces, which many distributions restrict: a
+plain <code>bwrap</code> on the Ubuntu machine this was written on failed with
+<code>setting up uid map: Permission denied</code> (<code>kernel.apparmor_restrict_unprivileged_userns=1</code>;
+not conclusive, that shell may itself have been inside another sandbox).
+</li>
+<li><strong>Landlock</strong> is a kernel security module needing no privilege and no
+namespaces: the runtime applies a ruleset in the child before <code>exec</code>.
+Paths outside the ruleset are denied (not hidden), and on kernels with
+network rules it can deny TCP bind and connect, which is not the same as
+no network (to verify in the slice, then state precisely in <code>check</code>).
+</li>
+</ul>
+<p><code>agents-exe check</code> probes the configured mechanism for real, the way it would
+run a tool, and reports what it can and cannot enforce (for example
+“<code>net: none</code> best effort under landlock”). Where a mechanism cannot honour a
+declared field the tool fails to load naming the field; it is never silently
+weakened.</p>
+<p><strong>Non-goal: image or container isolation.</strong> agents-exe has no notion of an
+image, and this spec adds none. A tool that wants podman or docker calls it
+from its own script, like any other command, and agents-exe sees an ordinary
+process. (Reviewed against <code>juhp/encapsule</code>, an interactive podman
+dev-shell: useful vocabulary for named capabilities, the wrong shape for a
+non-interactive tool call.)</p>
+<p>These are declarations, not privileges: an agent’s configuration (and the
+operator’s <code>--set</code>/<code>--pin</code> parameters, <code>tool-partial-application.md</code>) may
+refuse or override them. <code>run_as</code> in particular is only honoured when the
+operator configured a mechanism; otherwise the tool loads with a
+<code>LoadingError</code> naming the field, the same way a <code>with</code> binding that names
+an undeclared parameter does today.</p>
+<h4 id="15-health-a-real-probe-and-ordered-backends-per-capability">1.5 Health: a real probe, and ordered backends per capability</h4>
+<p>The pattern comes from Agent-Reach (a “capability layer” that selects and
+health-checks the upstream tools an agent uses, MIT): the same capability
+can be served by several tools, and whether one <em>works here, now</em> is found
+by running a cheap command, never by looking the binary up on <code>PATH</code> (a
+stale shim passes <code>which</code> and cannot execute).</p>
+<p><strong><code>check</code>, a third verb.</strong> A v2 tool may say <code>&quot;check&quot;: true</code> in <code>describe</code>
+and then answers <code>./tool check</code>: a cheap, <strong>read-only</strong> self-test (no
+writes, no login, no remote mutation, no long-lived process; a <code>service</code>
+is not started) that prints one JSON document and exits 0 when the tool is
+usable:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;ok&quot;</span><span class="fu">:</span> <span class="kw">false</span><span class="fu">,</span> <span class="dt">&quot;detail&quot;</span><span class="fu">:</span> <span class="st">&quot;jina reader answered 429&quot;</span><span class="fu">,</span> <span class="dt">&quot;fix&quot;</span><span class="fu">:</span> <span class="st">&quot;set JINA_API_KEY in the envdir&quot;</span> <span class="fu">}</span></span></code></pre></div></div><p><code>detail</code> and <code>fix</code> are for the operator, <code>fix</code> is a prescription. The
+runtime runs <code>check</code> exactly as it would run the tool (same <code>runtime</code>:
+<code>run_as</code>, <code>sandbox</code>, <code>envdir</code>, timeouts), so a probe that passes proves the
+sandbox and the user work too. A tool that cannot be checked without side
+effects omits <code>check</code>; it is then <code>unverified</code> (it loaded and <code>describe</code>
+answered, nothing more) and is never reported <code>ok</code>.</p>
+<p><strong>A capability is an ordered list of backends.</strong> The model sees one tool,
+<code>web_read</code>; the agent configuration says which tool binaries can serve it,
+preferred first:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;capability&quot;</span><span class="fu">:</span> <span class="st">&quot;web_read&quot;</span><span class="fu">,</span> <span class="dt">&quot;backends&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;tools/web/read-jina&quot;</span><span class="ot">,</span> <span class="st">&quot;tools/web/read-curl&quot;</span><span class="ot">]</span> <span class="fu">}</span></span></code></pre></div></div><p>All backends of a capability must declare the same <code>args</code> (checked at load,
+a <code>LoadingError</code> otherwise) so the model’s schema does not depend on which
+one is active. Switching backends is reordering the list, or an operator
+override <code>--backend web_read=read-curl</code> that moves the named backend first
+(an unknown name is ignored, so a stale override never hides a working
+backend). The <strong>active backend</strong> is the first one whose probe is <code>ok</code>,
+else the first <code>unverified</code> one, else none (the capability fails to load
+when required, is omitted with a warning otherwise). Every tool result
+carries the backend that served it, so the model can say what it used.</p>
+<p><strong>A failed call does not silently retry the next backend.</strong> The model sees
+the failure and which backend produced it; automatic fallback is left out of
+the first slice (open question).</p>
+<p><strong><code>agents-exe check --probe [--json]</code></strong> runs every probe and reports, per
+capability, the active backend and every candidate:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;capability&quot;</span><span class="fu">:</span> <span class="st">&quot;web_read&quot;</span><span class="fu">,</span> <span class="dt">&quot;active&quot;</span><span class="fu">:</span> <span class="st">&quot;read-jina&quot;</span><span class="fu">,</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;backends&quot;</span><span class="fu">:</span> <span class="ot">[</span> <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;read-jina&quot;</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;ok&quot;</span><span class="fu">,</span> <span class="dt">&quot;ms&quot;</span><span class="fu">:</span> <span class="dv">310</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>                <span class="fu">{</span> <span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;read-curl&quot;</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;unverified&quot;</span> <span class="fu">}</span> <span class="ot">]</span> <span class="fu">}</span></span></code></pre></div></div><p><code>status</code> is <code>ok</code>, <code>failed</code> (with <code>detail</code> and <code>fix</code>), <code>unverified</code> or
+<code>skipped</code> (a sandbox mechanism that cannot enforce a declared field, §1.4).
+Plain <code>check</code> keeps its meaning (configuration loads: exit 0 / 1); with
+<code>--probe</code> it exits 2 when the configuration loads but a required capability
+has no active backend. Do not confuse it with <code>ready</code> (§1.1): <code>ready</code> says a
+process that was started is up, <code>check</code> says a tool could work before
+anything is started.</p>
+<h3 id="2-the-runtime-side">2. The runtime side</h3>
+<h4 id="21-a-oneshot-v2-tool">2.1 A <code>oneshot</code> v2 tool</h4>
+<p>Identical to v1 except that <code>output.framing</code>/<code>output.event</code> apply: the
+result delivered to the model is the events, rendered as a JSON array (or
+the joined lines), and each event is also a <code>tool.progressed</code> payload as it
+arrives. Nothing else changes; this is the cheap slice that makes the new
+<code>describe</code> real.</p>
+<h4 id="22-a-stream-tool">2.2 A <code>stream</code> tool</h4>
+<p>The call runs as an asynchronous call (<code>RunAsync</code>, <code>async-tool-calls.md</code>):
+the model gets the <code>running</code> placeholder, events arrive as progress, the
+call completes when the process exits, and the result is the full event
+sequence (bounded: the last N events, N from the agent’s config, the count
+of elided ones stated). <code>wait</code>, <code>get-tool-call-status</code> and
+<code>cancel-tool-call</code> work unchanged; <code>get-tool-call-status</code> shows the latest
+events, which is the “tail” the model needs mid-run.</p>
+<h4 id="23-a-service-tool-the-process-handle">2.3 A <code>service</code> tool: the process handle</h4>
+<p>Starting a <code>service</code> tool is a call that completes at <code>ready</code>: its result
+is a <strong>process handle</strong> <code>{&quot;process&quot;: &quot;&lt;id&gt;&quot;, &quot;tool&quot;: &quot;log_watcher&quot;, &quot;status&quot;: &quot;running&quot;, &quot;since&quot;: ...}</code>, an entity in the OS world like a tool
+call is today (<code>OS.Conversation.ToolCalls</code>), owned by the session. Each
+start is a new process with its own handle: an agent that starts
+<code>log_watcher</code> on two files holds two handles and talks to either by its
+handle; nothing is deduplicated or shared between starts. A handle has:</p>
+<ul>
+<li>the declared <code>input.event</code> schema (what <code>send</code> accepts);
+</li>
+<li>a bounded ring of its output events and of its stderr lines (same shape
+as a node’s output ring in salmon’s <code>serve</code>: small, per process, what an
+operator wants when it fails);
+</li>
+<li>its lifecycle: <code>starting</code>, <code>running</code>, <code>stopping</code>, <code>exited</code> (code),
+<code>failed</code> (why), <code>restarting</code> (n);
+</li>
+<li>the <code>runtime</code> it was started with, resolved (which user, which envdir).
+</li>
+</ul>
+<p>A process belongs to the session that started it. It survives across the
+session’s runs (it is exactly the “background call” case, <code>evictIdle</code> and
+<code>hasRunningCalls</code> already keep such a session resident) but <strong>not</strong> a
+restart of agents-exe: <code>recoverOnStartup</code> marks it <code>failed: lost on restart</code>, as it does for orphaned async calls, and the model learns it
+from the process tool. Durable services are a node of their own in
+whatever supervises agents-exe, not this spec (D3).</p>
+<p>Output events of a running service are delivered to the model as <strong>mail</strong>
+(<code>session-mailbox.md</code>): each event, or a digest of them as the tool’s
+<code>digest</code> declares (default: per round) when they are chatty, is an envelope
+from <code>process:&lt;id&gt;</code>, so the model’s turn
+is woken the same way any other asynchronous news wakes it, with the same
+<code>wakeOn</code> controls. This is the <code>notify</code> progress level that spec deferred
+(D9 there), given a producer.</p>
+<h4 id="24-process-tools-one-typed-send-per-family-one-shared-processes">2.4 Process tools: one typed <code>send</code> per family, one shared <code>processes</code></h4>
+<p>Two layers, split by what varies:</p>
+<p><strong>Per family, one typed tool.</strong> For each <code>service</code> tool <code>T</code> in the toolbox
+the runtime generates, at load, one companion tool <code>T.send</code> (<code>slug.name</code>,
+the same naming as <code>commands</code>, §1.3). Its arguments are <code>process</code> (the
+handle) and <code>event</code>, whose schema is the declared <code>input.event</code> verbatim,
+so the model gets a typed function per family instead of an untyped
+argument, and a family with two running processes is addressed by handle:
+<code>log_watcher.send {process: p1, event: ...}</code> and <code>{process: p2, ...}</code>. The
+answer is the events the process produced in reply within a short window,
+or <code>accepted</code>. The companion exists from load, not from start, so the tool
+list (and the tool cache) does not change while processes come and go.</p>
+<p><strong>Shared across families, one tool.</strong> Everything that does not depend on a
+family’s schema is one system capability with sub-commands (the shape of
+<code>get-tool-call-status</code> and friends), so a session holding ten service
+families still has one management tool:</p>
+<table>
+<tr><th>Sub-command</th><th>Arguments</th><th>Answer</th></tr>
+<tr><td><code>list</code></td><td></td><td>every process of the session (and, for a root agent, of its sub-sessions), with tool, status and age</td></tr>
+<tr><td><code>status</code></td><td><code>process</code></td><td>the handle with its counters, last events, last stderr lines, and the accepted input schema</td></tr>
+<tr><td><code>tail</code></td><td><code>process</code>, <code>n</code></td><td>the last <code>n</code> output events, oldest first</td></tr>
+<tr><td><code>stop</code></td><td><code>process</code>, <code>force?</code></td><td>the declared cancel, then <code>SIGKILL</code> after <code>timeout.stop</code>; the exit becomes the answer</td></tr>
+</table>
+<p>The model discovers which processes exist through <code>list</code> and <code>status</code>; a
+tool’s <code>description</code> should say it is a service and name the events it
+accepts, in a sentence.</p>
+<h3 id="3-what-the-model-sees-end-to-end">3. What the model sees, end to end</h3>
+<ol>
+<li>The tool list holds <code>log_watcher</code> (start it), <code>log_watcher.send</code>
+(talk to one of its processes) and <code>processes</code> (list, status, tail,
+stop, for anything started). Starting is an ordinary tool call with the
+declared <code>args</code>, and may be done twice: each start returns its own handle.
+</li>
+<li>The result is the handle. The model continues; when the watcher reports
+a line, mail arrives: <code>from process:p1 {&quot;line&quot;: &quot;...&quot;, &quot;level&quot;: &quot;error&quot;}</code>.
+</li>
+<li>The model calls <code>log_watcher.send {process: p1, event: {op: &quot;pattern&quot;, value: &quot;ERROR&quot;}}</code>; the answer is <code>accepted</code> or the watcher’s reply.
+</li>
+<li><code>processes stop p1</code> when done; or the session ends and every process of
+it is stopped with its declared cancel (a session delete stops them the
+way it cancels runs).
+</li>
+</ol>
+<h3 id="decisions-proposed">Decisions (proposed)</h3>
+<p>D1. <strong>The protocol number, not new commands.</strong> <code>&quot;protocol&quot;: 2</code> in
+<code>describe</code> is the whole opt-in; <code>run</code> keeps its name and argument passing,
+so a v2 tool can be tried as a v1 tool by ignoring the new fields.</p>
+<p>D2. <strong>Independent features, each shippable</strong> (the feature <code>9914ff73</code> is
+split as needed). (1) <code>describe</code> v2 parsing, <code>oneshot</code> with framing and
+validation; (2) <code>runtime</code> for <code>oneshot</code> tools (<code>envdir</code> with
+<code>--envdir-root</code>, <code>environment</code>, <code>rundir</code>, <code>timeout.stop</code>, <code>cancel</code>) and
+<code>run_as</code> and <code>sandbox</code> behind operator-configured mechanisms (<code>bwrap</code>,
+<code>landlock</code>), which ship ahead of the
+process modes because a low-privilege <code>oneshot</code> tool is valuable alone;
+(3) <code>stream</code> on the existing async engine; (4) <code>service</code>: the handle
+entity, mail delivery and <code>digest</code>, the typed <code>T.send</code> companions, the
+shared <code>processes</code> capability, and the <code>runtime</code> fields only a service
+uses (<code>timeout.idle</code>, <code>on_exit</code>). #539’s <code>commands</code>/<code>help</code> are a fifth,
+independent slice, and (§1.5) the <code>check</code> verb with <code>check --probe --json</code>
+is a sixth, small one that lands with (1); capabilities with ordered
+backends and the <code>--backend</code> override are a seventh, depending on it.</p>
+<p>D3. <strong>Not durable across an agents-exe restart.</strong> A service is lost with the
+process that started it and reported as such; supervising long-lived
+services belongs to systemd/salmon, which can restart agents-exe itself.
+Revisit only with a concrete need (<code>os-as-standalone-server.md</code> G11 says
+the same of watches and run handles).</p>
+<p>D4. <strong>Events, not bytes, at the model boundary.</strong> The model never sees a
+raw stream; it sees validated events (or <code>invalid</code> ones with the raw
+text). <code>chunks</code> framing exists for tools, not for the model: the runtime
+delivers chunks to progress consumers and to the ring only.</p>
+<p>D5. <strong>Mail, not polling, for a service’s output.</strong> The existing mailbox is
+how asynchronous news reaches a session; a second channel would duplicate
+its wake rules. Chatty services get digests, bounded by the ring, and the
+digest policy is the tool’s own declaration.</p>
+<p>D6. <strong>A typed <code>send</code> per family, a shared <code>processes</code> for the rest.</strong> One
+handle per start, several handles per family; the family’s input schema
+lives in one generated <code>T.send</code> tool present from load (an agent
+configuration may omit it, saving its tokens), while <code>list</code>,
+<code>status</code>, <code>tail</code> and <code>stop</code> are shared so the session’s tool list does not
+grow with the number of families’ management surfaces.</p>
+<p>D7. <strong>Explicit envdir root.</strong> Secrets are provisioned where the operator
+says (<code>--envdir-root</code>), never found by convention next to the tool.</p>
+<p>D8. <strong>Process isolation, not image isolation.</strong> <code>sandbox</code> is enforced by
+bubblewrap or Landlock, chosen by the operator (explicitly, or with the
+opt-in <code>--sandbox auto</code>, never by a silent default); agents-exe never builds,
+pulls or names an image. It composes with <code>run_as</code>, refuses rather than
+weakens, and is probed by <code>check</code>.</p>
+<p>D9. <strong>Probe, don’t look up.</strong> Whether a tool works is found by running it
+(<code>check</code>, under its real <code>runtime</code>), read-only, reported as <code>ok</code>, <code>failed</code>,
+<code>unverified</code> or <code>skipped</code>; a tool that cannot be probed safely is
+<code>unverified</code>, never <code>ok</code>. Backends are an ordered list per capability, the
+first <code>ok</code> one is active, and the tool result names the backend used.
+Pattern from Agent-Reach (§1.5).</p>
+<h3 id="resolved-in-review-2026-09-25-pr-574-comments">Resolved in review (2026-09-25, PR #574 comments)</h3>
+<ul>
+<li><code>send</code>: one tool per process family with a handle and a typed event; a
+second start of the same tool gives a second handle, addressable on its
+own; process management (<code>list</code>, <code>status</code>, <code>tail</code>, <code>stop</code>) is shared so it
+does not pollute the session’s tools (§2.4, D6).
+</li>
+<li><code>run_as</code> for <code>oneshot</code>: yes, split into its own feature ahead of the
+process modes (D2).
+</li>
+<li>Digest policy: per tool, declared in <code>process.digest</code> (§1.1, §2.3).
+</li>
+<li><code>envdir</code>: explicit, an operator <code>--envdir-root</code> with a per-tool
+subdirectory, no implicit location (§1.2, D7).
+</li>
+<li>The generated <code>T.send</code> companion is optional per agent: an agent
+configuration may omit it for a service the model may start but never talk
+to, which saves the tool’s tokens (owner’s answer, 2026-09-25; D6).
+</li>
+<li>Isolation backend: bubblewrap and Landlock, no images; whoever wants podman
+calls it from the tool’s own script (§1.4, D8).
+</li>
+<li>Sandbox mechanism selection: no silent default; the operator picks, or opts
+in to <code>--sandbox auto</code> (strongest mechanism that honours every declared
+field), shown by <code>check --probe</code> (owner, 2026-09-25; §1.4, D8).
+</li>
+<li>Health: adopt Agent-Reach’s doctor pattern (ordered backends, a real probe,
+<code>--json</code>), but not Agent-Reach itself, which is deferred as heavy
+(owner, 2026-09-25; §1.5, D9).
+</li>
+</ul>
+<h3 id="open-questions">Open questions</h3>
+<ul>
+<li>Where is a capability’s backend list declared: in the agent configuration
+(as sketched), or in a manifest next to the tool directories so several
+agents share it?
+</li>
+<li>When are probes run and how long are they cached: once at load, lazily on
+the first call, or with a TTL? A probe that costs a network call should
+not run on every session start.
+</li>
+<li>Automatic fallback to the next backend on a failed call: worth it for
+transient failures if the tool declares which exit codes mean “try
+another” (<code>fallback_on</code>), or is the model seeing the failure enough?
+</li>
+</ul>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

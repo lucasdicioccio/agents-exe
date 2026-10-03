@@ -1,8 +1,10 @@
-Usage: agents-exe check [--tools MODE]
+Usage: agents-exe check [--tools MODE] [--show-config]
 
   Validate agent configurations and optionally dump tool schemas
 
 Available options:
   --tools MODE             Tool display mode: none, list, agents-exe, openai
                            (default: none) (default: none)
+  --show-config            Print each agent file's JSON configuration; for a
+                           .tramaj template, the JSON it evaluates to
   -h,--help                Show this help text

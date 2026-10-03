@@ -1,0 +1,97 @@
+# How agents-exe compares
+
+This page puts agents-exe next to five agent frameworks people are likely to be choosing between: LangGraph, AutoGen, the OpenAI Agents SDK, the Claude Agent SDK and CrewAI.
+
+**Read this first.** It is a draft. What it says about agents-exe was checked against the code or by running it. What it says about the other five comes only from their own documentation, read on 2026-10-03 and linked under [Sources](#sources ); none of them was installed or run for this page. There are no benchmarks here, and no claim that one is faster, cheaper or better than another. A cell that says "not checked" means exactly that, not "missing". Which frameworks belong on this page, and on which axes, is still an open choice; corrections are welcome as [issues](https://github.com/lucasdicioccio/agents-exe/issues ).
+
+## What agents-exe is
+
+- **A command-line program, configured with files.** An agent is a JSON file: an endpoint, a model, a system prompt, tools, helper agents. There is no Python or TypeScript API; the library underneath is Haskell.
+
+- **Tools are programs.** Any executable that answers `describe` and `run` is a tool, whatever language it is written in. MCP servers, OpenAPI documents and a few builtin toolboxes (SQLite, system information, Lua) are tools too.
+
+- **Helper agents are tools as well.** A root agent calls a helper the way it calls a tool, and helpers can have helpers.
+
+- **One agent file, several ways to run it:** a one-shot command, a terminal UI, a stdio MCP server, or an HTTP server with a chat page.
+
+- **Sessions are stored.** As JSON files for the command line, in SQLite or PostgreSQL for the server; a session can stop on a tool call that waits for an outside answer and be resumed later.
+
+- **Self-hosted.** It talks to the model endpoint you give it; there is no agents-exe service. Apache-2.0.
+
+
+The [demo](/demo.html ) shows several of these at once.
+
+## What it is not
+
+- Not a library for a Python or TypeScript application: if you want to build agents as code inside such an application, the five frameworks below are made for that and agents-exe is not.
+
+- Not tied to one model vendor, and not a client for every vendor's native API either: models are reached through OpenAI-style chat-completions endpoints (the README lists OpenAI, Mistral, Moonshot and Ollama as working).
+
+- Not a hosted product: you run the binary and keep the database.
+
+- Not large: the commit history has a single author, and there is no ecosystem of third-party integrations around it.
+
+
+## Side by side
+
+```html
+<table>
+<tr><th></th><th>In its own words</th><th>You use it from</th><th>State between turns and runs, as documented</th></tr>
+<tr><td><strong>agents-exe</strong></td><td>"A handy LLM-agent tool, with a variety of calling and configuration modes"</td><td>the command line and JSON files; a Haskell library</td><td>session files; SQLite or PostgreSQL behind the server</td></tr>
+<tr><td><strong>LangGraph</strong></td><td>"A low-level orchestration framework and runtime for building, managing, and deploying long-running, stateful agents."</td><td>Python; JavaScript/TypeScript</td><td>checkpointers: in-memory, SQLite, PostgreSQL</td></tr>
+<tr><td><strong>AutoGen</strong></td><td>"A framework for building AI agents and applications."</td><td>Python; .NET</td><td>not checked</td></tr>
+<tr><td><strong>OpenAI Agents SDK</strong></td><td>"agentic AI apps in a lightweight, easy-to-use package with very few abstractions"</td><td>Python; TypeScript</td><td>sessions, with SQLite, SQLAlchemy, Redis and other session stores in the documentation index</td></tr>
+<tr><td><strong>Claude Agent SDK</strong></td><td>"Build production AI agents with Claude Code as a library"</td><td>Python; TypeScript</td><td>sessions that can be resumed or forked; storage not checked</td></tr>
+<tr><td><strong>CrewAI</strong></td><td>"The leading open-source framework for orchestrating autonomous AI agents and building complex workflows."</td><td>Python</td><td>Flows "persist data across steps and executions"; storage not checked</td></tr>
+</table>
+```
+
+A few more facts from the same documentation pages, where they bear on the choice:
+
+- **LangGraph** describes checkpointers as serving "conversation continuity, human-in-the-loop workflows, time travel, and fault tolerance". That is the closest counterpart in this list to agents-exe's stored, resumable sessions, reached from code rather than from a command line.
+
+- **AutoGen** is layered: Core ("an event-driven programming framework for building scalable multi-agent AI systems"), AgentChat on top of it, and Studio, a web UI for prototyping without code.
+
+- **OpenAI Agents SDK** names three primitives (agents, handoffs, guardrails) and lists built-in tracing, human-in-the-loop and MCP tools. It uses OpenAI's Responses API by default and documents adapters for other providers.
+
+- **Claude Agent SDK** is "a library that runs the Claude Code binary", with Claude Code's built-in tools (files, commands, web search), hooks, subagents, MCP, permissions and sessions.
+
+- **CrewAI** has two layers: Crews ("teams of autonomous agents") and Flows ("structured, event-driven workflows that manage state and control execution"). Its repository calls it "a standalone Python framework", MIT-licensed.
+
+
+## When agents-exe is a reasonable pick
+
+- You would rather describe an agent in a file and give it shell scripts as tools than write an application around a framework.
+
+- You want the same agent in a terminal, in an MCP client and behind HTTP without rewriting it.
+
+- You want to keep sessions in your own SQLite file or PostgreSQL database, and to run against a local model.
+
+
+## When to pick something else
+
+- Your agents live inside a Python or TypeScript code base, or you need a vendor's native features (OpenAI's tracing and voice, Claude Code's built-in tools and permissions).
+
+- You want a large ecosystem of integrations, tutorials and people to ask.
+
+- You need a hosted, managed runtime.
+
+
+## Sources
+
+Read on 2026-10-03:
+
+- LangGraph: [overview](https://docs.langchain.com/oss/python/langgraph/overview ), [persistence](https://docs.langchain.com/oss/python/langgraph/persistence ), [JavaScript overview](https://docs.langchain.com/oss/javascript/langgraph/overview ).
+
+- AutoGen: [documentation home](https://microsoft.github.io/autogen/stable/ ).
+
+- OpenAI Agents SDK: [Python documentation](https://openai.github.io/openai-agents-python/ ), [TypeScript documentation](https://openai.github.io/openai-agents-js/ ).
+
+- Claude Agent SDK: [overview](https://code.claude.com/docs/en/agent-sdk/overview ).
+
+- CrewAI: [introduction](https://docs.crewai.com/en/introduction ), [repository](https://github.com/crewAIInc/crewAI ).
+
+- agents-exe: this site, the [repository](https://github.com/lucasdicioccio/agents-exe ), and the [demo](/demo.html ) for what was run.
+
+
+

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-09-25T18:11:20Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html</id><title type="text">Plan: Durable execution from the CLI</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows-cli-start-plan.md"&gt;&lt;code&gt;todos/durable-workflows-cli-start-plan.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-10-03T10:37:53Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html</id><title type="text">Plan: Durable execution from the CLI</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows-cli-start-plan.md"&gt;&lt;code&gt;todos/durable-workflows-cli-start-plan.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="plan-durable-execution-from-the-cli"&gt;Plan: Durable execution from the CLI&lt;/h2&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;Make the durable-workflow execution mode accessible from the CLI in one-shot
@@ -366,7 +366,7 @@ handlers.
 &lt;li&gt;&lt;code&gt;src/System/Agents/Session/Loop.hs&lt;/code&gt; — &lt;code&gt;runAsync&lt;/code&gt; and &lt;code&gt;runStepM&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs.html</id><title type="text">Specs</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="specs"&gt;Specs&lt;/h2&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs.html</id><title type="text">Specs</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="specs"&gt;Specs&lt;/h2&gt;
 &lt;p&gt;The &lt;code&gt;todos/&lt;/code&gt; directory holds the design documents behind the larger
 features (durable workflows, asynchronous tool calls, the session mailbox,
 partial application of tool arguments, the standalone server) and their
@@ -378,6 +378,8 @@ canonical source, and may be ahead of what is published here.&lt;/p&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-async-tool-calls.html"&gt;&lt;strong&gt;Asynchronous / Interruptible Tool Calls&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
 &lt;/li&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-async-tool-calls-progress.html"&gt;&lt;strong&gt;Async Tool Calls Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="/agents-exe/specs-bash-tools-v2.html"&gt;&lt;strong&gt;Spec: bash tools v2, long-running tool processes&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposal, 2026-09-25, from issue &lt;a href="/agents-exe/hashtags/539.html"&gt;&lt;span class="hashtag" data-hashtag="539"&gt;#539&lt;/span&gt;&lt;/a&gt; and a robot-chat conversation
 &lt;/li&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-durable-workflows-cli-start-plan.html"&gt;&lt;strong&gt;Plan: Durable execution from the CLI&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
 &lt;/li&gt;
@@ -396,7 +398,7 @@ canonical source, and may be ahead of what is published here.&lt;/p&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-web-server-embedding.progress.html"&gt;&lt;strong&gt;Web server embedding — Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs.html" rel="alternate"/><summary type="text">The design documents under todos/, each headed by a Status line saying what of it has shipped.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html</id><title type="text">Spec: the OS as a standalone server (TUI and web UI as clients)</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"&gt;&lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs.html" rel="alternate"/><summary type="text">The design documents under todos/, each headed by a Status line saying what of it has shipped.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html</id><title type="text">Spec: the OS as a standalone server (TUI and web UI as clients)</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"&gt;&lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-the-os-as-a-standalone-server-tui-and-web-ui-as-clients"&gt;Spec: the OS as a standalone server (TUI and web UI as clients)&lt;/h2&gt;
 &lt;p&gt;Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch &lt;code&gt;feature/os-standalone-server&lt;/code&gt;
@@ -933,18 +935,53 @@ avoids the module cycle). A narrowed child is pinned live (never evicted);
 the narrowing is not persisted, so after a restart a resumed narrowed child
 runs un-narrowed (bindings may be secret).
 &lt;/li&gt;
-&lt;li&gt;&lt;code&gt;mailInToolResult&lt;/code&gt;: partial-turn placeholders lack the round’s mail.
+&lt;li&gt;&lt;code&gt;mailInToolResult&lt;/code&gt;: done – a partial turn holds the round’s mail out of its query (&lt;code&gt;pMailInToolResult&lt;/code&gt;) and renders it into the last placeholder (&lt;code&gt;partialTurnForLlm&lt;/code&gt;); folded once when the round completes.
 &lt;/li&gt;
 &lt;li&gt;G11: secret params, watches and the run handle are volatile (D7 stands);
 since 2026-09-25 &lt;code&gt;recoverOnStartup&lt;/code&gt; fails the running calls of a session
 whose required params were lost, with a &lt;code&gt;params_required&lt;/code&gt; detail.
+Since 2026-09-27, watches are also recovered: a &lt;code&gt;session_watches&lt;/code&gt; table
+(SQLite via &lt;code&gt;System.Agents.Session.WatchStore&lt;/code&gt;, Postgres via
+&lt;code&gt;System.Agents.Postgres.mkPostgresWatchStore&lt;/code&gt;, both modeled directly on
+&lt;code&gt;session_mail&lt;/code&gt;/&lt;code&gt;MailStore&lt;/code&gt;) persists each active &lt;code&gt;watch-session&lt;/code&gt;
+registration (watcher, &lt;code&gt;WatchRequest&lt;/code&gt;, absolute deadline) alongside the
+in-memory &lt;code&gt;WatchHandle&lt;/code&gt;; &lt;code&gt;serverWatchSession&lt;/code&gt; writes the row before
+starting to forward, &lt;code&gt;serverUnwatchSession&lt;/code&gt; and the forwarding loop’s own
+TTL expiry both delete it, and &lt;code&gt;recoverOnStartup&lt;/code&gt; (via the new
+&lt;code&gt;recoverWatches&lt;/code&gt;) re-registers every row whose deadline has not yet
+passed and drops the rest, exactly as an in-process TTL timeout would.
+A &lt;code&gt;WatchRequest&lt;/code&gt; carries no secret, so unlike session parameters this
+needed no client resupply step – D7’s “durable storage” branch applies
+here, not its “resupplied by the client” one. Events raised while no
+process was watching are not replayed; a recovered watch only sees
+events from the moment it is re-registered, same as any other live
+subscriber.
+The run handle (&lt;code&gt;lsRun&lt;/code&gt;/&lt;code&gt;Async&lt;/code&gt;) turned out not to need new work: eviction
+already refuses to drop a &lt;code&gt;LiveSession&lt;/code&gt; with an active run or a running
+background call (&lt;code&gt;evictIdle&lt;/code&gt;’s &lt;code&gt;lsRun&lt;/code&gt;/&lt;code&gt;hasRunningCalls&lt;/code&gt; checks), so it
+is never actually lost to eviction; and a process restart was already
+covered by &lt;code&gt;recoverOnStartup&lt;/code&gt;’s existing orphaned/&lt;code&gt;params_required&lt;/code&gt;
+handling above. This is a deviation from the literal G11 wording (“the
+run &lt;code&gt;Async&lt;/code&gt;… [is] lost on restart or eviction”) only in that the
+eviction half of that claim no longer held by the time this phase
+started – no behavior change was needed there, only watches.
+(&lt;code&gt;feat/g11-watch-recovery&lt;/code&gt;, full &lt;code&gt;cabal test&lt;/code&gt; suite green: 1248 tests in
+&lt;code&gt;agents-tests&lt;/code&gt;, 32 in &lt;code&gt;agents-server-tests&lt;/code&gt;, 7 in &lt;code&gt;agents-postgres-tests&lt;/code&gt;
+including a migration-inventory test updated for the new table.)
 &lt;/li&gt;
-&lt;li&gt;TUI: no selection among several pending calls; no view for &lt;code&gt;hook.failed&lt;/code&gt;.
+&lt;li&gt;TUI: selection among several pending calls (&lt;code&gt;select-pending&lt;/code&gt;, Ctrl+O) and
+&lt;code&gt;fail-pending&lt;/code&gt; (Ctrl+W) are done; a failed call completes with the text
+&lt;code&gt;Error: &amp;lt;reason&amp;gt;&lt;/code&gt; rather than a new &lt;code&gt;UserToolResponse&lt;/code&gt; variant. Still no view
+for &lt;code&gt;hook.failed&lt;/code&gt;.
 &lt;/li&gt;
 &lt;li&gt;Service packaging: docs only, no unit file shipped, no &lt;code&gt;bundling/&lt;/code&gt; entry.
 &lt;/li&gt;
-&lt;li&gt;&lt;code&gt;checks/&lt;/code&gt; fake endpoint cannot script multi-turn answers, so sub-agent
-and tool-call flows have no pty end-to-end test.
+&lt;li&gt;&lt;code&gt;checks/lib/fake_llm.py&lt;/code&gt; scripts multi-turn answers (text and tool calls,
+matched on request index, system prompt, last message or offered tools);
+pty end-to-end checks now cover a sub-agent call as a child session
+(&lt;code&gt;checks/phase5-subagent-e2e&lt;/code&gt;) and deferred calls answered, failed or picked
+from the Pending panel (&lt;code&gt;checks/phase5-pending-e2e&lt;/code&gt;). Not covered yet:
+interrupts, and the same flows with &lt;code&gt;tui --attach&lt;/code&gt;.
 &lt;/li&gt;
 &lt;li&gt;D8’s out-of-scope items: multi-server Postgres, mid-&lt;code&gt;RunAsync&lt;/code&gt; durability,
 per-owner API keys.
@@ -979,7 +1016,9 @@ this spec; &lt;code&gt;lsParams&lt;/code&gt; stays volatile and the TUI resuppli
 &lt;code&gt;--params-file&lt;/code&gt; on &lt;code&gt;CreateSession&lt;/code&gt;/&lt;code&gt;PostMessage&lt;/code&gt;, as the web page does today.&lt;/p&gt;
 &lt;p&gt;D8. &lt;strong&gt;Out of scope:&lt;/strong&gt; several servers on one Postgres, mid-tool-call
 durability for &lt;code&gt;RunAsync&lt;/code&gt; calls, per-owner API keys. They are documented as
-unsupported in &lt;code&gt;documentation/agents-server.md&lt;/code&gt; and are not needed for attach.&lt;/p&gt;
+unsupported in &lt;code&gt;documentation/agents-server.md&lt;/code&gt; and are not needed for attach.
+(Several servers on one Postgres was done since, with run leases: see
+&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;, Remaining later work.)&lt;/p&gt;
 &lt;h3 id="related-docs"&gt;Related docs&lt;/h3&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;, &lt;code&gt;.progress.md&lt;/code&gt;: the Host/Runner and the
@@ -996,7 +1035,7 @@ Phases 0 and 1.
 goes with D1.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-23, revised the same day after checking service</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html</id><title type="text">Plan: Durable Workflows for agents-exe</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.md"&gt;&lt;code&gt;todos/durable-workflows.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-23, revised the same day after checking service</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html</id><title type="text">Plan: Durable Workflows for agents-exe</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.md"&gt;&lt;code&gt;todos/durable-workflows.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="plan-durable-workflows-for-agents-exe"&gt;Plan: Durable Workflows for agents-exe&lt;/h2&gt;
 &lt;p&gt;See &lt;a href="/agents-exe/specs-durable-workflows.progress.html"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt; for implementation progress.&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
@@ -1358,7 +1397,7 @@ A UUID is safer for external workers and database keys; an index is smaller and 
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;p&gt;This milestone delivers the requested primitives without yet building Docker runners or Postgres backends.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html</id><title type="text">Async Tool Calls Implementation Progress</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls-progress.md"&gt;&lt;code&gt;todos/async-tool-calls-progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html</id><title type="text">Async Tool Calls Implementation Progress</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls-progress.md"&gt;&lt;code&gt;todos/async-tool-calls-progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="async-tool-calls-implementation-progress"&gt;Async Tool Calls Implementation Progress&lt;/h2&gt;
 &lt;h3 id="plan"&gt;Plan&lt;/h3&gt;
 &lt;p&gt;See &lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;.&lt;/p&gt;
@@ -1963,10 +2002,11 @@ documents the paused JSON report of &lt;code&gt;run&lt;/code&gt;.
 &lt;ul&gt;
 &lt;li&gt;OpenAPI tools wait for one complete HTTP response: nothing to stream.
 &lt;/li&gt;
-&lt;li&gt;MCP defines progress notifications and &lt;code&gt;ProgressNotification&lt;/code&gt; exists in
-&lt;code&gt;System.Agents.MCP.Base&lt;/code&gt;, but &lt;code&gt;MCP.Client&lt;/code&gt; ignores them. Forwarding them to
-&lt;code&gt;ctxProgressCallback&lt;/code&gt; would make MCP tools report progress like bash tools.
-Not done.
+&lt;li&gt;Done: &lt;code&gt;MCP.Client&lt;/code&gt; advertises a &lt;code&gt;_meta.progressToken&lt;/code&gt; on &lt;code&gt;tools/call&lt;/code&gt; when
+the call has a progress callback, and forwards the server’s
+&lt;code&gt;notifications/progress&lt;/code&gt; for that token to &lt;code&gt;ctxProgressCallback&lt;/code&gt; (payload
+&lt;code&gt;{progress, total?, message?}&lt;/code&gt;), so MCP tools report progress like bash
+tools (&lt;code&gt;tool.progressed&lt;/code&gt; events, &lt;code&gt;get_tool_call_status&lt;/code&gt;).
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;h4 id="not-done"&gt;Not done&lt;/h4&gt;
@@ -2095,7 +2135,7 @@ the agent JSON schema for async.
 &lt;li&gt;Clarify whether MCP / OpenAPI tools can stream into the progress callback.
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html</id><title type="text">Web server embedding — Implementation Progress</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.progress.md"&gt;&lt;code&gt;todos/web-server-embedding.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html</id><title type="text">Web server embedding — Implementation Progress</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.progress.md"&gt;&lt;code&gt;todos/web-server-embedding.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="web-server-embedding--implementation-progress"&gt;Web server embedding — Implementation Progress&lt;/h2&gt;
 &lt;p&gt;Progress tracker for &lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="phase-1--storage-wiring-fix-white_check_mark-complete"&gt;Phase 1 — Storage wiring fix ✅ COMPLETE&lt;/h3&gt;
@@ -2610,7 +2650,7 @@ server is &lt;code&gt;agents-exe mcp-server&lt;/code&gt;, and its tool
 &lt;/ul&gt;
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html</id><title type="text">Spec: embedding agents-exe in a web server</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.md"&gt;&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html</id><title type="text">Spec: embedding agents-exe in a web server</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.md"&gt;&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-embedding-agents-exe-in-a-web-server"&gt;Spec: embedding agents-exe in a web server&lt;/h2&gt;
 &lt;p&gt;Status: proposed (2026-09-18)&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
@@ -3487,7 +3527,8 @@ running status; queries (agent, owner, parent, status, limit, before); 16
 concurrent CAS with exactly one winner; and a runner flow (deferred call,
 completion, token already completed, cascade delete).
 &lt;/li&gt;
-&lt;li&gt;Not done: coordinating runs between servers (lease column).
+&lt;li&gt;Coordinating runs between servers came later: see “Several server
+processes on one Postgres database” under Remaining later work.
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;h4 id="phase-11-token-streaming-white_check_mark"&gt;Phase 11: token streaming ✅&lt;/h4&gt;
@@ -3618,17 +3659,108 @@ below the pinned 2.16, and 3.2.5 (which allows it) was published after the
 pinned index date. Every previously pinned version is unchanged.
 &lt;/li&gt;
 &lt;/ul&gt;
+&lt;h4 id="database-agents-with-tools-and-helpers-white_check_mark"&gt;Database agents with tools and helpers ✅&lt;/h4&gt;
+&lt;p&gt;Lifts the two refusals of Phase 12 that decision 10 recorded.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Tool files are stored with the agent.&lt;/strong&gt; &lt;code&gt;StoredAgent.saFiles&lt;/code&gt; (contents
+by relative path; column &lt;code&gt;files&lt;/code&gt;, SQLite and Postgres migration 2);
+&lt;code&gt;asPut&lt;/code&gt; takes them. &lt;code&gt;PUT /v1/agents/:slug&lt;/code&gt; reads them from a &lt;code&gt;files&lt;/code&gt; object
+in the body, and &lt;code&gt;config.files&lt;/code&gt; shows them.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Loading writes them to disk.&lt;/strong&gt; Each load of a stored agent gets its own
+directory under a temporary directory of the host
+(&lt;code&gt;materializeToolFiles&lt;/code&gt;); the loaded configuration’s &lt;code&gt;toolDirectory&lt;/code&gt; and
+&lt;code&gt;bashToolboxes&lt;/code&gt; paths point there. The directory is removed when the node
+is released, and with the host.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;extraAgents&lt;/code&gt; name stored agents by slug&lt;/strong&gt; (&lt;code&gt;path&lt;/code&gt; is now optional in
+the JSON, and refused for a stored agent). &lt;code&gt;resolveHelpers&lt;/code&gt; computes what
+an agent reaches; &lt;code&gt;AgentTree.loadAgentTreeFromConfigs&lt;/code&gt; loads the root and
+those helpers as one tree, so each root has its own copy of its helpers,
+like roots from files.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;putStoredAgentWithFiles&lt;/code&gt;; &lt;code&gt;AgentEditError&lt;/code&gt; gains &lt;code&gt;AgentInvalidPaths&lt;/code&gt;,
+&lt;code&gt;AgentHelperError&lt;/code&gt; (&lt;code&gt;UnknownHelper&lt;/code&gt;, &lt;code&gt;HelperCycle&lt;/code&gt;), and &lt;code&gt;AgentInUse&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;Choices made here (&lt;em&gt;default&lt;/em&gt;, none was planned in detail):
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Cycles are refused&lt;/strong&gt;, self-reference included, although agent files
+allow them: an edit is checked against the agents stored at that time,
+and a helper must exist first, so a cycle can only be an error.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Replacing a helper reloads its dependents&lt;/strong&gt;; a dependent that fails to
+load again keeps its previous version, and the failure is traced.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;A helper in use cannot be deleted&lt;/strong&gt; (&lt;code&gt;409 agent_in_use&lt;/code&gt;).
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Only stored agents can be named&lt;/strong&gt;, not agents from files.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;openApiToolboxes&lt;/code&gt;, &lt;code&gt;postgrestToolboxes&lt;/code&gt;, &lt;code&gt;skillSources&lt;/code&gt;, and
+&lt;code&gt;autoEnableSkills&lt;/code&gt; are still refused.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;Tests: runner level (a stored agent with a tool directory and a stored
+helper with a single tool, run end to end, across a restart, and after
+replacing the helper; unknown helper, cycles, paths); server (&lt;code&gt;files&lt;/code&gt; in
+and out, &lt;code&gt;unknown_helper&lt;/code&gt;, &lt;code&gt;helper_cycle&lt;/code&gt;, &lt;code&gt;agent_invalid_paths&lt;/code&gt;,
+&lt;code&gt;agent_in_use&lt;/code&gt;, a session that runs the tool); Postgres (files round-trip).
+&lt;/li&gt;
+&lt;/ul&gt;
 &lt;h3 id="remaining-later-work"&gt;Remaining later work&lt;/h3&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;strong&gt;Per-owner API keys and isolation&lt;/strong&gt;: build agents per owner, including
 sub-agent tools; default policy &lt;code&gt;runIsolated&lt;/code&gt; for bash and MCP tools, backed
 by &lt;code&gt;dockerRunner&lt;/code&gt;.
 &lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Several server processes on one Postgres database&lt;/strong&gt;: live-run ownership
-through a lease column (&lt;code&gt;run_owner&lt;/code&gt;, &lt;code&gt;run_lease_until&lt;/code&gt;).
+&lt;li&gt;~~&lt;strong&gt;Several server processes on one Postgres database&lt;/strong&gt;: live-run ownership
+through a lease column (&lt;code&gt;run_owner&lt;/code&gt;, &lt;code&gt;run_lease_until&lt;/code&gt;).~~ Done:
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;System.Agents.Host.Coordination&lt;/code&gt;: what a host needs from a shared
+database (acquire, renew, release a run lease; who holds it; which
+running sessions lost their owner; signals from the other processes).
+&lt;code&gt;noCoordination&lt;/code&gt; is the single-process case (SQLite, the TUI) and
+changes nothing there. &lt;code&gt;HostStores.hsCoordination&lt;/code&gt;,
+&lt;code&gt;Host.hostCoordination&lt;/code&gt;.
 &lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Database agents with files or sub-agents&lt;/strong&gt;: tool directories stored with
-the agent; &lt;code&gt;extraAgents&lt;/code&gt; naming other stored agents.
+&lt;li&gt;&lt;code&gt;agents-postgres&lt;/code&gt;: migration 4 adds &lt;code&gt;run_owner&lt;/code&gt; and &lt;code&gt;run_lease_until&lt;/code&gt;
+to &lt;code&gt;sessions&lt;/code&gt;; lease times are the database’s &lt;code&gt;now()&lt;/code&gt;. Each process
+gets a random instance name. Session writes and accepted mail are
+announced with &lt;code&gt;pg_notify&lt;/code&gt; on &lt;code&gt;agents_sessions&lt;/code&gt;; one connection outside
+the pool listens and reconnects.
+&lt;/li&gt;
+&lt;li&gt;The runner takes the lease in &lt;code&gt;startRun&lt;/code&gt; and releases it wherever a run
+ends. A heartbeat (every third of &lt;code&gt;rcLeaseTtl&lt;/code&gt;, default 30 s) renews,
+stops runs whose lease was taken (&lt;code&gt;abandonRun&lt;/code&gt;, nothing stored), syncs
+the mail of running sessions, and takes over expired sessions
+(&lt;code&gt;takeOverExpired&lt;/code&gt;, same recovery as &lt;code&gt;recoverOnStartup&lt;/code&gt;, nothing
+resumed). &lt;code&gt;recoverOnStartup&lt;/code&gt; only recovers sessions without a live
+lease. A run held elsewhere is busy: &lt;code&gt;postMessage&lt;/code&gt; and &lt;code&gt;completeCall&lt;/code&gt;
+go to mail, &lt;code&gt;resume&lt;/code&gt; and &lt;code&gt;deleteSession&lt;/code&gt; are refused, &lt;code&gt;cancelRun&lt;/code&gt; posts
+&lt;code&gt;StopRun&lt;/code&gt;, &lt;code&gt;awaitRun&lt;/code&gt; waits on forwarded events.
+&lt;/li&gt;
+&lt;li&gt;Writes are fenced by the versioned compare-and-store, not by the lease:
+a takeover stores a version, so the previous owner’s next write
+conflicts, and &lt;code&gt;failRun&lt;/code&gt; stores nothing once the lease is gone.
+&lt;/li&gt;
+&lt;li&gt;Mail: &lt;code&gt;msAppend&lt;/code&gt; answers with the envelope as stored. Postgres settles
+&lt;code&gt;seq&lt;/code&gt; under an advisory lock per session, since two processes each
+number from what they last loaded; &lt;code&gt;mbSync&lt;/code&gt; merges what others
+appended.
+&lt;/li&gt;
+&lt;li&gt;Events: only &lt;code&gt;session.updated&lt;/code&gt;, &lt;code&gt;run.stopped&lt;/code&gt; and &lt;code&gt;session.deleted&lt;/code&gt; are
+forwarded to the other servers. Text deltas and tool events stay on the
+owner. A watch skips the forwarded copies (&lt;code&gt;srRemoteEvents&lt;/code&gt;), so a
+registration known to two servers yields one mail per event.
+&lt;/li&gt;
+&lt;li&gt;Not done: resuming a taken-over run by itself; sharing stored-agent
+edits and &lt;code&gt;watch-session&lt;/code&gt; registrations between servers; an
+&lt;code&gt;agents-server&lt;/code&gt; flag for the lease duration.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;~~&lt;strong&gt;Database agents with files or sub-agents&lt;/strong&gt;~~: done, see
+&lt;a href="#database-agents-with-tools-and-helpers"&gt;Database agents with tools and helpers&lt;/a&gt;.
 &lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Stopping a stored agent’s MCP servers&lt;/strong&gt; when it is replaced or deleted.
 &lt;/li&gt;
@@ -3695,7 +3827,7 @@ It is plain HTML and JavaScript in one document, with no build step.
 &lt;li&gt;&lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;, &lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;, &lt;code&gt;documentation/sessions.md&lt;/code&gt;
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html" rel="alternate"/><summary type="text">Status: proposed (2026-09-18)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html</id><title type="text">Asynchronous / Interruptible Tool Calls</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls.md"&gt;&lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html" rel="alternate"/><summary type="text">Status: proposed (2026-09-18)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html</id><title type="text">Asynchronous / Interruptible Tool Calls</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls.md"&gt;&lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="asynchronous--interruptible-tool-calls"&gt;Asynchronous / Interruptible Tool Calls&lt;/h2&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;Make tool calls in a TUI/oneshot session truly interruptible and inspectable:&lt;/p&gt;
@@ -4121,7 +4253,7 @@ It is plain HTML and JavaScript in one document, with no build step.
 &lt;li&gt;[ ] &lt;code&gt;get_tool_call_status&lt;/code&gt; returns &lt;code&gt;orphaned&lt;/code&gt; for calls referenced in history that no longer exist.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html</id><title type="text">Durable Workflows — Implementation Progress</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.progress.md"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html</id><title type="text">Durable Workflows — Implementation Progress</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.progress.md"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="durable-workflows--implementation-progress"&gt;Durable Workflows — Implementation Progress&lt;/h2&gt;
 &lt;p&gt;Progress tracker for &lt;code&gt;todos/durable-workflows.md&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="phase-1--core-primitives-types--interfaces-white_check_mark-complete"&gt;Phase 1 — Core primitives (types &amp;amp; interfaces) ✅ COMPLETE&lt;/h3&gt;
@@ -4968,11 +5100,11 @@ resolving name clashes with the session-layer &lt;code&gt;ToolCallState&lt;/code
 &lt;li&gt;Test suite &lt;code&gt;agents-tests&lt;/code&gt; passes, including all durable-workflow tests.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html</id><title type="text">Spec: partial application of tool arguments</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"&gt;&lt;code&gt;todos/tool-partial-application.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html</id><title type="text">Spec: partial application of tool arguments</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"&gt;&lt;code&gt;todos/tool-partial-application.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-partial-application-of-tool-arguments"&gt;Spec: partial application of tool arguments&lt;/h2&gt;
 &lt;p&gt;Status: Phases 1-7 and §8.4 (&lt;code&gt;derive_agent&lt;/code&gt;) done as of 2026-09-21. Phase 1 done
 (&lt;code&gt;97961e0&lt;/code&gt;). Phase 2 done
-except the tool-cache key (G8) and MCP server &lt;code&gt;env&lt;/code&gt; (G4) (&lt;code&gt;03783fb&lt;/code&gt;,
+except MCP server &lt;code&gt;env&lt;/code&gt; (G4); the tool-cache key (G8) is done too, see below (&lt;code&gt;03783fb&lt;/code&gt;,
 &lt;code&gt;b0c53a5&lt;/code&gt;): parameters, &lt;code&gt;ctxParams&lt;/code&gt; (now actually wired at runtime, not
 just in tests), &lt;code&gt;--set&lt;/code&gt;/&lt;code&gt;--set-json&lt;/code&gt;/&lt;code&gt;--pin&lt;/code&gt;/&lt;code&gt;--pin-json&lt;/code&gt;/&lt;code&gt;--params-file&lt;/code&gt;,
 process-scope resolution, secret-argv-mode load-time guard (G7).
@@ -4989,7 +5121,7 @@ persisted; message-scope values applied for one run only, never stored;
 &lt;code&gt;agentView&lt;/code&gt;’s &lt;code&gt;&amp;quot;parameters&amp;quot;&lt;/code&gt; self-description (&lt;code&gt;bound&lt;/code&gt;/&lt;code&gt;pinned&lt;/code&gt;, never a
 value); &lt;code&gt;agents-server --set&lt;/code&gt;/&lt;code&gt;--set-json&lt;/code&gt;/&lt;code&gt;--pin&lt;/code&gt;/&lt;code&gt;--pin-json&lt;/code&gt; (mirroring
 &lt;code&gt;agents-exe&lt;/code&gt;) so an operator can lock a container to one tenant. Not done
-from Phase 4: &lt;code&gt;seal&lt;/code&gt;, session tokens, the chat page’s parameter form, and the generated OpenAPI
+from Phase 4: the chat page’s parameter form, and the generated OpenAPI
 document’s request/response schemas (&lt;code&gt;AgentsServer/Types.hs&lt;/code&gt;/&lt;code&gt;Routes.hs&lt;/code&gt;
 are a separate hand-maintained layer used only for &lt;code&gt;/openapi.json&lt;/code&gt; and
 were not updated with the new fields — the real handlers in &lt;code&gt;Api.hs&lt;/code&gt; are
@@ -4998,7 +5130,15 @@ fully wired and correct; this is a documentation-only gap).
 parameters are no longer bound as failed with a &lt;code&gt;params_required&lt;/code&gt; message
 (§5’s documented recovery behaviour; done 2026-09-25, which also made the
 persisted non-secret session values seed the live session back after a
-restart or an eviction, as §5 always said they would). Since then:
+restart or an eviction, as §5 always said they would). &lt;code&gt;seal&lt;/code&gt; and session
+tokens (§5.1) are done: &lt;code&gt;seal&lt;/code&gt;/&lt;code&gt;session_token&lt;/code&gt; on &lt;code&gt;POST /v1/sessions&lt;/code&gt;, a
+&lt;code&gt;security&lt;/code&gt; column (sealed flag and token SHA-256 digest, never the token) on
+both backends, session-token routing limited to its own session’s read,
+messages, events and cancel, and &lt;code&gt;DELETE /v1/sessions/:id/token&lt;/code&gt;. Deviations:
+the token is only honoured on &lt;code&gt;/v1/sessions/:id/...&lt;/code&gt; paths of its own session
+(anything else is a 401, so no probing); &lt;code&gt;seal&lt;/code&gt; exempts the owner as §5.1 says,
+so today it only matters against session-token holders, who never may set
+parameters anyway; a fork or child does not inherit either. Since then:
 &lt;code&gt;PUT /v1/sessions/:id/params&lt;/code&gt;, &lt;code&gt;409 params_required&lt;/code&gt; on a message or resume
 to an existing session, and &lt;code&gt;params&lt;/code&gt; on &lt;code&gt;POST /v1/sessions/:id/fork&lt;/code&gt; (which
 lacks §5.2’s &lt;code&gt;fork&lt;/code&gt; on session creation and the CLI’s &lt;code&gt;--fork&lt;/code&gt;; required
@@ -5698,7 +5838,16 @@ that echoes its token sends it to the LLM. That is the tool author’s
 responsibility and the docs say so.
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;p&gt;&lt;strong&gt;Tool cache (G8).&lt;/strong&gt; &lt;code&gt;computeCacheKey&lt;/code&gt; takes the bound values of the call:
+&lt;p&gt;&lt;strong&gt;Tool cache (G8), done.&lt;/strong&gt; Implemented as &lt;code&gt;CacheScope&lt;/code&gt;/&lt;code&gt;cacheScopeOf&lt;/code&gt; in
+&lt;code&gt;Tools/Cache.hs&lt;/code&gt;: a call’s key also depends on the digest of the agent’s
+non-secret parameter values and inherited narrowing bindings (the context’s
+&lt;code&gt;ctxParams&lt;/code&gt;/&lt;code&gt;ctxInheritedBindings&lt;/code&gt;, at every cache call site), and a call
+with any secret one is not cached. Deviation: this looks at &lt;em&gt;all&lt;/em&gt; the agent’s
+parameters, not only those a tool binds (the registrations’ bindings are closed
+over in the tools and invisible where the cache is consulted), so it can only
+cost hits, never share a result across bound values. Argument hashes are now
+SHA-256 (the old length + 60-character prefix could collide). As designed:
+&lt;code&gt;computeCacheKey&lt;/code&gt; takes the bound values of the call:
 non-secret values are hashed into &lt;code&gt;ckArgumentsHash&lt;/code&gt; together with the LLM
 arguments. A call with any secret binding is &lt;strong&gt;not cached at all&lt;/strong&gt;: hashing a
 token into a persisted key is a needless oracle, and results obtained with
@@ -6050,7 +6199,7 @@ and for the model.&lt;/p&gt;
 &lt;li&gt;&lt;code&gt;todo&lt;/code&gt;: “partial-application of tool values”.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html" rel="alternate"/><summary type="text">Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html</id><title type="text">Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</title><updated>2026-09-25T18:11:20Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/session-mailbox.md"&gt;&lt;code&gt;todos/session-mailbox.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html" rel="alternate"/><summary type="text">Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html</id><title type="text">Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/session-mailbox.md"&gt;&lt;code&gt;todos/session-mailbox.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-the-session-mailbox-agent-to-agent-mail-suspended-tool-calls-interrupts-tool-call-wrappers"&gt;Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)&lt;/h2&gt;
 &lt;p&gt;Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
 issues #563 and #564, and most of #507 (see “What happens to the issues”).&lt;/p&gt;
@@ -6213,7 +6362,8 @@ is a &lt;code&gt;filter&lt;/code&gt;, and a receive with alternatives is &lt;cod
 (&lt;code&gt;session_id, seq, id UNIQUE, from_json, priority, hops, body_json, accepted_at&lt;/code&gt;), SQLite and Postgres, fronted by the same &lt;code&gt;TVar&lt;/code&gt; so
 &lt;code&gt;mbUnread&lt;/code&gt; stays STM. The runner is single-process per session already
 (second writers are detected), so the &lt;code&gt;TVar&lt;/code&gt; front is sound; a multi-process
-Postgres deployment would fill it from &lt;code&gt;LISTEN/NOTIFY&lt;/code&gt;, later.
+Postgres deployment fills it from &lt;code&gt;LISTEN/NOTIFY&lt;/code&gt; (&lt;code&gt;mbSync&lt;/code&gt;, with the
+sequence numbers settled by the database).
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;Bounded: &lt;code&gt;mailboxMaxUnread&lt;/code&gt; (default 256). A full mailbox refuses with
@@ -6537,4 +6687,392 @@ only thing the server adds.&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;, &lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;,
 &lt;code&gt;documentation/agents-server.md&lt;/code&gt;, &lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;,
 &lt;code&gt;todos/tool-partial-application.md&lt;/code&gt; (bindings, §5.2 fork).&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in</summary></entry></feed>
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html</id><title type="text">Spec: bash tools v2, long-running tool processes</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/bash-tools-v2.md"&gt;&lt;code&gt;todos/bash-tools-v2.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;h2 id="spec-bash-tools-v2-long-running-tool-processes"&gt;Spec: bash tools v2, long-running tool processes&lt;/h2&gt;
+&lt;p&gt;Status: proposal, 2026-09-25, from issue #539 and a robot-chat conversation
+the same day. Nothing implemented. The v1 protocol (&lt;code&gt;documentation/binary-tool.md&lt;/code&gt;)
+stays valid unchanged: a tool that does not say otherwise is a v1 tool.&lt;/p&gt;
+&lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
+&lt;p&gt;A bash tool today is one process per call: &lt;code&gt;describe&lt;/code&gt; once, then &lt;code&gt;run&lt;/code&gt; with
+the arguments, stdin written once and closed, stdout collected until exit,
+and that stdout is the tool result. Progress exists (&lt;code&gt;tool.progressed&lt;/code&gt;
+events carry each line as it arrives, see &lt;code&gt;runProcessReportingOutput&lt;/code&gt;), but
+the model only ever sees the final stdout, and a tool cannot be talked to
+while it runs.&lt;/p&gt;
+&lt;p&gt;v2 lets a tool declare that it is a &lt;strong&gt;process&lt;/strong&gt; rather than a function:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;it may keep running after answering, streaming information out in
+chunks the runtime understands (a declared event shape);
+&lt;/li&gt;
+&lt;li&gt;its stdin may stay open, the runtime feeding it JSON events shaped as the
+tool declares, so the model (or another tool, or mail) can keep talking to
+it;
+&lt;/li&gt;
+&lt;li&gt;from the model’s perspective such a tool is stateful: starting it returns
+a handle (start it twice and there are two handles, each addressable on
+its own); the tool family gets one typed &lt;code&gt;send&lt;/code&gt; tool taking a handle and
+an event, and one shared system tool (&lt;code&gt;processes&lt;/code&gt;: list, status, tail,
+stop) serves every family, so process management never multiplies the
+session’s tools;
+&lt;/li&gt;
+&lt;li&gt;the tool declares how it wants to be run, in the spirit of a systemd
+unit or a daemontools service directory: the user to run as, an envdir,
+a run directory, timeouts, what to do when it exits.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The runtime change is large (D2 below says how it lands in slices); the
+protocol change is small, and this document is mostly the protocol.&lt;/p&gt;
+&lt;h3 id="1-the-describe-document-v2"&gt;1. The &lt;code&gt;describe&lt;/code&gt; document, v2&lt;/h3&gt;
+&lt;p&gt;A v2 tool adds &lt;code&gt;&amp;quot;protocol&amp;quot;: 2&lt;/code&gt; to its &lt;code&gt;describe&lt;/code&gt; output. Everything v1
+defines keeps its meaning (&lt;code&gt;slug&lt;/code&gt;, &lt;code&gt;description&lt;/code&gt;, &lt;code&gt;args&lt;/code&gt;, &lt;code&gt;empty-result&lt;/code&gt;).
+Three optional objects and one flag (&lt;code&gt;check&lt;/code&gt;, §1.5) are new.&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;protocol&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;2&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;slug&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;log_watcher&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;check&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="kw"&gt;true&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;Follows a log file and reports matching lines&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;args&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;path&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;string&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;backing_type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;string&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;              &lt;span class="dt"&gt;&amp;quot;arity&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;single&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;mode&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;dashdashspace&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;              &lt;span class="dt"&gt;&amp;quot;description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;the file to follow&amp;quot;&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt; &lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;process&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="10"&gt;&lt;a href="#10" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;mode&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;stream&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="11"&gt;&lt;a href="#11" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;output&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;framing&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;jsonl&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;event&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;object&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;                &lt;span class="dt"&gt;&amp;quot;properties&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;line&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;string&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;},&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;level&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;string&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="13"&gt;&lt;a href="#13" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;                &lt;span class="dt"&gt;&amp;quot;required&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;line&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="14"&gt;&lt;a href="#14" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;input&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;  &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;framing&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;jsonl&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;event&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;object&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="15"&gt;&lt;a href="#15" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;                &lt;span class="dt"&gt;&amp;quot;properties&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;op&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;enum&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;pattern&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;pause&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;resume&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="16"&gt;&lt;a href="#16" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;                                &lt;span class="dt"&gt;&amp;quot;value&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;string&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="17"&gt;&lt;a href="#17" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;                &lt;span class="dt"&gt;&amp;quot;required&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;op&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="18"&gt;&lt;a href="#18" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;ready&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;kind&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;line&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;match&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;^ready$&amp;quot;&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="19"&gt;&lt;a href="#19" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="20"&gt;&lt;a href="#20" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;runtime&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="21"&gt;&lt;a href="#21" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;run_as&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;user&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;logs&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;group&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;logs&amp;quot;&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="22"&gt;&lt;a href="#22" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;sandbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;fs&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;read&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;/var/log&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;write&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;state&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;net&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;none&amp;quot;&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="23"&gt;&lt;a href="#23" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;envdir&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;env&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="24"&gt;&lt;a href="#24" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;environment&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;LC_ALL&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;C&amp;quot;&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="25"&gt;&lt;a href="#25" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;rundir&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;state&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="26"&gt;&lt;a href="#26" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;timeout&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;start&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;10&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;stop&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;5&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;idle&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="kw"&gt;null&lt;/span&gt; &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="27"&gt;&lt;a href="#27" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;on_exit&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;report&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="28"&gt;&lt;a href="#28" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;cancel&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;SIGTERM&amp;quot;&lt;/span&gt;&lt;/span&gt;
+&lt;span id="29"&gt;&lt;a href="#29" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="30"&gt;&lt;a href="#30" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h4 id="11-process-what-kind-of-process-this-is"&gt;1.1 &lt;code&gt;process&lt;/code&gt;: what kind of process this is&lt;/h4&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Field&lt;/th&gt;&lt;th&gt;Values&lt;/th&gt;&lt;th&gt;Meaning&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;mode&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;oneshot&lt;/code&gt; (default), &lt;code&gt;stream&lt;/code&gt;, &lt;code&gt;service&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;oneshot&lt;/code&gt; is v1: run to completion, stdout is the result. &lt;code&gt;stream&lt;/code&gt;: the result is the sequence of output events until exit; the call completes when the process exits. &lt;code&gt;service&lt;/code&gt;: the process is expected to outlive the call; starting it returns a handle and the model works with it through the process tool (§3).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;output.framing&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;jsonl&lt;/code&gt; (default for v2), &lt;code&gt;lines&lt;/code&gt;, &lt;code&gt;chunks&lt;/code&gt;&lt;/td&gt;&lt;td&gt;How stdout is cut into events: one JSON object per line, one text line per event, or raw chunks as they arrive (binary-safe, for tools that produce no lines).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;output.event&lt;/code&gt;&lt;/td&gt;&lt;td&gt;a JSON Schema&lt;/td&gt;&lt;td&gt;The shape of one output event under &lt;code&gt;jsonl&lt;/code&gt;. Validated by the runtime; an event that does not match is delivered as an &lt;code&gt;invalid&lt;/code&gt; event carrying the raw line, never dropped silently. Optional under &lt;code&gt;lines&lt;/code&gt;/&lt;code&gt;chunks&lt;/code&gt;.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;input.framing&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;jsonl&lt;/code&gt; (default), &lt;code&gt;lines&lt;/code&gt;&lt;/td&gt;&lt;td&gt;How the runtime writes events to stdin. Absent &lt;code&gt;input&lt;/code&gt;: stdin gets the v1 &lt;code&gt;mode: stdin&lt;/code&gt; arguments and is closed, as today.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;input.event&lt;/code&gt;&lt;/td&gt;&lt;td&gt;a JSON Schema&lt;/td&gt;&lt;td&gt;What the runtime accepts to send to this process; also the schema of the &lt;code&gt;event&lt;/code&gt; argument of the family's typed &lt;code&gt;send&lt;/code&gt; tool (§2.4).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;digest&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;{"per": "round"}&lt;/code&gt;, &lt;code&gt;{"per": "events", "n": N}&lt;/code&gt;, &lt;code&gt;{"per": "seconds", "n": N}&lt;/code&gt; (default &lt;code&gt;round&lt;/code&gt;)&lt;/td&gt;&lt;td&gt;For a &lt;code&gt;service&lt;/code&gt;: how chatty output is folded into mail (§2.3). Declared by the tool, per tool, because its author knows what an event is worth.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;ready&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;{"kind": "line", "match": REGEX}&lt;/code&gt;, &lt;code&gt;{"kind": "exit"}&lt;/code&gt;, &lt;code&gt;{"kind": "immediate"}&lt;/code&gt;&lt;/td&gt;&lt;td&gt;When the process counts as started: a stdout line matching (its first events are still delivered), its exit (a &lt;code&gt;oneshot&lt;/code&gt;), or right away. Bounded by &lt;code&gt;runtime.timeout.start&lt;/code&gt;.&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;stderr is never part of the result. It is captured into the process’s
+bounded output ring (§2.3) and traced, as today.&lt;/p&gt;
+&lt;h4 id="12-runtime-how-to-run-it"&gt;1.2 &lt;code&gt;runtime&lt;/code&gt;: how to run it&lt;/h4&gt;
+&lt;p&gt;Every field is optional; an absent field keeps v1 behaviour (run as the
+agents-exe process, its environment plus the session context variables,
+its working directory, no timeouts beyond the call’s, cancellation kills
+the process group).&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Field&lt;/th&gt;&lt;th&gt;Meaning&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;run_as&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;{"user", "group"}&lt;/code&gt;: run the process as this user and group. The runtime uses one mechanism it was configured with (&lt;code&gt;setpriv&lt;/code&gt;, &lt;code&gt;sudo -u&lt;/code&gt;, &lt;code&gt;runuser&lt;/code&gt;, or a refusal when none is configured); the tool never names the mechanism. Same shape and reasoning as salmon's &lt;code&gt;RunAs&lt;/code&gt;/&lt;code&gt;Mechanism&lt;/code&gt; (&lt;code&gt;multi-user-privilege-separation.md&lt;/code&gt; there).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;sandbox&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;{"fs": {"read": [...], "write": [...]}, "net": "host"\|"none", "tmp": "shared"\|"private"}&lt;/code&gt;: what the process may touch (§1.4). Enforced by one operator-configured mechanism, &lt;code&gt;bwrap&lt;/code&gt; or &lt;code&gt;landlock&lt;/code&gt;; never images or containers.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;envdir&lt;/code&gt;&lt;/td&gt;&lt;td&gt;A subdirectory name under the operator's explicit &lt;code&gt;--envdir-root&lt;/code&gt;, read the daemontools way: one file per variable, file name is the name, file content is the value. Read at start; absent files are absent variables. Lets an operator provision secrets without touching the tool or the checkout. There is no implicit default location: a tool that declares &lt;code&gt;envdir&lt;/code&gt; while no &lt;code&gt;--envdir-root&lt;/code&gt; was given fails to load with a &lt;code&gt;LoadingError&lt;/code&gt; naming the field.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;environment&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Literal variables, added last (they win over &lt;code&gt;envdir&lt;/code&gt;).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;rundir&lt;/code&gt;&lt;/td&gt;&lt;td&gt;A directory, relative to the tool's directory, created if missing and made the process's working directory; where a &lt;code&gt;service&lt;/code&gt; keeps its state.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;timeout&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;start&lt;/code&gt;: seconds to reach &lt;code&gt;ready&lt;/code&gt; or fail the start; &lt;code&gt;stop&lt;/code&gt;: seconds between the cancel signal and &lt;code&gt;SIGKILL&lt;/code&gt;; &lt;code&gt;idle&lt;/code&gt;: seconds without any output or input event after which a &lt;code&gt;service&lt;/code&gt; is stopped (&lt;code&gt;null&lt;/code&gt;: never).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;on_exit&lt;/code&gt;&lt;/td&gt;&lt;td&gt;For a &lt;code&gt;service&lt;/code&gt;: &lt;code&gt;report&lt;/code&gt; (default: the model is told, the handle becomes final), &lt;code&gt;restart&lt;/code&gt; (bring it back, bounded by a small backoff; every restart is an event), &lt;code&gt;fail&lt;/code&gt; (the call that started it fails if it has not completed yet).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;cancel&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The signal sent first on cancel/stop: &lt;code&gt;SIGTERM&lt;/code&gt; (default), &lt;code&gt;SIGINT&lt;/code&gt;, or a JSON event &lt;code&gt;{"send": {...}}&lt;/code&gt; written to stdin before the signal, for tools that prefer a polite request.&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;h4 id="13-commands-and-help-several-actions-in-one-binary-from-539"&gt;1.3 &lt;code&gt;commands&lt;/code&gt; and &lt;code&gt;help&lt;/code&gt;: several actions in one binary (from #539)&lt;/h4&gt;
+&lt;p&gt;Out of scope of the process story but part of the same &lt;code&gt;describe&lt;/code&gt; bump:
+&lt;code&gt;&amp;quot;commands&amp;quot;: [ {&amp;quot;name&amp;quot;, &amp;quot;description&amp;quot;, &amp;quot;args&amp;quot;} ]&lt;/code&gt; lets one binary expose
+several tools (&lt;code&gt;slug.name&lt;/code&gt; each), and &lt;code&gt;help&lt;/code&gt; (&lt;code&gt;./tool help [command]&lt;/code&gt;)
+gives the runtime a longer text to disclose on demand rather than in every
+system prompt. A &lt;code&gt;setup&lt;/code&gt; step (&lt;code&gt;./tool setup&lt;/code&gt;) that provisions the tool’s
+own dependencies is left for a later spec: it is an operator concern, not a
+runtime one.&lt;/p&gt;
+&lt;h4 id="14-sandbox-what-the-process-may-touch-without-images"&gt;1.4 &lt;code&gt;sandbox&lt;/code&gt;: what the process may touch, without images&lt;/h4&gt;
+&lt;p&gt;A small declaration, no more: &lt;code&gt;fs.read&lt;/code&gt; and &lt;code&gt;fs.write&lt;/code&gt; are lists of paths
+(absolute, or relative to the tool’s directory), &lt;code&gt;net&lt;/code&gt; is &lt;code&gt;host&lt;/code&gt; (default)
+or &lt;code&gt;none&lt;/code&gt;, &lt;code&gt;tmp&lt;/code&gt; is &lt;code&gt;shared&lt;/code&gt; (default) or &lt;code&gt;private&lt;/code&gt;. Everything not listed
+is not granted; the tool’s own directory is always readable so it can run.
+Like &lt;code&gt;run_as&lt;/code&gt;, the tool names what it needs and the &lt;strong&gt;operator&lt;/strong&gt; names how
+it is enforced (&lt;code&gt;--sandbox bwrap&lt;/code&gt;, &lt;code&gt;--sandbox landlock&lt;/code&gt; or &lt;code&gt;--sandbox auto&lt;/code&gt;);
+a tool that declares &lt;code&gt;sandbox&lt;/code&gt; with no mechanism configured fails to load
+with a &lt;code&gt;LoadingError&lt;/code&gt;, it never runs unconfined by silence. There is &lt;strong&gt;no
+silent default&lt;/strong&gt;: the two mechanisms give different guarantees (bubblewrap
+hides paths and really cuts the network, Landlock denies access and covers
+TCP only), so picking one for the operator could quietly weaken what a tool
+asked for.&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;--sandbox auto&lt;/code&gt; is the explicit opt-in to “per tool, the strongest
+mechanism that can honour every declared field”: bubblewrap first, then
+Landlock, and a tool declaring &lt;code&gt;net: none&lt;/code&gt; or &lt;code&gt;tmp: private&lt;/code&gt; skips Landlock
+rather than being weakened, failing to load when no mechanism qualifies.
+It is the ordered-backends idea of §1.5 applied to mechanisms, and
+&lt;code&gt;agents-exe check --probe&lt;/code&gt; prints what &lt;code&gt;auto&lt;/code&gt; resolved to for each tool. &lt;code&gt;sandbox&lt;/code&gt; composes with
+&lt;code&gt;run_as&lt;/code&gt; (the sandbox is set up for the process that runs as that user).&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;bubblewrap&lt;/strong&gt; builds a mount namespace: only the declared paths (plus the
+minimum to exec the tool) exist, &lt;code&gt;net: none&lt;/code&gt; is a network namespace,
+&lt;code&gt;tmp: private&lt;/code&gt; a fresh tmpfs, and the process dies with agents-exe. It
+needs unprivileged user namespaces, which many distributions restrict: a
+plain &lt;code&gt;bwrap&lt;/code&gt; on the Ubuntu machine this was written on failed with
+&lt;code&gt;setting up uid map: Permission denied&lt;/code&gt; (&lt;code&gt;kernel.apparmor_restrict_unprivileged_userns=1&lt;/code&gt;;
+not conclusive, that shell may itself have been inside another sandbox).
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Landlock&lt;/strong&gt; is a kernel security module needing no privilege and no
+namespaces: the runtime applies a ruleset in the child before &lt;code&gt;exec&lt;/code&gt;.
+Paths outside the ruleset are denied (not hidden), and on kernels with
+network rules it can deny TCP bind and connect, which is not the same as
+no network (to verify in the slice, then state precisely in &lt;code&gt;check&lt;/code&gt;).
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;code&gt;agents-exe check&lt;/code&gt; probes the configured mechanism for real, the way it would
+run a tool, and reports what it can and cannot enforce (for example
+“&lt;code&gt;net: none&lt;/code&gt; best effort under landlock”). Where a mechanism cannot honour a
+declared field the tool fails to load naming the field; it is never silently
+weakened.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Non-goal: image or container isolation.&lt;/strong&gt; agents-exe has no notion of an
+image, and this spec adds none. A tool that wants podman or docker calls it
+from its own script, like any other command, and agents-exe sees an ordinary
+process. (Reviewed against &lt;code&gt;juhp/encapsule&lt;/code&gt;, an interactive podman
+dev-shell: useful vocabulary for named capabilities, the wrong shape for a
+non-interactive tool call.)&lt;/p&gt;
+&lt;p&gt;These are declarations, not privileges: an agent’s configuration (and the
+operator’s &lt;code&gt;--set&lt;/code&gt;/&lt;code&gt;--pin&lt;/code&gt; parameters, &lt;code&gt;tool-partial-application.md&lt;/code&gt;) may
+refuse or override them. &lt;code&gt;run_as&lt;/code&gt; in particular is only honoured when the
+operator configured a mechanism; otherwise the tool loads with a
+&lt;code&gt;LoadingError&lt;/code&gt; naming the field, the same way a &lt;code&gt;with&lt;/code&gt; binding that names
+an undeclared parameter does today.&lt;/p&gt;
+&lt;h4 id="15-health-a-real-probe-and-ordered-backends-per-capability"&gt;1.5 Health: a real probe, and ordered backends per capability&lt;/h4&gt;
+&lt;p&gt;The pattern comes from Agent-Reach (a “capability layer” that selects and
+health-checks the upstream tools an agent uses, MIT): the same capability
+can be served by several tools, and whether one &lt;em&gt;works here, now&lt;/em&gt; is found
+by running a cheap command, never by looking the binary up on &lt;code&gt;PATH&lt;/code&gt; (a
+stale shim passes &lt;code&gt;which&lt;/code&gt; and cannot execute).&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;&lt;code&gt;check&lt;/code&gt;, a third verb.&lt;/strong&gt; A v2 tool may say &lt;code&gt;&amp;quot;check&amp;quot;: true&lt;/code&gt; in &lt;code&gt;describe&lt;/code&gt;
+and then answers &lt;code&gt;./tool check&lt;/code&gt;: a cheap, &lt;strong&gt;read-only&lt;/strong&gt; self-test (no
+writes, no login, no remote mutation, no long-lived process; a &lt;code&gt;service&lt;/code&gt;
+is not started) that prints one JSON document and exits 0 when the tool is
+usable:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;ok&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="kw"&gt;false&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;detail&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;jina reader answered 429&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;fix&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;set JINA_API_KEY in the envdir&amp;quot;&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;detail&lt;/code&gt; and &lt;code&gt;fix&lt;/code&gt; are for the operator, &lt;code&gt;fix&lt;/code&gt; is a prescription. The
+runtime runs &lt;code&gt;check&lt;/code&gt; exactly as it would run the tool (same &lt;code&gt;runtime&lt;/code&gt;:
+&lt;code&gt;run_as&lt;/code&gt;, &lt;code&gt;sandbox&lt;/code&gt;, &lt;code&gt;envdir&lt;/code&gt;, timeouts), so a probe that passes proves the
+sandbox and the user work too. A tool that cannot be checked without side
+effects omits &lt;code&gt;check&lt;/code&gt;; it is then &lt;code&gt;unverified&lt;/code&gt; (it loaded and &lt;code&gt;describe&lt;/code&gt;
+answered, nothing more) and is never reported &lt;code&gt;ok&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;A capability is an ordered list of backends.&lt;/strong&gt; The model sees one tool,
+&lt;code&gt;web_read&lt;/code&gt;; the agent configuration says which tool binaries can serve it,
+preferred first:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;capability&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;web_read&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;backends&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;tools/web/read-jina&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;tools/web/read-curl&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;All backends of a capability must declare the same &lt;code&gt;args&lt;/code&gt; (checked at load,
+a &lt;code&gt;LoadingError&lt;/code&gt; otherwise) so the model’s schema does not depend on which
+one is active. Switching backends is reordering the list, or an operator
+override &lt;code&gt;--backend web_read=read-curl&lt;/code&gt; that moves the named backend first
+(an unknown name is ignored, so a stale override never hides a working
+backend). The &lt;strong&gt;active backend&lt;/strong&gt; is the first one whose probe is &lt;code&gt;ok&lt;/code&gt;,
+else the first &lt;code&gt;unverified&lt;/code&gt; one, else none (the capability fails to load
+when required, is omitted with a warning otherwise). Every tool result
+carries the backend that served it, so the model can say what it used.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;A failed call does not silently retry the next backend.&lt;/strong&gt; The model sees
+the failure and which backend produced it; automatic fallback is left out of
+the first slice (open question).&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;&lt;code&gt;agents-exe check --probe [--json]&lt;/code&gt;&lt;/strong&gt; runs every probe and reports, per
+capability, the active backend and every candidate:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;capability&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;web_read&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;active&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;read-jina&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;backends&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;read-jina&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;status&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;ok&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;ms&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;310&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;                &lt;span class="fu"&gt;{&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;read-curl&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;status&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;unverified&amp;quot;&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt; &lt;span class="ot"&gt;]&lt;/span&gt; &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;status&lt;/code&gt; is &lt;code&gt;ok&lt;/code&gt;, &lt;code&gt;failed&lt;/code&gt; (with &lt;code&gt;detail&lt;/code&gt; and &lt;code&gt;fix&lt;/code&gt;), &lt;code&gt;unverified&lt;/code&gt; or
+&lt;code&gt;skipped&lt;/code&gt; (a sandbox mechanism that cannot enforce a declared field, §1.4).
+Plain &lt;code&gt;check&lt;/code&gt; keeps its meaning (configuration loads: exit 0 / 1); with
+&lt;code&gt;--probe&lt;/code&gt; it exits 2 when the configuration loads but a required capability
+has no active backend. Do not confuse it with &lt;code&gt;ready&lt;/code&gt; (§1.1): &lt;code&gt;ready&lt;/code&gt; says a
+process that was started is up, &lt;code&gt;check&lt;/code&gt; says a tool could work before
+anything is started.&lt;/p&gt;
+&lt;h3 id="2-the-runtime-side"&gt;2. The runtime side&lt;/h3&gt;
+&lt;h4 id="21-a-oneshot-v2-tool"&gt;2.1 A &lt;code&gt;oneshot&lt;/code&gt; v2 tool&lt;/h4&gt;
+&lt;p&gt;Identical to v1 except that &lt;code&gt;output.framing&lt;/code&gt;/&lt;code&gt;output.event&lt;/code&gt; apply: the
+result delivered to the model is the events, rendered as a JSON array (or
+the joined lines), and each event is also a &lt;code&gt;tool.progressed&lt;/code&gt; payload as it
+arrives. Nothing else changes; this is the cheap slice that makes the new
+&lt;code&gt;describe&lt;/code&gt; real.&lt;/p&gt;
+&lt;h4 id="22-a-stream-tool"&gt;2.2 A &lt;code&gt;stream&lt;/code&gt; tool&lt;/h4&gt;
+&lt;p&gt;The call runs as an asynchronous call (&lt;code&gt;RunAsync&lt;/code&gt;, &lt;code&gt;async-tool-calls.md&lt;/code&gt;):
+the model gets the &lt;code&gt;running&lt;/code&gt; placeholder, events arrive as progress, the
+call completes when the process exits, and the result is the full event
+sequence (bounded: the last N events, N from the agent’s config, the count
+of elided ones stated). &lt;code&gt;wait&lt;/code&gt;, &lt;code&gt;get-tool-call-status&lt;/code&gt; and
+&lt;code&gt;cancel-tool-call&lt;/code&gt; work unchanged; &lt;code&gt;get-tool-call-status&lt;/code&gt; shows the latest
+events, which is the “tail” the model needs mid-run.&lt;/p&gt;
+&lt;h4 id="23-a-service-tool-the-process-handle"&gt;2.3 A &lt;code&gt;service&lt;/code&gt; tool: the process handle&lt;/h4&gt;
+&lt;p&gt;Starting a &lt;code&gt;service&lt;/code&gt; tool is a call that completes at &lt;code&gt;ready&lt;/code&gt;: its result
+is a &lt;strong&gt;process handle&lt;/strong&gt; &lt;code&gt;{&amp;quot;process&amp;quot;: &amp;quot;&amp;lt;id&amp;gt;&amp;quot;, &amp;quot;tool&amp;quot;: &amp;quot;log_watcher&amp;quot;, &amp;quot;status&amp;quot;: &amp;quot;running&amp;quot;, &amp;quot;since&amp;quot;: ...}&lt;/code&gt;, an entity in the OS world like a tool
+call is today (&lt;code&gt;OS.Conversation.ToolCalls&lt;/code&gt;), owned by the session. Each
+start is a new process with its own handle: an agent that starts
+&lt;code&gt;log_watcher&lt;/code&gt; on two files holds two handles and talks to either by its
+handle; nothing is deduplicated or shared between starts. A handle has:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;the declared &lt;code&gt;input.event&lt;/code&gt; schema (what &lt;code&gt;send&lt;/code&gt; accepts);
+&lt;/li&gt;
+&lt;li&gt;a bounded ring of its output events and of its stderr lines (same shape
+as a node’s output ring in salmon’s &lt;code&gt;serve&lt;/code&gt;: small, per process, what an
+operator wants when it fails);
+&lt;/li&gt;
+&lt;li&gt;its lifecycle: &lt;code&gt;starting&lt;/code&gt;, &lt;code&gt;running&lt;/code&gt;, &lt;code&gt;stopping&lt;/code&gt;, &lt;code&gt;exited&lt;/code&gt; (code),
+&lt;code&gt;failed&lt;/code&gt; (why), &lt;code&gt;restarting&lt;/code&gt; (n);
+&lt;/li&gt;
+&lt;li&gt;the &lt;code&gt;runtime&lt;/code&gt; it was started with, resolved (which user, which envdir).
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A process belongs to the session that started it. It survives across the
+session’s runs (it is exactly the “background call” case, &lt;code&gt;evictIdle&lt;/code&gt; and
+&lt;code&gt;hasRunningCalls&lt;/code&gt; already keep such a session resident) but &lt;strong&gt;not&lt;/strong&gt; a
+restart of agents-exe: &lt;code&gt;recoverOnStartup&lt;/code&gt; marks it &lt;code&gt;failed: lost on restart&lt;/code&gt;, as it does for orphaned async calls, and the model learns it
+from the process tool. Durable services are a node of their own in
+whatever supervises agents-exe, not this spec (D3).&lt;/p&gt;
+&lt;p&gt;Output events of a running service are delivered to the model as &lt;strong&gt;mail&lt;/strong&gt;
+(&lt;code&gt;session-mailbox.md&lt;/code&gt;): each event, or a digest of them as the tool’s
+&lt;code&gt;digest&lt;/code&gt; declares (default: per round) when they are chatty, is an envelope
+from &lt;code&gt;process:&amp;lt;id&amp;gt;&lt;/code&gt;, so the model’s turn
+is woken the same way any other asynchronous news wakes it, with the same
+&lt;code&gt;wakeOn&lt;/code&gt; controls. This is the &lt;code&gt;notify&lt;/code&gt; progress level that spec deferred
+(D9 there), given a producer.&lt;/p&gt;
+&lt;h4 id="24-process-tools-one-typed-send-per-family-one-shared-processes"&gt;2.4 Process tools: one typed &lt;code&gt;send&lt;/code&gt; per family, one shared &lt;code&gt;processes&lt;/code&gt;&lt;/h4&gt;
+&lt;p&gt;Two layers, split by what varies:&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Per family, one typed tool.&lt;/strong&gt; For each &lt;code&gt;service&lt;/code&gt; tool &lt;code&gt;T&lt;/code&gt; in the toolbox
+the runtime generates, at load, one companion tool &lt;code&gt;T.send&lt;/code&gt; (&lt;code&gt;slug.name&lt;/code&gt;,
+the same naming as &lt;code&gt;commands&lt;/code&gt;, §1.3). Its arguments are &lt;code&gt;process&lt;/code&gt; (the
+handle) and &lt;code&gt;event&lt;/code&gt;, whose schema is the declared &lt;code&gt;input.event&lt;/code&gt; verbatim,
+so the model gets a typed function per family instead of an untyped
+argument, and a family with two running processes is addressed by handle:
+&lt;code&gt;log_watcher.send {process: p1, event: ...}&lt;/code&gt; and &lt;code&gt;{process: p2, ...}&lt;/code&gt;. The
+answer is the events the process produced in reply within a short window,
+or &lt;code&gt;accepted&lt;/code&gt;. The companion exists from load, not from start, so the tool
+list (and the tool cache) does not change while processes come and go.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Shared across families, one tool.&lt;/strong&gt; Everything that does not depend on a
+family’s schema is one system capability with sub-commands (the shape of
+&lt;code&gt;get-tool-call-status&lt;/code&gt; and friends), so a session holding ten service
+families still has one management tool:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Sub-command&lt;/th&gt;&lt;th&gt;Arguments&lt;/th&gt;&lt;th&gt;Answer&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;list&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td&gt;every process of the session (and, for a root agent, of its sub-sessions), with tool, status and age&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;status&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;process&lt;/code&gt;&lt;/td&gt;&lt;td&gt;the handle with its counters, last events, last stderr lines, and the accepted input schema&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tail&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;process&lt;/code&gt;, &lt;code&gt;n&lt;/code&gt;&lt;/td&gt;&lt;td&gt;the last &lt;code&gt;n&lt;/code&gt; output events, oldest first&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;stop&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;process&lt;/code&gt;, &lt;code&gt;force?&lt;/code&gt;&lt;/td&gt;&lt;td&gt;the declared cancel, then &lt;code&gt;SIGKILL&lt;/code&gt; after &lt;code&gt;timeout.stop&lt;/code&gt;; the exit becomes the answer&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;The model discovers which processes exist through &lt;code&gt;list&lt;/code&gt; and &lt;code&gt;status&lt;/code&gt;; a
+tool’s &lt;code&gt;description&lt;/code&gt; should say it is a service and name the events it
+accepts, in a sentence.&lt;/p&gt;
+&lt;h3 id="3-what-the-model-sees-end-to-end"&gt;3. What the model sees, end to end&lt;/h3&gt;
+&lt;ol&gt;
+&lt;li&gt;The tool list holds &lt;code&gt;log_watcher&lt;/code&gt; (start it), &lt;code&gt;log_watcher.send&lt;/code&gt;
+(talk to one of its processes) and &lt;code&gt;processes&lt;/code&gt; (list, status, tail,
+stop, for anything started). Starting is an ordinary tool call with the
+declared &lt;code&gt;args&lt;/code&gt;, and may be done twice: each start returns its own handle.
+&lt;/li&gt;
+&lt;li&gt;The result is the handle. The model continues; when the watcher reports
+a line, mail arrives: &lt;code&gt;from process:p1 {&amp;quot;line&amp;quot;: &amp;quot;...&amp;quot;, &amp;quot;level&amp;quot;: &amp;quot;error&amp;quot;}&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;The model calls &lt;code&gt;log_watcher.send {process: p1, event: {op: &amp;quot;pattern&amp;quot;, value: &amp;quot;ERROR&amp;quot;}}&lt;/code&gt;; the answer is &lt;code&gt;accepted&lt;/code&gt; or the watcher’s reply.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;processes stop p1&lt;/code&gt; when done; or the session ends and every process of
+it is stopped with its declared cancel (a session delete stops them the
+way it cancels runs).
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3 id="decisions-proposed"&gt;Decisions (proposed)&lt;/h3&gt;
+&lt;p&gt;D1. &lt;strong&gt;The protocol number, not new commands.&lt;/strong&gt; &lt;code&gt;&amp;quot;protocol&amp;quot;: 2&lt;/code&gt; in
+&lt;code&gt;describe&lt;/code&gt; is the whole opt-in; &lt;code&gt;run&lt;/code&gt; keeps its name and argument passing,
+so a v2 tool can be tried as a v1 tool by ignoring the new fields.&lt;/p&gt;
+&lt;p&gt;D2. &lt;strong&gt;Independent features, each shippable&lt;/strong&gt; (the feature &lt;code&gt;9914ff73&lt;/code&gt; is
+split as needed). (1) &lt;code&gt;describe&lt;/code&gt; v2 parsing, &lt;code&gt;oneshot&lt;/code&gt; with framing and
+validation; (2) &lt;code&gt;runtime&lt;/code&gt; for &lt;code&gt;oneshot&lt;/code&gt; tools (&lt;code&gt;envdir&lt;/code&gt; with
+&lt;code&gt;--envdir-root&lt;/code&gt;, &lt;code&gt;environment&lt;/code&gt;, &lt;code&gt;rundir&lt;/code&gt;, &lt;code&gt;timeout.stop&lt;/code&gt;, &lt;code&gt;cancel&lt;/code&gt;) and
+&lt;code&gt;run_as&lt;/code&gt; and &lt;code&gt;sandbox&lt;/code&gt; behind operator-configured mechanisms (&lt;code&gt;bwrap&lt;/code&gt;,
+&lt;code&gt;landlock&lt;/code&gt;), which ship ahead of the
+process modes because a low-privilege &lt;code&gt;oneshot&lt;/code&gt; tool is valuable alone;
+(3) &lt;code&gt;stream&lt;/code&gt; on the existing async engine; (4) &lt;code&gt;service&lt;/code&gt;: the handle
+entity, mail delivery and &lt;code&gt;digest&lt;/code&gt;, the typed &lt;code&gt;T.send&lt;/code&gt; companions, the
+shared &lt;code&gt;processes&lt;/code&gt; capability, and the &lt;code&gt;runtime&lt;/code&gt; fields only a service
+uses (&lt;code&gt;timeout.idle&lt;/code&gt;, &lt;code&gt;on_exit&lt;/code&gt;). #539’s &lt;code&gt;commands&lt;/code&gt;/&lt;code&gt;help&lt;/code&gt; are a fifth,
+independent slice, and (§1.5) the &lt;code&gt;check&lt;/code&gt; verb with &lt;code&gt;check --probe --json&lt;/code&gt;
+is a sixth, small one that lands with (1); capabilities with ordered
+backends and the &lt;code&gt;--backend&lt;/code&gt; override are a seventh, depending on it.&lt;/p&gt;
+&lt;p&gt;D3. &lt;strong&gt;Not durable across an agents-exe restart.&lt;/strong&gt; A service is lost with the
+process that started it and reported as such; supervising long-lived
+services belongs to systemd/salmon, which can restart agents-exe itself.
+Revisit only with a concrete need (&lt;code&gt;os-as-standalone-server.md&lt;/code&gt; G11 says
+the same of watches and run handles).&lt;/p&gt;
+&lt;p&gt;D4. &lt;strong&gt;Events, not bytes, at the model boundary.&lt;/strong&gt; The model never sees a
+raw stream; it sees validated events (or &lt;code&gt;invalid&lt;/code&gt; ones with the raw
+text). &lt;code&gt;chunks&lt;/code&gt; framing exists for tools, not for the model: the runtime
+delivers chunks to progress consumers and to the ring only.&lt;/p&gt;
+&lt;p&gt;D5. &lt;strong&gt;Mail, not polling, for a service’s output.&lt;/strong&gt; The existing mailbox is
+how asynchronous news reaches a session; a second channel would duplicate
+its wake rules. Chatty services get digests, bounded by the ring, and the
+digest policy is the tool’s own declaration.&lt;/p&gt;
+&lt;p&gt;D6. &lt;strong&gt;A typed &lt;code&gt;send&lt;/code&gt; per family, a shared &lt;code&gt;processes&lt;/code&gt; for the rest.&lt;/strong&gt; One
+handle per start, several handles per family; the family’s input schema
+lives in one generated &lt;code&gt;T.send&lt;/code&gt; tool present from load (an agent
+configuration may omit it, saving its tokens), while &lt;code&gt;list&lt;/code&gt;,
+&lt;code&gt;status&lt;/code&gt;, &lt;code&gt;tail&lt;/code&gt; and &lt;code&gt;stop&lt;/code&gt; are shared so the session’s tool list does not
+grow with the number of families’ management surfaces.&lt;/p&gt;
+&lt;p&gt;D7. &lt;strong&gt;Explicit envdir root.&lt;/strong&gt; Secrets are provisioned where the operator
+says (&lt;code&gt;--envdir-root&lt;/code&gt;), never found by convention next to the tool.&lt;/p&gt;
+&lt;p&gt;D8. &lt;strong&gt;Process isolation, not image isolation.&lt;/strong&gt; &lt;code&gt;sandbox&lt;/code&gt; is enforced by
+bubblewrap or Landlock, chosen by the operator (explicitly, or with the
+opt-in &lt;code&gt;--sandbox auto&lt;/code&gt;, never by a silent default); agents-exe never builds,
+pulls or names an image. It composes with &lt;code&gt;run_as&lt;/code&gt;, refuses rather than
+weakens, and is probed by &lt;code&gt;check&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;D9. &lt;strong&gt;Probe, don’t look up.&lt;/strong&gt; Whether a tool works is found by running it
+(&lt;code&gt;check&lt;/code&gt;, under its real &lt;code&gt;runtime&lt;/code&gt;), read-only, reported as &lt;code&gt;ok&lt;/code&gt;, &lt;code&gt;failed&lt;/code&gt;,
+&lt;code&gt;unverified&lt;/code&gt; or &lt;code&gt;skipped&lt;/code&gt;; a tool that cannot be probed safely is
+&lt;code&gt;unverified&lt;/code&gt;, never &lt;code&gt;ok&lt;/code&gt;. Backends are an ordered list per capability, the
+first &lt;code&gt;ok&lt;/code&gt; one is active, and the tool result names the backend used.
+Pattern from Agent-Reach (§1.5).&lt;/p&gt;
+&lt;h3 id="resolved-in-review-2026-09-25-pr-574-comments"&gt;Resolved in review (2026-09-25, PR #574 comments)&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;send&lt;/code&gt;: one tool per process family with a handle and a typed event; a
+second start of the same tool gives a second handle, addressable on its
+own; process management (&lt;code&gt;list&lt;/code&gt;, &lt;code&gt;status&lt;/code&gt;, &lt;code&gt;tail&lt;/code&gt;, &lt;code&gt;stop&lt;/code&gt;) is shared so it
+does not pollute the session’s tools (§2.4, D6).
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;run_as&lt;/code&gt; for &lt;code&gt;oneshot&lt;/code&gt;: yes, split into its own feature ahead of the
+process modes (D2).
+&lt;/li&gt;
+&lt;li&gt;Digest policy: per tool, declared in &lt;code&gt;process.digest&lt;/code&gt; (§1.1, §2.3).
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;envdir&lt;/code&gt;: explicit, an operator &lt;code&gt;--envdir-root&lt;/code&gt; with a per-tool
+subdirectory, no implicit location (§1.2, D7).
+&lt;/li&gt;
+&lt;li&gt;The generated &lt;code&gt;T.send&lt;/code&gt; companion is optional per agent: an agent
+configuration may omit it for a service the model may start but never talk
+to, which saves the tool’s tokens (owner’s answer, 2026-09-25; D6).
+&lt;/li&gt;
+&lt;li&gt;Isolation backend: bubblewrap and Landlock, no images; whoever wants podman
+calls it from the tool’s own script (§1.4, D8).
+&lt;/li&gt;
+&lt;li&gt;Sandbox mechanism selection: no silent default; the operator picks, or opts
+in to &lt;code&gt;--sandbox auto&lt;/code&gt; (strongest mechanism that honours every declared
+field), shown by &lt;code&gt;check --probe&lt;/code&gt; (owner, 2026-09-25; §1.4, D8).
+&lt;/li&gt;
+&lt;li&gt;Health: adopt Agent-Reach’s doctor pattern (ordered backends, a real probe,
+&lt;code&gt;--json&lt;/code&gt;), but not Agent-Reach itself, which is deferred as heavy
+(owner, 2026-09-25; §1.5, D9).
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="open-questions"&gt;Open questions&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Where is a capability’s backend list declared: in the agent configuration
+(as sketched), or in a manifest next to the tool directories so several
+agents share it?
+&lt;/li&gt;
+&lt;li&gt;When are probes run and how long are they cached: once at load, lazily on
+the first call, or with a TTL? A probe that costs a network call should
+not run on every session start.
+&lt;/li&gt;
+&lt;li&gt;Automatic fallback to the next backend on a failed call: worth it for
+transient failures if the tool declares which exit codes mean “try
+another” (&lt;code&gt;fallback_on&lt;/code&gt;), or is the model seeing the failure enough?
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-25, from issue &amp;#35;539 and a robot-chat conversation</summary></entry></feed>

@@ -1,0 +1,167 @@
+# See it work: four agents on one screen
+
+One prompt, "Give me the tour.", goes to a front-desk agent. It asks three helper agents in the same turn; each helper runs a command-line tool of its own and reports back; the desk writes the answer. While that happens, `agents-exe spectate` shows the four sessions and their tool calls live.
+
+Everything on this page was recorded on 2026-10-03 from a build of `main`, on a laptop, against a local model served by [Ollama](https://ollama.com/ ) (`gemma4:e4b`). No hosted API and no real API key are involved, so you can run the same thing; the agents are in [`demo-agents/repo-tour/`](https://github.com/lucasdicioccio/agents-exe/tree/main/demo-agents/repo-tour ).
+
+## The screen, mid-run
+
+The two frames below are unedited text captures of the `spectate` terminal (100 columns by 24 rows), taken during one run.
+
+1 minute 46 seconds in: the historian has returned, the code counter and the librarian are still working. Each helper is a session of its own, listed under the session that called it.
+
+```
+┌────────────────── agents ─────────────────┐┌──────────── text: librarian (following) ────────────┐
+│* repo-tour-desk  90669359  running 1m46s  ││                                                     │
+│  - historian  326ce547  returned 18s      ││                                                     │
+│  * code-counter  401bf8a5  running 1m07s  ││                                                     │
+│  * librarian  fae942c5  running 1m07s     ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘│                                                     │
+┌──────────────── tool calls ───────────────┐│                                                     │
+│* io_prompt_agent_code-counter  repo-tour-d││                                                     │
+│* io_prompt_agent_librarian  repo-tour-desk││                                                     │
+│- io_prompt_agent_historian  repo-tour-desk││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ http://localhost:8765 | 3/4 sessions running | 2 tool calls | 27 events | up/down select, f follow,
+```
+
+3 minutes 49 seconds in: the three helpers have returned and the desk is writing its answer, which streams into the right-hand pane.
+
+```
+┌────────────────── agents ─────────────────┐┌────────── text: repo-tour-desk (following) ─────────┐
+│* repo-tour-desk  90669359  running 3m49s  ││housing 66,172 lines.                                │
+│  - historian  326ce547  returned 2m21s    ││*   **`test`**: Dedicated testing area with 55 files │
+│  - code-counter  401bf8a5  returned 1m55s ││and 23,934 lines.                                    │
+│  - librarian  fae942c5  returned 51s      ││*   **`examples`**: Includes 12 files and 5,188 lines│
+│                                           ││for demonstration purposes.                          │
+│                                           ││*   **`tui`**: Contains 29 files, totaling 8,234     │
+│                                           ││lines.                                               │
+│                                           ││*   Other areas include `agq` (6 files, 2,247 lines),│
+│                                           ││`app`, `bench`, `postgres`, and `src`.               │
+│                                           ││                                                     │
+│                                           ││### 📜 Git History (Historian)
+│                                           ││The repository has a robust development history      │
+└───────────────────────────────────────────┘│spanning **722 commits**. Recent activity shows      │
+┌──────────────── tool calls ───────────────┐│significant focus on improving stability and         │
+│- io_prompt_agent_librarian  repo-tour-desk││capability:                                          │
+│- io_prompt_agent_code-counter  repo-tour-d││*   **Key Focus:** Coordinating runs across servers  │
+│- io_prompt_agent_historian  repo-tour-desk││on Postgres with a lease (2026-10-03) and adding a   │
+│                                           ││read-only live dashboard called 'spectate'           │
+│                                           ││(2026-10-03).                                        │
+│                                           ││*   **Recent Upgrades:** The codebase has been       │
+│                                           ││upgraded to                                          │
+│───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ http://localhost:8765 | 1/4 sessions running | 0 tool calls | 363 events | up/down select, f follow
+```
+
+(The border is broken on the line that holds an emoji, a wide character the pane does not account for. It is left as captured.)
+
+    **Placeholder, not recorded yet:** an animated recording (asciinema or GIF) of this run, and a screenshot of the interactive TUI (`agents-exe tui`), would show this better than still text frames. Neither exists yet, and nothing on this page stands in for them.
+
+
+## The agents
+
+Four JSON files and three shell scripts:
+
+```html
+<table>
+<tr><th>Agent</th><th>File</th><th>Its tool</th></tr>
+<tr><td><code>repo-tour-desk</code></td><td><code>desk.json</code></td><td>none of its own; three helpers under <code>extraAgents</code></td></tr>
+<tr><td><code>code-counter</code></td><td><code>code/agent.json</code></td><td><code>count_haskell</code>: tracked <code>.hs</code> files and lines, per directory</td></tr>
+<tr><td><code>historian</code></td><td><code>history/agent.json</code></td><td><code>recent_commits</code>: commit count and the latest non-merge commits</td></tr>
+<tr><td><code>librarian</code></td><td><code>docs/agent.json</code></td><td><code>list_docs</code>: the pages under <code>documentation/</code> with their titles</td></tr>
+</table>
+```
+
+A helper reaches the model as a function (`io_prompt_agent_<slug>` in the frames above), the same way a tool does; see [tools](/docs-tools.html ). Each tool is an executable that answers `describe` with its interface and `run` with its output; see [executable tools](/docs-binary-tool.html ).
+
+## Run it yourself
+
+You need `agents-exe` built from the repository ([getting started](/getting-started.html )), Ollama running locally, and the model (`ollama pull gemma4:e4b`). Another model that your Ollama serves and that supports tool calls may work if you change `modelName` in the four JSON files; only `gemma4:e4b` was tried for this page. Run from the root of the repository: the tools describe the repository in the current directory, and the helpers' tool directories are given relative to it.
+
+```sh
+# one shot: the answer on stdout
+agents-exe --api-keys demo-agents/repo-tour/keys.json \
+  --agent-file demo-agents/repo-tour/desk.json \
+  run --prompt "Give me the tour."
+```
+
+`keys.json` holds a dummy key: Ollama does not check it, and agents-exe looks one up for each agent's `apiKeyId`.
+
+To watch it as above, use three terminals:
+
+```sh
+# 1. a server, with sessions in a SQLite file
+agents-exe --api-keys demo-agents/repo-tour/keys.json \
+  --agent-file demo-agents/repo-tour/desk.json \
+  serve --db /tmp/repo-tour.db --port 8765 --stream-tokens
+
+# 2. the read-only dashboard
+agents-exe spectate --attach http://localhost:8765
+
+# 3. start a session
+curl -s -X POST localhost:8765/v1/sessions \
+  -d '{"agent": "repo-tour-desk", "prompt": "Give me the tour."}'
+```
+
+The server has no authentication unless you give it `--auth-tokens`, and binds to `127.0.0.1` by default; see [agents-server](/docs-agents-server.html ) before exposing it.
+
+## What the recorded run did
+
+- The desk's first turn asked for the three helpers in one go; the server created three child sessions, each linked to the desk's session as its parent.
+
+- The run took 4 minutes 15 seconds from the session's creation to its last update. That is the pace of an 8-billion-parameter model on a laptop, with the three helpers sharing one Ollama. It says nothing about agents-exe with a hosted model, which was not measured.
+
+- After the server was stopped and started again on the same database file, `GET /v1/sessions` still listed the four sessions with their parent links.
+
+
+The desk's answer, verbatim:
+
+```
+Welcome to the tour of the repository! I've gathered information from our specialists on the codebase, history, and documentation to give you a comprehensive overview.
+
+### 💻 Codebase Structure (Code Counter)
+The repository is quite large and complex, containing a total of **290 Haskell files** and approximately **109,118 lines of code**. The code is distributed across several specialized sections:
+*   **`src`**: The core logic hub with 184 files, housing 66,172 lines.
+*   **`test`**: Dedicated testing area with 55 files and 23,934 lines.
+*   **`examples`**: Includes 12 files and 5,188 lines for demonstration purposes.
+*   **`tui`**: Contains 29 files, totaling 8,234 lines.
+*   Other areas include `agq` (6 files, 2,247 lines), `app`, `bench`, `postgres`, and `src`.
+
+### 📜 Git History (Historian)
+The repository has a robust development history spanning **722 commits**. Recent activity shows significant focus on improving stability and capability:
+*   **Key Focus:** Coordinating runs across servers on Postgres with a lease (2026-10-03) and adding a read-only live dashboard called 'spectate' (2026-10-03).
+*   **Recent Upgrades:** The codebase has been upgraded to GHC 9.10.3 and the 'topicgraph' module was updated (2026-09-28).
+*   **Pattern:** There is consistent activity related to systemd units and API documentation over the past week.
+
+### 📚 Documentation (Librarian)
+The documentation is extensive and well-structured, covering the entire lifecycle of the Agents Framework. It is organized by architectural components and usage guides.
+*   **Core Topics:** The docs cover system architecture, agent lifecycle (sessions, durable workflows), and tool integration. Specific guides are available for handling state (OS Model API), multi-agent interactions, and advanced workflows (SQQ agent flow/DAG).
+*   **Getting Started Guide:** You should begin with `documentation/README.md` for a high-level overview.
+*   **How to Use:** For integration, consult the material on `tools.md` and `binary-tool.md`. For stateful processes, refer to `durable-workflows-howto.md`.
+```
+
+The file and line counts, the commit count and the commit subjects match what the three tools print. The prose around them is a small model's: it lists `src` twice, and its "Pattern" line is its own reading of two commit subjects. The mechanics shown above do not depend on the model.
+
+## Where next
+
+- [The TUI](/docs-tui.html ), and the [CLI reference](/docs-cli-commands.html ), which documents `spectate`.
+
+- [agents-server](/docs-agents-server.html ): the HTTP API used in step 3, the event stream `spectate` follows, and sub-agents as sessions.
+
+- [How agents-exe compares](/comparison.html ) with other agent frameworks.
+
+
+

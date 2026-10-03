@@ -31,7 +31,7 @@ agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS]
 Validate agent configuration and display loaded tools.
 
 ```bash
-agents-exe check [--tools MODE]
+agents-exe check [--tools MODE] [--show-config]
 ```
 
 **Options:**
@@ -40,6 +40,7 @@ agents-exe check [--tools MODE]
 <table>
 <tr><th>Option</th><th>Description</th></tr>
 <tr><td><code>--tools MODE</code></td><td>Tool display mode: <code>none</code>, <code>list</code>, <code>agents-exe</code>, <code>openai</code> (default: <code>none</code>)</td></tr>
+<tr><td><code>--show-config</code></td><td>Print each agent file's JSON before its check line; for a <code>.tramaj</code> [template](/docs-agent-templates.html), the JSON it evaluates to</td></tr>
 </table>
 ```
 
@@ -284,6 +285,60 @@ agents-exe tui --attach http://127.0.0.1:8080
 agents-exe tui --attach unix:///run/agents/agents.sock
 agents-exe tui --attach https://agents.example --token-file ~/.agents-token
 ```
+
+### spectate
+
+Watch a running server: a read-only, live dashboard.
+
+```bash
+agents-exe spectate --attach URL|PATH [--token TOKEN | --token-file FILE]
+```
+
+`spectate` is one more client of a running `agents-exe serve`/`agents-server`, like `tui --attach`, except that it only reads: it follows the server's event feed and changes nothing. It is made for watching one long run, on a fixed screen:
+
+- **agents** (top left): the tree of sessions and of the sub-agent calls they make, indented by depth, each with its state and for how long.
+
+- **tool calls** (bottom left): the calls running now, with elapsed time and the latest progress a background call reported, then the ones that finished recently.
+
+- **text** (right): what the model writes in one session, with the user queries it answers. By default the pane follows the session that wrote last; selecting a row of the tree pins it to that session.
+
+
+The events carry no timestamp, so every duration is measured by `spectate` from the moment it received the event; a run that started before `spectate` attached counts from the attach. Text arrives as the model writes it when the server runs with `--stream-tokens`, and turn by turn otherwise. A sub-agent call that runs inside its caller's tool call (rather than as a session of its own) is in the tree, but has no event stream and so no text; and a session already running when `spectate` attaches shows its text from its next turn on.
+
+**Options:**
+
+```html
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>--attach URL\|PATH</code></td><td>required</td><td>The server to watch. Same forms as <code>tui --attach</code>: <code>http://HOST:PORT</code>, <code>https://...</code>, <code>unix:///path/to.sock</code>, or a bare socket path.</td></tr>
+<tr><td><code>--token TOKEN</code></td><td>none</td><td>Bearer token, when the server runs with <code>--auth-tokens</code>. <code>spectate</code> then sees that owner's sessions only.</td></tr>
+<tr><td><code>--token-file FILE</code></td><td>none</td><td>The same, read from a file.</td></tr>
+</table>
+```
+
+**Keyboard Shortcuts:**
+
+- `Up` / `Down` (or `k` / `j`) - Select a session in the tree; the text pane shows it
+
+- `f` - Follow the session that writes, again
+
+- `PgUp` / `PgDn` - Scroll the text
+
+- `q`, `Esc` or `Ctrl+C` - Quit (the runs go on)
+
+
+**Examples:**
+
+```bash
+# In one terminal: a server, and a TUI or any other client driving it
+agents-exe serve --socket /run/agents/agents.sock --stream-tokens
+agents-exe tui --attach /run/agents/agents.sock
+
+# In another: watch
+agents-exe spectate --attach /run/agents/agents.sock
+```
+
+A TUI started without `--attach` runs its agents in its own process and exposes no endpoint, so there is nothing for `spectate` to attach to: run `agents-exe serve` and attach both.
 
 ### mcp-server
 
@@ -770,7 +825,7 @@ agents-exe serve [--agent-file FILE...] [--agent SLUG] [OPTIONS]
 
 **Description:**
 
-`agents-exe serve` is `agents-server`'s code (sessions in SQLite or Postgres, the HTTP API and SSE stream, MCP over HTTP, the chat page) run behind agents-exe's own config loading, so it resolves agent files the same way every other `agents-exe` command does: `--agent-file` (repeatable), else `agents-exe.cfg.json`'s `agentsFiles` plus every `.json` file under `agentsDirectories`, else `~/.config/agents-exe/default`; `--agent SLUG` narrows to one agent by slug, failing with the list of available slugs if it does not match. It shares agents-exe's global `--api-keys`, `--set`/`--set-json`/`--pin`/`--pin-json` and `--params-file`, so those are not repeated below.
+`agents-exe serve` is `agents-server`'s code (sessions in SQLite or Postgres, the HTTP API and SSE stream, MCP over HTTP, the chat page) run behind agents-exe's own config loading, so it resolves agent files the same way every other `agents-exe` command does: `--agent-file` (repeatable), else `agents-exe.cfg.json`'s `agentsFiles` plus every `.json` and `.tramaj` file under `agentsDirectories`, else `~/.config/agents-exe/default`; `--agent SLUG` narrows to one agent by slug, failing with the list of available slugs if it does not match. It shares agents-exe's global `--api-keys`, `--set`/`--set-json`/`--pin`/`--pin-json` and `--params-file`, so those are not repeated below.
 
 **Options:**
 
