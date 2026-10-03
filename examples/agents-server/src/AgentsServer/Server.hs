@@ -45,6 +45,7 @@ import qualified Data.ByteString.Char8 as Char8
 import System.Agents.Host
 import System.Agents.Host.Runner (recoverOnStartup, withSessionRunner)
 import System.Agents.Postgres (isPostgresUrl, withPostgresStores)
+import System.Agents.Session.Types (IsolationSpec (..))
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 
 data ServerOptions = ServerOptions
@@ -75,6 +76,15 @@ data ServerOptions = ServerOptions
     socket is created with mode 0600. Requests over it carry no @Origin@
     and need no bearer token beyond what @--auth-tokens@ imposes elsewhere:
     the socket itself, and who can reach it, is the trust boundary.
+    -}
+    , soOwnerApiKeys :: [(Text, FilePath)]
+    {- ^ @--owner-api-keys OWNER=FILE@, repeatable: the owner's sessions call
+    the LLM with the keys in this file instead of the shared @--api-keys@
+    ('Host.hcOwnerApiKeysFiles'). Needs @--auth-tokens@.
+    -}
+    , soIsolateTools :: Maybe IsolationSpec
+    {- ^ @--isolate-tools docker:IMAGE|process:PATH@: run bash and MCP tool
+    calls outside the server process ('Host.hcToolIsolation').
     -}
     , soLegacySessionDirs :: [FilePath]
     {- ^ Read-only fallback locations for old @conv.<uuid>.json@ session
@@ -128,6 +138,8 @@ data ServerFlags = ServerFlags
     , sfNoUI :: Bool
     , sfCorsOrigins :: [Text]
     , sfSocket :: Maybe FilePath
+    , sfOwnerApiKeys :: [(Text, FilePath)]
+    , sfIsolateTools :: Maybe IsolationSpec
     }
 
 -- | @db@'s default value is the caller's to choose (@agents-exe serve@
@@ -149,6 +161,21 @@ serverFlags defaultDb =
         <*> switch (long "no-ui" <> help "Do not serve the chat page at /")
         <*> many (Text.pack <$> strOption (long "cors-origin" <> metavar "ORIGIN" <> help "Allow this origin to call the server cross-origin (e.g. http://localhost:5173); repeat for several, or pass \"*\" for any (needs no --auth-tokens)"))
         <*> optional (strOption (long "socket" <> metavar "PATH" <> help "Also listen on this Unix domain socket (in addition to --bind/--port); a stale file there is removed at start, the socket is created 0600. The socket is the local trust boundary: requests over it carry no Origin and need no bearer token beyond --auth-tokens"))
+        <*> many (option (eitherReader parseOwnerApiKeys) (long "owner-api-keys" <> metavar "OWNER=FILE" <> help "This owner's sessions call the LLM with the keys in FILE (same format as --api-keys) instead of the shared ones; repeat for several owners (needs --auth-tokens)"))
+        <*> optional (option (eitherReader parseIsolateTools) (long "isolate-tools" <> metavar "docker:IMAGE|process:PATH" <> help "Run bash and MCP tool calls outside the server: each call is handed, as a JSON envelope on stdin, to `docker run --rm -i IMAGE` or to the worker executable at PATH. Off by default"))
+
+-- | @OWNER=FILE@, split at the first @=@.
+parseOwnerApiKeys :: String -> Either String (Text, FilePath)
+parseOwnerApiKeys raw = case break (== '=') raw of
+    (owner@(_ : _), '=' : file@(_ : _)) -> Right (Text.pack owner, file)
+    _ -> Left "expected OWNER=FILE"
+
+-- | @docker:IMAGE@ or @process:PATH@.
+parseIsolateTools :: String -> Either String IsolationSpec
+parseIsolateTools raw = case break (== ':') raw of
+    ("docker", ':' : image@(_ : _)) -> Right (Docker (Text.pack image))
+    ("process", ':' : path@(_ : _)) -> Right (LocalProcess path)
+    _ -> Left "expected docker:IMAGE or process:PATH"
 
 -- | Assemble a 'ServerOptions' from agent files, an API keys path, 'ServerFlags' and process parameters.
 serverOptionsFromFlags :: [FilePath] -> FilePath -> ServerFlags -> ProcessParams -> ServerOptions
@@ -167,6 +194,8 @@ serverOptionsFromFlags agentFiles apiKeysFile flags params =
         , soNoUI = flags.sfNoUI
         , soCorsOrigins = flags.sfCorsOrigins
         , soSocket = flags.sfSocket
+        , soOwnerApiKeys = flags.sfOwnerApiKeys
+        , soIsolateTools = flags.sfIsolateTools
         , soLegacySessionDirs = []
         , soProcessParams = params
         , soTemplateLibraries = standardLibraries
@@ -221,6 +250,9 @@ runServer opts logger = do
     when (not (null opts.soAdminOwners) && null auth) $
         throwIO $
             userError "--admin-owners needs --auth-tokens: without authentication, owners cannot be told apart"
+    when (not (null opts.soOwnerApiKeys) && null auth) $
+        throwIO $
+            userError "--owner-api-keys needs --auth-tokens: without authentication, owners cannot be told apart"
     when ("*" `elem` opts.soCorsOrigins && isJust auth) $
         throwIO $
             userError "--cors-origin '*' needs no authentication: with --auth-tokens, list the exact origins allowed to send bearer tokens"
@@ -231,6 +263,8 @@ runServer opts logger = do
                 , hcProcessParams = opts.soProcessParams
                 , hcTemplateLibraries = opts.soTemplateLibraries
                 , hcLegacySessionDirs = opts.soLegacySessionDirs
+                , hcOwnerApiKeysFiles = opts.soOwnerApiKeys
+                , hcToolIsolation = opts.soIsolateTools
                 }
         tracer = hostTraceLogger logger
         withStores k

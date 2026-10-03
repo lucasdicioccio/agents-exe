@@ -122,6 +122,7 @@ library agents-lib
                     , System.Agents.Tools.EndpointPredicate
                     , System.Agents.Tools.ExecuteToolCall
                     , System.Agents.Tools.IO
+                    , System.Agents.Tools.Isolated
                     , System.Agents.Tools.LuaToolbox
                     , System.Agents.Tools.LuaToolbox.Utils
                     , System.Agents.Tools.LuaToolbox.Modules.Fs
@@ -543,6 +544,7 @@ test-suite agents-tests
     ghc-options:      -threaded
     other-modules:    ActivationSessionTests
                     , AgentFactoryTests
+                    , OwnerIsolationTests
                     , BindingsTests
                     , ConfigLoaderTests
                     , TemplateTests
@@ -625,6 +627,7 @@ test-suite agents-tests
                       unordered-containers,
                       uuid,
                       vector,
+                      http-types,
                       network,
                       wai,
                       warp

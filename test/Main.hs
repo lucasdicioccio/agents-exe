@@ -94,6 +94,7 @@ import qualified OpenAIStreamTests
 import qualified ProtocolTests
 import qualified RunnerCoordinationTests
 import qualified RunnerTests
+import qualified OwnerIsolationTests
 import qualified System.Environment as Env
 import qualified HostClientTests
 import qualified HttpClientTests
@@ -172,6 +173,7 @@ tests =
         , OpenAIStreamTests.tests
         , ProtocolTests.tests
         , RunnerTests.tests
+        , OwnerIsolationTests.tests
         , RunnerCoordinationTests.tests
         , HostClientTests.tests
         , HttpClientTests.tests

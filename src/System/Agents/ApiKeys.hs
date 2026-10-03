@@ -8,6 +8,7 @@ module System.Agents.ApiKeys (
     -- * Loaded API keys
     LoadedApiKeys,
     readOpenApiKeysFile,
+    readOpenApiKeysFileStrict,
 ) where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=))
@@ -54,3 +55,14 @@ readOpenApiKeysFile keysPath =
     readApiKeys :: FilePath -> IO (Maybe ApiKeys)
     readApiKeys path =
         Aeson.decode <$> LByteString.readFile path
+
+{- | Like 'readOpenApiKeysFile', reporting a file that does not parse instead
+of reading it as an empty list of keys.
+-}
+readOpenApiKeysFileStrict :: FilePath -> IO (Either String LoadedApiKeys)
+readOpenApiKeysFileStrict keysPath = do
+    parsed <- Aeson.eitherDecode <$> LByteString.readFile keysPath
+    pure $ case parsed of
+        Left err -> Left err
+        Right (ApiKeys keys) ->
+            Right [(k.apiKeyId, OpenAI.ApiKey $ TextEncoding.encodeUtf8 (k.apiKeyValue)) | k <- keys]

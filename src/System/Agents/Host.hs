@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | Everything a long-lived process needs to run agents without the TUI:
 the loaded agents, the database, and the stores built on it.
@@ -61,6 +62,7 @@ import System.Agents.AgentFactory (AgentDeps (..), Completion, SessionSink (..),
 import qualified System.Agents.AgentFactory as AgentFactory
 import System.Agents.AgentStore (AgentStore (..), HelperError (..), StoredAgent (..), ToolFiles, fileBasedFields, materializeToolFiles, mkSqliteAgentStore, referencedSlugs, resolveHelpers, storedPathErrors)
 import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentTree (..), Props (..), formatLoadingError, loadAgentTreeFromConfigs, readOpenApiKeysFile, releaseAgentNode, withAgentTree)
+import System.Agents.ApiKeys (LoadedApiKeys, readOpenApiKeysFileStrict)
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.FileLoader (TemplateLibraries, standardLibraries)
 import System.Agents.AgentTree.Trace (TreeTrace)
@@ -69,9 +71,10 @@ import System.Agents.Host.Coordination (Coordination, noCoordination)
 import System.Agents.Session.Async (ContinuationStore, mkSqliteContinuationStore)
 import System.Agents.Session.Mailbox (MailStore)
 import System.Agents.Session.MailStore (mkSqliteMailStore)
-import System.Agents.Session.Types (SessionId)
+import System.Agents.Session.Types (IsolationSpec, SessionId)
 import System.Agents.Session.WatchStore (WatchStore, mkSqliteWatchStore)
 import System.Agents.SessionStore (FileSessionStore (..), SessionBackend, backendCatalog, fileSessionBackend, mkCompositeSessionStore, mkSqliteSessionStore)
+import System.Agents.Tools.Isolated (toolIsolationFromSpec)
 import System.Agents.Tools.Params.Types (ProcessParams)
 
 -- | Loaded agents and the stores sessions live in.
@@ -82,6 +85,11 @@ data Host = Host
     -- ^ Root agents from the database, which can change while the host runs.
     , hostDeps :: AgentDeps
     -- ^ For root agents: no session sink, the runner stores their sessions.
+    , hostOwnerApiKeys :: Map Text LoadedApiKeys
+    {- ^ API keys of the owners that have their own ('hcOwnerApiKeysFiles').
+    The runner builds the agents of such an owner's sessions, sub-sessions
+    included, with these keys instead of the ones in 'hostDeps'.
+    -}
     , hostSubAgentDeps :: AgentDeps
     -- ^ For sub-agents: they store their own sessions in 'hostBackend'.
     , hostBackend :: SessionBackend
@@ -126,6 +134,20 @@ data HostConfig = HostConfig
     -- ^ See 'hostProcessParams'.
     , hcTemplateLibraries :: TemplateLibraries
     -- ^ Libraries @.tramaj@ agent files may import; 'standardLibraries' by default.
+    , hcOwnerApiKeysFiles :: [(Text, FilePath)]
+    {- ^ Owners that call the LLM with their own API keys: an owner and a
+    keys file in the format of 'hcApiKeysFile'. That file replaces
+    'hcApiKeysFile' for the owner's sessions, it is not merged with it: a
+    key id it does not hold is not looked up in 'hcApiKeysFile'. Owners not
+    listed here, and sessions without an owner, use 'hcApiKeysFile'.
+    A file that cannot be read or parsed, or an owner listed twice, fails
+    the start ('OwnerApiKeysFailed').
+    -}
+    , hcToolIsolation :: Maybe IsolationSpec
+    {- ^ Run the bash and MCP tool calls of every agent this host builds
+    outside the process ("System.Agents.Tools.Isolated"). 'Nothing' (the
+    default) runs them in-process, as before.
+    -}
     , hcLegacySessionDirs :: [FilePath]
     {- ^ Read-only fallback locations for pre-existing @conv.<uuid>.json@
     session history (@todos/os-as-standalone-server.md@ Design §6). When
@@ -151,6 +173,8 @@ defaultHostConfig files keysFile dbPath =
         , hcStreamTokens = False
         , hcProcessParams = mempty
         , hcTemplateLibraries = standardLibraries
+        , hcOwnerApiKeysFiles = []
+        , hcToolIsolation = Nothing
         , hcLegacySessionDirs = []
         }
 
@@ -181,6 +205,10 @@ data HostTrace
 data HostError
     = AgentLoadFailed FilePath String
     | DuplicateAgentSlug Text
+    | -- | An owner's API keys file ('hcOwnerApiKeysFiles') and what is wrong with it.
+      OwnerApiKeysFailed Text FilePath String
+    | -- | 'hcToolIsolation' names something that cannot run tool calls.
+      ToolIsolationRefused Text
     deriving (Show)
 
 instance Exception HostError
@@ -225,12 +253,26 @@ withHostStores cfg stores tracer action = do
             dirs -> mkCompositeSessionStore (stores.hsSessions : map (fileSessionBackend . FileSessionStore) dirs)
         store = stores.hsContinuations
     keys <- readOpenApiKeysFile cfg.hcApiKeysFile
+    ownerKeys <- loadOwnerApiKeys cfg.hcOwnerApiKeysFiles
+    isolation <- case traverse toolIsolationFromSpec cfg.hcToolIsolation of
+        Left err -> throwIO $ ToolIsolationRefused err
+        Right iso -> pure iso
     let rootDeps =
             (defaultAgentDeps keys)
                 { adContinuationStore = Just store
                 , adCompletion = cfg.hcCompletion
+                , adToolIsolation = isolation
                 }
-        subDeps = rootDeps{adSessionSink = SinkBackend backend}
+        -- These dependencies are fixed when the agents load, before any
+        -- owner is known: they only serve a helper that could not be run
+        -- as a session of its own (the runner builds those per owner).
+        -- With per-owner keys, such a call gets no key rather than the
+        -- shared ones.
+        subDeps =
+            rootDeps
+                { adSessionSink = SinkBackend backend
+                , adApiKeys = if Map.null ownerKeys then keys else []
+                }
         props file =
             Props
                 { apiKeys = keys
@@ -292,6 +334,7 @@ withHostStores cfg stores tracer action = do
                 { hostAgents = agents
                 , hostStoredAgents = storedAgents
                 , hostDeps = rootDeps
+                , hostOwnerApiKeys = ownerKeys
                 , hostSubAgentDeps = subDeps
                 , hostBackend = backend
                 , hostContinuations = store
@@ -304,6 +347,19 @@ withHostStores cfg stores tracer action = do
                 , hostProcessParams = cfg.hcProcessParams
                 }
   where
+    loadOwnerApiKeys :: [(Text, FilePath)] -> IO (Map Text LoadedApiKeys)
+    loadOwnerApiKeys = go Map.empty
+      where
+        go acc [] = pure acc
+        go acc ((owner, file) : rest)
+            | Text.null owner = throwIO $ OwnerApiKeysFailed owner file "empty owner"
+            | Map.member owner acc = throwIO $ OwnerApiKeysFailed owner file "owner listed twice"
+            | otherwise =
+                try (readOpenApiKeysFileStrict file) >>= \case
+                    Left (e :: IOException) -> throwIO $ OwnerApiKeysFailed owner file (show e)
+                    Right (Left err) -> throwIO $ OwnerApiKeysFailed owner file err
+                    Right (Right loaded) -> go (Map.insert owner loaded acc) rest
+
     indexBySlug :: [OSAgentNode] -> IO (Map Text OSAgentNode)
     indexBySlug = go Map.empty
       where

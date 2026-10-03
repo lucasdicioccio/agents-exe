@@ -77,6 +77,8 @@ main =
             , testCase "CORS: preflight, matching origins, refused origins, SSE" corsTest
             , testCase "CORS: --cors-origin '*' is refused at startup with --auth-tokens" corsWildcardStartupTest
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
+            , testCase "owners with their own API keys call the LLM with them, others with the shared ones" ownerApiKeysTest
+            , testCase "--owner-api-keys is refused at startup without --auth-tokens" ownerApiKeysStartupTest
             , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
             , testCase "a stored agent carries its bash tools and names stored helpers" storedAgentFilesTest
             , testCase "without admin owners, storing agents is disabled" agentEditsDisabledTest
@@ -681,6 +683,8 @@ corsWildcardStartupTest = withSystemTempDirectory "agents-server-cors" $ \dir ->
                 , soNoUI = True
                 , soCorsOrigins = ["*"]
                 , soSocket = Nothing
+                , soOwnerApiKeys = []
+                , soIsolateTools = Nothing
                 , soLegacySessionDirs = []
                 , soProcessParams = mempty
                 , soTemplateLibraries = standardLibraries
@@ -730,6 +734,68 @@ fakeStreamingLlm requests req respond = do
         , choice ["delta" .= Aeson.object [], "finish_reason" .= ("stop" :: Text)]
         , Aeson.object ["choices" .= ([] :: [Aeson.Value]), "usage" .= Aeson.object ["prompt_tokens" .= (3 :: Int), "completion_tokens" .= (2 :: Int), "total_tokens" .= (5 :: Int)]]
         ]
+
+{- | Three owners, two with keys of their own: each session's LLM call
+carries its owner's key, and the third owner's the shared one.
+-}
+ownerApiKeysTest :: Assertion
+ownerApiKeysTest = withSystemTempDirectory "agents-server-owner-keys" $ \dir -> do
+    let keysFile name key = do
+            let path = dir </> name
+            writeFile path ("{\"keys\": [{\"id\": \"none\", \"value\": \"" <> key <> "\"}]}")
+            pure path
+    shared <- keysFile "shared.json" "shared-key"
+    aliceKeys <- keysFile "alice.json" "alice-key"
+    bobKeys <- keysFile "bob.json" "bob-key"
+    seen <- newIORef []
+    let tokens = authTokensFromList [("alice-token", "alice"), ("bob-token", "bob"), ("carol-token", "carol")]
+        recording req respond = do
+            modifyIORef' seen (<> [lookup "Authorization" (Wai.requestHeaders req)])
+            ignored <- newIORef []
+            fakeStreamingLlm ignored req respond
+    testWithApplication (pure recording) $ \llmPort -> do
+        let extra = "{\"modelUrl\": \"http://127.0.0.1:" <> show llmPort <> "/v1\"}"
+            adjust c =
+                c
+                    { hcCompletion = Nothing
+                    , hcStreamTokens = True
+                    , hcApiKeysFile = shared
+                    , hcOwnerApiKeysFiles = [("alice", aliceKeys), ("bob", bobKeys)]
+                    }
+        withServerConfig (Just tokens) extra adjust id $ \anonymous ->
+            forM_ ["alice-token", "bob-token", "carol-token", "alice-token"] $ \token -> do
+                (created, view) <- call anonymous{srvToken = Just token} "POST" "/v1/sessions?wait=true" (Just (createBody []))
+                (created, field "status" view) @?= (201, "idle")
+    sent <- readIORef seen
+    sent @?= map Just ["Bearer alice-key", "Bearer bob-key", "Bearer shared-key", "Bearer alice-key"]
+
+ownerApiKeysStartupTest :: Assertion
+ownerApiKeysStartupTest = withSystemTempDirectory "agents-server-owner-keys" $ \dir -> do
+    let opts =
+            ServerOptions
+                { soAgentFiles = ["/nonexistent/agent.json"]
+                , soApiKeysFile = "/nonexistent/keys.json"
+                , soDatabase = dir </> "agents.db"
+                , soBind = "127.0.0.1"
+                , soPort = 0
+                , soLiveSessionTtl = 900
+                , soShutdownGrace = 1
+                , soAuthTokens = Nothing
+                , soStreamTokens = False
+                , soAdminOwners = []
+                , soNoUI = True
+                , soCorsOrigins = []
+                , soSocket = Nothing
+                , soOwnerApiKeys = [("alice", dir </> "alice.json")]
+                , soIsolateTools = Nothing
+                , soLegacySessionDirs = []
+                , soProcessParams = mempty
+                , soTemplateLibraries = standardLibraries
+                }
+    result <- try (runServer opts silentLogger)
+    case result of
+        Left (e :: IOException) -> assertBool ("names the flag, got " <> show e) ("--owner-api-keys" `List.isInfixOf` show e)
+        Right () -> assertFailure "expected --owner-api-keys without --auth-tokens to be refused at startup"
 
 storedAgentsTest :: Assertion
 storedAgentsTest = do
@@ -1355,6 +1421,8 @@ socketHealthzTest = withSystemTempDirectory "agents-server-socket" $ \dir -> do
                 , soNoUI = True
                 , soCorsOrigins = []
                 , soSocket = Just sockPath
+                , soOwnerApiKeys = []
+                , soIsolateTools = Nothing
                 , soLegacySessionDirs = []
                 , soProcessParams = mempty
                 , soTemplateLibraries = standardLibraries
