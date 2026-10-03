@@ -105,7 +105,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Lazy as LByteString
 import qualified Data.ByteString.Lazy.Char8 as BSL
-import Data.List (foldl', isInfixOf, isPrefixOf, sortOn)
+import Data.List (isInfixOf, isPrefixOf, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)

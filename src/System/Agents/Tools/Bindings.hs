@@ -29,7 +29,6 @@ module System.Agents.Tools.Bindings (
     deriveAgentTable,
 ) where
 
-import Data.Foldable (foldl')
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Key (fromText)
 import qualified Data.Aeson.KeyMap as KeyMap

@@ -47,9 +47,8 @@ module AgentsServer.Types (
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Char (isUpper, toLower)
-import Data.Foldable (foldl')
 import Data.Map.Strict (Map)
-import qualified Data.HashMap.Strict.InsOrd as InsOrd
+import qualified Data.HashMap.Strict.InsOrd.Compat as InsOrd
 import Data.OpenApi (
     NamedSchema (..),
     OpenApiType (..),
