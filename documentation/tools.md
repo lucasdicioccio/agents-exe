@@ -516,7 +516,8 @@ The file sandbox system provides secure, configurable file access control for to
 
 ### FileSandboxConfig
 
-Each sandboxed toolbox accepts an optional `FileSandbox` configuration:
+Each sandboxed toolbox accepts an optional `FileSandbox` configuration, either
+inline (below) or as a reference to a [named sandbox](#named-sandboxes):
 
 ```haskell
 data FileSandboxConfig = FileSandboxConfig
@@ -536,6 +537,84 @@ defaultFileSandboxConfig = FileSandboxConfig
     , fsbName = Nothing
     }
 ```
+
+### Named Sandboxes
+
+A sandbox can be written once, under a name, in the agent's `fileSandboxes`
+map, and referenced from any builtin toolbox of that agent with
+`{"ref": "<name>"}` in place of the inline definition:
+
+```json
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "coder",
+    "fileSandboxes": {
+      "project": {
+        "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./src"},
+        "fsbMaxFileSize": 10485760
+      },
+      "scratch": {
+        "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "/tmp/scratch"}
+      }
+    },
+    "builtinToolboxes": [
+      {"tag": "DeveloperToolbox", "contents": {
+        "Name": "dev", "Description": "Development tools",
+        "Capabilities": ["read-file-range", "patch-file"],
+        "FileSandbox": {"ref": "project"}}},
+      {"tag": "LuaToolbox", "contents": {
+        "Name": "lua", "Description": "Lua orchestration",
+        "MaxMemoryMB": 256, "MaxExecutionTimeSeconds": 300,
+        "AllowedTools": [], "AllowedHosts": [],
+        "FileSandbox": {"ref": "project"}}},
+      {"tag": "SystemToolbox", "contents": {
+        "Name": "system", "Description": "System context",
+        "Capabilities": ["attach-file"],
+        "FileSandbox": {"ref": "scratch"}}}
+    ]
+  }
+}
+```
+
+The value of `FileSandbox` is therefore one of two things:
+
+| Form | JSON | Meaning |
+|------|------|---------|
+| Inline | `{"fsbPredicate": ..., "fsbMaxFileSize": ..., "fsbName": ...}` | The sandbox itself, as before. Existing agent files need no change. |
+| Reference | `{"ref": "project"}` | The sandbox declared as `project` in this agent's `fileSandboxes`. |
+
+Rules:
+
+- **Resolution happens when the agent's toolboxes are loaded.** Each reference
+  is replaced by the named definition, and the toolbox then behaves exactly as
+  if the definition had been written inline.
+- **An undeclared name is an error**, not an empty sandbox: the agent fails to
+  load with a message naming the toolbox and the missing sandbox, and
+  `validate-agent` reports it too.
+- **`ref` stands alone.** An object carrying both `ref` and inline fields is
+  refused, so that a sandbox is never silently widened or narrowed at the
+  place it is used.
+- **The name is the default `fsbName`.** A referenced sandbox that sets no
+  `fsbName` is named after its key in `fileSandboxes`.
+- **Each toolbox gets its own sandbox instance** built from the shared
+  definition: the rules are shared, nothing else is.
+- `fileSandboxes` is optional; an agent without it loads as before.
+
+**What this does and does not do.** Naming a sandbox changes where the rules
+are written, not what is enforced. The enforcement is the one described in
+this section: a path predicate and a size limit checked by the builtin tools
+that take a `FileSandbox` (`attach-file` and `list-directory` in the System
+Toolbox, the file capabilities of the Developer Toolbox, the Lua `fs` module).
+It is not an operating-system sandbox: bash tools, MCP servers,
+`execute-command` and `build-command` run as ordinary processes and are not
+confined by it.
+
+**Scope.** `fileSandboxes` belongs to one agent file; a name declared in one
+agent is not visible from another, including its sub-agents. To share one
+definition across several agent files, use an [agent template](agent-templates.md)
+library: define the sandbox once there and either pass it inline to each
+toolbox or put it in the `fileSandboxes` of each agent.
 
 ### PathPredicate DSL
 
@@ -949,7 +1028,7 @@ Returns aggregate statistics about accessible sessions.
 | `SessionIntrospectionScope` | string? | Scope of accessible sessions (default: "subtree") |
 | `SessionIntrospectionMaxResults` | number? | Max sessions to return (default: 50) |
 | `SessionIntrospectionIncludeToolOutputs` | boolean? | Include tool outputs in read operations (default: true) |
-| `FileSandbox` | object? | File sandbox for attach-file/list-directory capabilities (default: deny all) |
+| `FileSandbox` | object? | File sandbox for attach-file/list-directory capabilities (default: deny all); inline or `{"ref": name}` |
 | `CommandFilter` | string? | Optional command approval filter for execute-command |
 
 ### Security Considerations
@@ -1574,7 +1653,7 @@ The Lua toolbox enables a powerful pattern called **Recursive Language Models (L
 | `MaxExecutionTimeSeconds` | integer | Maximum script execution time in seconds |
 | `AllowedTools` | [string] | Whitelist of tool names Lua scripts can call via the portal |
 | `AllowedHosts` | [string] | Whitelist of network hosts accessible to Lua HTTP module |
-| `FileSandbox` | object? | File sandbox configuration for Lua `fs` module |
+| `FileSandbox` | object? | File sandbox configuration for Lua `fs` module; inline or `{"ref": name}` |
 
 ### File Sandbox for Lua
 

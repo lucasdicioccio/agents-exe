@@ -419,6 +419,7 @@ formatToolLoaderError (ToolLoader.DeveloperLoadingError msg) = "Developer Toolbo
 formatToolLoaderError (ToolLoader.LuaLoadingError msg) = "Lua Toolbox Loading Error: " <> Text.pack msg
 formatToolLoaderError (ToolLoader.SkillsLoadingError msg) = "Skills Toolbox Loading Error: " <> Text.pack msg
 formatToolLoaderError (ToolLoader.ParameterLoadingError msg) = "Parameter Error: " <> Text.pack msg
+formatToolLoaderError (ToolLoader.FileSandboxLoadingError msg) = "File Sandbox Error: " <> Text.pack msg
 
 data LoadAgentResult
     = Errors (NonEmpty.NonEmpty LoadingError)

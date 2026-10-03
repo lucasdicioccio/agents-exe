@@ -261,6 +261,7 @@ buildAgentConfig catalog opts = do
                 , openApiToolboxes = Nothing
                 , postgrestToolboxes = Nothing
                 , builtinToolboxes = Just [defaultDeveloperToolbox]
+                , fileSandboxes = Nothing
                 , extraAgents = Nothing
                 , skillSources = Nothing
                 , autoEnableSkills = Nothing

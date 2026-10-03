@@ -10,7 +10,8 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
-import Data.Maybe (catMaybes)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (UUID)
@@ -56,6 +57,68 @@ defaultFileSandboxConfig =
         , fsbMaxFileSize = Just (50 * 1024 * 1024) -- 50MB default
         , fsbName = Nothing
         }
+
+{- | The file sandbox of a toolbox: either written in place, or the name of
+one declared once in the agent's @fileSandboxes@ map.
+
+JSON forms:
+
+@
+{"fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./src"}}   -- inline
+{"ref": "project"}                                                      -- by name
+@
+
+A reference is replaced by the sandbox it names when the agent's toolboxes
+are loaded ('resolveBuiltinToolboxSandboxes'); a name that is not declared is
+a loading error.
+-}
+data FileSandboxSpec
+    = InlineFileSandbox FileSandboxConfig
+    | NamedFileSandbox Text
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON FileSandboxSpec where
+    toJSON (InlineFileSandbox cfg) = toJSON cfg
+    toJSON (NamedFileSandbox ref) = Aeson.object ["ref" .= ref]
+
+instance FromJSON FileSandboxSpec where
+    parseJSON = Aeson.withObject "FileSandboxSpec" $ \v ->
+        case KeyMap.lookup "ref" v of
+            Nothing -> InlineFileSandbox <$> parseJSON (Aeson.Object v)
+            Just refValue
+                | KeyMap.size v == 1 -> NamedFileSandbox <$> parseJSON refValue
+                | otherwise ->
+                    fail "a file sandbox is either {\"ref\": name} or an inline definition, not both"
+
+{- | The sandbox a toolbox enforces: the inline one, or the given default when
+the toolbox has none. A reference that was never resolved denies everything,
+so that a toolbox initialized outside of the loader fails closed.
+-}
+effectiveFileSandbox :: FileSandboxConfig -> Maybe FileSandboxSpec -> FileSandboxConfig
+effectiveFileSandbox def Nothing = def
+effectiveFileSandbox _ (Just (InlineFileSandbox cfg)) = cfg
+effectiveFileSandbox _ (Just (NamedFileSandbox ref)) =
+    FileSandboxConfig
+        { fsbPredicate = AlwaysDeny
+        , fsbMaxFileSize = Just 0
+        , fsbName = Just ("unresolved:" <> ref)
+        }
+
+{- | Replace a reference by the sandbox it names. The resolved sandbox takes
+the reference as its @fsbName@ unless the definition sets one.
+-}
+resolveFileSandboxSpec :: Map Text FileSandboxConfig -> FileSandboxSpec -> Either Text FileSandboxSpec
+resolveFileSandboxSpec _ spec@(InlineFileSandbox _) = Right spec
+resolveFileSandboxSpec named (NamedFileSandbox ref) =
+    case Map.lookup ref named of
+        Just cfg -> Right (InlineFileSandbox cfg{fsbName = Just (fromMaybe ref (fsbName cfg))})
+        Nothing ->
+            Left $
+                "unknown file sandbox '"
+                    <> ref
+                    <> "' (declared in fileSandboxes: "
+                    <> (if Map.null named then "none" else Text.intercalate ", " (Map.keys named))
+                    <> ")"
 
 type AgentSlug = Text
 type AgentAnnounce = Text
@@ -1080,8 +1143,9 @@ data SystemToolboxDescription
     -- ^ Max sessions to return in list operations (default: 50)
     , systemToolboxSessionIntrospectionIncludeToolOutputs :: Maybe Bool
     -- ^ Whether to include tool outputs in read operations (default: True)
-    , systemToolboxFileSandbox :: Maybe FileSandboxConfig
-    -- ^ File sandbox for attach-file capability (default: deny all)
+    , systemToolboxFileSandbox :: Maybe FileSandboxSpec
+    -- ^ File sandbox for attach-file capability (default: deny all), inline
+    -- or a reference to one of the agent's @fileSandboxes@
     , systemToolboxCommandFilter :: Maybe Text
     -- ^ Optional hardcoded filter command. When set, the command is run with
     -- the requested command on stdin and must print a JSON acceptance object.
@@ -1231,8 +1295,9 @@ data LuaToolboxDescription = LuaToolboxDescription
     -- ^ Whitelist of network hosts accessible to Lua HTTP module
     , luaToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
-    , luaToolboxFileSandbox :: Maybe FileSandboxConfig
-    -- ^ File sandbox configuration for Lua file system operations
+    , luaToolboxFileSandbox :: Maybe FileSandboxSpec
+    -- ^ File sandbox configuration for Lua file system operations, inline
+    -- or a reference to one of the agent's @fileSandboxes@
     }
     deriving (Show, Ord, Eq, Generic)
 
@@ -1359,9 +1424,10 @@ data DeveloperToolboxDescription
     -- ^ List of developer tool capabilities to expose
     , developerToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
-    , developerToolboxFileSandbox :: Maybe FileSandboxConfig
+    , developerToolboxFileSandbox :: Maybe FileSandboxSpec
     {- ^ File sandbox for read-file-range, write-file-range, patch-file
-    Default: deny all (secure by default)
+    Default: deny all (secure by default). Inline, or a reference to one
+    of the agent's @fileSandboxes@.
     -}
     , developerToolboxBuildCommand :: Maybe [Text]
     {- ^ Argv (program then arguments, no shell) run by the opt-in
@@ -1461,6 +1527,46 @@ instance FromJSON BuiltinToolboxDescription where
             "LuaToolbox" ->
                 LuaToolbox <$> v .: "contents"
             _ -> fail "expecting 'SqliteToolbox', 'SystemToolbox', 'LuaToolbox', or 'DeveloperToolbox' tag"
+
+-- | The file sandbox of a builtin toolbox, when its kind has one.
+builtinToolboxFileSandbox :: BuiltinToolboxDescription -> Maybe FileSandboxSpec
+builtinToolboxFileSandbox (SqliteToolbox _) = Nothing
+builtinToolboxFileSandbox (SystemToolbox d) = systemToolboxFileSandbox d
+builtinToolboxFileSandbox (DeveloperToolbox d) = developerToolboxFileSandbox d
+builtinToolboxFileSandbox (LuaToolbox d) = luaToolboxFileSandbox d
+
+-- | The name of a builtin toolbox.
+builtinToolboxName :: BuiltinToolboxDescription -> Text
+builtinToolboxName (SqliteToolbox d) = sqliteToolboxName d
+builtinToolboxName (SystemToolbox d) = systemToolboxName d
+builtinToolboxName (DeveloperToolbox d) = developerToolboxName d
+builtinToolboxName (LuaToolbox d) = luaToolboxName d
+
+{- | Replace the file sandbox reference of a builtin toolbox, if it has one,
+by the named sandbox. Inline sandboxes and toolboxes without a sandbox are
+returned unchanged.
+-}
+resolveBuiltinToolboxSandbox ::
+    Map Text FileSandboxConfig ->
+    BuiltinToolboxDescription ->
+    Either Text BuiltinToolboxDescription
+resolveBuiltinToolboxSandbox named toolbox =
+    case toolbox of
+        SqliteToolbox _ -> Right toolbox
+        SystemToolbox d ->
+            (\sb -> SystemToolbox d{systemToolboxFileSandbox = sb}) <$> resolve d.systemToolboxFileSandbox
+        DeveloperToolbox d ->
+            (\sb -> DeveloperToolbox d{developerToolboxFileSandbox = sb}) <$> resolve d.developerToolboxFileSandbox
+        LuaToolbox d ->
+            (\sb -> LuaToolbox d{luaToolboxFileSandbox = sb}) <$> resolve d.luaToolboxFileSandbox
+  where
+    resolve :: Maybe FileSandboxSpec -> Either Text (Maybe FileSandboxSpec)
+    resolve Nothing = Right Nothing
+    resolve (Just spec) =
+        either
+            (\err -> Left ("toolbox '" <> builtinToolboxName toolbox <> "': " <> err))
+            (Right . Just)
+            (resolveFileSandboxSpec named spec)
 
 -------------------------------------------------------------------------------
 -- Skills Toolbox Configuration
@@ -1747,6 +1853,11 @@ data Agent
     , openApiToolboxes :: Maybe [OpenAPIToolboxDescription]
     , postgrestToolboxes :: Maybe [PostgRESTToolboxDescription]
     , builtinToolboxes :: Maybe [BuiltinToolboxDescription]
+    , fileSandboxes :: Maybe (Map Text FileSandboxConfig)
+    {- ^ File sandboxes declared once, by name, for the builtin toolboxes
+    of this agent to share: a toolbox refers to one with
+    @"FileSandbox": {"ref": "name"}@ instead of an inline definition.
+    -}
     , extraAgents :: Maybe [ExtraAgentRef]
     , skillSources :: Maybe [SkillSource]
     -- ^ Sources to load skills from (directories, git repos)
@@ -1835,6 +1946,19 @@ instance FromJSON Agent where
 
 instance Ord Agent where
     compare a1 a2 = compare (slug a1) (slug a2)
+
+{- | The builtin toolboxes of an agent with every file sandbox reference
+replaced by the sandbox the agent declares under that name in
+@fileSandboxes@. Every unknown reference is reported.
+-}
+resolveBuiltinToolboxSandboxes :: Agent -> Either [Text] [BuiltinToolboxDescription]
+resolveBuiltinToolboxSandboxes agent =
+    case [err | Left err <- results] of
+        [] -> Right [tb | Right tb <- results]
+        errs -> Left errs
+  where
+    named = fromMaybe Map.empty (fileSandboxes agent)
+    results = map (resolveBuiltinToolboxSandbox named) (fromMaybe [] (builtinToolboxes agent))
 
 data AgentDescription
     = AgentDescription Agent

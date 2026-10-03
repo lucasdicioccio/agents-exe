@@ -558,6 +558,7 @@ test-suite agents-tests
                     , LuaToolboxSecurityTests
                     , LuaToolboxTests
                     , FileSandboxPredicateTests
+                    , FileSandboxRefTests
                     , LuaToolboxJsonValueTests
                     , LuaToolboxHttpTests
                     , MailboxTests

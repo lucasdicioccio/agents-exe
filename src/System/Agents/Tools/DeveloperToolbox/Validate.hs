@@ -21,6 +21,7 @@ import System.Agents.Base (
     Agent (..),
     AgentDescription (..),
     DeveloperToolCapability (..),
+    resolveBuiltinToolboxSandboxes,
  )
 import qualified System.Agents.FileLoader as FileLoader
 import System.Agents.Tools.DeveloperToolbox.Types (
@@ -100,6 +101,7 @@ validateAgentStructure agent =
                 , checkRequired "modelName" (modelName agent)
                 , checkRequired "announce" (announce agent)
                 , checkSystemPrompt (systemPrompt agent)
+                , checkFileSandboxRefs agent
                 ]
         warnings =
             concat
@@ -112,6 +114,11 @@ validateAgentStructure agent =
         if Text.null value
             then ["Required field '" <> fieldName <> "' is empty"]
             else []
+
+    -- A toolbox naming a file sandbox the agent does not declare.
+    checkFileSandboxRefs :: Agent -> [Text]
+    checkFileSandboxRefs a =
+        either (map ("File sandbox reference: " <>)) (const []) (resolveBuiltinToolboxSandboxes a)
 
     checkSystemPrompt :: [Text] -> [Text]
     checkSystemPrompt [] = ["Required field 'systemPrompt' is empty"]

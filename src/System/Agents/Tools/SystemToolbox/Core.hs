@@ -39,7 +39,7 @@ import qualified Data.Text as Text
 import Data.Time (diffUTCTime, getCurrentTime)
 import Prod.Tracer (Tracer (..), runTracer)
 
-import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..), defaultFileSandboxConfig)
+import System.Agents.Base (SystemToolCapability (..), SystemToolboxDescription (..), defaultFileSandboxConfig, effectiveFileSandbox)
 import System.Agents.FileSandbox (FileSandbox (..))
 import System.Agents.Tools.SystemToolbox.Session (
     getListSessionsInfo,
@@ -115,7 +115,7 @@ initializeToolboxWithSessionIntrospection _tracer desc mSessionConfig = do
         then pure $ Left "System toolbox must have at least one capability enabled"
         else do
             -- Create file sandbox if attach-file capability is enabled
-            let config = fromMaybe defaultFileSandboxConfig desc.systemToolboxFileSandbox
+            let config = effectiveFileSandbox defaultFileSandboxConfig desc.systemToolboxFileSandbox
             mFileSandbox <-
                 if SystemToolAttachFile `elem` desc.systemToolboxCapabilities
                     then do

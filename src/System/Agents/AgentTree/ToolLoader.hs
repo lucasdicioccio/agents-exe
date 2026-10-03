@@ -63,6 +63,7 @@ import System.Agents.Base (
     SqliteToolboxDescription (..),
     SystemToolCapability (..),
     SystemToolboxDescription (..),
+    resolveBuiltinToolboxSandboxes,
  )
 import System.Agents.SessionStore (SessionCatalog)
 import System.Agents.Tools.Bindings.Types (BindingValue (..))
@@ -114,6 +115,7 @@ data LoadingError
     | LuaLoadingError String
     | SkillsLoadingError String
     | ParameterLoadingError String
+    | FileSandboxLoadingError String
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -613,13 +615,16 @@ loadBuiltinToolboxes ::
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError)
 loadBuiltinToolboxes tracer sessionStore agent toolsTVar = do
-    let toolboxes = fromMaybe [] (builtinToolboxes agent)
-
-    if null toolboxes
-        then pure Nothing
-        else do
-            errors <- mapM (loadBuiltinToolbox tracer sessionStore toolsTVar) toolboxes
-            pure $ collectFirstError errors
+    -- A toolbox may name one of the agent's @fileSandboxes@ instead of
+    -- carrying its sandbox inline: toolboxes are initialized with the
+    -- sandbox itself, and an undeclared name stops the load.
+    case resolveBuiltinToolboxSandboxes agent of
+        Left errs -> pure $ Just $ FileSandboxLoadingError (Text.unpack (Text.intercalate "; " errs))
+        Right toolboxes
+            | null toolboxes -> pure Nothing
+            | otherwise -> do
+                errors <- mapM (loadBuiltinToolbox tracer sessionStore toolsTVar) toolboxes
+                pure $ collectFirstError errors
 
 -- | Load a single builtin toolbox.
 loadBuiltinToolbox ::

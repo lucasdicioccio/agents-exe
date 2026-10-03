@@ -4,6 +4,12 @@
 
 ### New Features
 
+#### Named file sandboxes
+- An agent may declare file sandboxes once, by name, in `fileSandboxes`; a builtin toolbox (System, Developer, Lua) refers to one with `"FileSandbox": {"ref": "<name>"}`
+- The inline `FileSandbox` form is unchanged; an undeclared name is a loading error, also reported by `validate-agent`
+- `sandbox-ref(name)` in the `agents` template library
+- See `documentation/tools.md` (Named Sandboxes)
+
 #### Agent templates
 - An agent file may be a tramaj program (`.tramaj`), evaluated once at load to the JSON an agent file holds
 - `$ctx` is the process parameters (`--set`, `--pin`, `--params-file`); a template may only read process-scope, non-secret parameters the agent declares

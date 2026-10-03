@@ -30,7 +30,7 @@ import qualified Prod.Tracer as Prod
 
 import System.Agents.Base (
     ConversationId (..),
-    FileSandboxConfig (..),
+    FileSandboxConfig (..), FileSandboxSpec (..),
     LuaToolboxDescription (..),
     defaultFileSandboxConfig,
  )
@@ -246,7 +246,7 @@ securityDefaultsTests =
                             , luaToolboxMaxMemoryMB = 64
                             , luaToolboxMaxExecutionTimeSeconds = 5
                             , luaToolboxAllowedTools = []
-                            , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
+                            , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
                             , luaToolboxAllowedHosts = []
                             , luaToolboxActivation = Nothing
                             }
@@ -276,7 +276,7 @@ securityDefaultsTests =
                         , luaToolboxMaxMemoryMB = 64
                         , luaToolboxMaxExecutionTimeSeconds = 5
                         , luaToolboxAllowedTools = []
-                        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
+                        , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
                         , luaToolboxAllowedHosts = []
                         , luaToolboxActivation = Nothing
                         }

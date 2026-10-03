@@ -177,6 +177,21 @@ fields marked optional may be left out.
 and is required; `deny`, `name` and `maxFileSize` are optional. A path is
 allowed when an `allow` entry matches and no `deny` entry does.
 
+`sandbox-ref(name)`: a reference to a sandbox the agent declares in its
+`fileSandboxes` map (see [Named Sandboxes](tools.md#named-sandboxes)), usable
+wherever a toolbox takes `sandbox`:
+
+```
+$a.agent({
+  ...,
+  fileSandboxes: {code: $a.sandbox({allow: [$a.dir("./src")]})},
+  builtinToolboxes: [
+    $a.developer-toolbox({name: "dev", capabilities: ["read-file-range"], sandbox: $a.sandbox-ref("code")}),
+    $a.lua-toolbox({name: "lua", sandbox: $a.sandbox-ref("code")})
+  ]
+})
+```
+
 **Toolboxes**
 
 | function | fields |
