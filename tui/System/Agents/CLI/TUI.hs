@@ -28,6 +28,9 @@ module System.Agents.CLI.TUI (
 
     -- * Handler
     handleTUI,
+
+    -- * Attaching to a server
+    attachRunnerClient,
 ) where
 
 import Control.Monad (when)
@@ -109,7 +112,7 @@ handleTUI tracer rc apiKeysFile opts agentFiles params = do
         Just target -> do
             when (isJust opts.tuiDatabasePath) $
                 die "--attach and --db cannot be used together: an attached TUI uses the server's database"
-            client <- attachClient target opts
+            client <- attachRunnerClient "tui" target opts.tuiToken opts.tuiTokenFile
             TUI.runTUIWithUserConfig tuiTracer TUI.AttachedRunner client userConfig rawParams
         Nothing -> do
             let dbPath = maybe (ConfigLoader.defaultServerDatabasePath rc) id opts.tuiDatabasePath
@@ -131,25 +134,29 @@ handleTUI tracer rc apiKeysFile opts agentFiles params = do
 {- | An 'Http.httpClient' for @--attach@, after checking the server answers
 @/healthz@ and accepts the token (@GET /v1/agents@ needs one when the
 server has @--auth-tokens@): failing either, exit with a message rather
-than open a TUI with nothing in it.
+than open a screen with nothing in it. The first argument names the
+command in that message; @spectate@ attaches the same way.
 -}
-attachClient :: String -> TuiOptions -> IO Client.RunnerClient
-attachClient target opts = do
-    endpoint <- either (die . Text.pack) pure (Http.parseEndpoint target)
-    token <- case (opts.tuiToken, opts.tuiTokenFile) of
-        (Just _, Just _) -> die "--token and --token-file cannot be used together"
+attachRunnerClient :: Text -> String -> Maybe Text -> Maybe FilePath -> IO Client.RunnerClient
+attachRunnerClient cmd target mToken mTokenFile = do
+    endpoint <- either (dieAs cmd . Text.pack) pure (Http.parseEndpoint target)
+    token <- case (mToken, mTokenFile) of
+        (Just _, Just _) -> dieAs cmd "--token and --token-file cannot be used together"
         (Just t, Nothing) -> pure (Just t)
         (Nothing, Just path) -> Just . Text.strip <$> Text.readFile path
         (Nothing, Nothing) -> pure Nothing
     client <- Http.httpClient (Http.defaultHttpClientConfig endpoint){Http.hccToken = token}
     let where_ = Text.pack (Http.renderEndpoint endpoint)
     Client.stats client >>= \case
-        Left err -> die ("cannot attach to " <> where_ <> ": " <> runnerErrorMessage err)
+        Left err -> dieAs cmd ("cannot attach to " <> where_ <> ": " <> runnerErrorMessage err)
         Right _ -> pure ()
     Client.listAgents client >>= \case
-        Left err -> die ("attached to " <> where_ <> ", but it refused to list agents: " <> runnerErrorMessage err)
+        Left err -> dieAs cmd ("attached to " <> where_ <> ", but it refused to list agents: " <> runnerErrorMessage err)
         Right _ -> pure ()
     pure client
 
 die :: Text -> IO a
-die msg = Text.hPutStrLn stderr ("agents-exe tui: " <> msg) >> exitFailure
+die = dieAs "tui"
+
+dieAs :: Text -> Text -> IO a
+dieAs cmd msg = Text.hPutStrLn stderr ("agents-exe " <> cmd <> ": " <> msg) >> exitFailure

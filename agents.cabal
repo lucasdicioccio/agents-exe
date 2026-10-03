@@ -194,6 +194,7 @@ library agents-lib
                     , System.Agents.Host.Client
                     , System.Agents.Host.Client.Http
                     , System.Agents.OneShot
+                    , System.Agents.Spectate
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Client
                     , System.Agents.MCP.Client.Runtime
@@ -275,6 +276,7 @@ library agents-tui
     default-extensions: OverloadedStrings, OverloadedRecordDot
     exposed-modules:  System.Agents.CLI
                     , System.Agents.CLI.Config
+                    , System.Agents.CLI.Spectate
                     , System.Agents.CLI.TUI
                     , System.Agents.TUI.Buffer
                     , System.Agents.TUI.Clipboard
@@ -296,6 +298,7 @@ library agents-tui
                     , System.Agents.TUI.Render.Layout
                     , System.Agents.TUI.Render.Utils
                     , System.Agents.TUI.Render.Widgets
+                    , System.Agents.TUI.Spectate
                     , System.Agents.TUI.Types
                     , System.Agents.TUI.Types.Conversation
                     , System.Agents.TUI.Types.Core
@@ -573,6 +576,7 @@ test-suite agents-tests
                     , SessionMetadataTests
                     , SessionPrintTests
                     , SkillsTests
+                    , SpectateTests
                     , ToolPortalTests
                     , OS.CompatibilityTests
                     , TuiDraftTests

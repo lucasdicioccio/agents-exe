@@ -57,6 +57,7 @@ import qualified System.Agents.CLI.SessionIndex as SessionIndexCmd
 import qualified System.Agents.CLI.SessionSearch as SessionSearchCmd
 import qualified System.Agents.CLI.SessionDurable as SessionDurableCmd
 import qualified System.Agents.CLI.Spec as SpecCmd
+import qualified System.Agents.CLI.Spectate as SpectateCmd
 import qualified System.Agents.CLI.TUI as TUICmd
 import qualified System.Agents.CLI.ToolCall as ToolCallCmd
 import qualified System.Agents.FileLoader as FileLoader
@@ -417,6 +418,7 @@ data Command
     | ToolCall ToolCallCmd.ToolCallOptions
     | SessionDurable SessionDurableCmd.SessionDurableOptions
     | Serve ServeOptions
+    | Spectate SpectateCmd.SpectateOptions
 
 instance Show Command where
     show (Check _) = "Check"
@@ -442,6 +444,7 @@ instance Show Command where
     show (ToolCall _) = "ToolCall"
     show (SessionDurable _) = "SessionDurable"
     show (Serve _) = "Serve"
+    show (Spectate _) = "Spectate"
 
 -------------------------------------------------------------------------------
 -- Parsers
@@ -636,6 +639,32 @@ parseOneShotTextualCommand = OneShot <$> parseOneShotOptions
 
 parseEchoPromptCommand :: Parser Command
 parseEchoPromptCommand = EchoPrompt <$> parseEchoPromptOptions
+
+parseSpectateCommand :: Parser Command
+parseSpectateCommand = Spectate <$> parseSpectateOptions
+
+parseSpectateOptions :: Parser SpectateCmd.SpectateOptions
+parseSpectateOptions =
+    SpectateCmd.SpectateOptions
+        <$> strOption
+            ( long "attach"
+                <> metavar "URL|PATH"
+                <> help "The running `agents-exe serve`/agents-server to watch: http://HOST:PORT, https://..., unix:///PATH/TO.sock, or a socket path"
+            )
+        <*> optional
+            ( strOption
+                ( long "token"
+                    <> metavar "TOKEN"
+                    <> help "Bearer token (a server started with --auth-tokens)"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "token-file"
+                    <> metavar "FILE"
+                    <> help "Read the bearer token from FILE"
+                )
+            )
 
 parseTuiOptions :: ArgParserArgs -> Parser TUICmd.TuiOptions
 parseTuiOptions argArgs =
@@ -1245,6 +1274,7 @@ parseProgOptions argparserargs =
                 <> command "list-tool-calls" (info parseListToolCallsCommand (progDesc "List all tool calls from a session file"))
                 <> command "replay-tool-call" (info parseReplayToolCallCommand (progDesc "Replay a tool call from a session file, validating and optionally executing"))
                 <> command "tui" (info (parseTuiChatCommand argparserargs) (progDesc "Interactive terminal UI, over an embedded runner or, with --attach, a running server"))
+                <> command "spectate" (info parseSpectateCommand (progDesc "Read-only live dashboard of a running server: session tree, tool calls and model text"))
                 <> command "run" (info parseOneShotTextualCommand (idm))
                 <> command "echo-prompt" (info parseEchoPromptCommand (idm))
                 <> command "describe" (info (parseSelfDescribeCommand argparserargs) (idm))
@@ -1401,6 +1431,9 @@ main = do
         case pargs'.mainCommand of
             TerminalUI tuiOpts | isJust tuiOpts.tuiAttach ->
                 runCommand pargs' baseTracer sessionStore []
+            -- 'spectate' only ever watches a server: nothing local to resolve.
+            Spectate _ ->
+                runCommand pargs' baseTracer sessionStore []
             _ -> do
                 resolvedAgentFiles <- ConfigLoader.resolveAgentFiles pargs'.agentFiles pargs'.selectedAgentSlug
                 case resolvedAgentFiles of
@@ -1488,6 +1521,8 @@ runCommand pargs baseTracer sessionStore files =
             SessionDurableCmd.handleSessionDurable sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
         Serve opts ->
             handleServe pargs sessionStore files opts
+        Spectate opts ->
+            SpectateCmd.handleSpectate opts
 
 {- | @agents-exe serve@: like @agents-server@, but with the agent files,
 API keys and process parameters agents-exe already resolved from

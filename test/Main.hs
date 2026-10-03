@@ -101,6 +101,7 @@ import qualified MailboxTests
 import qualified ConfigLoaderTests
 import qualified TuiDraftTests
 import qualified TuiFileBrowserTests
+import qualified SpectateTests
 import qualified TuiPendingTests
 
 main :: IO ()
@@ -165,6 +166,7 @@ tests =
         , TuiDraftTests.tests
         , TuiFileBrowserTests.tests
         , TuiPendingTests.tests
+        , SpectateTests.tests
         ]
 
 openAIRateLimitTests :: TestTree
