@@ -1,0 +1,18 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "code-counter",
+    "flavor": "OpenAIv1",
+    "modelUrl": "http://localhost:11434/v1",
+    "apiKeyId": "ollama",
+    "modelName": "gemma4:e4b",
+    "announce": "Counts the Haskell source files and lines of the repository in the current directory.",
+    "systemPrompt": [
+      "You report how much Haskell code the repository in the current directory holds.",
+      "Always call your tool before answering, and answer in at most five lines using only what the tool printed."
+    ],
+    "bashToolboxes": [
+      { "tag": "FileSystemDirectory", "contents": { "Path": "demo-agents/repo-tour/code/tools" } }
+    ]
+  }
+}

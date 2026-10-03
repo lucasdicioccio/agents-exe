@@ -5,6 +5,58 @@
 A handy LLM-agent tool, with a variety of calling and configuration modes so
 that the LLM adapts to your workflow rather than the opposite.
 
+## See it work
+
+One prompt goes to a front-desk agent; it asks three helper agents in the
+same turn, each helper runs a shell-script tool of its own, and
+`agents-exe spectate` shows the four sessions live. Below is an unedited
+text capture of that dashboard, 1 minute 46 seconds into a run recorded on
+a laptop against a local Ollama model (`gemma4:e4b`), with no hosted API:
+
+```
+┌────────────────── agents ─────────────────┐┌──────────── text: librarian (following) ────────────┐
+│* repo-tour-desk  90669359  running 1m46s  ││                                                     │
+│  - historian  326ce547  returned 18s      ││                                                     │
+│  * code-counter  401bf8a5  running 1m07s  ││                                                     │
+│  * librarian  fae942c5  running 1m07s     ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘│                                                     │
+┌──────────────── tool calls ───────────────┐│                                                     │
+│* io_prompt_agent_code-counter  repo-tour-d││                                                     │
+│* io_prompt_agent_librarian  repo-tour-desk││                                                     │
+│- io_prompt_agent_historian  repo-tour-desk││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ http://localhost:8765 | 3/4 sessions running | 2 tool calls | 27 events | up/down select, f follow,
+```
+
+The agents are in [`demo-agents/repo-tour/`](demo-agents/repo-tour); from
+the root of this repository, with Ollama running and the model pulled:
+
+```console
+agents-exe --api-keys demo-agents/repo-tour/keys.json \
+  --agent-file demo-agents/repo-tour/desk.json \
+  run --prompt "Give me the tour."
+```
+
+The [demo page](https://lucasdicioccio.github.io/agents-exe/demo.html) has
+the second frame, the full answer, how long it took, and the three commands
+to watch it yourself. An animated recording and a screenshot of the
+interactive TUI are not there yet. To place agents-exe next to LangGraph,
+AutoGen, the OpenAI Agents SDK, the Claude Agent SDK and CrewAI, see the
+[comparison page](https://lucasdicioccio.github.io/agents-exe/comparison.html)
+(a draft, from their documentation, with no benchmarks).
+
 ## Architecture Overview
 
 Agents-exe uses a layered architecture with a modern Entity-Component-System (ECS) based OS model at its core:

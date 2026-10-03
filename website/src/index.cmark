@@ -46,6 +46,45 @@ It is a Haskell cabal project: the `agents` library, the `agents-exe` and
 `agents-server` executables, and `agq`, a small query tool over stored
 sessions.
 
+## See it work
+
+One prompt, four agents: a front desk asks three helpers in the same turn,
+each runs a tool of its own, and `agents-exe spectate` shows the sessions
+while they work. An unedited capture, from a run on a laptop against a
+local model:
+
+```
+┌────────────────── agents ─────────────────┐┌──────────── text: librarian (following) ────────────┐
+│* repo-tour-desk  90669359  running 1m46s  ││                                                     │
+│  - historian  326ce547  returned 18s      ││                                                     │
+│  * code-counter  401bf8a5  running 1m07s  ││                                                     │
+│  * librarian  fae942c5  running 1m07s     ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘│                                                     │
+┌──────────────── tool calls ───────────────┐│                                                     │
+│* io_prompt_agent_code-counter  repo-tour-d││                                                     │
+│* io_prompt_agent_librarian  repo-tour-desk││                                                     │
+│- io_prompt_agent_historian  repo-tour-desk││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ http://localhost:8765 | 3/4 sessions running | 2 tool calls | 27 events | up/down select, f follow,
+```
+
+[**The demo**](/demo.html) has the rest of the run and the commands to
+reproduce it. [**How agents-exe compares**](/comparison.html) places it
+next to LangGraph, AutoGen, the OpenAI Agents SDK, the Claude Agent SDK and
+CrewAI.
+
 ## How it fits together
 
 ![The layers of agents-exe: the CLI, TUI, MCP server and HTTP server on top of the session runner and agent tree, over sessions, tools and LLM endpoints](/gen/images/architecture-layers.dot.png)
@@ -57,6 +96,10 @@ endpoints) is shared, so an agent behaves the same in each mode.
 
 ## Explore
 
+- [**The demo**](/demo.html): a root agent and three helpers at work,
+  recorded, with the commands to run it.
+- [**How agents-exe compares**](/comparison.html): what it is and is not,
+  next to five other agent frameworks.
 - [**Getting started**](/getting-started.html): build it, write a first
   agent, store an API key, and run it in each mode.
 - [**Architecture**](/docs-architecture.html): the layers, the OS model

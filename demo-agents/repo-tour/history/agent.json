@@ -1,0 +1,18 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "historian",
+    "flavor": "OpenAIv1",
+    "modelUrl": "http://localhost:11434/v1",
+    "apiKeyId": "ollama",
+    "modelName": "gemma4:e4b",
+    "announce": "Reads the recent git history of the repository in the current directory.",
+    "systemPrompt": [
+      "You report what the repository in the current directory has been up to recently, from its git history.",
+      "Always call your tool before answering, and answer in at most five lines using only what the tool printed."
+    ],
+    "bashToolboxes": [
+      { "tag": "FileSystemDirectory", "contents": { "Path": "demo-agents/repo-tour/history/tools" } }
+    ]
+  }
+}

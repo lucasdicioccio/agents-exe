@@ -2,6 +2,8 @@ agents-exe: a command-line LLM-agent tool. An agent is a JSON file (endpoint, mo
 
 Overview: https://lucasdicioccio.github.io/agents-exe/
 Getting started: https://lucasdicioccio.github.io/agents-exe/getting-started.html
+Demo (a recorded multi-agent run, reproducible): https://lucasdicioccio.github.io/agents-exe/demo.html
+Comparison with other agent frameworks (draft, from their documentation): https://lucasdicioccio.github.io/agents-exe/comparison.html
 Command reference: https://lucasdicioccio.github.io/agents-exe/commands.html
 Architecture: https://lucasdicioccio.github.io/agents-exe/docs-architecture.html
 Tools: https://lucasdicioccio.github.io/agents-exe/docs-tools.html

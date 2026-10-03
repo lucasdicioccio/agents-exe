@@ -1,4 +1,316 @@
-<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-09-25T12:00:00Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/getting-started.html</id><title type="text">Getting started with agents-exe</title><updated>2026-09-25T12:00:00Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="getting-started-with-agents-exe"&gt;Getting started with agents-exe&lt;/h2&gt;
+<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-09-25T12:00:00Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/demo.html</id><title type="text">See it work: four agents on one screen</title><updated>2026-10-03T12:00:00Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="see-it-work-four-agents-on-one-screen"&gt;See it work: four agents on one screen&lt;/h2&gt;
+&lt;p&gt;One prompt, “Give me the tour.”, goes to a front-desk agent. It asks three
+helper agents in the same turn; each helper runs a command-line tool of its
+own and reports back; the desk writes the answer. While that happens,
+&lt;code&gt;agents-exe spectate&lt;/code&gt; shows the four sessions and their tool calls live.&lt;/p&gt;
+&lt;p&gt;Everything on this page was recorded on 2026-10-03 from a build of &lt;code&gt;main&lt;/code&gt;,
+on a laptop, against a local model served by &lt;a href="https://ollama.com/"&gt;Ollama&lt;/a&gt;
+(&lt;code&gt;gemma4:e4b&lt;/code&gt;). No hosted API and no real API key are involved, so you can
+run the same thing; the agents are in
+&lt;a href="https://github.com/lucasdicioccio/agents-exe/tree/main/demo-agents/repo-tour"&gt;&lt;code&gt;demo-agents/repo-tour/&lt;/code&gt;&lt;/a&gt;.&lt;/p&gt;
+&lt;h3 id="the-screen-mid-run"&gt;The screen, mid-run&lt;/h3&gt;
+&lt;p&gt;The two frames below are unedited text captures of the &lt;code&gt;spectate&lt;/code&gt; terminal
+(100 columns by 24 rows), taken during one run.&lt;/p&gt;
+&lt;p&gt;1 minute 46 seconds in: the historian has returned, the code counter and
+the librarian are still working. Each helper is a session of its own, listed
+under the session that called it.&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;┌────────────────── agents ─────────────────┐┌──────────── text: librarian (following) ────────────┐
+│* repo-tour-desk  90669359  running 1m46s  ││                                                     │
+│  - historian  326ce547  returned 18s      ││                                                     │
+│  * code-counter  401bf8a5  running 1m07s  ││                                                     │
+│  * librarian  fae942c5  running 1m07s     ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘│                                                     │
+┌──────────────── tool calls ───────────────┐│                                                     │
+│* io_prompt_agent_code-counter  repo-tour-d││                                                     │
+│* io_prompt_agent_librarian  repo-tour-desk││                                                     │
+│- io_prompt_agent_historian  repo-tour-desk││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+│                                           ││                                                     │
+└───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ http://localhost:8765 | 3/4 sessions running | 2 tool calls | 27 events | up/down select, f follow,
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;3 minutes 49 seconds in: the three helpers have returned and the desk is
+writing its answer, which streams into the right-hand pane.&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;┌────────────────── agents ─────────────────┐┌────────── text: repo-tour-desk (following) ─────────┐
+│* repo-tour-desk  90669359  running 3m49s  ││housing 66,172 lines.                                │
+│  - historian  326ce547  returned 2m21s    ││*   **`test`**: Dedicated testing area with 55 files │
+│  - code-counter  401bf8a5  returned 1m55s ││and 23,934 lines.                                    │
+│  - librarian  fae942c5  returned 51s      ││*   **`examples`**: Includes 12 files and 5,188 lines│
+│                                           ││for demonstration purposes.                          │
+│                                           ││*   **`tui`**: Contains 29 files, totaling 8,234     │
+│                                           ││lines.                                               │
+│                                           ││*   Other areas include `agq` (6 files, 2,247 lines),│
+│                                           ││`app`, `bench`, `postgres`, and `src`.               │
+│                                           ││                                                     │
+│                                           ││### 📜 Git History (Historian)
+│                                           ││The repository has a robust development history      │
+└───────────────────────────────────────────┘│spanning **722 commits**. Recent activity shows      │
+┌──────────────── tool calls ───────────────┐│significant focus on improving stability and         │
+│- io_prompt_agent_librarian  repo-tour-desk││capability:                                          │
+│- io_prompt_agent_code-counter  repo-tour-d││*   **Key Focus:** Coordinating runs across servers  │
+│- io_prompt_agent_historian  repo-tour-desk││on Postgres with a lease (2026-10-03) and adding a   │
+│                                           ││read-only live dashboard called 'spectate'           │
+│                                           ││(2026-10-03).                                        │
+│                                           ││*   **Recent Upgrades:** The codebase has been       │
+│                                           ││upgraded to                                          │
+│───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+ http://localhost:8765 | 1/4 sessions running | 0 tool calls | 363 events | up/down select, f follow
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;(The border is broken on the line that holds an emoji, a wide character the
+pane does not account for. It is left as captured.)&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;Placeholder, not recorded yet:&lt;/strong&gt; an animated recording (asciinema or
+GIF) of this run, and a screenshot of the interactive TUI
+(&lt;code&gt;agents-exe tui&lt;/code&gt;), would show this better than still text frames.
+Neither exists yet, and nothing on this page stands in for them.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h3 id="the-agents"&gt;The agents&lt;/h3&gt;
+&lt;p&gt;Four JSON files and three shell scripts:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Agent&lt;/th&gt;&lt;th&gt;File&lt;/th&gt;&lt;th&gt;Its tool&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;repo-tour-desk&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;desk.json&lt;/code&gt;&lt;/td&gt;&lt;td&gt;none of its own; three helpers under &lt;code&gt;extraAgents&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;code-counter&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;code/agent.json&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;count_haskell&lt;/code&gt;: tracked &lt;code&gt;.hs&lt;/code&gt; files and lines, per directory&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;historian&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;history/agent.json&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;recent_commits&lt;/code&gt;: commit count and the latest non-merge commits&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;librarian&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;docs/agent.json&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;list_docs&lt;/code&gt;: the pages under &lt;code&gt;documentation/&lt;/code&gt; with their titles&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;A helper reaches the model as a function (&lt;code&gt;io_prompt_agent_&amp;lt;slug&amp;gt;&lt;/code&gt; in the
+frames above), the same way a tool does; see &lt;a href="/agents-exe/docs-tools.html"&gt;tools&lt;/a&gt;. Each
+tool is an executable that answers &lt;code&gt;describe&lt;/code&gt; with its interface and &lt;code&gt;run&lt;/code&gt;
+with its output; see &lt;a href="/agents-exe/docs-binary-tool.html"&gt;executable tools&lt;/a&gt;.&lt;/p&gt;
+&lt;h3 id="run-it-yourself"&gt;Run it yourself&lt;/h3&gt;
+&lt;p&gt;You need &lt;code&gt;agents-exe&lt;/code&gt; built from the repository
+(&lt;a href="/agents-exe/getting-started.html"&gt;getting started&lt;/a&gt;), Ollama running locally, and the
+model (&lt;code&gt;ollama pull gemma4:e4b&lt;/code&gt;). Another model that your Ollama serves and
+that supports tool calls may work if you change &lt;code&gt;modelName&lt;/code&gt; in the four JSON
+files; only &lt;code&gt;gemma4:e4b&lt;/code&gt; was tried for this page. Run from the root of the
+repository: the tools describe the repository in the current directory, and
+the helpers’ tool directories are given relative to it.&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-sh"&gt;# one shot: the answer on stdout
+agents-exe --api-keys demo-agents/repo-tour/keys.json \
+  --agent-file demo-agents/repo-tour/desk.json \
+  run --prompt &amp;quot;Give me the tour.&amp;quot;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;code&gt;keys.json&lt;/code&gt; holds a dummy key: Ollama does not check it, and agents-exe
+looks one up for each agent’s &lt;code&gt;apiKeyId&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;To watch it as above, use three terminals:&lt;/p&gt;
+&lt;pre&gt;&lt;code class="language-sh"&gt;# 1. a server, with sessions in a SQLite file
+agents-exe --api-keys demo-agents/repo-tour/keys.json \
+  --agent-file demo-agents/repo-tour/desk.json \
+  serve --db /tmp/repo-tour.db --port 8765 --stream-tokens
+
+# 2. the read-only dashboard
+agents-exe spectate --attach http://localhost:8765
+
+# 3. start a session
+curl -s -X POST localhost:8765/v1/sessions \
+  -d '{&amp;quot;agent&amp;quot;: &amp;quot;repo-tour-desk&amp;quot;, &amp;quot;prompt&amp;quot;: &amp;quot;Give me the tour.&amp;quot;}'
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The server has no authentication unless you give it &lt;code&gt;--auth-tokens&lt;/code&gt;, and
+binds to &lt;code&gt;127.0.0.1&lt;/code&gt; by default; see
+&lt;a href="/agents-exe/docs-agents-server.html"&gt;agents-server&lt;/a&gt; before exposing it.&lt;/p&gt;
+&lt;h3 id="what-the-recorded-run-did"&gt;What the recorded run did&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;The desk’s first turn asked for the three helpers in one go; the server
+created three child sessions, each linked to the desk’s session as its
+parent.
+&lt;/li&gt;
+&lt;li&gt;The run took 4 minutes 15 seconds from the session’s creation to its last
+update. That is the pace of an 8-billion-parameter model on a laptop, with
+the three helpers sharing one Ollama. It says nothing about agents-exe
+with a hosted model, which was not measured.
+&lt;/li&gt;
+&lt;li&gt;After the server was stopped and started again on the same database file,
+&lt;code&gt;GET /v1/sessions&lt;/code&gt; still listed the four sessions with their parent links.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The desk’s answer, verbatim:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;Welcome to the tour of the repository! I've gathered information from our specialists on the codebase, history, and documentation to give you a comprehensive overview.
+
+### 💻 Codebase Structure (Code Counter)
+The repository is quite large and complex, containing a total of **290 Haskell files** and approximately **109,118 lines of code**. The code is distributed across several specialized sections:
+*   **`src`**: The core logic hub with 184 files, housing 66,172 lines.
+*   **`test`**: Dedicated testing area with 55 files and 23,934 lines.
+*   **`examples`**: Includes 12 files and 5,188 lines for demonstration purposes.
+*   **`tui`**: Contains 29 files, totaling 8,234 lines.
+*   Other areas include `agq` (6 files, 2,247 lines), `app`, `bench`, `postgres`, and `src`.
+
+### 📜 Git History (Historian)
+The repository has a robust development history spanning **722 commits**. Recent activity shows significant focus on improving stability and capability:
+*   **Key Focus:** Coordinating runs across servers on Postgres with a lease (2026-10-03) and adding a read-only live dashboard called 'spectate' (2026-10-03).
+*   **Recent Upgrades:** The codebase has been upgraded to GHC 9.10.3 and the 'topicgraph' module was updated (2026-09-28).
+*   **Pattern:** There is consistent activity related to systemd units and API documentation over the past week.
+
+### 📚 Documentation (Librarian)
+The documentation is extensive and well-structured, covering the entire lifecycle of the Agents Framework. It is organized by architectural components and usage guides.
+*   **Core Topics:** The docs cover system architecture, agent lifecycle (sessions, durable workflows), and tool integration. Specific guides are available for handling state (OS Model API), multi-agent interactions, and advanced workflows (SQQ agent flow/DAG).
+*   **Getting Started Guide:** You should begin with `documentation/README.md` for a high-level overview.
+*   **How to Use:** For integration, consult the material on `tools.md` and `binary-tool.md`. For stateful processes, refer to `durable-workflows-howto.md`.
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The file and line counts, the commit count and the commit subjects match
+what the three tools print. The prose around them is a small model’s: it
+lists &lt;code&gt;src&lt;/code&gt; twice, and its “Pattern” line is its own reading of two commit
+subjects. The mechanics shown above do not depend on the model.&lt;/p&gt;
+&lt;h3 id="where-next"&gt;Where next&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href="/agents-exe/docs-tui.html"&gt;The TUI&lt;/a&gt;, and the
+&lt;a href="/agents-exe/docs-cli-commands.html"&gt;CLI reference&lt;/a&gt;, which documents &lt;code&gt;spectate&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="/agents-exe/docs-agents-server.html"&gt;agents-server&lt;/a&gt;: the HTTP API used in step 3,
+the event stream &lt;code&gt;spectate&lt;/code&gt; follows, and sub-agents as sessions.
+&lt;/li&gt;
+&lt;li&gt;&lt;a href="/agents-exe/comparison.html"&gt;How agents-exe compares&lt;/a&gt; with other agent frameworks.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/demo.html" rel="alternate"/><summary type="text">A root agent asks three helper agents at once, each runs its own tool, and a read-only dashboard shows all four sessions while they work. Recorded on a laptop with a local model, and reproducible from the repository.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/comparison.html</id><title type="text">How agents-exe compares</title><updated>2026-10-03T12:00:00Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="how-agents-exe-compares"&gt;How agents-exe compares&lt;/h2&gt;
+&lt;p&gt;This page puts agents-exe next to five agent frameworks people are likely
+to be choosing between: LangGraph, AutoGen, the OpenAI Agents SDK, the
+Claude Agent SDK and CrewAI.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Read this first.&lt;/strong&gt; It is a draft. What it says about agents-exe was
+checked against the code or by running it. What it says about the other
+five comes only from their own documentation, read on 2026-10-03 and linked
+under &lt;a href="#sources"&gt;Sources&lt;/a&gt;; none of them was installed or run for this page.
+There are no benchmarks here, and no claim that one is faster, cheaper or
+better than another. A cell that says “not checked” means exactly that, not
+“missing”. Which frameworks belong on this page, and on which axes, is
+still an open choice; corrections are welcome as
+&lt;a href="https://github.com/lucasdicioccio/agents-exe/issues"&gt;issues&lt;/a&gt;.&lt;/p&gt;
+&lt;h3 id="what-agents-exe-is"&gt;What agents-exe is&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;A command-line program, configured with files.&lt;/strong&gt; An agent is a JSON
+file: an endpoint, a model, a system prompt, tools, helper agents. There
+is no Python or TypeScript API; the library underneath is Haskell.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Tools are programs.&lt;/strong&gt; Any executable that answers &lt;code&gt;describe&lt;/code&gt; and &lt;code&gt;run&lt;/code&gt;
+is a tool, whatever language it is written in. MCP servers, OpenAPI
+documents and a few builtin toolboxes (SQLite, system information, Lua)
+are tools too.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Helper agents are tools as well.&lt;/strong&gt; A root agent calls a helper the way
+it calls a tool, and helpers can have helpers.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;One agent file, several ways to run it:&lt;/strong&gt; a one-shot command, a
+terminal UI, a stdio MCP server, or an HTTP server with a chat page.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Sessions are stored.&lt;/strong&gt; As JSON files for the command line, in SQLite or
+PostgreSQL for the server; a session can stop on a tool call that waits
+for an outside answer and be resumed later.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Self-hosted.&lt;/strong&gt; It talks to the model endpoint you give it; there is no
+agents-exe service. Apache-2.0.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The &lt;a href="/agents-exe/demo.html"&gt;demo&lt;/a&gt; shows several of these at once.&lt;/p&gt;
+&lt;h3 id="what-it-is-not"&gt;What it is not&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Not a library for a Python or TypeScript application: if you want to
+build agents as code inside such an application, the five frameworks
+below are made for that and agents-exe is not.
+&lt;/li&gt;
+&lt;li&gt;Not tied to one model vendor, and not a client for every vendor’s native
+API either: models are reached through OpenAI-style chat-completions
+endpoints (the README lists OpenAI, Mistral, Moonshot and Ollama as
+working).
+&lt;/li&gt;
+&lt;li&gt;Not a hosted product: you run the binary and keep the database.
+&lt;/li&gt;
+&lt;li&gt;Not large: the commit history has a single author, and there is no
+ecosystem of third-party integrations around it.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="side-by-side"&gt;Side by side&lt;/h3&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th&gt;In its own words&lt;/th&gt;&lt;th&gt;You use it from&lt;/th&gt;&lt;th&gt;State between turns and runs, as documented&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;strong&gt;agents-exe&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;"A handy LLM-agent tool, with a variety of calling and configuration modes"&lt;/td&gt;&lt;td&gt;the command line and JSON files; a Haskell library&lt;/td&gt;&lt;td&gt;session files; SQLite or PostgreSQL behind the server&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;strong&gt;LangGraph&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;"A low-level orchestration framework and runtime for building, managing, and deploying long-running, stateful agents."&lt;/td&gt;&lt;td&gt;Python; JavaScript/TypeScript&lt;/td&gt;&lt;td&gt;checkpointers: in-memory, SQLite, PostgreSQL&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;strong&gt;AutoGen&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;"A framework for building AI agents and applications."&lt;/td&gt;&lt;td&gt;Python; .NET&lt;/td&gt;&lt;td&gt;not checked&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;strong&gt;OpenAI Agents SDK&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;"agentic AI apps in a lightweight, easy-to-use package with very few abstractions"&lt;/td&gt;&lt;td&gt;Python; TypeScript&lt;/td&gt;&lt;td&gt;sessions, with SQLite, SQLAlchemy, Redis and other session stores in the documentation index&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Claude Agent SDK&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;"Build production AI agents with Claude Code as a library"&lt;/td&gt;&lt;td&gt;Python; TypeScript&lt;/td&gt;&lt;td&gt;sessions that can be resumed or forked; storage not checked&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;strong&gt;CrewAI&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;"The leading open-source framework for orchestrating autonomous AI agents and building complex workflows."&lt;/td&gt;&lt;td&gt;Python&lt;/td&gt;&lt;td&gt;Flows "persist data across steps and executions"; storage not checked&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;A few more facts from the same documentation pages, where they bear on the
+choice:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;LangGraph&lt;/strong&gt; describes checkpointers as serving “conversation
+continuity, human-in-the-loop workflows, time travel, and fault
+tolerance”. That is the closest counterpart in this list to agents-exe’s
+stored, resumable sessions, reached from code rather than from a
+command line.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;AutoGen&lt;/strong&gt; is layered: Core (“an event-driven programming framework for
+building scalable multi-agent AI systems”), AgentChat on top of it, and
+Studio, a web UI for prototyping without code.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;OpenAI Agents SDK&lt;/strong&gt; names three primitives (agents, handoffs,
+guardrails) and lists built-in tracing, human-in-the-loop and MCP tools.
+It uses OpenAI’s Responses API by default and documents adapters for
+other providers.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Claude Agent SDK&lt;/strong&gt; is “a library that runs the Claude Code binary”,
+with Claude Code’s built-in tools (files, commands, web search), hooks,
+subagents, MCP, permissions and sessions.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;CrewAI&lt;/strong&gt; has two layers: Crews (“teams of autonomous agents”) and Flows
+(“structured, event-driven workflows that manage state and control
+execution”). Its repository calls it “a standalone Python framework”,
+MIT-licensed.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="when-agents-exe-is-a-reasonable-pick"&gt;When agents-exe is a reasonable pick&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;You would rather describe an agent in a file and give it shell scripts
+as tools than write an application around a framework.
+&lt;/li&gt;
+&lt;li&gt;You want the same agent in a terminal, in an MCP client and behind HTTP
+without rewriting it.
+&lt;/li&gt;
+&lt;li&gt;You want to keep sessions in your own SQLite file or PostgreSQL database,
+and to run against a local model.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="when-to-pick-something-else"&gt;When to pick something else&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Your agents live inside a Python or TypeScript code base, or you need a
+vendor’s native features (OpenAI’s tracing and voice, Claude Code’s
+built-in tools and permissions).
+&lt;/li&gt;
+&lt;li&gt;You want a large ecosystem of integrations, tutorials and people to ask.
+&lt;/li&gt;
+&lt;li&gt;You need a hosted, managed runtime.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="sources"&gt;Sources&lt;/h3&gt;
+&lt;p&gt;Read on 2026-10-03:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;LangGraph: &lt;a href="https://docs.langchain.com/oss/python/langgraph/overview"&gt;overview&lt;/a&gt;,
+&lt;a href="https://docs.langchain.com/oss/python/langgraph/persistence"&gt;persistence&lt;/a&gt;,
+&lt;a href="https://docs.langchain.com/oss/javascript/langgraph/overview"&gt;JavaScript overview&lt;/a&gt;.
+&lt;/li&gt;
+&lt;li&gt;AutoGen: &lt;a href="https://microsoft.github.io/autogen/stable/"&gt;documentation home&lt;/a&gt;.
+&lt;/li&gt;
+&lt;li&gt;OpenAI Agents SDK: &lt;a href="https://openai.github.io/openai-agents-python/"&gt;Python documentation&lt;/a&gt;,
+&lt;a href="https://openai.github.io/openai-agents-js/"&gt;TypeScript documentation&lt;/a&gt;.
+&lt;/li&gt;
+&lt;li&gt;Claude Agent SDK: &lt;a href="https://code.claude.com/docs/en/agent-sdk/overview"&gt;overview&lt;/a&gt;.
+&lt;/li&gt;
+&lt;li&gt;CrewAI: &lt;a href="https://docs.crewai.com/en/introduction"&gt;introduction&lt;/a&gt;,
+&lt;a href="https://github.com/crewAIInc/crewAI"&gt;repository&lt;/a&gt;.
+&lt;/li&gt;
+&lt;li&gt;agents-exe: this site, the
+&lt;a href="https://github.com/lucasdicioccio/agents-exe"&gt;repository&lt;/a&gt;, and the
+&lt;a href="/agents-exe/demo.html"&gt;demo&lt;/a&gt; for what was run.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/comparison.html" rel="alternate"/><summary type="text">What agents-exe is and is not, next to five other agent frameworks, from their own documentation. A draft: no benchmarks, and the choice of frameworks and axes is still open.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/getting-started.html</id><title type="text">Getting started with agents-exe</title><updated>2026-09-25T12:00:00Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="getting-started-with-agents-exe"&gt;Getting started with agents-exe&lt;/h2&gt;
 &lt;p&gt;agents-exe is a command-line tool, and a Haskell library underneath it. This
 page gets you from a checkout to an agent answering a prompt in each of the
 modes it supports.&lt;/p&gt;

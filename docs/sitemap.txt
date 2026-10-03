@@ -1,6 +1,9 @@
 https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html
+https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html
 https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html
+https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html
 https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html
+https://lucasdicioccio.github.io/agents-exe/comparison.html
 https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html
 https://lucasdicioccio.github.io/agents-exe/docs-sessions.html
 https://lucasdicioccio.github.io/agents-exe/commands.html
@@ -8,6 +11,7 @@ https://lucasdicioccio.github.io/agents-exe/docs-architecture.html
 https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html
 https://lucasdicioccio.github.io/agents-exe/docs.html
 https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html
+https://lucasdicioccio.github.io/agents-exe/demo.html
 https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html
 https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html
 https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html

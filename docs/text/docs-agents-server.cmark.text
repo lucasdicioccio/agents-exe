@@ -379,6 +379,14 @@ agents-exe tui --attach https://agents.example --token-file ~/.agents-token
 
 The TUI is then one more client of this API, like the chat page: it lists agents from `GET /v1/agents`, drives sessions through the routes above, follows `GET /v1/events` (`scope=all`, or `scope=owner` when a non-admin token is used), and fetches `GET /v1/sessions/:id` on each `session.updated`. It sees the sessions of its token's owner (or every session, without authentication), including ones created by other clients, and quitting it leaves its sessions running here. Its `--params-file` values travel as `params` on each create and message, as the chat page's do. See [tui.md](/docs-tui.html#architecture ) for what differs from the embedded TUI.
 
+### Watching with spectate
+
+`agents-exe spectate --attach` takes the same addresses and tokens, and only reads: it lists the running sessions once (`GET /v1/sessions`), then follows `GET /v1/events` and shows the session tree, the tool calls and the model's text live. With `--stream-tokens` the text arrives as it is written; without, turn by turn from `session.updated`. See [cli-commands.md](/docs-cli-commands.html#spectate ).
+
+```sh
+agents-exe spectate --attach unix:///run/agents/agents.sock
+```
+
 -----------------------------
 
 ## API reference
@@ -394,9 +402,10 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 <tr><td><code>POST /mcp</code></td><td>JSON-RPC message or batch</td><td><code>200</code> JSON-RPC answer, or <code>202</code></td><td>see [MCP over HTTP](#mcp-over-http)</td></tr>
 <tr><td><code>GET /v1/agents</code></td><td></td><td><code>200 [{slug, description, model, system_prompt, tools, parameters, helpers, source, …}]</code></td><td></td></tr>
 <tr><td><code>GET /v1/agents/:slug</code></td><td></td><td><code>200</code> agent (same shape)</td><td>404 <code>unknown_agent</code></td></tr>
-<tr><td><code>PUT /v1/agents/:slug</code></td><td>agent configuration</td><td><code>201</code> (new) or <code>200</code> agent</td><td>403 <code>agent_edits_disabled</code> / <code>forbidden</code>, 400 <code>agent_uses_files</code> / <code>agent_failed_to_load</code> / <code>bad_request</code>, 409 <code>agent_defined_by_file</code></td></tr>
-<tr><td><code>DELETE /v1/agents/:slug</code></td><td></td><td><code>200 {deleted}</code></td><td>403, 404 <code>unknown_agent</code>, 409 <code>agent_defined_by_file</code></td></tr>
-<tr><td><code>POST /v1/sessions?wait=&amp;timeout=</code></td><td><code>{agent, prompt?, media?, run?, params?, parent?}</code></td><td><code>201</code> session, with a <code>Location</code> header</td><td>404 <code>unknown_agent</code>, 404 <code>unknown_session</code> (parent), 400 <code>bad_request</code>, see [Parameters](#parameters)</td></tr>
+<tr><td><code>PUT /v1/agents/:slug</code></td><td>agent configuration</td><td><code>201</code> (new) or <code>200</code> agent</td><td>403 <code>agent_edits_disabled</code> / <code>forbidden</code>, 400 <code>agent_uses_files</code> / <code>agent_invalid_paths</code> / <code>unknown_helper</code> / <code>helper_cycle</code> / <code>agent_failed_to_load</code> / <code>bad_request</code>, 409 <code>agent_defined_by_file</code></td></tr>
+<tr><td><code>DELETE /v1/agents/:slug</code></td><td></td><td><code>200 {deleted}</code></td><td>403, 404 <code>unknown_agent</code>, 409 <code>agent_defined_by_file</code> / <code>agent_in_use</code></td></tr>
+<tr><td><code>POST /v1/sessions?wait=&amp;timeout=</code></td><td><code>{agent, prompt?, media?, run?, params?, parent?, seal?, session_token?}</code></td><td><code>201</code> session (with <code>session_token</code> once, when asked), with a <code>Location</code> header</td><td>404 <code>unknown_agent</code>, 404 <code>unknown_session</code> (parent), 400 <code>bad_request</code>, see [Parameters](#parameters) and [Session tokens](#session-tokens-and-sealed-sessions)</td></tr>
+<tr><td><code>DELETE /v1/sessions/:id/token</code></td><td>none</td><td><code>200</code> session</td><td>404; revokes the session's token, also during a run</td></tr>
 <tr><td><code>GET /v1/sessions?agent=&amp;status=&amp;parent=&amp;limit=&amp;before=</code></td><td></td><td><code>200 {sessions, next_before}</code></td><td>400 <code>bad_request</code></td></tr>
 <tr><td><code>GET /v1/sessions/:id?wait=&amp;timeout=</code></td><td></td><td><code>200</code> session, or <code>202</code> when <code>wait</code> expired with a run still active</td><td>404 <code>unknown_session</code></td></tr>
 <tr><td><code>POST /v1/sessions/:id/messages?wait=&amp;timeout=</code></td><td><code>{prompt, media?, run?, params?, interrupt?}</code></td><td><code>202</code> or <code>200</code> session</td><td>404, 409 <code>run_in_progress</code>, 409 <code>not_accepting_messages</code>, see [Parameters](#parameters)</td></tr>
@@ -446,7 +455,24 @@ Mail (a message, or any other envelope R1 folds into a turn) normally becomes a 
 
 `--db postgresql://user:password@host:5432/agents` stores sessions in Postgres instead of SQLite. The server creates its tables on start (`sessions`, `tool_continuations`, `agents`, `schema_migrations`); the database must exist and the user must be allowed to create tables. The logs show the URL without its user and password.
 
-Several servers may share one Postgres database: every write is versioned, so a conflicting write is detected and refused (`409 conflict`). Runs are not coordinated between servers, though: route all requests for a session to the same server.
+#### Several servers on one database
+
+Several servers may share one Postgres database, and a request for a session may go to any of them. A session's run is on one server at a time:
+
+- The server that starts a run takes a **lease** on the session (the `run_owner` and `run_lease_until` columns of `sessions`) and renews it every 10 seconds while the run lasts. The lease is given back when the run stops. Times are the database's, so the servers' clocks need not agree.
+
+- While another server holds the lease, the session is busy here too. A message is accepted as mail for the run, as it is on the server that runs it. `resume` and deleting answer `409 run_in_progress`. `cancel` asks the owner to stop, which it does at its next step, not at once. A completed deferred call is queued for the run. `GET /v1/sessions/:id?wait=true` waits for the run wherever it is.
+
+- A server that dies stops renewing. Once its lease is 30 seconds old, another server **takes the session over**: it stores the session as a restart would (the interrupted step is lost, its background calls are orphaned, the status is the one the turns imply) and logs `sessions.taken_over`. Nothing is resumed: resume the session, on any server, to continue. Secret parameters lived in the dead server's memory and must be supplied again.
+
+- A server that was only cut off (from the database, or by a long pause) and comes back after its session was taken over stops its run without storing anything, and logs `run.lease_lost`.
+
+- Servers tell each other what they write with `LISTEN`/`NOTIFY` (channel `agents_sessions`), on one extra connection per server. Mail accepted by one server reaches the run on another at once. Each stored version of a session is announced as `session.updated` on every server's event streams, and a session that stops running as `run.stopped`. The other events of a run (`text.delta`, `tool.*`, `run.started`, ...) are only on the streams of the server that runs it: follow a session's events on the server you started its run on.
+
+
+All the servers must run a version with leases: an older one neither takes nor honours them. A server started with other servers already running recovers only the sessions no live server holds.
+
+Not shared between servers: agent files and `--set` parameters (give every server the same ones), and stored agents edited while the servers run (a server loads them at startup). A `watch-session` registration is followed by the server that runs the watched session, if it knows the registration: a server knows the ones made on it and the ones stored when it started.
 
 -----------------------------
 
@@ -465,7 +491,7 @@ curl -X PUT localhost:8080/v1/agents/helper -H 'Authorization: Bearer <admin tok
 
 - The body is what goes under `contents` in an agent file. The slug comes from the path.
 
-- A stored agent cannot use anything that refers to files: `toolDirectory`, `bashToolboxes`, `openApiToolboxes`, `postgrestToolboxes`, `extraAgents`, `skillSources`, `autoEnableSkills` (`400 agent_uses_files`). Builtin toolboxes and MCP servers work, as do the execution mode and tool-call policy.
+- A stored agent cannot use `openApiToolboxes`, `postgrestToolboxes`, `skillSources`, or `autoEnableSkills`, which refer to files on the server (`400 agent_uses_files`). Builtin toolboxes and MCP servers work, as do the execution mode and tool-call policy. Bash tools and helpers work as described below.
 
 - The agent is loaded before it is stored: if an MCP server fails to start, the answer is `400 agent_failed_to_load` and nothing is stored.
 
@@ -476,6 +502,55 @@ curl -X PUT localhost:8080/v1/agents/helper -H 'Authorization: Bearer <admin tok
 - New sessions use a replaced agent at once. Sessions already in memory keep the version they built until they are idle long enough to be dropped (`--live-session-ttl`). Sessions of a deleted agent stay, but runs on them fail with `unknown_agent` until an agent with that slug exists again.
 
 - MCP servers started for a stored agent keep running when the agent is replaced or deleted, until the server stops.
+
+
+### Bash tools of a stored agent
+
+The files of a stored agent's bash tools are stored with it. Next to the configuration's fields, the body takes a `files` object: contents by path.
+
+```json
+{
+  "apiKeyId": "openai", "flavor": "OpenAIv1",
+  "modelUrl": "https://api.openai.com/v1", "modelName": "gpt-4o-mini",
+  "announce": "greets people", "systemPrompt": ["You greet."],
+  "toolDirectory": "tools",
+  "files": {
+    "tools/greet.sh": "#!/bin/sh\n..."
+  }
+}
+```
+
+For instance, to send a configuration (`greeter.json`, without `files`) with a script from disk:
+
+```bash
+jq --rawfile greet tools/greet.sh '. + {files: {"tools/greet.sh": $greet}}' greeter.json \
+  | curl -X PUT localhost:8080/v1/agents/greeter -H 'Authorization: Bearer <admin token>' -d @-
+```
+
+- `toolDirectory` and the paths of `bashToolboxes` are relative to the directory the files are written to. Paths, of tools and of files, are relative and without `..` (`400 agent_invalid_paths`); `bashToolboxes` entries take no `root`.
+
+- When the agent is loaded, the server writes the files to a temporary directory of its own, makes each one executable, and loads the tools from there. The directory goes away with that version of the agent, and with the server. Tools run on the server's machine, as the server's user: this is the reason storing agents needs an admin owner.
+
+- Files are text (UTF-8). A `PUT` replaces the agent and all its files: send `files` again to keep them. `GET /v1/agents/:slug` shows them under `config.files`, so that `config` can be sent back as a body.
+
+
+### Helpers of a stored agent
+
+`extraAgents` of a stored agent name other stored agents by slug, without a `path`; `with` and `narrowable` work as in agent files.
+
+```json
+{"extraAgents": [{"slug": "greeter"}]}
+```
+
+- A helper must be stored before the agent that names it (`400 unknown_helper`). Agents from files cannot be named.
+
+- The references of stored agents cannot form a cycle, and an agent cannot name itself (`400 helper_cycle`). This is stricter than agent files.
+
+- Replacing a helper reloads the stored agents that reach it, so that new sessions call the new version.
+
+- An agent that others name as a helper cannot be deleted (`409 agent_in_use`): delete or change the agents that name it first.
+
+- At startup, a stored agent whose helpers cannot be resolved (for instance because an agent file now has a helper's slug) is skipped, and logged as `agents.stored_skipped`.
 
 
 -----------------------------
@@ -507,6 +582,17 @@ With `--auth-tokens tokens.json`, every endpoint except `/healthz` needs an `Aut
 
 
 All owners share the agents and the API keys of the server.
+
+### Session tokens and sealed sessions
+
+A backend that opens a chat for an end user should not have to proxy every message and event stream, but must not hand the browser its own token either. Two options on `POST /v1/sessions` (with `--auth-tokens`) cover that:
+
+- `"seal": true` marks the session sealed (shown as `"sealed": true`). `params` on a message, resume or continuation is then refused with `403 forbidden_params` for every caller but the session's owner, who keeps `PUT /v1/sessions/:id/params` to rotate values. The parameters of a sealed session are those its creator chose.
+
+- `"session_token": true` adds a `session_token` to the creation answer, once: 32 random bytes in hex, prefixed `st_`. Only its SHA-256 digest is stored, with the session, on either backend; reads never show it. It is refused with `400` without `--auth-tokens`, where every caller has full access anyway.
+
+
+`Authorization: Bearer <session token>` allows exactly, on that one session: `GET /v1/sessions/:id`, `GET /v1/sessions/:id/events`, `POST /v1/sessions/:id/messages` (without `params`: `403 forbidden_params`) and `POST /v1/sessions/:id/cancel`. The other paths of the session answer `403 forbidden`; every path outside it (other sessions, the listing, agents, `/v1/events`) answers `401`, so a token cannot probe for other sessions. The owner revokes a token with `DELETE /v1/sessions/:id/token`; it also dies with the session. A fork or a child session does not inherit the seal or the token.
 
 **Browser origins.** Without `--auth-tokens`, requests carrying an `Origin` header that is not `localhost`, `127.0.0.1`, `[::1]`, or a `--cors-origin` answer `403 forbidden_origin`. This stops a web page from reaching a local server through DNS rebinding. Clients that send no `Origin` (curl, servers, MCP clients) are not affected. With authentication on, origins are not checked (a bearer token already proves the caller is authorized; there is no cookie to leak). `/healthz`, `/openapi.json` and `/` are answered before the check, so a monitor or a documentation browser reaches them from anywhere.
 
@@ -574,6 +660,13 @@ Background tool calls (`runAsync`) live in the server process. They survive betw
 ## Running as a service
 
 Both `agents-server` and `agents-exe serve` are already service-ready: every path either needs is a flag, they log JSON lines on stderr (see [Logs](#logs ) below), `SIGTERM`/`SIGINT` trigger the graceful shutdown described above (`--shutdown-grace` bounds it), and `recoverOnStartup` runs before the first request is accepted. A `systemd` unit only needs to point one at the right files and restart it on crash.
+
+Ready-made units live in `bundling/systemd/`:
+
+- `agents-server.service`: the system-wide unit below, for `agents-server`. `sudo install -Dm644 bundling/systemd/agents-server.service /etc/systemd/system/agents-server.service`, edit the paths, then `systemctl daemon-reload` and `enable --now`.
+
+- `agents-server.user.service`: a per-user unit that also listens on `$XDG_RUNTIME_DIR/agents-server.sock` (`--socket`). `install -Dm644 bundling/systemd/agents-server.user.service ~/.config/systemd/user/agents-server.service`, put `agent.json` and `keys.json` in `~/.config/agents-server/`, and the binary at `~/.local/bin/agents-server`, then `systemctl --user daemon-reload` and `systemctl --user enable --now agents-server`. The server creates and owns its socket (it does not use systemd socket activation), so this is a plain service, not a `.socket` unit.
+
 
 Create a user and directories for its state, put the agent files, API keys and token file somewhere readable, and write a unit. This one uses `agents-exe serve`, so agents-exe.cfg.json in `WorkingDirectory` can carry the agent files instead of repeating `--agent-file`; `agents-server` works the same way with `ExecStart=/usr/local/bin/agents-server` and the agent files always on the command line:
 
@@ -723,8 +816,6 @@ Each `Command` maps onto one route of the table above (`SpawnSession` and `creat
 ## Not yet supported
 
 - Per-owner API keys: all owners share the server's keys.
-
-- Coordinating runs between several servers sharing a Postgres database.
 
 
 See `todos/web-server-embedding.md` for the design and the planned work.

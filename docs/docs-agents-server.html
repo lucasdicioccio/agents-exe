@@ -1,4 +1,4 @@
-<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - agents-server: agents over HTTP</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - agents-server: agents over HTTP"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - agents-server: agents over HTTP"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><meta property="og:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="article:published_time" content="2026-09-25T18:11:20Z"><meta name="article:modified_time" content="2026-09-25T18:11:20Z"><meta name="ks:article_json" content="/agents-exe/json/docs-agents-server.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-agents-server.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-09-25T18:11:20Z","datePublished":"2026-09-25T18:11:20Z","description":"`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s","headline":"agents-server: agents over HTTP","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/">home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>agents-server: agents over HTTP</h1><p>On <span>Fri, 25 Sep 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 5011 words, 21 code snippets, 17 links, 1images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-MIGRATION-GUIDE.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">2/26</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-tui.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"><code>documentation/agents-server.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - agents-server: agents over HTTP</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - agents-server: agents over HTTP"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - agents-server: agents over HTTP"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><meta property="og:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="article:published_time" content="2026-10-03T10:37:53Z"><meta name="article:modified_time" content="2026-10-03T10:37:53Z"><meta name="ks:article_json" content="/agents-exe/json/docs-agents-server.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-agents-server.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-03T10:37:53Z","datePublished":"2026-10-03T10:37:53Z","description":"`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s","headline":"agents-server: agents over HTTP","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>agents-server: agents over HTTP</h1><p>On <span>Sat, 03 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 5986 words, 25 code snippets, 18 links, 1images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-MIGRATION-GUIDE.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">2/27</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-tui.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"><code>documentation/agents-server.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
 <h2 id="agents-server-agents-over-http">agents-server: agents over HTTP</h2>
 <p><img src="/agents-exe/gen/images/server-overview.dot.png" alt="The standalone server: clients reach one session runner through the HTTP API." /></p>
 <p><code>agents-server</code> runs agents as a long-lived HTTP service. Sessions live in a
@@ -430,6 +430,15 @@ and quitting it leaves its sessions running here. Its <code>--params-file</code>
 values travel as <code>params</code> on each create and message, as the chat page’s
 do. See <a href="/agents-exe/docs-tui.html#architecture">tui.md</a> for what differs from the embedded
 TUI.</p>
+<h4 id="watching-with-spectate">Watching with spectate</h4>
+<p><code>agents-exe spectate --attach</code> takes the same addresses and tokens, and
+only reads: it lists the running sessions once (<code>GET /v1/sessions</code>), then
+follows <code>GET /v1/events</code> and shows the session tree, the tool calls and
+the model’s text live. With <code>--stream-tokens</code> the text arrives as it is
+written; without, turn by turn from <code>session.updated</code>. See
+<a href="/agents-exe/docs-cli-commands.html#spectate">cli-commands.md</a>.</p>
+<pre><code class="language-sh">agents-exe spectate --attach unix:///run/agents/agents.sock
+</code></pre>
 <hr />
 <h3 id="api-reference">API reference</h3>
 <p>All bodies are JSON. Errors are <code>{&quot;error&quot;: &quot;&lt;code&gt;&quot;, &quot;message&quot;: &quot;&lt;text&gt;&quot;}</code>.</p>
@@ -441,9 +450,10 @@ TUI.</p>
 <tr><td><code>POST /mcp</code></td><td>JSON-RPC message or batch</td><td><code>200</code> JSON-RPC answer, or <code>202</code></td><td>see [MCP over HTTP](#mcp-over-http)</td></tr>
 <tr><td><code>GET /v1/agents</code></td><td></td><td><code>200 [{slug, description, model, system_prompt, tools, parameters, helpers, source, …}]</code></td><td></td></tr>
 <tr><td><code>GET /v1/agents/:slug</code></td><td></td><td><code>200</code> agent (same shape)</td><td>404 <code>unknown_agent</code></td></tr>
-<tr><td><code>PUT /v1/agents/:slug</code></td><td>agent configuration</td><td><code>201</code> (new) or <code>200</code> agent</td><td>403 <code>agent_edits_disabled</code> / <code>forbidden</code>, 400 <code>agent_uses_files</code> / <code>agent_failed_to_load</code> / <code>bad_request</code>, 409 <code>agent_defined_by_file</code></td></tr>
-<tr><td><code>DELETE /v1/agents/:slug</code></td><td></td><td><code>200 {deleted}</code></td><td>403, 404 <code>unknown_agent</code>, 409 <code>agent_defined_by_file</code></td></tr>
-<tr><td><code>POST /v1/sessions?wait=&amp;timeout=</code></td><td><code>{agent, prompt?, media?, run?, params?, parent?}</code></td><td><code>201</code> session, with a <code>Location</code> header</td><td>404 <code>unknown_agent</code>, 404 <code>unknown_session</code> (parent), 400 <code>bad_request</code>, see [Parameters](#parameters)</td></tr>
+<tr><td><code>PUT /v1/agents/:slug</code></td><td>agent configuration</td><td><code>201</code> (new) or <code>200</code> agent</td><td>403 <code>agent_edits_disabled</code> / <code>forbidden</code>, 400 <code>agent_uses_files</code> / <code>agent_invalid_paths</code> / <code>unknown_helper</code> / <code>helper_cycle</code> / <code>agent_failed_to_load</code> / <code>bad_request</code>, 409 <code>agent_defined_by_file</code></td></tr>
+<tr><td><code>DELETE /v1/agents/:slug</code></td><td></td><td><code>200 {deleted}</code></td><td>403, 404 <code>unknown_agent</code>, 409 <code>agent_defined_by_file</code> / <code>agent_in_use</code></td></tr>
+<tr><td><code>POST /v1/sessions?wait=&amp;timeout=</code></td><td><code>{agent, prompt?, media?, run?, params?, parent?, seal?, session_token?}</code></td><td><code>201</code> session (with <code>session_token</code> once, when asked), with a <code>Location</code> header</td><td>404 <code>unknown_agent</code>, 404 <code>unknown_session</code> (parent), 400 <code>bad_request</code>, see [Parameters](#parameters) and [Session tokens](#session-tokens-and-sealed-sessions)</td></tr>
+<tr><td><code>DELETE /v1/sessions/:id/token</code></td><td>none</td><td><code>200</code> session</td><td>404; revokes the session's token, also during a run</td></tr>
 <tr><td><code>GET /v1/sessions?agent=&amp;status=&amp;parent=&amp;limit=&amp;before=</code></td><td></td><td><code>200 {sessions, next_before}</code></td><td>400 <code>bad_request</code></td></tr>
 <tr><td><code>GET /v1/sessions/:id?wait=&amp;timeout=</code></td><td></td><td><code>200</code> session, or <code>202</code> when <code>wait</code> expired with a run still active</td><td>404 <code>unknown_session</code></td></tr>
 <tr><td><code>POST /v1/sessions/:id/messages?wait=&amp;timeout=</code></td><td><code>{prompt, media?, run?, params?, interrupt?}</code></td><td><code>202</code> or <code>200</code> session</td><td>404, 409 <code>run_in_progress</code>, 409 <code>not_accepting_messages</code>, see [Parameters](#parameters)</td></tr>
@@ -539,10 +549,52 @@ Postgres instead of SQLite. The server creates its tables on start
 (<code>sessions</code>, <code>tool_continuations</code>, <code>agents</code>, <code>schema_migrations</code>); the
 database must exist and the user must be allowed to create tables. The logs show the URL
 without its user and password.</p>
-<p>Several servers may share one Postgres database: every write is versioned,
-so a conflicting write is detected and refused (<code>409 conflict</code>). Runs are
-not coordinated between servers, though: route all requests for a session to
-the same server.</p>
+<h5 id="several-servers-on-one-database">Several servers on one database</h5>
+<p>Several servers may share one Postgres database, and a request for a session
+may go to any of them. A session’s run is on one server at a time:</p>
+<ul>
+<li>The server that starts a run takes a <strong>lease</strong> on the session (the
+<code>run_owner</code> and <code>run_lease_until</code> columns of <code>sessions</code>) and renews it
+every 10 seconds while the run lasts. The lease is given back when the run
+stops. Times are the database’s, so the servers’ clocks need not agree.
+</li>
+<li>While another server holds the lease, the session is busy here too. A
+message is accepted as mail for the run, as it is on the server that runs
+it. <code>resume</code> and deleting answer <code>409 run_in_progress</code>. <code>cancel</code> asks the
+owner to stop, which it does at its next step, not at once. A completed
+deferred call is queued for the run. <code>GET /v1/sessions/:id?wait=true</code>
+waits for the run wherever it is.
+</li>
+<li>A server that dies stops renewing. Once its lease is 30 seconds old,
+another server <strong>takes the session over</strong>: it stores the session as a
+restart would (the interrupted step is lost, its background calls are
+orphaned, the status is the one the turns imply) and logs
+<code>sessions.taken_over</code>. Nothing is resumed: resume the session, on any
+server, to continue. Secret parameters lived in the dead server’s memory
+and must be supplied again.
+</li>
+<li>A server that was only cut off (from the database, or by a long pause)
+and comes back after its session was taken over stops its run without
+storing anything, and logs <code>run.lease_lost</code>.
+</li>
+<li>Servers tell each other what they write with <code>LISTEN</code>/<code>NOTIFY</code> (channel
+<code>agents_sessions</code>), on one extra connection per server. Mail accepted by
+one server reaches the run on another at once. Each stored version of a
+session is announced as <code>session.updated</code> on every server’s event
+streams, and a session that stops running as <code>run.stopped</code>. The other
+events of a run (<code>text.delta</code>, <code>tool.*</code>, <code>run.started</code>, …) are only on
+the streams of the server that runs it: follow a session’s events on the
+server you started its run on.
+</li>
+</ul>
+<p>All the servers must run a version with leases: an older one neither takes
+nor honours them. A server started with other servers already running
+recovers only the sessions no live server holds.</p>
+<p>Not shared between servers: agent files and <code>--set</code> parameters (give every
+server the same ones), and stored agents edited while the servers run (a
+server loads them at startup). A <code>watch-session</code> registration is followed
+by the server that runs the watched session, if it knows the registration: a
+server knows the ones made on it and the ones stored when it started.</p>
 <hr />
 <h3 id="storing-agents">Storing agents</h3>
 <p>Besides <code>--agent-file</code>, agents can live in the server’s database and be
@@ -559,11 +611,11 @@ commands run on the server’s machine.</p>
 <li>The body is what goes under <code>contents</code> in an agent file. The slug comes
 from the path.
 </li>
-<li>A stored agent cannot use anything that refers to files:
-<code>toolDirectory</code>, <code>bashToolboxes</code>, <code>openApiToolboxes</code>,
-<code>postgrestToolboxes</code>, <code>extraAgents</code>, <code>skillSources</code>, <code>autoEnableSkills</code>
+<li>A stored agent cannot use <code>openApiToolboxes</code>, <code>postgrestToolboxes</code>,
+<code>skillSources</code>, or <code>autoEnableSkills</code>, which refer to files on the server
 (<code>400 agent_uses_files</code>). Builtin toolboxes and MCP servers work, as do the
-execution mode and tool-call policy.
+execution mode and tool-call policy. Bash tools and helpers work as
+described below.
 </li>
 <li>The agent is loaded before it is stored: if an MCP server fails to start,
 the answer is <code>400 agent_failed_to_load</code> and nothing is stored.
@@ -582,6 +634,56 @@ fail with <code>unknown_agent</code> until an agent with that slug exists again.
 </li>
 <li>MCP servers started for a stored agent keep running when the agent is
 replaced or deleted, until the server stops.
+</li>
+</ul>
+<h4 id="bash-tools-of-a-stored-agent">Bash tools of a stored agent</h4>
+<p>The files of a stored agent’s bash tools are stored with it. Next to the
+configuration’s fields, the body takes a <code>files</code> object: contents by path.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;apiKeyId&quot;</span><span class="fu">:</span> <span class="st">&quot;openai&quot;</span><span class="fu">,</span> <span class="dt">&quot;flavor&quot;</span><span class="fu">:</span> <span class="st">&quot;OpenAIv1&quot;</span><span class="fu">,</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;modelUrl&quot;</span><span class="fu">:</span> <span class="st">&quot;https://api.openai.com/v1&quot;</span><span class="fu">,</span> <span class="dt">&quot;modelName&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o-mini&quot;</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;announce&quot;</span><span class="fu">:</span> <span class="st">&quot;greets people&quot;</span><span class="fu">,</span> <span class="dt">&quot;systemPrompt&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;You greet.&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;toolDirectory&quot;</span><span class="fu">:</span> <span class="st">&quot;tools&quot;</span><span class="fu">,</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;files&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;tools/greet.sh&quot;</span><span class="fu">:</span> <span class="st">&quot;#!/bin/sh</span><span class="ch">\n</span><span class="st">...&quot;</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p>For instance, to send a configuration (<code>greeter.json</code>, without <code>files</code>) with
+a script from disk:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">jq</span> <span class="at">--rawfile</span> greet tools/greet.sh <span class="st">&#39;. + {files: {&quot;tools/greet.sh&quot;: $greet}}&#39;</span> greeter.json <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="ex">curl</span> <span class="at">-X</span> PUT localhost:8080/v1/agents/greeter <span class="at">-H</span> <span class="st">&#39;Authorization: Bearer &lt;admin token&gt;&#39;</span> <span class="at">-d</span> @-</span></code></pre></div></div><ul>
+<li><code>toolDirectory</code> and the paths of <code>bashToolboxes</code> are relative to the
+directory the files are written to. Paths, of tools and of files, are
+relative and without <code>..</code> (<code>400 agent_invalid_paths</code>); <code>bashToolboxes</code>
+entries take no <code>root</code>.
+</li>
+<li>When the agent is loaded, the server writes the files to a temporary
+directory of its own, makes each one executable, and loads the tools from
+there. The directory goes away with that version of the agent, and with
+the server. Tools run on the server’s machine, as the server’s user: this
+is the reason storing agents needs an admin owner.
+</li>
+<li>Files are text (UTF-8). A <code>PUT</code> replaces the agent and all its files: send
+<code>files</code> again to keep them. <code>GET /v1/agents/:slug</code> shows them under
+<code>config.files</code>, so that <code>config</code> can be sent back as a body.
+</li>
+</ul>
+<h4 id="helpers-of-a-stored-agent">Helpers of a stored agent</h4>
+<p><code>extraAgents</code> of a stored agent name other stored agents by slug, without a
+<code>path</code>; <code>with</code> and <code>narrowable</code> work as in agent files.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;extraAgents&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;slug&quot;</span><span class="fu">:</span> <span class="st">&quot;greeter&quot;</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}</span></span></code></pre></div></div><ul>
+<li>A helper must be stored before the agent that names it (<code>400 unknown_helper</code>). Agents from files cannot be named.
+</li>
+<li>The references of stored agents cannot form a cycle, and an agent cannot
+name itself (<code>400 helper_cycle</code>). This is stricter than agent files.
+</li>
+<li>Replacing a helper reloads the stored agents that reach it, so that new
+sessions call the new version.
+</li>
+<li>An agent that others name as a helper cannot be deleted (<code>409 agent_in_use</code>): delete or change the agents that name it first.
+</li>
+<li>At startup, a stored agent whose helpers cannot be resolved (for instance
+because an agent file now has a helper’s slug) is skipped, and logged as
+<code>agents.stored_skipped</code>.
 </li>
 </ul>
 <hr />
@@ -616,6 +718,30 @@ other endpoint does, and the request log records no query strings.
 </li>
 </ul>
 <p>All owners share the agents and the API keys of the server.</p>
+<h4 id="session-tokens-and-sealed-sessions">Session tokens and sealed sessions</h4>
+<p>A backend that opens a chat for an end user should not have to proxy every
+message and event stream, but must not hand the browser its own token either.
+Two options on <code>POST /v1/sessions</code> (with <code>--auth-tokens</code>) cover that:</p>
+<ul>
+<li><code>&quot;seal&quot;: true</code> marks the session sealed (shown as <code>&quot;sealed&quot;: true</code>). <code>params</code> on
+a message, resume or continuation is then refused with <code>403 forbidden_params</code>
+for every caller but the session’s owner, who keeps <code>PUT /v1/sessions/:id/params</code>
+to rotate values. The parameters of a sealed session are those its creator chose.
+</li>
+<li><code>&quot;session_token&quot;: true</code> adds a <code>session_token</code> to the creation answer, once:
+32 random bytes in hex, prefixed <code>st_</code>. Only its SHA-256 digest is stored, with
+the session, on either backend; reads never show it. It is refused with <code>400</code>
+without <code>--auth-tokens</code>, where every caller has full access anyway.
+</li>
+</ul>
+<p><code>Authorization: Bearer &lt;session token&gt;</code> allows exactly, on that one session:
+<code>GET /v1/sessions/:id</code>, <code>GET /v1/sessions/:id/events</code>, <code>POST /v1/sessions/:id/messages</code>
+(without <code>params</code>: <code>403 forbidden_params</code>) and <code>POST /v1/sessions/:id/cancel</code>.
+The other paths of the session answer <code>403 forbidden</code>; every path outside it
+(other sessions, the listing, agents, <code>/v1/events</code>) answers <code>401</code>, so a token
+cannot probe for other sessions. The owner revokes a token with
+<code>DELETE /v1/sessions/:id/token</code>; it also dies with the session. A fork or a
+child session does not inherit the seal or the token.</p>
 <p><strong>Browser origins.</strong> Without <code>--auth-tokens</code>, requests carrying an <code>Origin</code>
 header that is not <code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code>, or a <code>--cors-origin</code>
 answer <code>403 forbidden_origin</code>. This stops a web page from reaching a local
@@ -738,6 +864,21 @@ path either needs is a flag, they log JSON lines on stderr (see
 described above (<code>--shutdown-grace</code> bounds it), and <code>recoverOnStartup</code> runs
 before the first request is accepted. A <code>systemd</code> unit only needs to point
 one at the right files and restart it on crash.</p>
+<p>Ready-made units live in <code>bundling/systemd/</code>:</p>
+<ul>
+<li><code>agents-server.service</code>: the system-wide unit below, for <code>agents-server</code>.
+<code>sudo install -Dm644 bundling/systemd/agents-server.service /etc/systemd/system/agents-server.service</code>,
+edit the paths, then <code>systemctl daemon-reload</code> and <code>enable --now</code>.
+</li>
+<li><code>agents-server.user.service</code>: a per-user unit that also listens on
+<code>$XDG_RUNTIME_DIR/agents-server.sock</code> (<code>--socket</code>). <code>install -Dm644 bundling/systemd/agents-server.user.service ~/.config/systemd/user/agents-server.service</code>,
+put <code>agent.json</code> and <code>keys.json</code> in <code>~/.config/agents-server/</code>, and the
+binary at <code>~/.local/bin/agents-server</code>, then <code>systemctl --user daemon-reload</code>
+and <code>systemctl --user enable --now agents-server</code>. The server creates and
+owns its socket (it does not use systemd socket activation), so this is a
+plain service, not a <code>.socket</code> unit.
+</li>
+</ul>
 <p>Create a user and directories for its state, put the agent files, API keys
 and token file somewhere readable, and write a unit. This one uses
 <code>agents-exe serve</code>, so agents-exe.cfg.json in <code>WorkingDirectory</code> can carry
@@ -907,8 +1048,6 @@ non-admin token). The token goes in <code>Authorization</code> on commands and i
 <h3 id="not-yet-supported">Not yet supported</h3>
 <ul>
 <li>Per-owner API keys: all owners share the server’s keys.
-</li>
-<li>Coordinating runs between several servers sharing a Postgres database.
 </li>
 </ul>
 <p>See <code>todos/web-server-embedding.md</code> for the design and the planned work.</p>

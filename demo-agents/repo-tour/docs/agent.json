@@ -1,0 +1,18 @@
+{
+  "tag": "OpenAIAgentDescription",
+  "contents": {
+    "slug": "librarian",
+    "flavor": "OpenAIv1",
+    "modelUrl": "http://localhost:11434/v1",
+    "apiKeyId": "ollama",
+    "modelName": "gemma4:e4b",
+    "announce": "Lists the documentation pages of the repository in the current directory.",
+    "systemPrompt": [
+      "You report which documentation the repository in the current directory offers.",
+      "Always call your tool before answering, and answer in at most five lines using only what the tool printed."
+    ],
+    "bashToolboxes": [
+      { "tag": "FileSystemDirectory", "contents": { "Path": "demo-agents/repo-tour/docs/tools" } }
+    ]
+  }
+}

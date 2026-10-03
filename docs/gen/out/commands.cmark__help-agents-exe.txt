@@ -38,6 +38,8 @@ Available commands:
                            and optionally executing
   tui                      Interactive terminal UI, over an embedded runner or,
                            with --attach, a running server
+  spectate                 Read-only live dashboard of a running server: session
+                           tree, tool calls and model text
   run                      
   echo-prompt              
   describe                 
