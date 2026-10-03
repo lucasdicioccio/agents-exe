@@ -307,6 +307,7 @@ clusterHost cluster me complete = do
             , hostStoredAgents = stored
             , hostDeps = deps
             , hostSubAgentDeps = deps{adSessionSink = SinkBackend stores.hsSessions}
+            , hostOwnerApiKeys = mempty
             , hostBackend = stores.hsSessions
             , hostContinuations = stores.hsContinuations
             , hostMail = stores.hsMail

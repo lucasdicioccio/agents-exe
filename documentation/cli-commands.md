@@ -778,6 +778,8 @@ not repeated below.
 | `--no-ui` | off | Do not serve the chat page at `/` |
 | `--cors-origin ORIGIN` | (none) | Allow this origin to call the server cross-origin; repeatable, or `*` for any (needs no `--auth-tokens`) |
 | `--socket PATH` | (none) | Also listen on this Unix domain socket, in addition to `--bind`/`--port`; created `0600`, a stale file removed at start, closed and unlinked on shutdown. The socket is the local trust boundary: no `Origin`, no bearer token beyond `--auth-tokens`. |
+| `--owner-api-keys OWNER=FILE` | (none) | This owner's sessions call the LLM with the keys in `FILE` instead of the shared ones; repeatable (needs `--auth-tokens`) |
+| `--isolate-tools docker:IMAGE\|process:PATH` | (none) | Run bash and MCP tool calls outside the server, in a worker you provide |
 
 See [agents-server.md](agents-server.md) for everything the running server
 does (the HTTP API, sessions, deferred calls, CORS, authentication, running

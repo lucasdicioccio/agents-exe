@@ -101,7 +101,7 @@ import Control.Concurrent.Async (Async, async, cancel, waitCatch)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
 import Control.Exception (Exception, SomeAsyncException, SomeException, bracket, displayException, finally, fromException, onException, throwIO, try)
-import Control.Monad (filterM, forM, forM_, forever, unless, void, when)
+import Control.Monad (filterM, forM, forM_, forever, join, unless, void, when)
 import qualified Data.Aeson as Aeson
 import Data.Aeson ((.=))
 import Control.Applicative ((<|>))
@@ -661,9 +661,28 @@ sessionAgent runner live meta =
                 lookupAgent runner.srHost slug >>= \case
                     Nothing -> pure $ Left $ UnknownAgent slug
                     Just node -> do
-                        agent <- newAgent runner live node
+                        owner <- rootOwner runner meta.smOwner meta.smParent
+                        agent <- newAgent runner live owner node
                         atomically $ writeTVar live.lsAgent (Just agent)
                         pure $ Right agent
+
+{- | The owner a session's agent is built for: the session's own, else the
+owner of its root session (see 'sessionOwner'). Works before the session is
+stored, from what its metadata will say.
+-}
+rootOwner :: SessionRunner -> Maybe Text -> Maybe SessionId -> IO (Maybe Text)
+rootOwner _ (Just owner) _ = pure (Just owner)
+rootOwner _ Nothing Nothing = pure Nothing
+rootOwner runner Nothing (Just parent) = join <$> sessionOwner runner parent
+
+{- | The API keys an owner's agents call the LLM with: the owner's own when
+the host has some for it ('hostOwnerApiKeys'), else the host's shared ones.
+-}
+ownerApiKeys :: Host -> Maybe Text -> AgentDeps -> AgentDeps
+ownerApiKeys host owner deps =
+    case owner >>= (`Map.lookup` host.hostOwnerApiKeys) of
+        Just keys -> deps{adApiKeys = keys}
+        Nothing -> deps
 
 {- | A root agent for a session, always asynchronous: runs can pause and
 resume. Its tool list re-reads 'LiveSession.lsParams' fresh on every turn
@@ -671,15 +690,15 @@ resume. Its tool list re-reads 'LiveSession.lsParams' fresh on every turn
 reappears as the session's own parameters are set, without ever rebuilding
 the agent.
 -}
-newAgent :: SessionRunner -> LiveSession -> OSAgentNode -> IO RunnerAgent
-newAgent runner live node = do
+newAgent :: SessionRunner -> LiveSession -> Maybe Text -> OSAgentNode -> IO RunnerAgent
+newAgent runner live owner node = do
     atomically $ writeTVar live.lsNode (Just node)
     let host = runner.srHost
         sid = live.lsSessionId
     let deps0
             | host.hostStreamTokens = host.hostDeps{adOnTextDelta = Just (emit runner sid . TextDelta)}
             | otherwise = host.hostDeps
-        deps = deps0{adLiveParams = readTVarIO live.lsParams}
+        deps = ownerApiKeys host owner deps0{adLiveParams = readTVarIO live.lsParams}
     agent <- buildAgent (contramap HostAgentTrace host.hostTracer) deps RootAgent (sessionIdToConversationId sid) node
     -- Phase 3 (@todos/session-mailbox.md@): every server-run session has a
     -- durable mailbox, hydrated from 'hostMail', so 'postMessage' can always
@@ -1504,11 +1523,15 @@ createSessionForNodeWith :: SessionRunner -> Maybe SessionId -> Maybe Text -> Te
 createSessionForNodeWith runner parent owner slug node adjust security message mode supplied = do
     sid <- newSessionId
     withLive runner sid $ \live -> do
-      for_ adjust $ \f -> do
-        built <- newAgent runner live node
-        atomically $ do
-            writeTVar live.lsAgent (Just (f built))
-            writeTVar live.lsNarrowed True
+      -- Always from the node in hand: a helper that is not also a root
+      -- agent is unknown to 'lookupAgent', and 'sessionAgent' below would
+      -- refuse it (sending the call back to the in-tool path, which knows
+      -- neither the session's owner nor its keys).
+      agentOwner <- rootOwner runner owner parent
+      built <- newAgent runner live agentOwner node
+      atomically $ do
+          writeTVar live.lsAgent (Just (maybe built ($ built) adjust))
+          when (isJust adjust) $ writeTVar live.lsNarrowed True
       prepareParams runner live node supplied >>= \case
             Left err -> pure (Left err)
             Right overlay -> do

@@ -43,6 +43,8 @@ cabal run agents-server -- \
 | `--no-ui` | off | Do not serve the chat page at `/`. See [Finding your way around](#finding-your-way-around). |
 | `--cors-origin ORIGIN` | (none) | Allow this origin to call the server cross-origin (a browser page on another host or port). Repeatable, or `*` for any origin — refused at startup together with `--auth-tokens`. See [Authentication](#authentication). |
 | `--socket PATH` | (none) | Also listen on this Unix domain socket, in addition to `--bind`/`--port`. A stale file at the path is removed at start; the socket is created with mode `0600`. Requests over it carry no `Origin` header and need no bearer token beyond what `--auth-tokens` imposes elsewhere: the socket, and who can reach it on the filesystem, is the trust boundary. Closed and unlinked on shutdown. |
+| `--owner-api-keys OWNER=FILE` | (none) | This owner's sessions call the LLM with the keys in `FILE` instead of the ones in `--api-keys`. Repeatable. Needs `--auth-tokens`. See [API keys per owner](#api-keys-per-owner). |
+| `--isolate-tools docker:IMAGE\|process:PATH` | (none) | Run bash and MCP tool calls outside the server process. See [Isolating tool calls](#isolating-tool-calls). |
 | `--set NAME=VALUE`, `--set-json NAME=JSON` | (none) | Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters). |
 | `--pin NAME=VALUE`, `--pin-json NAME=JSON` | (none) | Like `--set`, but sessions cannot override it. Repeatable. See [Parameters](#parameters). |
 
@@ -76,7 +78,8 @@ shares agents-exe's global `--api-keys`, `--set`/`--pin`/`--set-json`/
 `--pin-json` and `--params-file`. Its own flags are the rest of this table
 (`--db`, `--bind`, `--port`, `--live-session-ttl`, `--shutdown-grace`,
 `--auth-tokens`, `--stream-tokens`, `--admin-owners`, `--no-ui`,
-`--cors-origin`, `--socket`); `--db` defaults next to the resolved sessions
+`--cors-origin`, `--socket`, `--owner-api-keys`, `--isolate-tools`); `--db`
+defaults next to the resolved sessions
 directory instead of `./agents-server.db`:
 
 ```bash
@@ -856,7 +859,40 @@ Several tokens may share an owner. The file is read at startup.
   query parameter, because a browser's `EventSource` cannot set headers. No
   other endpoint does, and the request log records no query strings.
 
-All owners share the agents and the API keys of the server.
+All owners share the agents of the server, and its API keys unless they
+have their own (next section).
+
+### API keys per owner
+
+By default every owner's sessions call the LLM with the keys in
+`--api-keys`. `--owner-api-keys OWNER=FILE` gives one owner a keys file of
+their own, in the same format; repeat it for several owners:
+
+```bash
+agents-server --agent-file ./weather.json --api-keys ./secrets/keys.json \
+    --auth-tokens ./tokens.json \
+    --owner-api-keys alice=./secrets/alice-keys.json \
+    --owner-api-keys bob=./secrets/bob-keys.json
+```
+
+* The agents of that owner's sessions are built with that file: root
+  sessions, and the sub-sessions their sub-agents run in. An agent still
+  names its key by `apiKeyId`; the id is looked up in the owner's file.
+* The owner's file replaces `--api-keys` for that owner, it is not merged
+  with it. A key id it does not hold is not looked up in `--api-keys`: the
+  call goes out without a key, and the provider refuses it.
+* Owners without an entry, and sessions without an owner, use `--api-keys`,
+  as before.
+* The files are read at startup. A file that is missing or does not parse,
+  an owner listed twice, or the flag without `--auth-tokens`, stops the
+  server from starting.
+* This covers the LLM calls only. A tool parameter whose value comes from
+  the keys file is still resolved from `--api-keys` when the agent loads,
+  for every owner.
+* A sub-agent call that cannot run as a session of its own falls back to
+  running inside the calling tool, which does not know the owner. With
+  `--owner-api-keys` in use, such a call is made without any key, rather
+  than with the shared ones.
 
 ### Session tokens and sealed sessions
 
@@ -925,6 +961,63 @@ A listed origin:
 works same-origin: `EventSource` cannot set the `Authorization` header, so
 with `--auth-tokens` the token still goes as `?access_token=` (see above);
 without tokens, a listed origin needs nothing extra.
+
+---
+
+## Isolating tool calls
+
+By default the server runs every tool in its own process, on its own host,
+for every owner. `--isolate-tools` sends the calls of bash tools and MCP
+tools to a worker instead:
+
+| Value | Each call is handed to |
+|---|---|
+| `docker:IMAGE` | `docker run --rm -i IMAGE`, one container per call |
+| `process:PATH` | the executable at `PATH`, one process per call |
+
+The worker reads one JSON envelope on stdin and writes one result envelope
+on stdout:
+
+```json
+{"token": "<uuid>", "toolCall": {"id": "call_1", "type": "function", "function": {"name": "bash_weather", "arguments": "{}"}},
+ "contextSnapshot": {"tecsSessionId": "…", "tecsParams": {}},
+ "policy": {"tag": "runIsolated", "spec": {"tag": "docker", "image": "IMAGE"}}}
+```
+
+```json
+{"token": "<the same uuid>", "status": "success", "result": {"type": "text", "content": "sunny"}}
+{"token": "<the same uuid>", "status": "error", "error": "what went wrong"}
+```
+
+The image, or the executable, is yours to provide: this repository ships no
+worker. It has to hold whatever the tools need (the scripts of a bash
+toolbox, the MCP server to start) and to find the tool from its name.
+
+What is enforced:
+
+* It applies to every agent the server builds, for every owner and for
+  sub-agents, and an agent's own `toolCallPolicyConfig` cannot turn it off.
+  That policy still decides whether a call is deferred or run in the
+  background; when the call is executed, it goes to the worker.
+* There is no fallback. If the worker cannot be started, exits with an
+  error, or answers something else than a result envelope for the call,
+  the call fails and its result is `isolation error: …`.
+* A bash or MCP tool called from another tool (a Lua script, through the
+  tool portal) is refused.
+
+What is not:
+
+* Only bash tools and MCP tools are covered. Skill scripts, Lua, SQLite,
+  OpenAPI, PostgREST, the system and developer toolboxes, and agents called
+  as tools still run inside the server.
+* MCP servers are still started by the server when it loads an agent, to
+  list their tools; only the calls go to the worker.
+* Secret parameter values are not written into the envelope. A tool that
+  needs one fails in the worker.
+* The server sets no limit on the worker: no timeout, no network or
+  filesystem restriction beyond what the image and your Docker setup give.
+* It is off unless the flag is given, and applies to this server only:
+  `agents-exe run` and the TUI's own loop run tools in-process.
 
 ---
 
@@ -1213,6 +1306,10 @@ non-admin token). The token goes in `Authorization` on commands and in
 
 ## Not yet supported
 
-* Per-owner API keys: all owners share the server's keys.
+* Tool isolation by default, and for every tool kind: it is opt-in
+  (`--isolate-tools`), covers bash and MCP tools only, and needs a worker
+  you provide. See [Isolating tool calls](#isolating-tool-calls).
+* Issuing or rotating per-owner API keys over the API: the files are read
+  at startup.
 
 See `todos/web-server-embedding.md` for the design and the planned work.

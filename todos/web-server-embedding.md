@@ -1066,7 +1066,26 @@ Lifts the two refusals of Phase 12 that decision 10 recorded.
 
 * **Per-owner API keys and isolation**: build agents per owner, including
   sub-agent tools; default policy `runIsolated` for bash and MCP tools, backed
-  by `dockerRunner`.
+  by `dockerRunner`. Partly done:
+  * Keys: `HostConfig.hcOwnerApiKeysFiles` (`--owner-api-keys OWNER=FILE`),
+    loaded into `Host.hostOwnerApiKeys`. The runner already builds one agent
+    per session, so it picks the keys there (`Runner.newAgent`), from the
+    owner of the session's root. Sub-agents needed one fix to be covered:
+    `createSessionForNodeWith` now always builds the agent from the node it
+    was given. Before, a helper that was not also a root agent failed
+    `lookupAgent` and silently fell back to the in-tool path, which is built
+    at load time and knows no owner. That fallback remains for real
+    failures, and gets no key at all when per-owner keys are in use.
+  * Isolation: `System.Agents.Tools.Isolated`, `AgentDeps.adToolIsolation`,
+    `HostConfig.hcToolIsolation` (`--isolate-tools docker:IMAGE|process:PATH`).
+    Enforced in `buildAgent`, around the tool execution rather than through
+    `ToolCallPolicy`: a policy is the agent's own (it would let an agent
+    file opt out, and replacing it would drop `defer` rules), and a
+    `RunIsolated` disposition without a runner runs in-process.
+  * Still open (owner decisions): isolation is opt-in, not the default, as
+    there is no worker image to default to; it covers bash and MCP tool
+    calls only; MCP servers still start on the host; no worker ships with
+    the repository; unlisted owners use the shared keys.
 * ~~**Several server processes on one Postgres database**: live-run ownership
   through a lease column (`run_owner`, `run_lease_until`).~~ Done:
   * `System.Agents.Host.Coordination`: what a host needs from a shared

@@ -537,9 +537,10 @@ deleteTest = do
         owners <- mapM (sessionOwner runner) [sid, childSid]
         owners @?= [Just (Just "alice"), Just (Just "alice")]
         busyParent <- deleteSession runner sid DryRun
-        busyParent @?= Left (RunInProgress sid)
+        -- The child runs as a session of its own: its run is the first busy one found.
+        busyParent @?= Left (RunInProgress childSid)
         busyChild <- deleteSession runner childSid DeleteForReal
-        busyChild @?= Left (RunInProgress sid)
+        busyChild @?= Left (RunInProgress childSid)
         putMVar gate ()
         (blocked, _) <- expectRight =<< awaitRun runner sid 5
         blocked.smStatus @?= StatusWaitingExternal
@@ -2041,6 +2042,7 @@ testHost nodes complete = do
             , hostStoredAgents = stored
             , hostDeps = deps
             , hostSubAgentDeps = deps{adSessionSink = SinkBackend backend}
+            , hostOwnerApiKeys = mempty
             , hostBackend = backend
             , hostContinuations = store
             , hostMail = mail

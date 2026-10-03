@@ -65,6 +65,7 @@ import qualified System.Agents.ToolRegistration as ToolRegistration
 import System.Agents.Tools.Cache (ToolCache)
 import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
+import System.Agents.Tools.Isolated (ToolIsolation, isolatePortal, isolateToolCalls)
 import System.Agents.Tools.Params.Types (Params)
 
 -------------------------------------------------------------------------------
@@ -103,6 +104,11 @@ data AgentDeps = AgentDeps
     {- ^ Streams the LLM's answers, passing each piece of text here as it
     arrives. Ignored when 'adCompletion' replaces the LLM call.
     -}
+    , adToolIsolation :: Maybe ToolIsolation
+    {- ^ Run bash and MCP tool calls outside this process, for every agent
+    built with these dependencies ("System.Agents.Tools.Isolated").
+    'Nothing' runs them in-process.
+    -}
     , adLiveParams :: IO Params
     {- ^ The current session/message-scope parameter overlay (§7,
     @todos/tool-partial-application.md@), read fresh every time the tool
@@ -126,6 +132,7 @@ defaultAgentDeps keys =
         , adToolCache = Nothing
         , adCompletion = Nothing
         , adOnTextDelta = Nothing
+        , adToolIsolation = Nothing
         , adLiveParams = pure mempty
         }
 
@@ -190,7 +197,9 @@ buildAgent tracer deps role convId node = do
                         (contramap ToolRegistrationTrace tracer)
                         (readTVarIO node.osNodeTools)
                         (SessionCompat.parseToolCallFromLlmToolCall, SessionCompat.callResultToUserToolResponse)
-                , toolPortal = ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) node.osNodeTools
+                , toolPortal =
+                    isolatePortal deps.adToolIsolation (readTVarIO node.osNodeTools) $
+                        ToolPortal.makeToolPortal (contramap ToolPortalTrace tracer) node.osNodeTools
                 , complete = completeF
                 , contextConfig = defaultContextConfig
                 , ctxWorld = Nothing
@@ -226,7 +235,14 @@ buildAgent tracer deps role convId node = do
             exposeBindings
             node.osNodeTools
             (applyAgentDurableConfig agentCfg base)
-    pure $ agentPersistSession deps.adSessionSink labels convId disclosed
+    -- Isolation wraps the tool execution that progressive disclosure
+    -- installs, so that nothing set before it can leave a covered call
+    -- in-process.
+    let isolated =
+            disclosed
+                { toolCall = isolateToolCalls deps.adToolIsolation (readTVarIO node.osNodeTools) disclosed.toolCall
+                }
+    pure $ agentPersistSession deps.adSessionSink labels convId isolated
   where
     sinkBackend :: SessionSink -> Maybe SessionBackend
     sinkBackend (SinkBackend backend) = Just backend
