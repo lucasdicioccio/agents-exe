@@ -1075,6 +1075,18 @@ parseNewAgentOptions =
                     <> help "Model name (e.g., gpt-4o, mistral-large, kimi-k2.5). The provider preset is inferred from the model catalog."
                 )
             )
+        <*> ( flag'
+                NewCmd.ConfigUpdateAlways
+                ( long "add-to-config"
+                    <> help "Add the agent to the agentsFiles of agents-exe.cfg.json when it is not listed there, without asking"
+                )
+                <|> flag'
+                    NewCmd.ConfigUpdateNever
+                    ( long "no-add-to-config"
+                        <> help "Never modify agents-exe.cfg.json"
+                    )
+                <|> pure NewCmd.ConfigUpdateAsk
+            )
 
 parseNewToolCommand :: Parser NewCmd.NewCommand
 parseNewToolCommand =

@@ -58,6 +58,8 @@ import qualified ToolPortalTests
 import qualified LuaToolboxSecurityTests
 -- Import ModelCatalog tests
 import qualified ModelCatalogTests
+-- Import 'new agent' bootstrap tests
+import qualified NewAgentTests
 -- Import LuaToolbox comprehensive tests
 import qualified LuaToolboxTests
 -- Import luaToJsonValue specific tests
@@ -153,6 +155,7 @@ tests =
         , FileSandboxRefTests.tests
         , ActivationSessionTests.activationSessionTestSuite
         , ModelCatalogTests.tests
+        , NewAgentTests.tests
         , McpImplementationTests.mcpImplementationTestSuite
         , McpProgressTests.tests
         , McpEnvTests.tests

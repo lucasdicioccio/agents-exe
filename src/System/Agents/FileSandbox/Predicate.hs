@@ -297,7 +297,7 @@ isPathWithin child parent =
             if null child || last child /= '/'
                 then child ++ "/"
                 else child
-     in child == parent
+     in child' == parent'
             || ( length child' > length parent'
                     && take (length parent') child' == parent'
                )

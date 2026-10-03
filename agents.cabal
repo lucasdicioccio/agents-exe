@@ -566,6 +566,7 @@ test-suite agents-tests
                     , MailboxTests
                     , McpImplementationTests
                     , ModelCatalogTests
+                    , NewAgentTests
                     , OpenAPIToolboxTests
                     , OfficialAgentsTests
                     , OS.ConcurrentTests
