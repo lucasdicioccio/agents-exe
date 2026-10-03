@@ -10,11 +10,10 @@ module System.Agents.Tools.DeveloperToolbox.Init (
     initializeToolbox,
 ) where
 
-import Data.Maybe (fromMaybe)
 import Data.Time (getCurrentTime)
 import Prod.Tracer (Tracer (..))
 
-import System.Agents.Base (DeveloperToolCapability (..), DeveloperToolboxDescription (..), defaultDeveloperFileSandbox)
+import System.Agents.Base (DeveloperToolCapability (..), DeveloperToolboxDescription (..), defaultDeveloperFileSandbox, effectiveFileSandbox)
 import System.Agents.FileSandbox (FileSandbox (..))
 import System.Agents.Tools.DeveloperToolbox.Types (
     Toolbox (..),
@@ -50,7 +49,7 @@ initializeToolbox _tracer desc = do
             then pure $ Left "Developer toolbox capability build-command requires a non-empty buildCommand"
         else do
             -- Create file sandbox if any file-related capability is enabled
-            let config = fromMaybe defaultDeveloperFileSandbox desc.developerToolboxFileSandbox
+            let config = effectiveFileSandbox defaultDeveloperFileSandbox desc.developerToolboxFileSandbox
             mFileSandbox <-
                 if any (`elem` desc.developerToolboxCapabilities) fileCapabilities
                     then do

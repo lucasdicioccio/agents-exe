@@ -40,7 +40,7 @@ import Test.Tasty.HUnit
 import Prod.Tracer (Tracer (..), silent)
 import qualified Prod.Tracer as Prod
 
-import System.Agents.Base (ConversationId (..), FileSandboxConfig (..), LuaToolboxDescription (..))
+import System.Agents.Base (ConversationId (..), FileSandboxConfig (..), FileSandboxSpec (..), LuaToolboxDescription (..))
 import System.Agents.FileSandbox.Predicate (fromPathList)
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolCall (..), ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
@@ -93,7 +93,7 @@ testLuaToolbox =
         , luaToolboxAllowedTools = []
         , luaToolboxAllowedHosts = []
         , luaToolboxActivation = Nothing
-        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
+        , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         }
 
 -- | Run an action with a test toolbox
@@ -107,7 +107,7 @@ withTestToolbox action = do
 -- | Run an action with a test toolbox that has filesystem access
 withTestToolboxFs :: (LuaToolbox.Toolbox -> FilePath -> IO ()) -> IO ()
 withTestToolboxFs action = withTempSandbox $ \testDir -> do
-    let desc = testLuaToolbox{luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [testDir], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }}
+    let desc = testLuaToolbox{luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [testDir], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }}
     initResult <- LuaToolbox.initializeToolbox silent desc
     case initResult of
         Left err -> assertFailure $ "Failed to initialize toolbox: " ++ err

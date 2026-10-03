@@ -47,6 +47,7 @@ handleInitialize apiKeysFile agentFiles = do
                 , openApiToolboxes = Nothing
                 , postgrestToolboxes = Nothing
                 , builtinToolboxes = Just []
+                , fileSandboxes = Nothing
                 , extraAgents = Nothing
                 , skillSources = Nothing
                 , autoEnableSkills = Nothing

@@ -149,6 +149,7 @@ writeAgentFile dir name slugName = do
                 , openApiToolboxes = Nothing
                 , postgrestToolboxes = Nothing
                 , builtinToolboxes = Nothing
+                , fileSandboxes = Nothing
                 , extraAgents = Nothing
                 , skillSources = Nothing
                 , autoEnableSkills = Nothing

@@ -28,7 +28,7 @@ import Test.Tasty.HUnit
 
 import Prod.Tracer (Tracer (..), silent)
 
-import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..), FileSandboxConfig (..))
+import System.Agents.Base (DeveloperToolboxDescription (..), DeveloperToolCapability (..), FileSandboxConfig (..), FileSandboxSpec (..))
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
 import System.Agents.Tools.DeveloperToolbox as DeveloperToolbox
 import System.Agents.Tools.DeveloperToolbox.Types (RangeSpec(..))
@@ -83,7 +83,7 @@ testToolbox = do
                     ]
                 , developerToolboxActivation = Nothing
                 , developerToolboxBuildCommand = Nothing
-                , developerToolboxFileSandbox = Just FileSandboxConfig
+                , developerToolboxFileSandbox = Just $ InlineFileSandbox FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing
                     , fsbName = Nothing
@@ -107,7 +107,7 @@ testDirectoryToolbox = do
                     ]
                 , developerToolboxActivation = Nothing
                 , developerToolboxBuildCommand = Nothing
-                , developerToolboxFileSandbox = Just FileSandboxConfig
+                , developerToolboxFileSandbox = Just $ InlineFileSandbox FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing
                     , fsbName = Nothing

@@ -90,6 +90,7 @@ import System.Agents.Base (
     SqliteVersioningConfig (..),
     SystemToolCapability (..),
     SystemToolboxDescription (..),
+    FileSandboxSpec (..),
     defaultFileSandboxConfig,
  )
 import qualified System.Agents.LLMs.OpenAI as OpenAI
@@ -1649,7 +1650,8 @@ buildLuaToolDescription config =
     let
         -- Check which modules have actual functionality enabled
         hasFileAccess = case config.luaToolboxFileSandbox of
-            Just _sandbox -> config.luaToolboxFileSandbox /= Just defaultFileSandboxConfig
+            Just (InlineFileSandbox sandbox) -> sandbox /= defaultFileSandboxConfig
+            Just (NamedFileSandbox _) -> False
             Nothing -> False
         hasHttpAccess = not (null config.luaToolboxAllowedHosts)
         hasToolAccess = not (null config.luaToolboxAllowedTools)

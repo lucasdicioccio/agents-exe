@@ -19,7 +19,7 @@ import Control.Exception (bracket)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
-import System.Agents.Base (ConversationId (..), FileSandboxConfig (..), LuaToolboxDescription (..))
+import System.Agents.Base (ConversationId (..), FileSandboxConfig (..), FileSandboxSpec (..), LuaToolboxDescription (..))
 import System.Agents.FileSandbox.Predicate (fromPathList)
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
@@ -81,7 +81,7 @@ testLuaToolboxHttp =
         , luaToolboxMaxMemoryMB = 64
         , luaToolboxMaxExecutionTimeSeconds = 10
         , luaToolboxAllowedTools = []
-        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
+        , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = ["localhost", "127.0.0.1"]
         }
 
@@ -94,7 +94,7 @@ testLuaToolboxNoHttp =
         , luaToolboxMaxMemoryMB = 64
         , luaToolboxMaxExecutionTimeSeconds = 10
         , luaToolboxAllowedTools = []
-        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
+        , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = []
         }
 

@@ -30,7 +30,7 @@ import System.Agents.Base (
     BuiltinToolboxDescription (..),
     DeveloperToolboxDescription (..),
     ExtraAgentRef (..),
-    FileSandboxConfig (..),
+    FileSandboxConfig (..), FileSandboxSpec (..),
     LuaToolboxDescription (..),
     McpServerDescription,
  )
@@ -140,8 +140,8 @@ agentTemplateTests =
                                 }
                     case agent.builtinToolboxes of
                         Just [DeveloperToolbox dev, LuaToolbox lua] -> do
-                            dev.developerToolboxFileSandbox @?= Just expected
-                            lua.luaToolboxFileSandbox @?= Just expected
+                            dev.developerToolboxFileSandbox @?= Just (InlineFileSandbox expected)
+                            lua.luaToolboxFileSandbox @?= Just (InlineFileSandbox expected)
                         other -> assertFailure ("unexpected toolboxes: " <> show other)
         , testCase "the evaluated value is the JSON an agent file holds" $ do
             case evalAgentTemplate defaultTemplateEnv (plainAgent "") of
@@ -230,6 +230,11 @@ standardLibraryTests =
         , testCase "sandbox without deny, with a size limit" $ do
             sb <- evalWithLibrary "$a.sandbox({allow: [$a.dir(\"src\")], maxFileSize: 1024})"
             sb @?= FileSandboxConfig (Any [DirectoryRecursive "src"]) (Just 1024) Nothing
+        , testCase "sandbox-ref names one of the agent's fileSandboxes" $ do
+            box <- evalWithLibrary "$a.lua-toolbox({name: \"lua\", sandbox: $a.sandbox-ref(\"code\")})"
+            case box of
+                LuaToolbox lua -> lua.luaToolboxFileSandbox @?= Just (NamedFileSandbox "code")
+                other -> assertFailure ("unexpected toolbox: " <> show other)
         , testCase "builtin toolboxes parse" $ do
             boxes <-
                 evalWithLibrary

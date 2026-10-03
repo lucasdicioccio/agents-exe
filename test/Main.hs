@@ -46,6 +46,7 @@ import qualified BindingsTests
 -- Import Skills tests
 -- Import FileSandbox predicate tests
 import qualified FileSandboxPredicateTests
+import qualified FileSandboxRefTests
 import qualified SkillsTests
 -- Import MCP Implementation tests
 import qualified McpEnvTests
@@ -148,6 +149,7 @@ tests =
         , NarrowingTests.tests
         , SkillsTests.skillsTestSuite
         , FileSandboxPredicateTests.tests
+        , FileSandboxRefTests.tests
         , ActivationSessionTests.activationSessionTestSuite
         , ModelCatalogTests.tests
         , McpImplementationTests.mcpImplementationTestSuite
@@ -315,6 +317,7 @@ agentSerializationTests =
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
+                    , Base.fileSandboxes = Nothing
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
                         ]
@@ -352,6 +355,7 @@ agentSerializationTests =
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
+                    , Base.fileSandboxes = Nothing
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -387,6 +391,7 @@ agentSerializationTests =
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
+                    , Base.fileSandboxes = Nothing
                     , Base.extraAgents = Just
                         [ Base.ExtraAgentRef { Base.extraAgentSlug = "helper", Base.extraAgentPath = "./helper.json", Base.extraAgentWith = Nothing, Base.extraAgentNarrowable = Nothing }
                         ]
@@ -432,6 +437,7 @@ agentSerializationTests =
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Just [builtinToolbox]
+                    , Base.fileSandboxes = Nothing
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -480,6 +486,7 @@ agentSerializationTests =
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Just builtinToolboxes
+                    , Base.fileSandboxes = Nothing
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -522,6 +529,7 @@ agentSerializationTests =
                     , Base.systemPrompt = ["You are helpful"]
                     , Base.toolDirectory = Just "tools"
                     , Base.builtinToolboxes = Just [builtinToolbox]
+                    , Base.fileSandboxes = Nothing
                     , Base.bashToolboxes = Nothing
                     , Base.mcpServers = Nothing
                     , Base.openApiToolboxes = Nothing
@@ -654,6 +662,7 @@ bashToolboxTests =
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
+                    , Base.fileSandboxes = Nothing
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing
@@ -690,6 +699,7 @@ bashToolboxTests =
                     , Base.openApiToolboxes = Nothing
                     , Base.postgrestToolboxes = Nothing
                     , Base.builtinToolboxes = Nothing
+                    , Base.fileSandboxes = Nothing
                     , Base.extraAgents = Nothing
                     , Base.skillSources = Nothing
                     , Base.autoEnableSkills = Nothing

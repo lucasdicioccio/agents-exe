@@ -27,7 +27,7 @@ import Test.Tasty.HUnit
 import Prod.Tracer (Tracer (..), silent)
 import qualified Prod.Tracer as Prod
 
-import System.Agents.Base (ConversationId (..), FileSandboxConfig (..), LuaToolboxDescription (..))
+import System.Agents.Base (ConversationId (..), FileSandboxConfig (..), FileSandboxSpec (..), LuaToolboxDescription (..))
 import System.Agents.FileSandbox.Predicate (fromPathList)
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
@@ -76,7 +76,7 @@ testLuaToolbox =
         , luaToolboxMaxMemoryMB = 64
         , luaToolboxMaxExecutionTimeSeconds = 10
         , luaToolboxAllowedTools = []
-        , luaToolboxFileSandbox = Just $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
+        , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = []
         }
 

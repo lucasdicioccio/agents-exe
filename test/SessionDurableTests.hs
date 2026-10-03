@@ -741,6 +741,7 @@ minimalBaseAgent =
         , Base.openApiToolboxes = Nothing
         , Base.postgrestToolboxes = Nothing
         , Base.builtinToolboxes = Nothing
+        , Base.fileSandboxes = Nothing
         , Base.extraAgents = Nothing
         , Base.skillSources = Nothing
         , Base.autoEnableSkills = Nothing
