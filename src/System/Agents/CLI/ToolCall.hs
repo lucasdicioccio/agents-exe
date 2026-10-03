@@ -30,6 +30,7 @@ import Prod.Tracer (Tracer, contramap)
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.SessionStore as SessionStore
 
 import System.Agents.AgentTree (OSAgentNode (..), OSAgentTree (..))
@@ -93,10 +94,12 @@ handleToolCall ::
     ToolCallOptions ->
     -- | Path to the API keys file
     FilePath ->
+    -- | Libraries @.tramaj@ agent files may import
+    FileLoader.TemplateLibraries ->
     -- | List of agent files (only first is used)
     [FilePath] ->
     IO ()
-handleToolCall tracer opts apiKeysFile agentFiles = do
+handleToolCall tracer opts apiKeysFile templateLibraries agentFiles = do
     -- Read JSON payload from stdin
     stdinContent <- LByteString.getContents
     args <- case Aeson.eitherDecode stdinContent of
@@ -123,6 +126,7 @@ handleToolCall tracer opts apiKeysFile agentFiles = do
                     , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps SessionStore.defaultSessionStore apiKeys)
                     , AgentTree.sessionCatalog = SessionStore.fileCatalog SessionStore.defaultSessionStore
                     , AgentTree.processParams = mempty
+                    , AgentTree.templateLibraries = templateLibraries
                     }
                 $ \result -> case result of
                     AgentTree.Errors errs -> do

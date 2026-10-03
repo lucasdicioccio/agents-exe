@@ -172,6 +172,7 @@ including a runnable mock-LLM demonstrator.
 - [Tool System](tools.md) - Tool registration and execution
 - [MCP Protocol](mcp.md) - Model Context Protocol integration
 - [Session Management](sessions.md) - Session lifecycle and persistence
+- [Agent Templates](agent-templates.md) - Write an agent file as a tramaj program: shared sandboxes and toolboxes, values picked by the operator
 - [Parameters, Bindings & Narrowing Sub-Agents](parameters-and-bindings.md) - Bind tool arguments to declared parameters, keep secrets out of the model, and narrow sub-agents at call time
 - [Durable Workflows How-To](durable-workflows-howto.md) - Resumable async execution
 - [agents-server](agents-server.md) - Agents over HTTP: sessions, events, OpenAPI, and a chat page

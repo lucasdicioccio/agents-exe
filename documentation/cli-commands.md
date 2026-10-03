@@ -26,7 +26,7 @@ agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS]
 Validate agent configuration and display loaded tools.
 
 ```bash
-agents-exe check [--tools MODE]
+agents-exe check [--tools MODE] [--show-config]
 ```
 
 **Options:**
@@ -34,6 +34,7 @@ agents-exe check [--tools MODE]
 | Option | Description |
 |--------|-------------|
 | `--tools MODE` | Tool display mode: `none`, `list`, `agents-exe`, `openai` (default: `none`) |
+| `--show-config` | Print each agent file's JSON before its check line; for a `.tramaj` [template](agent-templates.md), the JSON it evaluates to |
 
 **Output:**
 ```
@@ -755,7 +756,7 @@ agents-exe serve [--agent-file FILE...] [--agent SLUG] [OPTIONS]
 the HTTP API and SSE stream, MCP over HTTP, the chat page) run behind
 agents-exe's own config loading, so it resolves agent files the same way
 every other `agents-exe` command does: `--agent-file` (repeatable), else
-`agents-exe.cfg.json`'s `agentsFiles` plus every `.json` file under
+`agents-exe.cfg.json`'s `agentsFiles` plus every `.json` and `.tramaj` file under
 `agentsDirectories`, else `~/.config/agents-exe/default`; `--agent SLUG`
 narrows to one agent by slug, failing with the list of available slugs if it
 does not match. It shares agents-exe's global `--api-keys`,

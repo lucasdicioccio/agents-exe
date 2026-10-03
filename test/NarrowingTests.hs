@@ -35,6 +35,7 @@ import System.Agents.AgentTree (
  )
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Base (ConversationId (..))
+import System.Agents.FileLoader (standardLibraries)
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.SessionStore (SessionCatalog (..))
 import System.Agents.ToolRegistration (ToolRegistration (..))
@@ -149,6 +150,7 @@ withRootTools middleNarrowable action =
                     , agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool nullTracer deps
                     , sessionCatalog = emptyCatalog
                     , processParams = Map.empty
+                    , templateLibraries = standardLibraries
                     }
         withAgentTree props $ \case
             Errors errs -> assertFailure ("expected the tree to load, got: " <> show errs)

@@ -19,6 +19,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import qualified System.Agents.CLI.ConfigLoader as ConfigLoader
+import qualified System.Agents.FileLoader as FileLoader
 import System.Agents.Base (Agent (..), AgentDescription (..))
 
 tests :: TestTree
@@ -42,19 +43,19 @@ resolveAgentFilesTests =
             withSystemTempDirectory "cfg-loader" $ \dir -> do
                 fa <- writeAgentFile dir "a.json" "agent-a"
                 fb <- writeAgentFile dir "b.json" "agent-b"
-                result <- ConfigLoader.resolveAgentFiles [fa, fb] Nothing
+                result <- ConfigLoader.resolveAgentFiles FileLoader.defaultTemplateEnv [fa, fb] Nothing
                 result @?= Right [fa, fb]
         , testCase "slug matches: narrows to the one file" $
             withSystemTempDirectory "cfg-loader" $ \dir -> do
                 fa <- writeAgentFile dir "a.json" "agent-a"
                 fb <- writeAgentFile dir "b.json" "agent-b"
-                result <- ConfigLoader.resolveAgentFiles [fa, fb] (Just "agent-b")
+                result <- ConfigLoader.resolveAgentFiles FileLoader.defaultTemplateEnv [fa, fb] (Just "agent-b")
                 result @?= Right [fb]
         , testCase "slug not found: Left with an error listing available slugs" $
             withSystemTempDirectory "cfg-loader" $ \dir -> do
                 fa <- writeAgentFile dir "a.json" "agent-a"
                 fb <- writeAgentFile dir "b.json" "agent-b"
-                result <- ConfigLoader.resolveAgentFiles [fa, fb] (Just "does-not-exist")
+                result <- ConfigLoader.resolveAgentFiles FileLoader.defaultTemplateEnv [fa, fb] (Just "does-not-exist")
                 case result of
                     Left err -> do
                         assertBool "mentions the missing slug" ("does-not-exist" `Text.isInfixOf` err)

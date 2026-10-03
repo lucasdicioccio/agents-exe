@@ -50,6 +50,7 @@ import System.IO (stderr)
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.Base as Base
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.OneShot (PromptScriptOptions (..), loadPromptScriptOptions)
@@ -203,6 +204,7 @@ buildAgentForFile store apiKeysFile (agentFile : _) convId action = do
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool silent (AgentFactory.fileAgentDeps store apiKeys)
                 , AgentTree.sessionCatalog = SessionStore.fileCatalog store
                 , AgentTree.processParams = mempty
+                , AgentTree.templateLibraries = FileLoader.standardLibraries
                 }
     AgentTree.withAgentTree props $ \case
         AgentTree.Errors errs -> do

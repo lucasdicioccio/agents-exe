@@ -4,6 +4,13 @@
 
 ### New Features
 
+#### Agent templates
+- An agent file may be a tramaj program (`.tramaj`), evaluated once at load to the JSON an agent file holds
+- `$ctx` is the process parameters (`--set`, `--pin`, `--params-file`); a template may only read process-scope, non-secret parameters the agent declares
+- `tramajLibraries` in `agents-exe.cfg.json` lists directories of shared libraries; a built-in `agents` library builds sandboxes and toolboxes
+- `agents-exe check --show-config` prints the evaluated JSON
+- See `documentation/agent-templates.md`
+
 #### `agents-exe paths` Command
 - Added new diagnostic command `agents-exe paths` to show all important configuration paths
 - Displays config file location, agent files, API keys file, and session storage directory

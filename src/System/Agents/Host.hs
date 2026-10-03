@@ -16,6 +16,8 @@ module System.Agents.Host (
     Host (..),
     HostConfig (..),
     defaultHostConfig,
+    TemplateLibraries,
+    standardLibraries,
     HostTrace (..),
     HostError (..),
     withHost,
@@ -54,6 +56,7 @@ import qualified System.Agents.AgentFactory as AgentFactory
 import System.Agents.AgentStore (AgentStore (..), StoredAgent (..), fileBasedFields, mkSqliteAgentStore)
 import System.Agents.AgentTree (LoadAgentResult (..), OSAgentNode (..), OSAgentTree (..), Props (..), formatLoadingError, loadAgentTreeFromConfig, readOpenApiKeysFile, releaseAgentNode, withAgentTree)
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import System.Agents.FileLoader (TemplateLibraries, standardLibraries)
 import System.Agents.AgentTree.Trace (TreeTrace)
 import qualified System.Agents.Base as Base
 import System.Agents.Host.Coordination (Coordination, noCoordination)
@@ -115,6 +118,8 @@ data HostConfig = HostConfig
     -- ^ Stream root agents' LLM answers (see 'hostStreamTokens').
     , hcProcessParams :: ProcessParams
     -- ^ See 'hostProcessParams'.
+    , hcTemplateLibraries :: TemplateLibraries
+    -- ^ Libraries @.tramaj@ agent files may import; 'standardLibraries' by default.
     , hcLegacySessionDirs :: [FilePath]
     {- ^ Read-only fallback locations for pre-existing @conv.<uuid>.json@
     session history (@todos/os-as-standalone-server.md@ Design §6). When
@@ -139,6 +144,7 @@ defaultHostConfig files keysFile dbPath =
         , hcLiveSessionTtl = 15 * 60
         , hcStreamTokens = False
         , hcProcessParams = mempty
+        , hcTemplateLibraries = standardLibraries
         , hcLegacySessionDirs = []
         }
 
@@ -228,6 +234,7 @@ withHostStores cfg stores tracer action = do
                 , agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap HostSubAgentTrace tracer) subDeps
                 , sessionCatalog = backendCatalog backend
                 , processParams = cfg.hcProcessParams
+                , templateLibraries = cfg.hcTemplateLibraries
                 }
         loadAll [] k = k []
         loadAll (file : rest) k =

@@ -45,6 +45,7 @@ import qualified Prod.Tracer as Prod
 import qualified System.Agents.AgentTree as AgentTree
 import qualified System.Agents.AgentFactory as AgentFactory
 import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
+import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.OneShot as OneShot
 import qualified System.Agents.SessionPrint.Inject as SessionInject
 import qualified System.Agents.SessionStore as SessionStore
@@ -352,6 +353,8 @@ handleOneShot ::
     FilePath ->
     -- | Operator-supplied parameter values (@--set@/@--pin@)
     Params.ProcessParams ->
+    -- | Libraries @.tramaj@ agent files may import
+    FileLoader.TemplateLibraries ->
     -- | List of agent files (only first is used)
     [FilePath] ->
     -- | Available prompt aliases
@@ -359,7 +362,7 @@ handleOneShot ::
     -- | One-shot options
     OneShotOptions ->
     IO ()
-handleOneShot tracer sessionStore apiKeysFile processParams agentFiles aliases opts = do
+handleOneShot tracer sessionStore apiKeysFile processParams templateLibraries agentFiles aliases opts = do
     (promptContents, mediaAttachments) <-
         loadPromptScriptOptions aliases opts.sessionFile opts.promptScriptOptions
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
@@ -385,5 +388,6 @@ handleOneShot tracer sessionStore apiKeysFile processParams agentFiles aliases o
                 , AgentTree.agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (Prod.contramap OneShotToolTrace tracer) (AgentFactory.fileAgentDeps sessionStore apiKeys)
                 , AgentTree.sessionCatalog = SessionStore.fileCatalog sessionStore
                 , AgentTree.processParams = processParams
+                , AgentTree.templateLibraries = templateLibraries
                 }
 

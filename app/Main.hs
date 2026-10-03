@@ -286,7 +286,7 @@ ensureConfigStructure cfgDir secretKeysPath = do
         putStrLn "Please edit this file and add your actual API keys."
 
     -- Create example agent files if the default directory is empty
-    defaultDirContents <- FileLoader.listJsonDirectory defaultAgentsDir
+    defaultDirContents <- FileLoader.listAgentDirectory defaultAgentsDir
     when (null defaultDirContents) $ do
         createExampleAgents defaultAgentsDir
         putStrLn $ "Created example agent configurations in: " ++ defaultAgentsDir
@@ -329,6 +329,7 @@ data ArgParserArgs = ArgParserArgs
     , defaultSelfDescribeSlug :: Maybe String
     , defaultSelfDescribeDescription :: Maybe String
     , defaultKeymapPath :: Maybe FilePath
+    , defaultTemplateLibraries :: FileLoader.TemplateLibraries
     }
 
 -- | Get the path to the secrets key file
@@ -372,6 +373,7 @@ initArgParserArgs = do
             rc.rcSelfDescribeSlug
             rc.rcSelfDescribeDescription
             rc.rcKeymapPath
+            rc.rcTemplateLibraries
 
 -- | Main program configuration
 data Prog = Prog
@@ -391,6 +393,9 @@ data Prog = Prog
     , progParamsFiles :: [FilePath]
     -- ^ @--params-file@ paths, read and merged into 'progParams' at
     -- startup (flags win over a file's values on conflict).
+    , progTemplateLibraries :: FileLoader.TemplateLibraries
+    -- ^ Libraries @.tramaj@ agent files may import (@tramajLibraries@ in
+    -- @agents-exe.cfg.json@, over the standard library).
     }
 
 -- | Available commands
@@ -482,6 +487,10 @@ parseCheckOptions :: Parser CheckCmd.CheckOptions
 parseCheckOptions =
     CheckCmd.CheckOptions
         <$> parseToolsOption
+        <*> switch
+            ( long "show-config"
+                <> help "Print each agent file's JSON configuration; for a .tramaj template, the JSON it evaluates to"
+            )
 
 -- | Parse the check-tool-call command
 parseCheckToolCallCommand :: Parser Command
@@ -1337,6 +1346,7 @@ parseProgOptions argparserargs =
                     <> help "JSON file of {\"name\": value, ...} parameter values; repeatable. Flags win over a file's values."
                 )
             )
+        <*> pure argparserargs.defaultTemplateLibraries
 
 {- | Parse @--set@/@--set-json@/@--pin@/@--pin-json@ (all repeatable) into
 'ProcessParams'. The @-json@ variant accepts any JSON value; the plain
@@ -1435,7 +1445,7 @@ main = do
             Spectate _ ->
                 runCommand pargs' baseTracer sessionStore []
             _ -> do
-                resolvedAgentFiles <- ConfigLoader.resolveAgentFiles pargs'.agentFiles pargs'.selectedAgentSlug
+                resolvedAgentFiles <- ConfigLoader.resolveAgentFiles (FileLoader.TemplateEnv pargs'.progTemplateLibraries pargs'.progParams) pargs'.agentFiles pargs'.selectedAgentSlug
                 case resolvedAgentFiles of
                     Left err -> do
                         Text.hPutStrLn stderr err
@@ -1457,7 +1467,7 @@ runCommand :: Prog -> Prod.Tracer IO Trace -> SessionStore.SessionStore -> [File
 runCommand pargs baseTracer sessionStore files =
     case pargs.mainCommand of
         Check checkOpts ->
-            CheckCmd.handleCheck (Prod.contramap CheckCmdTrace baseTracer) checkOpts pargs.apiKeysFile pargs.progParams files
+            CheckCmd.handleCheck (Prod.contramap CheckCmdTrace baseTracer) checkOpts pargs.apiKeysFile pargs.progParams pargs.progTemplateLibraries files
         CheckToolCall opts ->
             CheckToolCallCmd.handleCheckToolCall Prod.silent opts
         Config opts ->
@@ -1479,6 +1489,7 @@ runCommand pargs baseTracer sessionStore files =
                         , ConfigLoader.rcSelfDescribeSlug = Nothing
                         , ConfigLoader.rcSelfDescribeDescription = Nothing
                         , ConfigLoader.rcKeymapPath = Nothing
+                        , ConfigLoader.rcTemplateLibraries = pargs.progTemplateLibraries
                         }
              in TUICmd.handleTUI
                     (Prod.contramap TUICmdTrace baseTracer)
@@ -1490,7 +1501,7 @@ runCommand pargs baseTracer sessionStore files =
         EchoPrompt opts ->
             EchoPromptCmd.handleEchoPrompt pargs.progPromptAliases opts
         OneShot opts ->
-            OneShotCmd.handleOneShot (Prod.contramap OneShotCmdTrace baseTracer) sessionStore pargs.apiKeysFile pargs.progParams files pargs.progPromptAliases opts
+            OneShotCmd.handleOneShot (Prod.contramap OneShotCmdTrace baseTracer) sessionStore pargs.apiKeysFile pargs.progParams pargs.progTemplateLibraries files pargs.progPromptAliases opts
         SelfDescribe opts ->
             SelfDescribeCmd.handleSelfDescribe opts pargs.apiKeysFile
         DescribeTool opts ->
@@ -1498,7 +1509,7 @@ runCommand pargs baseTracer sessionStore files =
         Initialize ->
             InitializeCmd.handleInitialize pargs.apiKeysFile files
         McpServer ->
-            McpServerCmd.handleMcpServer (Prod.contramap McpServerCmdTrace baseTracer) sessionStore pargs.apiKeysFile files
+            McpServerCmd.handleMcpServer (Prod.contramap McpServerCmdTrace baseTracer) sessionStore pargs.apiKeysFile pargs.progTemplateLibraries files
         SessionPrint opts ->
             SessionPrint.handleSessionPrint opts
         SessionEdit opts ->
@@ -1516,7 +1527,7 @@ runCommand pargs baseTracer sessionStore files =
         New opts ->
             NewCmd.handleNew pargs.configDir opts
         ToolCall opts ->
-            ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile files
+            ToolCallCmd.handleToolCall (Prod.contramap ToolCallTrace baseTracer) opts pargs.apiKeysFile pargs.progTemplateLibraries files
         SessionDurable opts ->
             SessionDurableCmd.handleSessionDurable sessionStore pargs.apiKeysFile files pargs.progPromptAliases opts
         Serve opts ->
@@ -1535,6 +1546,7 @@ handleServe pargs sessionStore files opts = do
     let serverOpts =
             (Srv.serverOptionsFromFlags files pargs.apiKeysFile opts.serveFlags pargs.progParams)
                 { Srv.soLegacySessionDirs = sessionStore.sessionReadPrefixes
+                , Srv.soTemplateLibraries = pargs.progTemplateLibraries
                 }
     result <- try (Srv.runServer serverOpts logger)
     case result of

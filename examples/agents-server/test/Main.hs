@@ -682,6 +682,7 @@ corsWildcardStartupTest = withSystemTempDirectory "agents-server-cors" $ \dir ->
                 , soSocket = Nothing
                 , soLegacySessionDirs = []
                 , soProcessParams = mempty
+                , soTemplateLibraries = standardLibraries
                 }
     result <- try (runServer opts silentLogger)
     case result of
@@ -1303,6 +1304,7 @@ socketHealthzTest = withSystemTempDirectory "agents-server-socket" $ \dir -> do
                 , soSocket = Just sockPath
                 , soLegacySessionDirs = []
                 , soProcessParams = mempty
+                , soTemplateLibraries = standardLibraries
                 }
     serverAsync <- async (runServer opts silentLogger)
     waitForFile sockPath

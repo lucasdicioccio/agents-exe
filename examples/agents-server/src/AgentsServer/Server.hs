@@ -83,6 +83,10 @@ data ServerOptions = ServerOptions
     only) leaves this empty; @agents-exe serve@ fills it in from the
     resolved config's session-store read prefixes.
     -}
+    , soTemplateLibraries :: TemplateLibraries
+    -- ^ Libraries @.tramaj@ agent files may import. Plain @agents-server@
+    -- has the standard library only; @agents-exe serve@ adds the config's
+    -- @tramajLibraries@.
     , soProcessParams :: ProcessParams
     {- ^ @--set@/@--set-json@/@--pin@/@--pin-json@: process-scope parameter
     values shared by every loaded agent (@todos/tool-partial-application.md@,
@@ -165,6 +169,7 @@ serverOptionsFromFlags agentFiles apiKeysFile flags params =
         , soSocket = flags.sfSocket
         , soLegacySessionDirs = []
         , soProcessParams = params
+        , soTemplateLibraries = standardLibraries
         }
 
 {- | Parse @--set@/@--set-json@/@--pin@/@--pin-json@ (all repeatable) into
@@ -224,6 +229,7 @@ runServer opts logger = do
                 { hcLiveSessionTtl = opts.soLiveSessionTtl
                 , hcStreamTokens = opts.soStreamTokens
                 , hcProcessParams = opts.soProcessParams
+                , hcTemplateLibraries = opts.soTemplateLibraries
                 , hcLegacySessionDirs = opts.soLegacySessionDirs
                 }
         tracer = hostTraceLogger logger
