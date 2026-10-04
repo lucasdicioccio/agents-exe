@@ -52,6 +52,10 @@
 - Supports template variables: `{{content}}`, `{{language}}`, `{{filename}}`
 - Auto-detects programming language from file extension
 
+### Bug Fixes
+
+- The Lua toolbox's `MaxMemoryMB` is now enforced: a script that allocates past the limit fails with "Lua script exceeded the memory limit of N MB" instead of growing until the host runs out of memory
+
 ### Improvements
 
 - Better experience when running `agents-exe` outside of a project directory

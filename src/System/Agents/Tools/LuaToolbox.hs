@@ -10,7 +10,7 @@ This module implements the Lua toolbox functionality with per-tool-call isolatio
 * Each tool call creates a fresh, isolated Lua state
 * Lua state is destroyed immediately after execution completes
 * No persistent state between calls (use SQLite for persistence)
-* Memory limits via Lua allocator hooks
+* Memory limits via a counting Lua allocator (see 'applyMemoryLimit')
 * Timeout enforcement via Haskell watchdog thread
 * Error handling and stack trace capture
 * Integration with the Tool Portal for calling other tools
@@ -105,6 +105,7 @@ module System.Agents.Tools.LuaToolbox (
     Toolbox (..),
     ScriptError (..),
     ExecutionResult (..),
+    scriptErrorMessage,
 
     -- * Module traces (union)
     LuaModuleTrace (..),
@@ -120,6 +121,7 @@ module System.Agents.Tools.LuaToolbox (
     -- * Sandbox configuration
     configureSandbox,
     applyMemoryLimit,
+    closeLimitedState,
     applyTimeout,
 
     -- * Module registration
@@ -137,11 +139,12 @@ module System.Agents.Tools.LuaToolbox (
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
 import Control.Exception (SomeException, bracket, try)
-import Control.Monad (replicateM, void, when)
+import Control.Monad (replicateM, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Time (NominalDiffTime, diffUTCTime, getCurrentTime)
+import Foreign.C.Types (CInt (..), CSize (..))
 import qualified HsLua as Lua
 
 import Prod.Tracer (Tracer (..), contramap, runTracer)
@@ -608,24 +611,67 @@ configurePackagePath = do
 
 {- | Apply a memory limit to the Lua state.
 
-This uses Lua's allocator hook to track memory usage and abort
-if the limit is exceeded. Note that this is approximate and may
-allow slight overruns.
+Installs an allocator that counts the bytes the state holds and refuses to
+grow past the limit, given in megabytes. The state's own baseline (standard
+libraries, modules) counts towards the limit.
 
-The limit is specified in megabytes.
+The limit only bites while a script runs under 'executeScriptWithPortal':
+a refused allocation is a Lua memory error, which is only safe to raise
+inside the protected call that runs the script. A script that allocates
+past the limit fails with 'MemoryError'.
+
+Allocations made by Haskell functions on behalf of the script (@fs.read@,
+@json.decode@, ...) cannot be refused where they happen; they are counted,
+and the script fails as soon as such a function returns over the limit.
+
+A state with a limit should be closed with 'closeLimitedState' so that the
+allocator's bookkeeping is released.
 -}
 applyMemoryLimit :: Lua.State -> Int -> IO ()
 applyMemoryLimit lstate maxMB = do
-    -- Store the limit in the Lua state's extra space
-    -- For now, we track this in Haskell and check periodically
-    -- Full implementation would use a custom allocator
-    let maxBytes = maxMB * 1024 * 1024
-    -- TODO: Implement custom allocator or periodic memory checks
-    -- This is a placeholder for the full memory tracking implementation
-    void $ Lua.runWith lstate $ do
-        -- Create a global to track memory limit
-        Lua.pushinteger (fromIntegral maxBytes)
-        Lua.setglobal (toName "__MEMORY_LIMIT") :: Lua.Lua ()
+    let maxBytes = fromIntegral (max 0 maxMB) * 1024 * 1024 :: CSize
+    ok <- c_memlimit_install lstate maxBytes
+    when (ok == 0) $
+        ioError (userError "LuaToolbox: could not install the memory limit")
+
+-- | Close a Lua state, releasing the memory-limit bookkeeping if it has any.
+closeLimitedState :: Lua.State -> IO ()
+closeLimitedState = c_memlimit_close
+
+-- | Run an action with the memory limit enforced (no-op without a limit).
+withMemoryLimitEnforced :: Lua.State -> Lua.Lua a -> Lua.Lua a
+withMemoryLimitEnforced lstate action = do
+    Lua.liftIO $ c_memlimit_enforce lstate 1
+    res <- action
+    Lua.liftIO $ c_memlimit_enforce lstate 0
+    pure res
+
+-- | Whether an allocation was refused on this state because of the limit.
+memoryLimitExceeded :: Lua.State -> IO Bool
+memoryLimitExceeded lstate = (/= 0) <$> c_memlimit_exceeded lstate
+
+foreign import ccall unsafe "agents_memlimit_install"
+    c_memlimit_install :: Lua.State -> CSize -> IO CInt
+
+foreign import ccall unsafe "agents_memlimit_enforce"
+    c_memlimit_enforce :: Lua.State -> CInt -> IO ()
+
+foreign import ccall unsafe "agents_memlimit_exceeded"
+    c_memlimit_exceeded :: Lua.State -> IO CInt
+
+-- Closing runs finalizers, which may call back into Haskell.
+foreign import ccall safe "agents_memlimit_close"
+    c_memlimit_close :: Lua.State -> IO ()
+
+{- | A message for a script error, fit to show to the script's author.
+
+Only 'MemoryError' has a dedicated wording; the others keep their 'Show'
+form, which callers already relied on.
+-}
+scriptErrorMessage :: ScriptError -> Text.Text
+scriptErrorMessage (MemoryError maxMB) =
+    "Lua script exceeded the memory limit of " <> Text.pack (show maxMB) <> " MB"
+scriptErrorMessage err = Text.pack (show err)
 
 {- | Apply a timeout to Lua script execution.
 
@@ -688,6 +734,7 @@ executeScriptWithPortal tracer toolbox script parentCtx portal = do
     startTime <- getCurrentTime
     let desc = toolboxConfig toolbox
     let maxTime = desc.luaToolboxMaxExecutionTimeSeconds
+    let maxMemory = desc.luaToolboxMaxMemoryMB
 
     -- Trace script execution start with full script content
     runTracer tracer (ScriptExecutionStartTrace script)
@@ -698,7 +745,7 @@ executeScriptWithPortal tracer toolbox script parentCtx portal = do
             bracket
                 (createFreshState tracer desc parentCtx portal)
                 (destroyState tracer)
-                (\lstate -> executeScriptInternal tracer lstate script maxTime)
+                (\lstate -> executeScriptInternal tracer lstate script maxTime maxMemory)
 
     endTime <- getCurrentTime
     let execTime = diffUTCTime endTime startTime
@@ -758,7 +805,7 @@ createFreshState tracer desc parentCtx portal = do
 -- | Destroy a Lua state and release its resources.
 destroyState :: Tracer IO Trace -> Lua.State -> IO ()
 destroyState tracer lstate = do
-    Lua.close lstate
+    closeLimitedState lstate
     runTracer tracer StateClosedTrace
 
 -- | Internal execution function that runs in the context of a fresh Lua state.
@@ -768,8 +815,10 @@ executeScriptInternal ::
     Text.Text ->
     -- | Timeout in seconds
     Int ->
+    -- | Memory limit in megabytes (reported when the limit is hit)
+    Int ->
     IO (Either ScriptError [Aeson.Value])
-executeScriptInternal tracer lstate script maxTime = do
+executeScriptInternal tracer lstate script maxTime maxMemory = do
     -- Execute with timeout
     result <- applyTimeout maxTime $ do
         Lua.runWith lstate $ do
@@ -783,12 +832,20 @@ executeScriptInternal tracer lstate script maxTime = do
                     pure $ Left $ LuaRuntimeError jsonValues
                 else do
                     -- Execute the loaded chunk with regular pcall (no traceback)
-                    execStatus <- Lua.pcall 0 Lua.multret Nothing
+                    -- The memory limit is only enforced inside this pcall
+                    execStatus <-
+                        withMemoryLimitEnforced lstate $
+                            Lua.pcall 0 Lua.multret Nothing
                     if execStatus /= Lua.OK
                         then do
                             nrets <- Lua.gettop
                             jsonValues <- replicateM (stackIndexToInt nrets) luaToJsonValue
-                            pure $ Left $ LuaRuntimeError jsonValues
+                            limitHit <- Lua.liftIO $ memoryLimitExceeded lstate
+                            pure $
+                                Left $
+                                    if execStatus == Lua.ErrMem || (limitHit && any isMemoryMessage jsonValues)
+                                        then MemoryError maxMemory
+                                        else LuaRuntimeError jsonValues
                         else do
                             -- Convert result to JSON
                             nrets <- Lua.gettop
@@ -800,4 +857,12 @@ executeScriptInternal tracer lstate script maxTime = do
             -- Timeout occurred
             runTracer tracer (ScriptTimeoutTrace maxTime)
             pure $ Left $ TimeoutError maxTime
+        Just (Left (MemoryError mb)) -> do
+            runTracer tracer (MemoryLimitExceededTrace mb)
+            pure $ Left $ MemoryError mb
         Just val -> pure val
+  where
+    -- Lua's own memory error, possibly re-raised by the script with a position
+    isMemoryMessage :: Aeson.Value -> Bool
+    isMemoryMessage (Aeson.String msg) = "not enough memory" `Text.isInfixOf` msg
+    isMemoryMessage _ = False

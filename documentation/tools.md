@@ -1688,7 +1688,7 @@ Use `FileSandbox` instead:
 
 The Lua toolbox provides a sandboxed execution environment:
 
-- **Memory limits**: Lua state memory is constrained via allocator hooks
+- **Memory limits**: a script whose Lua heap grows past `MaxMemoryMB` fails with a memory-limit error (`0` disables the limit)
 - **Timeout enforcement**: Scripts that exceed `MaxExecutionTimeSeconds` are terminated
 - **Path sandboxing**: Filesystem access restricted to `FileSandbox` configuration
 - **Host whitelisting**: HTTP requests limited to `allowedHosts`
