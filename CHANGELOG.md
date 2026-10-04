@@ -4,6 +4,13 @@
 
 ### New Features
 
+#### Tunable `spectate` display
+- `agents-exe spectate --panels SPEC` chooses the panels shown, their places and sizes (`tree:60+tools:40/45,text/55` is the default screen; `tree,tools,text` is three columns); `--refresh SECONDS` sets the time between two refreshes
+- Keys change the same things while running, as in `top`: `1` `2` `3` show or hide a panel, `Tab` picks one, `<` `>` move it, `[` `]` and `-` `+` resize it, `s` restacks it, `d` `D` change the refresh interval, `0` goes back to the layout at start, `?` lists the keys and the flags that reproduce the screen
+- `W` saves the layout to `~/.config/agents-exe/spectate-layout` (`--layout-file` for another file), read at the next start; the flags go over it
+- The screen is now redrawn once per refresh interval rather than on every event
+- See `documentation/cli-commands.md` (spectate)
+
 #### Named file sandboxes
 - An agent may declare file sandboxes once, by name, in `fileSandboxes`; a builtin toolbox (System, Developer, Lua) refers to one with `"FileSandbox": {"ref": "<name>"}`
 - The inline `FileSandbox` form is unchanged; an undeclared name is a loading error, also reported by `validate-agent`

@@ -198,6 +198,7 @@ library agents-lib
                     , System.Agents.Host.Client.Http
                     , System.Agents.OneShot
                     , System.Agents.Spectate
+                    , System.Agents.Spectate.Layout
                     , System.Agents.MCP.Base
                     , System.Agents.MCP.Client
                     , System.Agents.MCP.Client.Runtime

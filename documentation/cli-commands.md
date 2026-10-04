@@ -258,21 +258,27 @@ Watch a running server: a read-only, live dashboard.
 
 ```bash
 agents-exe spectate --attach URL|PATH [--token TOKEN | --token-file FILE]
+                    [--panels SPEC] [--refresh SECONDS] [--layout-file FILE]
 ```
 
 `spectate` is one more client of a running `agents-exe serve`/`agents-server`,
 like `tui --attach`, except that it only reads: it follows the server's
-event feed and changes nothing. It is made for watching one long run, on a
-fixed screen:
+event feed and changes nothing. It is made for watching one long run, in
+three panels:
 
-- **agents** (top left): the tree of sessions and of the sub-agent calls
-  they make, indented by depth, each with its state and for how long.
-- **tool calls** (bottom left): the calls running now, with elapsed time
-  and the latest progress a background call reported, then the ones that
-  finished recently.
-- **text** (right): what the model writes in one session, with the user
-  queries it answers. By default the pane follows the session that wrote
-  last; selecting a row of the tree pins it to that session.
+- **agents** (`tree`; top left by default): the tree of sessions and of the
+  sub-agent calls they make, indented by depth, each with its state and for
+  how long.
+- **tool calls** (`tools`; bottom left): the calls running now, with elapsed
+  time and the latest progress a background call reported, then the ones
+  that finished recently.
+- **text** (`text`; right): what the model writes in one session, with the
+  user queries it answers. By default the panel follows the session that
+  wrote last; selecting a row of the tree pins it to that session.
+
+Which panels show, where, how large, and how often the screen refreshes can
+be chosen on the command line and changed while running, as in `top`: see
+[Layout](#spectate-layout) below.
 
 The events carry no timestamp, so every duration is measured by
 `spectate` from the moment it received the event; a run that started
@@ -290,12 +296,63 @@ attaches shows its text from its next turn on.
 | `--attach URL\|PATH` | required | The server to watch. Same forms as `tui --attach`: `http://HOST:PORT`, `https://...`, `unix:///path/to.sock`, or a bare socket path. |
 | `--token TOKEN` | none | Bearer token, when the server runs with `--auth-tokens`. `spectate` then sees that owner's sessions only. |
 | `--token-file FILE` | none | The same, read from a file. |
+| `--panels SPEC` | `tree:60+tools:40/45,text/55` | The panels shown, their places and sizes (see below). |
+| `--refresh SECONDS` | `1` | Time between two refreshes of the screen, from `0.1` to `60`; decimals are accepted (`0.5`). |
+| `--layout-file FILE` | `~/.config/agents-exe/spectate-layout` | The saved layout: read at start when the file exists, written by the `W` key. |
+
+<a id="spectate-layout"></a>
+**Layout:**
+
+The screen is columns, left to right, each a stack of panels, top to
+bottom. `--panels` describes it in one string:
+
+- `,` separates columns, and `+` the panels stacked in one column;
+- a panel is `tree` (or `agents`), `tools` or `text`; one that is not named
+  is hidden, and none can be named twice;
+- `:N` after a panel is its share of its column's height, and `/N` after a
+  column its share of the screen's width. Shares go from 1 to 100, count
+  relative to their neighbours, and are 50 when left out.
+
+```bash
+--panels tree,tools,text               # three equal columns
+--panels text                          # only the text
+--panels tree+tools+text               # one stack
+--panels text/70,tree:30+tools:70/30   # text on the left, wide
+```
+
+Between two refreshes the events received wait, and the durations stand
+still: a longer interval makes a busy run calmer to read, a shorter one
+more live. Durations are still counted from when each event was received.
+
+The layout is remembered only when asked, as `top` does with `W`: the `W`
+key writes it to the layout file, and the next `spectate` starts from that
+file. `--panels` and `--refresh` each go over what the file says, so a
+scripted layout (for a screenshot, say) is the same whatever was saved. A
+layout file that cannot be read is an error, not a layout silently dropped.
+The file holds what the flags take:
+
+```
+panels tree:60+tools:40/45,text/55
+refresh 1
+```
 
 **Keyboard Shortcuts:**
-- `Up` / `Down` (or `k` / `j`) - Select a session in the tree; the text pane shows it
+- `Up` / `Down` (or `k` / `j`) - Select a session in the tree; the text panel shows it
 - `f` - Follow the session that writes, again
 - `PgUp` / `PgDn` - Scroll the text
+- `1` / `2` / `3` - Show or hide the agents, tool calls, text panel (the last one shown stays); a panel that comes back is a new last column
+- `Tab` / `Shift+Tab` - Choose the panel the next keys act on; its title is in brackets
+- `<` / `>` - Exchange it with the panel before or after
+- `[` / `]` - Narrow or widen its column
+- `-` / `+` - Shorten or heighten it in its column
+- `s` - Stack it under the column before, or give it a column of its own
+- `0` - Back to the layout at start
+- `d` / `D` - Longer or shorter refresh interval (0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60 seconds)
+- `W` - Save the layout to the layout file
+- `?` or `h` - Show the keys, and the `--panels`/`--refresh` flags that reproduce the layout on screen
 - `q`, `Esc` or `Ctrl+C` - Quit (the runs go on)
+
+No key sends anything to the server or to the agents.
 
 **Examples:**
 
@@ -306,6 +363,9 @@ agents-exe tui --attach /run/agents/agents.sock
 
 # In another: watch
 agents-exe spectate --attach /run/agents/agents.sock
+
+# The same, as three columns refreshed twice a second
+agents-exe spectate --attach /run/agents/agents.sock --panels tree,tools,text --refresh 0.5
 ```
 
 A TUI started without `--attach` runs its agents in its own process and
