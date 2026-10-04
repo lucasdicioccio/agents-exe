@@ -33,7 +33,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
 import Control.Exception (SomeException, try)
 import qualified Data.Aeson as Aeson
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (diffUTCTime, getCurrentTime)
@@ -114,10 +114,14 @@ initializeToolboxWithSessionIntrospection _tracer desc mSessionConfig = do
     if null desc.systemToolboxCapabilities
         then pure $ Left "System toolbox must have at least one capability enabled"
         else do
-            -- Create file sandbox if attach-file capability is enabled
+            -- Create the file sandbox when attach-file is enabled (deny-all
+            -- unless configured), or when one is configured: list-directory
+            -- then stays within it too. Without either, list-directory is
+            -- unrestricted, as it always was.
             let config = effectiveFileSandbox defaultFileSandboxConfig desc.systemToolboxFileSandbox
             mFileSandbox <-
                 if SystemToolAttachFile `elem` desc.systemToolboxCapabilities
+                    || isJust desc.systemToolboxFileSandbox
                     then do
                         createdAt <- getCurrentTime
                         let sandbox =

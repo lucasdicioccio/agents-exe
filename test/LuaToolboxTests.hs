@@ -463,9 +463,90 @@ resourceLimitTests =
     testGroup
         "Resource Limits"
         [ -- testCase "Timeout enforcement" testTimeout
-        -- Note: Memory limit is difficult to test reliably in CI
-        -- Skipping for now to avoid flakiness
+          testCase "Memory limit stops a script that accumulates data" testMemoryLimitAccumulation
+        , testCase "Memory limit stops a single oversized allocation" testMemoryLimitSingleAllocation
+        , testCase "Memory limit counts data built by Haskell modules" testMemoryLimitHaskellAllocation
+        , testCase "Memory limit leaves a script under the limit alone" testMemoryLimitNotReached
+        , testCase "Memory limit error has a clear message" testMemoryLimitMessage
         ]
+
+-- | Memory limit used by the memory tests, in megabytes.
+memoryTestLimitMB :: Int
+memoryTestLimitMB = 8
+
+-- | Run a script with a small memory limit.
+runWithMemoryLimit :: Text -> IO (Either ScriptError ExecutionResult)
+runWithMemoryLimit script = do
+    let desc = testLuaToolbox{luaToolboxMaxMemoryMB = memoryTestLimitMB}
+    initResult <- LuaToolbox.initializeToolbox silent desc
+    case initResult of
+        Left err -> assertFailure $ "Failed to initialize: " ++ err
+        Right box -> do
+            let ctx = mkTestContext dummyPortal
+            LuaToolbox.executeScriptWithPortal silent box script ctx dummyPortal
+
+assertMemoryError :: Either ScriptError ExecutionResult -> Assertion
+assertMemoryError result =
+    case result of
+        Left (MemoryError mb) -> assertEqual "reported limit" memoryTestLimitMB mb
+        Left err -> assertFailure $ "Wrong error type: " ++ show err
+        Right _ -> assertFailure "Should have exceeded the memory limit"
+
+testMemoryLimitAccumulation :: Assertion
+testMemoryLimitAccumulation = do
+    -- 64 MB of distinct 1 MB strings, kept alive in a table
+    result <-
+        runWithMemoryLimit $
+            Text.unlines
+                [ "local t = {}"
+                , "for i = 1, 64 do"
+                , "  t[i] = string.rep('x', 1024 * 1024) .. i"
+                , "end"
+                , "return #t"
+                ]
+    assertMemoryError result
+
+testMemoryLimitSingleAllocation :: Assertion
+testMemoryLimitSingleAllocation = do
+    result <- runWithMemoryLimit "return #string.rep('x', 256 * 1024 * 1024)"
+    assertMemoryError result
+
+testMemoryLimitHaskellAllocation :: Assertion
+testMemoryLimitHaskellAllocation = do
+    -- text.upper builds its result on the Haskell side
+    result <-
+        runWithMemoryLimit $
+            Text.unlines
+                [ "local s = string.rep('x', 1024 * 1024)"
+                , "local t = {}"
+                , "for i = 1, 64 do"
+                , "  t[i] = text.upper(s)"
+                , "end"
+                , "return #t"
+                ]
+    assertMemoryError result
+
+testMemoryLimitNotReached :: Assertion
+testMemoryLimitNotReached = do
+    -- 64 MB allocated in total, but never more than about 1 MB alive
+    result <-
+        runWithMemoryLimit $
+            Text.unlines
+                [ "local n = 0"
+                , "for i = 1, 64 do"
+                , "  local s = string.rep('x', 1024 * 1024) .. i"
+                , "  n = n + #s"
+                , "end"
+                , "return n > 0"
+                ]
+    case result of
+        Right execResult -> resultValues execResult @?= [Aeson.Bool True]
+        Left err -> assertFailure $ "Script under the limit failed: " ++ show err
+
+testMemoryLimitMessage :: Assertion
+testMemoryLimitMessage =
+    LuaToolbox.scriptErrorMessage (MemoryError 8)
+        @?= "Lua script exceeded the memory limit of 8 MB"
 
 testTimeout :: Assertion
 testTimeout = do

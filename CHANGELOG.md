@@ -11,6 +11,13 @@
 - The screen is now redrawn once per refresh interval rather than on every event
 - See `documentation/cli-commands.md` (spectate)
 
+#### `agents-exe new agent` bootstrap defaults
+- A new agent can read, edit and list files under `./` (a `workspace` file sandbox shared by its developer and system toolboxes) and has a read-write SQLite memory (`./{slug}-memory.sqlite`); before, its file sandbox denied everything
+- After creating the agent, reports whether `agents-exe.cfg.json` loads it and offers to add it to `agentsFiles` (`--add-to-config`, `--no-add-to-config`)
+- A `DirectoryRecursive` predicate written with a trailing slash (`./`, `./src/`) now allows the directory itself, not only its contents
+- The system toolbox's `list-directory` now honours a configured `FileSandbox` even when `attach-file` is not enabled; without a sandbox it stays unrestricted
+- `documentation/cli-commands.md` documents the `config` command
+
 #### Named file sandboxes
 - An agent may declare file sandboxes once, by name, in `fileSandboxes`; a builtin toolbox (System, Developer, Lua) refers to one with `"FileSandbox": {"ref": "<name>"}`
 - The inline `FileSandbox` form is unchanged; an undeclared name is a loading error, also reported by `validate-agent`
@@ -51,6 +58,10 @@
 - Aliases can be configured in `agents-exe.cfg.json`
 - Supports template variables: `{{content}}`, `{{language}}`, `{{filename}}`
 - Auto-detects programming language from file extension
+
+### Bug Fixes
+
+- The Lua toolbox's `MaxMemoryMB` is now enforced: a script that allocates past the limit fails with "Lua script exceeded the memory limit of N MB" instead of growing until the host runs out of memory
 
 ### Improvements
 

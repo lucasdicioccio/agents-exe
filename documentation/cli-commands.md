@@ -932,7 +932,7 @@ agents-exe new (agent|tool) [OPTIONS]
 Create a new agent configuration file from a template.
 
 ```bash
-agents-exe new agent SLUG [FILE] [MODEL] [OPTIONS]
+agents-exe new agent SLUG FILE [MODEL] [OPTIONS]
 ```
 
 **Arguments:**
@@ -940,14 +940,16 @@ agents-exe new agent SLUG [FILE] [MODEL] [OPTIONS]
 | Argument | Description |
 |----------|-------------|
 | `SLUG` | Unique identifier for the agent |
-| `FILE` | Output file path (default: `./{slug}.json`) |
+| `FILE` | Output file path |
 | `MODEL` | Model name (e.g., gpt-4o, mistral-large). The provider preset is inferred from the model catalog. |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `-f, --force` | Overwrite existing file |
+| `--add-to-config` | Add the agent to the `agentsFiles` of `agents-exe.cfg.json` when it is not listed there, without asking |
+| `--no-add-to-config` | Never modify `agents-exe.cfg.json` |
+| `-f, --force` | Overwrite existing file (given before the subcommand: `agents-exe new --force agent ...`) |
 
 Provider presets (URL, default model, API key ID) are selected automatically
 based on the model name. Use `agents-exe new models list` to see the built-in
@@ -957,22 +959,40 @@ model patterns and `agents-exe new models init` to customize them locally.
 
 ```bash
 # Create agent with the default OpenAI preset
-agents-exe new agent my-assistant
+agents-exe new agent my-assistant ./my-assistant.json
 
 # Create agent with custom model (preset inferred from the catalog)
-agents-exe new agent coder --model gpt-4o
+agents-exe new agent coder ./coder.json gpt-4o
 
-# Create agent with custom output path
-agents-exe new agent my-assistant ./agents/assistant.json
+# Create agent in a subdirectory and list it in agents-exe.cfg.json
+agents-exe new agent my-assistant ./agents/assistant.json --add-to-config
 
 # Overwrite existing
-agents-exe new agent my-assistant --force
+agents-exe new --force agent my-assistant ./my-assistant.json
 ```
+
+**What a new agent can do:**
+
+A new agent works on the directory it is started from:
+
+| Toolbox | Gives the agent |
+|---------|-----------------|
+| `developer` (DeveloperToolbox) | Reading and editing files (`read-file-range`, `write-file-range`, `patch-file`), and the agent/tool scaffolding helpers |
+| `system` (SystemToolbox) | The working directory and directory listings (`working-directory`, `list-directory`) |
+| `memory` (SqliteToolbox) | A read-write SQLite database, `./{slug}-memory.sqlite`, created on first use |
+
+File access is limited by one file sandbox, `workspace`, declared in the
+agent's `fileSandboxes` and shared by the `developer` and `system` toolboxes.
+It allows reading and writing `./` and everything below it, where `./` is the
+directory the agent runs in (not the directory of the agent file). Edit its
+`fsbPredicate` to narrow or widen what the agent may touch; see
+[Tools](tools.md) for the predicates.
 
 **Generated agent file:**
 ```json
 {
-  "agent": {
+  "tag": "OpenAIAgentDescription",
+  "contents": {
     "slug": "my-assistant",
     "apiKeyId": "main-key",
     "flavor": "OpenAIv1",
@@ -986,13 +1006,62 @@ agents-exe new agent my-assistant --force
     ],
     "toolDirectory": "tools",
     "mcpServers": [],
-    "openApiToolboxes": null,
-    "postgrestToolboxes": null,
-    "builtinToolboxes": [],
-    "extraAgents": null
+    "fileSandboxes": {
+      "workspace": {
+        "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./"},
+        "fsbMaxFileSize": 52428800,
+        "fsbName": null
+      }
+    },
+    "builtinToolboxes": [
+      {
+        "tag": "DeveloperToolbox",
+        "contents": {
+          "Name": "developer",
+          "Description": "Tools for developing agents and tools",
+          "Capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file"],
+          "FileSandbox": {"ref": "workspace"}
+        }
+      },
+      {
+        "tag": "SystemToolbox",
+        "contents": {
+          "Name": "system",
+          "Description": "Working directory and directory listings",
+          "Capabilities": ["working-directory", "list-directory"],
+          "FileSandbox": {"ref": "workspace"}
+        }
+      },
+      {
+        "tag": "SqliteToolbox",
+        "contents": {
+          "Name": "memory",
+          "Description": "Notes and facts to remember across conversations",
+          "Versioning": {"tag": "SqliteReadWrite", "path": "./my-assistant-memory.sqlite"}
+        }
+      }
+    ]
   }
 }
 ```
+
+**Listing the agent in `agents-exe.cfg.json`:**
+
+After writing the file, `new agent` looks for an `agents-exe.cfg.json` (in the
+current directory, then upward) and reports whether the new agent is loaded by
+it, that is, named in `agentsFiles` or sitting directly in one of the
+`agentsDirectories`:
+
+- listed: nothing else to do;
+- not listed, on an interactive terminal: it asks whether to add the file to
+  `agentsFiles` (default: no);
+- not listed, not interactive: it prints the entry to add. Pass
+  `--add-to-config` to add it without being asked, `--no-add-to-config` to
+  never be asked.
+
+Adding the entry rewrites the config file as formatted JSON; every other field
+is kept. Without any `agents-exe.cfg.json`, pass the file with `--agent-file`
+or create a config with `agents-exe config local init`.
 
 #### new tool
 
@@ -1076,6 +1145,95 @@ esac
 1. Edit the `args` array in the describe function
 2. Implement the `run` function logic
 3. Test with: `agents-exe describe-tool ./tools/my-tool`
+
+### config
+
+Configure agents-exe itself: the project config file, the TUI keymap and the
+API keys file, without writing their JSON by hand.
+
+```bash
+agents-exe config [-f|--force] (local|keymap|api-key) ...
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Overwrite an existing file or API key entry. It belongs to `config`, so it goes last: `agents-exe config local init --force` |
+
+#### config local init
+
+Create an `agents-exe.cfg.json` in the current directory.
+
+```bash
+agents-exe config local init
+```
+
+The file is minimal: `agentsConfigDir` pointing at `~/.config/agents-exe` and
+an empty `agentsFiles`. Add agents to `agentsFiles` or `agentsDirectories`
+(see [Configuration File](#configuration-file)); `agents-exe new agent` offers
+to do it for the agents it creates. Only the current directory is checked for
+an existing file, not its parents; an existing file is kept unless `--force`
+is given.
+
+#### config keymap init
+
+Write a keymap file holding the default TUI key bindings and input settings,
+as a starting point for customization.
+
+```bash
+agents-exe config keymap init FILE
+```
+
+| Argument | Description |
+|----------|-------------|
+| `FILE` | Path where the keymap file is created (parent directories are created as needed) |
+
+Point the `keymap` field of `agents-exe.cfg.json` at the file to use it. An
+existing file is kept unless `--force` is given.
+
+#### config api-key list
+
+List the names of the configured API keys (never their values).
+
+```bash
+agents-exe config api-key list
+```
+
+#### config api-key create
+
+Add an entry to the API keys file with a placeholder value, to be replaced by
+the real key in an editor.
+
+```bash
+agents-exe config api-key create NAME
+```
+
+| Argument | Description |
+|----------|-------------|
+| `NAME` | Name of the key, as referenced by an agent's `apiKeyId` |
+
+An existing entry of that name is kept unless `--force` is given, in which
+case it is reset to the placeholder.
+
+Both `api-key` subcommands work on the `secret-keys` file of the config
+directory (`~/.config/agents-exe/secret-keys` by default), and create it empty
+if it does not exist. The global `--api-keys` option does not redirect them.
+
+**Examples:**
+
+```bash
+# Start a project: config file, then an agent listed in it
+agents-exe config local init
+agents-exe new agent helper ./helper.json --add-to-config
+
+# Declare the key the agent's preset refers to, then fill in its value
+agents-exe config api-key create main-key
+agents-exe config api-key list
+
+# Customize the TUI key bindings
+agents-exe config keymap init ./keymap.json
+```
 
 ### spec
 

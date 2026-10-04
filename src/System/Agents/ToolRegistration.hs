@@ -1822,7 +1822,7 @@ luaTool box =
                         (Context.ctxToolPortal ctx)
 
                 case result of
-                    Left err -> pure $ LuaToolError call (Text.pack $ show err)
+                    Left err -> pure $ LuaToolError call (LuaTools.scriptErrorMessage err)
                     Right execResult -> pure $ LuaToolResult call (Aeson.toJSON (LuaTools.resultValues execResult))
             _ ->
                 pure $ LuaToolError call "Missing 'script' parameter or invalid type"

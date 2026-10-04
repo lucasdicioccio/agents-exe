@@ -97,6 +97,12 @@ recursiveDirectoryTests =
         [ testCase "DirectoryRecursive allows the directory itself" $ do
             root <- fixtureRoot
             assertAllowed (DirectoryRecursive (root </> "src")) (root </> "src")
+        , testCase "DirectoryRecursive written with a trailing slash allows the directory itself" $ do
+            root <- fixtureRoot
+            assertAllowed (DirectoryRecursive (root </> "src/")) (root </> "src")
+            withCurrentDirectory root $ do
+                assertAllowed (DirectoryRecursive "./") root
+                assertAllowed (DirectoryRecursive "./") (root </> "src" </> "Main.hs")
         , testCase "DirectoryRecursive allows direct children" $ do
             root <- fixtureRoot
             assertAllowed (DirectoryRecursive (root </> "src")) (root </> "src" </> "Main.hs")
