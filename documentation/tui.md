@@ -41,6 +41,8 @@ The TUI features a tabbed interface with four main tabs:
 | **History** | Past sessions | Session list and history view |
 | **Help** | Keyboard shortcuts | Command reference and key bindings |
 
+![The Agents tab](../test/tui-snapshots/png/agents-tab.png)
+
 ### Tab Navigation
 
 | Key | Action |
@@ -262,6 +264,8 @@ token, and its arguments:
 │ - search (token 5e6f7a8b): {"q": "todo"}           │
 └─────────────────────────────────────────────────────┘
 ```
+
+![The Pending panel, with one deferred call](../test/tui-snapshots/png/pending-panel.png)
 
 `>` marks the selected call, the first one with a continuation token until
 you move it: `Ctrl+O` (`select-pending`) selects the next one, wrapping
@@ -1288,6 +1292,62 @@ runTUIWithConfig tracer config props = do
 
     void $ customMainWithDefaultVty (Just evChan) app st
 ```
+
+## Screenshots and end-to-end tests
+
+The screenshots on this page are not taken by hand. The `agents-tui-e2e`
+test-suite runs the real `agents-exe tui` in a pseudo-terminal with
+[tuispec](https://github.com/Tritlo/tuispec), sends it keys, and compares the
+screen with a baseline at the end of each step. The model is a fake
+OpenAI-compatible endpoint the suite serves itself, with fixed answers, and
+`HOME` is a scratch directory: no API key, no network, none of your own
+configuration.
+
+| Scenario | Keys | Snapshots |
+|----------|------|-----------|
+| `launch` | none | `agents-tab` |
+| `chat` | `Ctrl+N`, `Ctrl+]`, `Tab` twice, a message, `Meta+Enter` | `message-typed`, `reply` |
+| `pending` | `Down`, the same with an agent whose tool calls are deferred, then `Ctrl+Y`, an answer, `Meta+Enter` | `pending-panel`, `pending-answered` |
+
+![A reply from the scripted model](../test/tui-snapshots/png/reply.png)
+
+The suite is opt-in, behind the `tui-e2e` cabal flag, so a plain `cabal test`
+neither builds tuispec nor needs a terminal:
+
+```bash
+# compare the screens with the baselines
+cabal test agents-tui-e2e -ftui-e2e
+
+# accept the screens as the new baselines, after a deliberate UI change
+TUISPEC_UPDATE_SNAPSHOTS=1 cabal test agents-tui-e2e -ftui-e2e
+
+# the same, and render the screenshots again
+TUISPEC_UPDATE_SNAPSHOTS=1 AGENTS_TUI_E2E_PNG=1 cabal test agents-tui-e2e -ftui-e2e
+```
+
+Files, under `test/tui-snapshots/`:
+
+| Path | Content |
+|------|---------|
+| `snapshots/<scenario>/<name>.ansi.txt` | The baseline: what the terminal received, with session ids zeroed |
+| `snapshots/<scenario>/<name>.txt` | The same screen as plain text, to read a change in a diff |
+| `snapshots/<scenario>/<name>.meta.json` | The terminal size (100x30) |
+| `png/<name>.png` | The screenshot, written only with `AGENTS_TUI_E2E_PNG` set |
+| `tests/` | What the last run captured, and a failure bundle per failed scenario; not tracked |
+
+Two screens are equal when their cells are: characters and colours, at 100
+columns by 30 rows. Session ids are random and the sidebar shows them, so they
+are zeroed before comparing.
+
+Rendering a PNG needs `python3` with Pillow and a monospace TTF: DejaVu Sans
+Mono or Liberation Mono where distributions install them, or the file
+`TUISPEC_FONT_PATH` names. A font without a glyph the TUI uses (the status
+icons of the conversation list) draws a box in its place. The comparison
+itself needs neither. Linux only: tuispec drives a PTY.
+
+`AGENTS_EXE` selects another binary than the one cabal just built. The
+scenarios are in `test/tui-e2e/Main.hs`; tuispec also has a JSON-RPC server
+(`tuispec server`) for driving the TUI from another program.
 
 ## Styling
 

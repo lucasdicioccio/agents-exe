@@ -19,3 +19,7 @@ website/src/specs-*.cmark
 website/src/specs.cmark
 website/src/commands.cmark
 website/scripts/__pycache__/
+
+# Per-run captures of the terminal UI end-to-end tests (agents-tui-e2e); the
+# baselines in test/tui-snapshots/snapshots/ and the PNGs in png/ are tracked.
+test/tui-snapshots/tests/
