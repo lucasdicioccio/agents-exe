@@ -1,10 +1,13 @@
 # Spec: the OS as a standalone server (TUI and web UI as clients)
 
-Status: proposal, 2026-09-23, revised the same day after checking service
-readiness. Phases 0 and 1 done on branch `feature/os-standalone-server`
-(commits 8de2a64..dc01dc8); All phases landed (8de2a64..771c988), with the open items listed
-under "Remaining after Phase 5". Builds on
+Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24
+(`8de2a64`..`771c988`, PR #571); what was left is listed, with what has
+closed since, under "Remaining after Phase 5". Builds on
 `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
+
+Status checked on 2026-10-04 against the git history and the code. "Current
+state", "Gaps" and "Integration modes, as of 2026-09-23" describe the code
+before this work.
 
 ## Goal
 
@@ -399,7 +402,7 @@ Config loading into the library (§6); `serve` subcommand on `agents-exe`;
 point over the same code. Docs: `documentation/agents-server.md` gains the config
 section; `documentation/cli-commands.md` gains `serve`.
 
-### Phase 2: the protocol, in the library
+### Phase 2: the protocol, in the library — done
 
 Split in three sequential steps: 2a the `Protocol` types with JSON, event
 sequence numbers, the ring and replay, the cross-session feed, and the
@@ -451,7 +454,7 @@ and the ring, `listSessions`, `sendMail`, `createSession` with no message,
 `OneShotTool` emit through it. `mailInToolResult` folding at R1 (§5). Tests: JSON round trips, replay from
 the ring, fork, empty create, `mailInToolResult` folding.
 
-### Phase 3: the TUI on the in-process runner
+### Phase 3: the TUI on the in-process runner — done
 
 Split in three sequential steps: 3a `RunnerClient` and `inProcessClient`
 in the library plus a serializable agent descriptor (`ListAgents` /
@@ -603,9 +606,10 @@ why it is last.
   including a migration-inventory test updated for the new table.)
 * TUI: selection among several pending calls (`select-pending`, Ctrl+O) and
   `fail-pending` (Ctrl+W) are done; a failed call completes with the text
-  `Error: <reason>` rather than a new `UserToolResponse` variant. Still no view
-  for `hook.failed`.
-* Service packaging: docs only, no unit file shipped, no `bundling/` entry.
+  `Error: <reason>` rather than a new `UserToolResponse` variant. `hook.failed`
+  is shown in the status bar since 2026-09-26 (`8255f05`, PR #594).
+* Service packaging: done since 2026-09-26, `bundling/systemd/` ships a
+  system unit and a user unit (`ea7c13f`, PR #598).
 * `checks/lib/fake_llm.py` scripts multi-turn answers (text and tool calls,
   matched on request index, system prompt, last message or offered tools);
   pty end-to-end checks now cover a sub-agent call as a child session
@@ -613,7 +617,17 @@ why it is last.
   from the Pending panel (`checks/phase5-pending-e2e`). Not covered yet:
   interrupts, and the same flows with `tui --attach`.
 * D8's out-of-scope items: multi-server Postgres, mid-`RunAsync` durability,
-  per-owner API keys.
+  per-owner API keys. Two of the three were done later, outside this spec:
+  several servers on one Postgres database through a run lease (`999666f`,
+  PR #603) and per-owner API keys with opt-in tool isolation (`1d8ee0c`,
+  PR #606); both are described under "Remaining later work" in
+  `todos/web-server-embedding.md`. Mid-`RunAsync` durability: no work found.
+
+As of 2026-10-04 the open items of this list are the pty checks for
+interrupts and for the same flows under `tui --attach` (not re-checked beyond
+the names of the directories in `checks/`), a narrowing that is lost when a
+narrowed child is resumed after a restart, and mid-`RunAsync` durability.
+They are tracked in the backlog, not in this file.
 
 ## Decisions (proposed)
 

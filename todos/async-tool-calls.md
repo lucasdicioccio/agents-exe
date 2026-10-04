@@ -1,5 +1,13 @@
 # Asynchronous / Interruptible Tool Calls
 
+Status: implemented (`7850f2e`), all phases; see
+`todos/async-tool-calls-progress.md` for what was built and what was left
+out. The user-facing description is `documentation/async-tool-calls.md`.
+This file is the plan as written before the work: "Today the flow is" and
+the unchecked boxes under "Success Criteria" are the starting point, not the
+current state. Later work on the same ground is in
+`todos/session-mailbox.md` (attach/detach, `wait`, interrupts).
+
 ## Goal
 
 Make tool calls in a TUI/oneshot session truly interruptible and inspectable:
@@ -385,6 +393,10 @@ None remaining. Decisions from review:
 5. Default `AsyncYieldStrategy` is `YieldWhenAllDone`.
 
 ## Success Criteria
+
+The boxes are left as written in the plan. Whether each is met is recorded in
+the table under "Success Criteria Status" of
+`todos/async-tool-calls-progress.md` (all met in the library and tests).
 
 - [ ] Two long-running tool calls issued in one LLM turn execute concurrently.
 - [ ] The LLM receives a partial user turn as soon as the first call finishes (when `YieldOnAnyProgress` is configured).

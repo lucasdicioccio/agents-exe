@@ -1,8 +1,32 @@
 # Spec: partial application of tool arguments
 
-Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done
-(`97961e0`). Phase 2 done
-except MCP server `env` (G4); the tool-cache key (G8) is done too, see below (`03783fb`,
+Status: implemented. Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21
+(PR #569), the Phase 2 and Phase 4 leftovers since. Open: `fork` on session
+creation and `session start --fork` (§5.2), and saved narrowings (D15).
+
+Checked on 2026-10-04 against the git history and the code. What was listed
+as missing here and has landed since:
+
+* MCP server `env` (G4): `d4036d1`, PR #596.
+* The tool-cache key (G8): `01d6823`, PR #588.
+* The chat page's parameter form: `d44645b`, PR #589.
+* `params`, `seal`, `session_token` and the params/token routes in
+  `/openapi.json`: `77f0fba`, PR #597.
+
+What is still open, tracked in the backlog rather than here:
+
+* §5.2's `fork` field on `POST /v1/sessions` and the CLI's
+  `session start --fork`. Forking with new values exists only as
+  `POST /v1/sessions/:id/fork` with `params`.
+* Required parameters are not enforced at fork time (a fork starts no run;
+  `forkSessionWithParams` says so).
+* Saving a narrowed helper as a stored agent (D15), which was never planned.
+
+The paragraphs below are the per-phase notes as they were written when each
+phase landed; where one says "not done", the list above is the current answer.
+
+Phase 1 done (`97961e0`). Phase 2 done, including MCP server `env` (G4) and
+the tool-cache key (G8) since 2026-09-26 (`03783fb`,
 `b0c53a5`): parameters, `ctxParams` (now actually wired at runtime, not
 just in tests), `--set`/`--set-json`/`--pin`/`--pin-json`/`--params-file`,
 process-scope resolution, secret-argv-mode load-time guard (G7).
@@ -20,12 +44,11 @@ in-memory `LiveSession` (`Host/Runner.hs`'s new `lsParams`), never
 persisted; message-scope values applied for one run only, never stored;
 `agentView`'s `"parameters"` self-description (`bound`/`pinned`, never a
 value); `agents-server --set`/`--set-json`/`--pin`/`--pin-json` (mirroring
-`agents-exe`) so an operator can lock a container to one tenant. Not done
-from Phase 4: the chat page's parameter form, and the generated OpenAPI
-document's request/response schemas (`AgentsServer/Types.hs`/`Routes.hs`
-are a separate hand-maintained layer used only for `/openapi.json` and
-were not updated with the new fields — the real handlers in `Api.hs` are
-fully wired and correct; this is a documentation-only gap).
+`agents-exe`) so an operator can lock a container to one tenant. Left out
+of the first Phase 4 commit and done on 2026-09-26: the chat page's
+parameter form (PR #589), and the generated OpenAPI document's
+request/response schemas (PR #597; `AgentsServer/Types.hs`/`Routes.hs` are
+a separate hand-maintained layer used only for `/openapi.json`).
 `recoverOnStartup` marks the running calls of a session whose required
 parameters are no longer bound as failed with a `params_required` message
 (§5's documented recovery behaviour; done 2026-09-25, which also made the
@@ -1026,17 +1049,18 @@ After this phase one container serves many tenants.
 * Tests on a three-level chain: root binds for the grandchild; the middle
   agent narrows further; the middle agent cannot rebind; `describe_agent`
   from the middle does not show what the root bound; resume and fork.
-* Later, if needed: `derive_agent` (§8.4).
+* `derive_agent` (§8.4): done (`9e12c9b`).
 
 Depends on Phases 1, 2 and 5 (`with`).
 
-### Phase 7 (optional): `Expose`
+### Phase 7 (optional): `Expose` — done (`b125648`)
 
 `whenUnbound: "expose"` puts the argument back in the schema when the
 parameter is unbound for this session. It makes the tool list a function of
 the session, which the progressive-disclosure machinery
 (`Combinators/ProgressiveDisclosure.hs`) already does for activation, so the
-hook exists. Deferred until a real use shows up.
+hook exists. Written as "deferred until a real use shows up"; implemented
+all the same, see the status at the top.
 
 ---
 
@@ -1125,9 +1149,11 @@ and for the model.
 
 ## Nice to have, later
 
-* Saving a narrowed helper as a stored agent (D15).
-* `derive_agent`, naming a narrowing within a session (§8.4).
-* `whenUnbound: "expose"` (Phase 7).
+* Saving a narrowed helper as a stored agent (D15). Still not planned.
+
+Two items that used to be listed here are done: `derive_agent`, naming a
+narrowing within a session (§8.4, `9e12c9b`), and `whenUnbound: "expose"`
+(Phase 7, `b125648`).
 
 ## Related docs
 

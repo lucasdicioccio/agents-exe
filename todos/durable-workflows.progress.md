@@ -2,6 +2,11 @@
 
 Progress tracker for `todos/durable-workflows.md`.
 
+Status: Phases 1 to 8 and the how-to addendum complete (2026-09-08). A log:
+each section was true when written and has not been revised since. Module
+names and `session` subcommands were spot-checked on 2026-10-04, the rest was
+not.
+
 ## Phase 1 — Core primitives (types & interfaces) ✅ COMPLETE
 
 ### 1.1 Rich tool-call state inside a turn
