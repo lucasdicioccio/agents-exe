@@ -25,6 +25,7 @@ library agents-lib
     import:           warnings
     visibility:       public
     hs-source-dirs:   src
+    c-sources:        cbits/lua_memlimit.c
     default-language: Haskell2010
     default-extensions: OverloadedStrings, OverloadedRecordDot
     exposed-modules:  System.Agents
@@ -236,6 +237,7 @@ library agents-lib
                       hashable,
                       hslua,
                       hslua-marshalling,
+                      lua,
                       http-client,
                       http-client-tls,
                       http-types,
