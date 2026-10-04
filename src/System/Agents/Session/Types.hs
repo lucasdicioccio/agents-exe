@@ -1786,7 +1786,7 @@ partialToolMessages content =
             message :: Text
             message = case tc.tcDetachedReason of
                 Just _ ->
-                    "Its result will arrive as mail. Use wait, get-tool-call-status or cancel-tool-call."
+                    "Its result will be delivered in a later message. Use wait, get-tool-call-status or cancel-tool-call."
                 Nothing ->
                     "This tool call has not finished yet. Its result will be delivered in a later message. \
                     \Use get-tool-call-status with this tool_call_id to inspect it, or cancel-tool-call to stop it."

@@ -79,6 +79,21 @@ tool_call_id call_abc (run_tests) completed:
 42 tests passed
 ```
 
+If the model already read the result with `get-tool-call-status`, the notice
+does not repeat it:
+
+```
+tool_call_id call_abc (run_tests) completed: result already read with get-tool-call-status
+```
+
+A session with a mailbox (the TUI, one-shot runs, the server) also gets a
+`ToolCallFinished` mail for each finished call, which is what wakes a waiting
+session. That mail is not shown to the model: the result reaches it once, as
+the call's tool message or in the notice above. The one exception is mail
+about a call the current process does not know (a durable mailbox read after a
+restart), which is shown like any other mail, since the call itself is then
+reported as orphaned.
+
 If the LLM ends its turn while calls are still running, the session does not
 stop: it waits for the results and sends them.
 
@@ -144,6 +159,11 @@ The 50 most recent progress entries per call are kept.
 in its own process group, so cancelling kills the script *and* whatever it
 started. The same happens when a call exceeds `asyncCallTimeoutSeconds`.
 
+A call is cancelled through the engine that started it, wherever that engine
+is in the process: cancelling works the same after the session was paused and
+resumed with a newly built agent. Only a call whose process is gone cannot be
+interrupted; it is reported as orphaned.
+
 Background calls are cancelled when the agent that owns them finishes or
 fails, so nothing keeps running (or keeps a subprocess alive) after a run.
 
@@ -200,9 +220,17 @@ _(Some tool calls had not finished when this turn was sent)_
 
 * Background calls live in the process that started them. A session reloaded
   elsewhere reports them as orphaned.
-* A pause/resume in the same process keeps the running calls only if the agent
-  was built with `withAsyncEngine`; `runAsync` does not hand the engine back.
-* If the model reads a result with `get-tool-call-status`, the delivery notice
-  repeats it once.
+* `runAsync` returns only the session. To pause and resume in the same
+  process, use `runAsyncKeepingAgent` and resume with the agent it returns:
+  that agent holds the engine that owns the running calls. A session resumed
+  with a freshly built agent still gets their results and can still cancel
+  them, but the new engine's `maxConcurrency` does not count them and they are
+  not cancelled when the resumed run ends.
+* `run` and `runWithProgress` return only a final result, so they cannot hand
+  back a session that waits on deferred calls: they throw
+  `BlockedOnDeferredCalls`, which carries that session. Use `runUntilBlocked`
+  or `runAsync` where deferred calls are expected.
 * `maxConcurrency` is per agent. To cap several agents together, share one
   limit built with `newAsyncConcurrencyLimit` between their engines.
+* The only limit on background calls is that number of calls running at once.
+  There is no rate limit (calls started per second or minute).

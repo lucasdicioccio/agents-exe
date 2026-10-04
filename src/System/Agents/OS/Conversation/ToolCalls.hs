@@ -31,6 +31,7 @@ module System.Agents.OS.Conversation.ToolCalls (
     failToolCall,
     cancelToolCall,
     addToolCallProgress,
+    markToolCallResultRead,
     recordChildSession,
 
     -- * Queries
@@ -156,6 +157,7 @@ createToolCallEntityWithProviderId world sessId convId turnId mParentEntityId to
                 , tcCompletedAt = Nothing
                 , tcResult = Nothing
                 , tcProgress = []
+                , tcResultReadAt = Nothing
                 }
     atomically $ do
         World.setComponent world eid cfg
@@ -226,6 +228,18 @@ addToolCallProgress :: World -> EntityId -> ToolCallProgress -> IO ()
 addToolCallProgress world eid progress =
     atomically $ World.modifyComponent @ToolCallState world eid $ \st ->
         st{tcProgress = take maxToolCallProgressEntries (progress : tcProgress st)}
+
+{- | Record that the model read a call's final result (with
+@get-tool-call-status@). Only a final call is marked, and only the first
+read is kept.
+-}
+markToolCallResultRead :: World -> EntityId -> IO ()
+markToolCallResultRead world eid = do
+    now <- getCurrentTime
+    atomically $ World.modifyComponent @ToolCallState world eid $ \st ->
+        case tcResultReadAt st of
+            Nothing | isToolCallCompleted st -> st{tcResultReadAt = Just now}
+            _ -> st
 
 {- | Record the child session a @prompt_agent_\<slug\>@ call started, once it
 exists (@todos/session-mailbox.md@ Phase 4, §5). A no-op if the entity has

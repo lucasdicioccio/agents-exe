@@ -642,7 +642,7 @@ agent's `mailInToolResult` (default `false`): R1 then appends the folded
 mail, with the same `[mail …]` header, as a trailing block of the *last*
 tool result of that round instead. Only applies when the round actually had
 tool calls; a plain user turn (no tool results) is unaffected, and
-detached/deferred results already arrive as mail of their own.
+a detached call's result arrives in a notice of its own (see `documentation/async-tool-calls.md`).
 
 **Results** (`result`). A JSON string is a text result. Other forms are
 `{"type": "text", "content": "…"}`, `{"type": "json", "content": <any>}`,

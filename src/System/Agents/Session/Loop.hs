@@ -34,11 +34,14 @@ module System.Agents.Session.Loop (
     run,
     runUntilBlocked,
     isBlockedOnDeferredCalls,
+    BlockedOnDeferredCalls (..),
 
     -- * Asynchronous execution with pause/resume
     runAsync,
     runWithProgress,
     runAsyncWithProgress,
+    runAsyncKeepingAgent,
+    runAsyncWithProgressKeepingAgent,
 
     -- * Session state inspection
     isSessionComplete,
@@ -48,7 +51,7 @@ module System.Agents.Session.Loop (
     module System.Agents.Session.Step,
 ) where
 
-import Control.Exception (onException)
+import Control.Exception (Exception, onException, throwIO)
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 
@@ -65,6 +68,9 @@ import System.Agents.Session.Step
 
 This is the traditional execution mode where all tool calls complete
 immediately and the session runs to completion without pausing.
+
+A turn that only waits on deferred calls cannot complete inside this loop:
+'run' then throws 'BlockedOnDeferredCalls' instead of stepping forever.
 -}
 run :: forall r. ConversationId -> Agent r -> Session -> IO r
 run convId agent sess =
@@ -73,11 +79,39 @@ run convId agent sess =
   where
     go :: IORef (Agent r) -> Agent r -> Session -> IO r
     go latest agent0 sess0 = do
+        stopIfBlockedOnDeferredCalls sess0
         (agent1, res) <- runStepM convId agent0 sess0
         writeIORef latest agent1
         case res of
             Left r -> pure r
             Right sess1 -> go latest agent1 sess1
+
+-- | Throw 'BlockedOnDeferredCalls' for a session no step can advance.
+stopIfBlockedOnDeferredCalls :: Session -> IO ()
+stopIfBlockedOnDeferredCalls sess =
+    when (isBlockedOnDeferredCalls sess) $ throwIO (BlockedOnDeferredCalls sess)
+
+{- | Thrown by 'run' and 'runWithProgress' when the head partial turn only
+waits on deferred calls (see 'isBlockedOnDeferredCalls').
+
+Those calls are completed from outside the run, which a loop that returns
+only the final result cannot observe: it would step forever without
+progress. The exception carries the session as it stands, so the caller can
+store it and resume once the calls are completed. Callers that expect
+deferred calls should use 'runUntilBlocked' or 'runAsync', which return that
+session instead.
+-}
+newtype BlockedOnDeferredCalls = BlockedOnDeferredCalls Session
+
+instance Show BlockedOnDeferredCalls where
+    show (BlockedOnDeferredCalls sess) =
+        "BlockedOnDeferredCalls: session "
+            ++ show sess.sessionId
+            ++ " only waits on deferred tool calls ("
+            ++ show (length (pendingDeferredCalls sess))
+            ++ "); use runUntilBlocked or runAsync to get the session back"
+
+instance Exception BlockedOnDeferredCalls
 
 {- | Run an action that tracks the evolving agent, then cancel whatever the
 agent's async engine is still running.
@@ -140,6 +174,10 @@ runUntilBlocked convId agent sess =
 Calls the provided callback after each step with the current session state.
 This allows external code to track session progress, save intermediate
 states, or implement custom pause logic.
+
+Like 'run', throws 'BlockedOnDeferredCalls' on a turn that only waits on
+deferred calls. The callback has seen that session in its last
+'SessionUpdated'.
 -}
 runWithProgress ::
     forall r.
@@ -154,6 +192,7 @@ runWithProgress convId agent sess onProgress = do
   where
     go :: IORef (Agent r) -> Agent r -> Session -> IO r
     go latest agent0 sess0 = do
+        stopIfBlockedOnDeferredCalls sess0
         (agent1, res) <- runStepM convId agent0 sess0
         writeIORef latest agent1
         case res of
@@ -181,7 +220,29 @@ runAsyncWithProgress ::
     Session ->
     OnSessionProgress ->
     IO (Either r Session)
-runAsyncWithProgress convId agent sess onProgress = do
+runAsyncWithProgress convId agent sess onProgress =
+    snd <$> runAsyncWithProgressKeepingAgent convId agent sess onProgress
+
+{- | 'runAsyncWithProgress', also returning the agent as the run left it.
+
+That agent holds the async engine the run created (see 'ctxAsyncEngine'),
+which owns the calls still running when the session paused. Resume with it,
+rather than with the agent the run started from, so that the next run shares
+the engine: its concurrency limit covers the calls already running, and they
+are cancelled with it when that run ends or fails.
+
+Resuming with a freshly built agent still works: finished calls are read
+from the OS world, and @cancel-tool-call@ reaches a call through the engine
+that started it. Only the two points above are lost.
+-}
+runAsyncWithProgressKeepingAgent ::
+    forall r.
+    ConversationId ->
+    Agent r ->
+    Session ->
+    OnSessionProgress ->
+    IO (Agent r, Either r Session)
+runAsyncWithProgressKeepingAgent convId agent sess onProgress = do
     onProgress $ SessionStarted sess
     -- Only cancel on failure: pausing with calls still running is the point of
     -- this loop, and they are picked up again on resume.
@@ -189,14 +250,14 @@ runAsyncWithProgress convId agent sess onProgress = do
     let shutdown = readIORef latest >>= \a -> mapM_ shutdownAsyncEngine a.ctxAsyncEngine
     go latest agent sess `onException` shutdown
   where
-    go :: IORef (Agent r) -> Agent r -> Session -> IO (Either r Session)
+    go :: IORef (Agent r) -> Agent r -> Session -> IO (Agent r, Either r Session)
     go latest agent0 sess0 = do
         (agent1, res) <- runStepM convId agent0 sess0
         writeIORef latest agent1
         case res of
             Left r -> do
                 onProgress $ SessionCompleted sess0
-                pure $ Left r
+                pure (agent1, Left r)
             Right sess1 -> do
                 onProgress $ SessionUpdated sess1
                 -- In async mode, check if we should pause
@@ -204,7 +265,7 @@ runAsyncWithProgress convId agent sess onProgress = do
                     Asynchronous ->
                         -- Check if there's a partial turn (indicating pause)
                         case getPartialTurn sess1 of
-                            Just _ -> pure $ Right sess1
+                            Just _ -> pure (agent1, Right sess1)
                             Nothing -> go latest agent1 sess1
                     Synchronous -> go latest agent1 sess1
 
@@ -221,10 +282,10 @@ Executes the agent step by step. Returns either:
 This allows sessions to be saved and resumed later, potentially on
 different machines.
 
-The async engine created during the run is not returned. When resuming in
-the same process, install one with 'withAsyncEngine' beforehand so calls
-started before the pause can still be cancelled. Calls whose process is
-gone are resolved as orphaned on resume.
+The async engine created during the run is not returned: use
+'runAsyncKeepingAgent' to get the agent holding it and resume with that
+agent in the same process. Calls whose process is gone are resolved as
+orphaned on resume.
 
 Example:
 
@@ -254,6 +315,17 @@ runAsync ::
     IO (Either r Session)
 runAsync convId agent sess =
     runAsyncWithProgress convId agent sess ignoreSessionProgress
+
+-- | 'runAsync', also returning the agent as the run left it (see
+-- 'runAsyncWithProgressKeepingAgent').
+runAsyncKeepingAgent ::
+    forall r.
+    ConversationId ->
+    Agent r ->
+    Session ->
+    IO (Agent r, Either r Session)
+runAsyncKeepingAgent convId agent sess =
+    runAsyncWithProgressKeepingAgent convId agent sess ignoreSessionProgress
 
 -------------------------------------------------------------------------------
 -- Session State Inspection
