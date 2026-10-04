@@ -313,6 +313,11 @@ data ToolCallState = ToolCallState
     -- ^ Result of the tool call (if completed)
     , tcProgress :: [ToolCallProgress]
     -- ^ Structured progress updates, newest at the head
+    , tcResultReadAt :: Maybe UTCTime
+    {- ^ When the model first read this call's final result with
+    @get-tool-call-status@ ('Nothing': never). The stepper then delivers a
+    one-line notice for the call instead of repeating the result.
+    -}
     }
     deriving (Show, Eq, Generic)
 

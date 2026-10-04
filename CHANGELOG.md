@@ -67,6 +67,11 @@
 ### Bug Fixes
 
 - The Lua toolbox's `MaxMemoryMB` is now enforced: a script that allocates past the limit fails with "Lua script exceeded the memory limit of N MB" instead of growing until the host runs out of memory
+- Background tool calls: a result is sent to the model once. In a session with a mailbox (TUI, one-shot, server) each finished call was also rendered as mail, so its result appeared a second time; and a result the model had read with `get-tool-call-status` was repeated by the delivery notice, which now says `result already read with get-tool-call-status`
+- `cancel-tool-call` (and `CancelCalls` mail) stops a call's thread even when the session was resumed with a newly built agent; before, it only marked the call cancelled and the thread kept running
+- `Session.Loop.run` and `runWithProgress` no longer loop forever on a turn that only waits on deferred calls: they throw `BlockedOnDeferredCalls`, which carries the session
+- `runAsyncKeepingAgent` / `runAsyncWithProgressKeepingAgent` return the agent holding the engine that owns the calls still running at a pause
+- See `documentation/async-tool-calls.md`
 
 ### Improvements
 

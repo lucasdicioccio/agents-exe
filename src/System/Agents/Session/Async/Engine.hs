@@ -24,6 +24,9 @@ Key design points:
 * A global registry inside 'AsyncEngine' lets 'cancelToolCall' find the
   batch that owns a running call. Completed calls are removed from the
   registry so that cancellation reports 'False' for already-final calls.
+* A process-wide index of running calls records which engine owns each one,
+  so 'cancelToolCallAnyEngine' can stop a call from an agent that does not
+  hold that engine (e.g. a session resumed with a freshly built agent).
 
 The engine is intentionally small and does not persist in-progress calls.
 After a process restart, calls referenced in chat history that have no OS
@@ -48,12 +51,14 @@ module System.Agents.Session.Async.Engine (
     finalizeCompleted,
     cancelAsyncBatch,
     cancelToolCall,
+    cancelToolCallAnyEngine,
     shutdownAsyncEngine,
 ) where
 
 import Control.Concurrent (QSem, newQSem, signalQSem, waitQSem)
 import Control.Concurrent.Async (Async, async, cancel, poll, waitAnyCatch)
 import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import System.IO.Unsafe (unsafePerformIO)
 import Control.Exception (SomeAsyncException, SomeException, bracket_, catch, displayException, finally, fromException, throwIO)
 import Control.Monad (forM, forM_, void, when)
 import Data.Aeson (Value, object, toJSON, (.=))
@@ -144,6 +149,24 @@ data AsyncBatchUpdate = AsyncBatchUpdate
     }
     deriving (Show, Eq)
 
+{- | The engine that owns each call currently running in this process.
+
+Engines are per agent, and an agent rebuilt for a resumed session gets a new
+one, which knows nothing of the calls its predecessor started. Their threads
+still run in this process, so this index is how they stay reachable. Entries
+live exactly as long as the entries of the owner's 'aeRegistry'. Call ids
+are UUIDs, so engines never collide.
+-}
+runningCallOwners :: TVar (Map ToolCallId AsyncEngine)
+runningCallOwners = unsafePerformIO (newTVarIO Map.empty)
+{-# NOINLINE runningCallOwners #-}
+
+-- | Forget calls in both the engine's registry and the process-wide index.
+forgetCalls :: AsyncEngine -> [ToolCallId] -> STM ()
+forgetCalls engine callIds = do
+    modifyTVar' (aeRegistry engine) $ \reg -> foldr Map.delete reg callIds
+    modifyTVar' runningCallOwners $ \owners -> foldr Map.delete owners callIds
+
 -------------------------------------------------------------------------------
 -- Construction
 -------------------------------------------------------------------------------
@@ -213,9 +236,11 @@ startAsyncBatch engine baseCtx allCalls = do
     callMap <- newTVarIO Map.empty
     let batch = AsyncBatch engine (aeWorld engine) callMap
     -- Register this batch for every call it owns.
-    atomically $
+    atomically $ do
         modifyTVar' (aeRegistry engine) $ \reg ->
             foldr (\tc -> Map.insert (tcId tc) batch) reg calls
+        modifyTVar' runningCallOwners $ \owners ->
+            foldr (\tc -> Map.insert (tcId tc) engine) owners calls
     -- Start each call.
     forM_ calls $ \tc -> do
         handle <- startCall engine batch baseCtx tc
@@ -304,7 +329,7 @@ cancelToolCall engine callId = do
                     cancel (achAsync h)
                     atomically $ do
                         modifyTVar' (abCalls batch) $ Map.delete callId
-                        modifyTVar' (aeRegistry engine) $ Map.delete callId
+                        forgetCalls engine [callId]
                     case tcEntityId (achTracked h) of
                         Just eid -> do
                             TCT.cancelToolCall (abWorld batch) eid
@@ -315,6 +340,28 @@ cancelToolCall engine callId = do
                                 notifyMailbox engine (achTracked h) ST.Failed (TextResponse "tool call cancelled")
                             pure cancelled
                         Nothing -> pure False
+
+{- | Cancel a running call whichever engine of this process owns it.
+
+The given engine (the calling agent's, if it has one) is asked first. If it
+does not know the call, the engine that started it is looked up in the
+process-wide index and asked instead. This is what makes @cancel-tool-call@
+and 'System.Agents.Session.Types.CancelCalls' mail stop the thread of a call
+started before the agent was rebuilt (a pause and resume in the same
+process), rather than only mark its entity.
+
+Returns 'True' if the call ended up cancelled. A call that no engine of this
+process runs (already final, or started by a process that is gone) gives
+'False'.
+-}
+cancelToolCallAnyEngine :: Maybe AsyncEngine -> ToolCallId -> IO Bool
+cancelToolCallAnyEngine mEngine callId = do
+    byOwn <- maybe (pure False) (`cancelToolCall` callId) mEngine
+    if byOwn
+        then pure True
+        else do
+            mOwner <- Map.lookup callId <$> readTVarIO runningCallOwners
+            maybe (pure False) (`cancelToolCall` callId) mOwner
 
 {- | Cancel every call the engine still knows about.
 
@@ -328,7 +375,7 @@ shutdownAsyncEngine engine = do
     -- Several calls map to the same batch; cancelling a batch twice is a no-op
     -- because the first cancellation empties it.
     forM_ (Map.elems batches) cancelAsyncBatch
-    atomically $ modifyTVar' (aeRegistry engine) (const Map.empty)
+    atomically $ forgetCalls engine (Map.keys batches)
 
 -------------------------------------------------------------------------------
 -- Internal helpers
@@ -372,7 +419,7 @@ startCall engine _batch baseCtx tc = do
     pure $ AsyncCallHandle tc a emit
   where
     sem = aeSemaphore engine
-    unregister = atomically $ modifyTVar' (aeRegistry engine) $ Map.delete (tcId tc)
+    unregister = atomically $ forgetCalls engine [tcId tc]
 
 {- | Post a call's final result as mail, if the engine has a mailbox.
 
@@ -501,7 +548,5 @@ finalizeBatchUpdate batch = do
 
 -- | Remove the given call ids from the engine registry for this batch.
 removeFromRegistry :: AsyncBatch -> [ToolCallId] -> STM ()
-removeFromRegistry batch callIds =
-    modifyTVar' (aeRegistry (abEngine batch)) $ \reg ->
-        foldr Map.delete reg callIds
+removeFromRegistry batch = forgetCalls (abEngine batch)
 

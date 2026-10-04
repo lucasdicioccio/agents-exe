@@ -482,6 +482,59 @@ Example agent JSON:
   save/reload; subprocess killed on cancel; process group killed on cancel.
 - Full suite: 894 tests, async group stable over repeated runs.
 
+## Residual gaps (2026-10-04)
+
+The gaps carried forward above, each checked against the code first. All five
+still held. Tests: the `residual gaps` group of `test/AsyncToolCallsTests.hs`
+(10 tests; the seven that compile against the old code failed on it).
+
+### Closed
+- **Result repeated after `get-tool-call-status`.** The capability records
+  the read on the call's entity (`ToolCallState.tcResultReadAt`,
+  `markToolCallResultRead`); `collectLateResults` returns `LateResult`s and
+  `lateResultsQuery` writes one line (`result already read with
+  get-tool-call-status`) for a read call instead of its payload. A turn with
+  tool calls now collects late results after they ran
+  (`collectLateResultsBefore`), so a status call and the notice in the same
+  turn do not both carry the result. Same in the synchronous stepper.
+- **Found on the way, same symptom, larger:** with a mailbox (TUI, one-shot,
+  server) every finished call was also rendered as `ToolCallFinished` mail at
+  the next receive point, so every result reached the LLM twice (tool message
+  or notice, plus mail, the mail under the internal UUID). `receiveMailForTurn`
+  now reads past such mail when the process has the call's entity
+  (`deliveredByStepper`); the cursor still advances and the mail still wakes
+  a waiting session. Mail about a call with no entity here (durable mailbox
+  after a restart) is still rendered: it is the only carrier of that result.
+- **Cancel with the engine gone.** A process-wide index records the engine
+  that owns each running call (`Engine.cancelToolCallAnyEngine`).
+  `ctxCancelToolCall` and `cancelAttachedCall` (so `cancel-tool-call` and
+  `CancelCalls` / `CancelAllAttached` mail) reach the thread of a call
+  started by an agent that was rebuilt since. A call whose process is gone
+  has no thread; it stays orphaned.
+- **`Loop.run` spinning on a deferred-only head turn.** `run` and
+  `runWithProgress` throw `BlockedOnDeferredCalls` (carrying the session)
+  instead of stepping forever. They cannot return the session; callers that
+  expect deferred calls use `runUntilBlocked` or `runAsync`.
+- **`runAsync` not returning the engine.** `runAsyncKeepingAgent` and
+  `runAsyncWithProgressKeepingAgent` return the agent, which holds the
+  engine. `runAsync` keeps its type.
+
+### Still open
+- **Rate limiting beyond the concurrency cap.** Not started. It is a new
+  setting, not a fix: it needs a decision on what is limited (call starts per
+  window, per agent or shared like `newAsyncConcurrencyLimit`, per tool?) and
+  a new field on the agent JSON. The engine side is small (wait before
+  `startCall` takes the semaphore).
+- Placeholders still carry no progress; tracing is still not done (both as
+  above).
+
+### Seen, not touched
+- `executeTrackedCalls` merges the turn's mail into the query when it stores
+  a partial turn (unless `mailInToolResult`), and again when a continued
+  partial turn finalizes (`continuePartialTurn` passes `pUserQuery` and
+  `pUserMail` back in). Mail folded into a turn that then waits on a deferred
+  call looks like it is rendered twice. Not verified with a test.
+
 ## Completion Plan
 
 ### Phase 3.5: End-to-End Correctness (done — see completion notes above)
