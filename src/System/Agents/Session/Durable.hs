@@ -230,6 +230,10 @@ mkToolInvoker dispatch ctx toolName args =
 interpretDecorator :: WrapperEnv -> Decorator -> ToolMiddleware
 interpretDecorator env dec next ctx call = case dec of
     WithLabel _label -> next ctx call
+    -- Read by the stepper when the call's process is gone (see
+    -- 'System.Agents.Session.Step.relaunchLostCalls'); a call that runs is
+    -- not changed by it.
+    WithRerunOnRestart _times -> next ctx call
     WithTimeout seconds -> do
         result <- timeout (max 0 seconds * 1000000) (next ctx call)
         pure $ case result of

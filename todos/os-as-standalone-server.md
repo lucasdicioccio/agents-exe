@@ -621,7 +621,15 @@ why it is last.
   several servers on one Postgres database through a run lease (`999666f`,
   PR #603) and per-owner API keys with opt-in tool isolation (`1d8ee0c`,
   PR #606); both are described under "Remaining later work" in
-  `todos/web-server-embedding.md`. Mid-`RunAsync` durability: no work found.
+  `todos/web-server-embedding.md`. Mid-`RunAsync` durability: a first slice
+  on `feat/durable-async-calls`. A detached call of a tool marked
+  `rerunOnRestart` is run again by the next process, from the start; every
+  other call is still reported as orphaned
+  (`documentation/async-tool-calls.md`, "Across a restart"). Left open: a
+  session another server takes over is not resumed by itself
+  (`takeOverExpired`), a call is never resumed where it stopped, and the
+  calls of a step interrupted before it was stored are still all run again,
+  marked or not.
 
 As of 2026-10-04 the open items of this list are the pty checks for
 interrupts and for the same flows under `tui --attach` (not re-checked beyond

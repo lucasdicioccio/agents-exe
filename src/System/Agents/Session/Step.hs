@@ -172,7 +172,8 @@ runStepMAsync convId agent sess =
     go :: Agent r -> Session -> IO (Agent r, Either r Session)
     go agent0 sess0 = do
         agent0' <- prepareAsyncEngine =<< prepareAgentWorld agent0
-        sessR <- refreshHeadPartialTurn (buildContext agent0' sess0 convId) sess0
+        sessL <- relaunchLostCalls (buildContext agent0' sess0 convId) agent0' sess0
+        sessR <- refreshHeadPartialTurn (buildContext agent0' sessL convId) sessL
         next <- agent0'.step sessR
         case next of
             Stop r -> pure (agent0', Left r)
@@ -834,6 +835,95 @@ pollRunningCall ctx tc
                 pure $ tc'{tcState = Failed, tcResult = Just $ TextResponse "async tool call was cancelled"}
             _ -> pure tc'
 
+{- | Start again the background calls that a restart interrupted, for the
+tools that opted in with 'WithRerunOnRestart'.
+
+The stored session is the journal: a call the step had detached is kept in
+its partial turn as 'Running', with its arguments and the policy applied to
+it. When the process that ran it is gone, the next one finds the call there
+with no OS entity and no thread. Such a call is reported as orphaned by
+'pollRunningCall', unless its policy still has a re-run left (see
+'rerunsLeft'): it is then given a new entity and handed to the async engine
+again, under the same tool-call id, and one re-run is taken out of its
+policy. From there it is an ordinary background call: it counts against
+'ctxMaxConcurrency', it can be cancelled, and its result is delivered late.
+
+The call runs again from the beginning, with the same arguments. Nothing of
+the first run is kept, so this is at-least-once execution and only fits tools
+that are safe to run twice, which is why it is opt-in.
+
+A call is left alone (and so handled as before) when:
+
+* it has an entity in this world, or a thread in this process
+  ('Engine.runsInThisProcess'): it was not lost;
+* unread 'ToolCallFinished' mail carries its result: it ended before the
+  restart, and that mail delivers the result;
+* there is no world or no engine, or its payload cannot be parsed.
+
+The budget is spent in the session the step returns. A process that dies
+again before that session is stored re-runs the call once more than the
+budget says.
+-}
+relaunchLostCalls :: forall r. ToolExecutionContext -> Agent r -> Session -> IO Session
+relaunchLostCalls ctx agent sess =
+    case (Ctx.ctxWorld ctx, agent.ctxAsyncEngine) of
+        (Just world, Just engine)
+            | not (null (rerunnableCalls sess)) -> do
+                answered <- answeredByMail
+                turns' <- mapM (relaunchTurn world engine answered) sess.turns
+                pure sess{turns = turns'}
+        _ -> pure sess
+  where
+    answeredByMail :: IO [ToolCallId]
+    answeredByMail = case agent.ctxMailbox of
+        Nothing -> pure []
+        Just mb -> do
+            unread <- atomically (mbUnread mb sess.mailCursor)
+            pure [callId | e <- unread, ToolCallFinished callId _ _ <- [e.envBody]]
+
+    relaunchTurn :: World -> Engine.AsyncEngine -> [ToolCallId] -> Turn -> IO Turn
+    relaunchTurn world engine answered (PartialUserTurn partial usage) = do
+        calls <- mapM (relaunchCall world engine answered) partial.pTrackedToolCalls
+        pure $ PartialUserTurn partial{pTrackedToolCalls = calls} usage
+    relaunchTurn _ _ _ turn = pure turn
+
+    relaunchCall :: World -> Engine.AsyncEngine -> [ToolCallId] -> TrackedToolCall -> IO TrackedToolCall
+    relaunchCall world engine answered tc
+        | tc.tcState /= Running || tc.tcDeliveredLate = pure tc
+        | rerunsLeft tc.tcPolicy.apDisposition <= 0 = pure tc
+        | tc.tcId `elem` answered = pure tc
+        | otherwise = do
+            known <- case tc.tcEntityId of
+                Nothing -> pure False
+                Just eid -> isJust <$> atomically (getComponent @OSConv.ToolCallState world eid)
+            alive <- Engine.runsInThisProcess tc.tcId
+            if known || alive
+                then pure tc
+                else do
+                    withEntity <- ensureTrackedCallEntities ctx [tc{tcEntityId = Nothing}]
+                    case withEntity of
+                        [fresh@TrackedToolCall{tcEntityId = Just eid}] -> do
+                            let relaunched =
+                                    fresh
+                                        { tcPolicy =
+                                            AppliedPolicy
+                                                (spendRerun tc.tcPolicy.apDisposition)
+                                                (Just rerunAfterRestartReason)
+                                        }
+                            now <- getCurrentTime
+                            let payload = Aeson.object ["relaunched" Aeson..= True, "reason" Aeson..= rerunAfterRestartReason]
+                            TCT.addToolCallProgress world eid $
+                                OSConv.ToolCallProgress now (OSConv.ProgressPartial payload) payload
+                            _batch <- startAsyncBatch engine ctx [relaunched]
+                            pure relaunched
+                        _ -> pure tc
+
+{- | The 'apReason' of a call that 'relaunchLostCalls' started again. The
+late-results notice says so to the model (see 'lateResultsQuery').
+-}
+rerunAfterRestartReason :: Text.Text
+rerunAfterRestartReason = "run again from the start after a restart"
+
 {- | Refresh the head partial turn from the OS world.
 
 Running calls are polled without blocking. If every call is then final, the
@@ -987,7 +1077,10 @@ lateResultsQuery late =
             callId = maybe "(unknown id)" id (providerToolCallId tc.tcCall)
             toolName = maybe "unknown tool" (\(ToolCall n _) -> n) (parseToolCallFromLlmToolCall tc.tcCall)
             status = if tcState tc == Completed then "completed" else "failed"
-            header = "tool_call_id " <> callId <> " (" <> toolName <> ") " <> status
+            rerun
+                | tc.tcPolicy.apReason == Just rerunAfterRestartReason = " (" <> rerunAfterRestartReason <> ")"
+                | otherwise = ""
+            header = "tool_call_id " <> callId <> " (" <> toolName <> ") " <> status <> rerun
          in if lr.lrAlreadyRead
                 then header <> ": result already read with get-tool-call-status"
                 else header <> ":\n" <> maybe "" renderResult (tcResult tc)

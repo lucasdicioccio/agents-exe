@@ -63,6 +63,7 @@ hostTraceLogger :: Logger -> Tracer IO HostTrace
 hostTraceLogger logger = Tracer $ \case
     HostRunnerTrace kind sid -> logLine logger kind ["session_id" .= sid]
     HostRecoveredSessions sids -> logLine logger "sessions.recovered" ["session_ids" .= sids]
+    HostResumedForReruns sids -> logLine logger "sessions.resumed_for_reruns" ["session_ids" .= sids]
     HostRecoveredParamsRequired sid names -> logLine logger "sessions.params_required" ["session_id" .= sid, "params" .= names]
     HostRecoveredWatches watchIds -> logLine logger "watches.recovered" ["watch_ids" .= watchIds]
     HostTookOverSessions sids -> logLine logger "sessions.taken_over" ["session_ids" .= sids]

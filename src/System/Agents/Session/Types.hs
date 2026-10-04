@@ -30,6 +30,10 @@ module System.Agents.Session.Types (
     hasBackgroundCalls,
     backgroundCalls,
     failRunningCalls,
+    rerunnableCalls,
+    withoutReruns,
+    rerunsLeft,
+    spendRerun,
     DeferredCallView (..),
     pendingDeferredCalls,
     Turn (..),
@@ -283,6 +287,37 @@ backgroundCalls sess =
     , tcState tc == Running
     , not (tcDeliveredLate tc)
     ]
+
+{- | The 'Running' calls of a session that would be started again if their
+process were gone: those whose applied policy still has a re-run left (see
+'rerunsLeft'). Whether the process is gone is for the caller to know.
+-}
+rerunnableCalls :: Session -> [TrackedToolCall]
+rerunnableCalls sess =
+    [ tc
+    | PartialUserTurn partial _ <- sess.turns
+    , tc <- partial.pTrackedToolCalls
+    , tc.tcState == Running
+    , not tc.tcDeliveredLate
+    , rerunsLeft tc.tcPolicy.apDisposition > 0
+    ]
+
+{- | Take every re-run left out of the session's 'Running' calls, so that
+none of them is started again after a restart: for a run whose calls were
+cancelled on purpose.
+-}
+withoutReruns :: Session -> Session
+withoutReruns sess = sess{turns = map turn sess.turns}
+  where
+    turn (PartialUserTurn partial p) = PartialUserTurn partial{pTrackedToolCalls = map call partial.pTrackedToolCalls} p
+    turn t = t
+    call tc
+        | tc.tcState == Running && rerunsLeft tc.tcPolicy.apDisposition > 0 =
+            tc{tcPolicy = tc.tcPolicy{apDisposition = spendAll tc.tcPolicy.apDisposition}}
+        | otherwise = tc
+    spendAll disp
+        | rerunsLeft disp > 0 = spendAll (spendRerun disp)
+        | otherwise = disp
 
 {- | Mark every 'Running' call, in every partial turn, 'Failed' with the
 given response: for a process that can tell up front that such calls can
@@ -554,6 +589,13 @@ data Decorator
     | WithAfterHook HookTarget
     -- ^ Run after the call completes: continue (optionally rewriting the
     -- result) or annotate it. See "System.Agents.Session.Durable".
+    | WithRerunOnRestart Int
+    {- ^ The call is safe to run twice: when its process goes away while it
+    runs in the background, the next process starts it again from the
+    beginning instead of reporting it orphaned, at most this many times. On
+    a tracked call's applied policy the number is what is left of that
+    budget. See 'rerunsLeft' and "System.Agents.Session.Step".
+    -}
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Decorator where
@@ -594,6 +636,11 @@ instance ToJSON Decorator where
                     [ "tag" .= ("after" :: Text)
                     , "hook" .= target
                     ]
+            WithRerunOnRestart times ->
+                Aeson.object
+                    [ "tag" .= ("rerunOnRestart" :: Text)
+                    , "times" .= times
+                    ]
 
 instance FromJSON Decorator where
     parseJSON = Aeson.withObject "Decorator" $ \v -> do
@@ -606,6 +653,7 @@ instance FromJSON Decorator where
             "truncate" -> WithTruncate <$> v .: "maxBytes"
             "before" -> WithBeforeHook <$> v .: "hook"
             "after" -> WithAfterHook <$> v .: "hook"
+            "rerunOnRestart" -> WithRerunOnRestart <$> v .:? "times" .!= 1
             _ -> fail $ "Unknown Decorator tag: " ++ Text.unpack tag
 
 {- | Decision made for a single tool call.
@@ -665,6 +713,33 @@ instance FromJSON ToolCallDisposition where
             "defer" -> Defer . Reason <$> v .: "reason"
             "decorate" -> Decorate <$> v .: "decorators" <*> v .: "inner"
             _ -> fail $ "Unknown ToolCallDisposition tag: " ++ Text.unpack tag
+
+{- | How many times a call under this disposition may still be started again
+after a restart: the 'WithRerunOnRestart' budget, the outermost one when
+several apply. Zero without that decorator, which is every call that did not
+opt in.
+-}
+rerunsLeft :: ToolCallDisposition -> Int
+rerunsLeft disp = case disp of
+    Decorate decorators inner -> case [n | WithRerunOnRestart n <- decorators] of
+        (n : _) -> max 0 n
+        [] -> rerunsLeft inner
+    _ -> 0
+
+-- | Take one re-run out of the budget 'rerunsLeft' reads.
+spendRerun :: ToolCallDisposition -> ToolCallDisposition
+spendRerun disp = case disp of
+    Decorate decorators inner
+        | any isRerun decorators -> Decorate (spendFirst decorators) inner
+        | otherwise -> Decorate decorators (spendRerun inner)
+    _ -> disp
+  where
+    isRerun (WithRerunOnRestart _) = True
+    isRerun _ = False
+    spendFirst (WithRerunOnRestart n : rest) = WithRerunOnRestart (max 0 (n - 1)) : rest
+    spendFirst (d : rest) = d : spendFirst rest
+    spendFirst [] = []
+
 {- | Strategy that controls when an asynchronous step yields a partial user turn.
 
 * 'YieldOnAnyProgress' - return as soon as at least one async call reaches a
