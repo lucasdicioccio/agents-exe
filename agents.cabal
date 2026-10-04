@@ -18,6 +18,13 @@ description:
     A Haskell framework for building AI agents with support for multiple LLM
     providers, tool systems (bash, MCP, OpenAPI, SQLite, etc.), and a TUI.
 
+flag tui-e2e
+    description: Build the agents-tui-e2e suite, which drives the terminal UI
+                 over a PTY with tuispec. Off by default: it needs a Linux
+                 PTY, and extra dependencies the rest of the package does not.
+    default:     False
+    manual:      True
+
 common warnings
     ghc-options: -Wall -Werror
 
@@ -632,6 +639,36 @@ test-suite agents-tests
                       network,
                       wai,
                       warp
+
+-- End-to-end tests of the terminal UI: the real agents-exe binary in a PTY,
+-- against a fake OpenAI-compatible endpoint. Opt-in (-ftui-e2e), so that a
+-- plain `cabal test` neither builds tuispec nor needs a PTY. See
+-- "Screenshots and end-to-end tests" in documentation/tui.md.
+test-suite agents-tui-e2e
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test/tui-e2e
+    main-is:          Main.hs
+    ghc-options:      -threaded
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings
+    if !flag(tui-e2e)
+        buildable: False
+    else
+        build-tool-depends: agents:agents-exe
+        build-depends:    base >=4.20,
+                          aeson,
+                          bytestring,
+                          directory,
+                          filepath,
+                          http-types,
+                          tasty,
+                          tasty-hunit,
+                          temporary,
+                          text,
+                          tuispec >=0.3.1 && <0.4,
+                          wai,
+                          warp
 
 benchmark os-benchmarks
     type:             exitcode-stdio-1.0
