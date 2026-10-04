@@ -35,6 +35,7 @@ module System.Agents.Tools.Bash (
     agentIdToString,
     buildToolEnvironment,
     runProcessReportingOutput,
+    notifyLinePrefix,
 
     -- * Re-exports
     ScriptDescription (..),
@@ -44,12 +45,13 @@ import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (modifyMVar_, newMVar)
 import Control.Exception (IOException, handle, onException)
-import Control.Monad (unless)
+import Control.Monad (forM_, unless, when)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as ByteStringChar8
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import System.IO (Handle, hClose)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LByteString
@@ -71,7 +73,7 @@ import System.Process (CreateProcess (..), ProcessHandle, StdStream (..), getPid
 import System.Process.ByteString (readCreateProcessWithExitCode, readProcessWithExitCode)
 
 import System.Agents.Base (AgentId (..), ConversationId (..))
-import System.Agents.Session.Base (SessionId (..), TurnId (..))
+import System.Agents.Session.Base (SessionId (..), TurnId (..), notifyProgress)
 import System.Agents.Tools.Context (ToolExecutionContext (..))
 
 -- Re-export shared types from ScriptTypes
@@ -94,6 +96,12 @@ it arrives.
 Progress payloads look like
 @{"stream": "stdout", "line": "<latest complete line>", "lines": n, "bytes": n}@
 and are sent at most every 'outputReportInterval' per stream.
+
+A line of standard error that starts with 'notifyLinePrefix'
+(@::notify:: tests are red, stopping early@) is how a script asks for the
+model's attention while it runs: the rest of the line is reported as a
+notify-level payload ('notifyProgress', with @"stream": "stderr"@), every
+time, whatever the interval. The line stays in the captured standard error.
 
 The script runs in its own process group, so cancelling the calling thread
 (e.g. through @cancel-tool-call@) kills the script *and* the processes it
@@ -141,6 +149,10 @@ runProcessReportingOutput report process input =
                                     completeLines = ByteStringChar8.lines complete
                                     lineCount' = lineCount + List.length completeLines
                                     nonEmpty = List.filter (not . ByteString.null) completeLines
+                                when (stream == "stderr") $
+                                    forM_ completeLines $ \line ->
+                                        forM_ (ByteString.stripPrefix notifyLinePrefix line) $ \notice ->
+                                            report (notifyLinePayload notice)
                                 unless (List.null nonEmpty) $
                                     reportLine lastReport stream (List.last nonEmpty) lineCount' byteCount'
                                 loop (chunk : chunks) rest lineCount' byteCount'
@@ -181,6 +193,17 @@ killProcessGroup ph = do
 -- | Grace period between SIGTERM and SIGKILL for a cancelled script.
 killGraceMicros :: Int
 killGraceMicros = 100000
+
+-- | What a line of standard error starts with to be reported at the notify level.
+notifyLinePrefix :: ByteString
+notifyLinePrefix = "::notify::"
+
+-- | The notify-level payload for the rest of such a line.
+notifyLinePayload :: ByteString -> Aeson.Value
+notifyLinePayload rest =
+    case notifyProgress (Text.strip (Text.decodeUtf8With lenientDecode rest)) of
+        Aeson.Object obj -> Aeson.Object (KeyMap.insert "stream" (Aeson.String "stderr") obj)
+        other -> other
 
 -- | Minimum delay between two output reports for one stream.
 outputReportInterval :: NominalDiffTime

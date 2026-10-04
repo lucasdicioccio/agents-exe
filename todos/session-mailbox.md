@@ -15,6 +15,13 @@ protocol, the TUI as a runner client, sub-agents as sessions,
 `mailInToolResult`, watch recovery after a restart). Anything still open is
 tracked in the backlog, not in this file.
 
+The three items this design left for later were added afterwards:
+`send-to-tool-call` (§3), a `notify` progress level that posts mail (D9), and
+`args` in a wrapper's `match` (§6). `documentation/async-tool-calls.md`
+describes them as built. Two things differ from the text below: a notice is
+a `ToolCallNotice` mail body rather than progress alone, and the idle wait on
+background calls now ends on unread mail, which is what R2 asks for.
+
 ## Goal
 
 One mechanism through which everything that happens *to* a running session

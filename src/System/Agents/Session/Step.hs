@@ -9,7 +9,7 @@ module System.Agents.Session.Step where
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (race)
 import Control.Concurrent.STM (STM, TVar, atomically, orElse, registerDelay, readTVar, retry)
-import Control.Monad (filterM, forM, forM_, unless, void)
+import Control.Monad (filterM, forM, forM_, unless, void, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LByteString
 import Data.List (partition)
@@ -86,7 +86,7 @@ runStepMSync convId agent sess =
                 -- Construct ToolExecutionContext for each tool call
                 let ctx = buildContext agent0' sess0 convId
                 (uQuery0, blockForLate) <- askUserQuery ctx agent0' missing sess0
-                (sessLate0, lateBefore) <- collectLateResultsBefore ctx agent0'.ctxAsyncYieldStrategy blockForLate missing.missingToolCalls sess0
+                (sessLate0, lateBefore) <- collectLateResultsBefore ctx agent0'.ctxMailbox agent0'.ctxAsyncYieldStrategy blockForLate missing.missingToolCalls sess0
                 let shouldBlockForMail = blockForLate && null lateBefore && null missing.missingToolCalls
                 (sessMail0, mailEnvelopes) <- receiveMailForTurn agent0' shouldBlockForMail sessLate0
                 let mMailBlock = mailQuery mailEnvelopes
@@ -238,7 +238,7 @@ startNewAsyncTurn ::
     IO (Agent r, Either r Session)
 startNewAsyncTurn convId agent sess sPrompt sTools uQuery blockForLate calls = do
     let ctx = buildContext agent sess convId
-    (sessLate, late) <- collectLateResultsBefore ctx agent.ctxAsyncYieldStrategy blockForLate calls sess
+    (sessLate, late) <- collectLateResultsBefore ctx agent.ctxMailbox agent.ctxAsyncYieldStrategy blockForLate calls sess
     let shouldBlockForMail = blockForLate && null late && null calls
     (sessMail, mailEnvelopes) <- receiveMailForTurn agent shouldBlockForMail sessLate
     tracked <- traverse (mkReadyTrackedCall ctx agent) calls
@@ -903,17 +903,55 @@ may have to wait for the results. A turn with tool calls collects after they
 ran (see 'executeTrackedCalls' and 'runStepMSync'): one of them may be a
 @get-tool-call-status@ on the very call whose result is ready, and collecting
 first would put the result in the user message and in that tool message.
+
+The wait is the idle receive point (R2 of @todos/session-mailbox.md@) of a
+session whose background calls still run: with a mailbox, unread mail ends
+it as well, and the turn is then built from that mail while the calls keep
+running (see 'waitForRunningCallsOrMail').
 -}
 collectLateResultsBefore ::
     ToolExecutionContext ->
+    Maybe Mailbox ->
     AsyncYieldStrategy ->
     Bool ->
     [LlmToolCall] ->
     Session ->
     IO (Session, [LateResult])
-collectLateResultsBefore ctx strategy block calls sess
-    | null calls = collectLateResults ctx strategy block sess
+collectLateResultsBefore ctx mMailbox strategy block calls sess
+    | null calls = do
+        when block $
+            waitForRunningCallsOrMail ctx mMailbox sess.mailCursor (lateWaitStrategy strategy) (backgroundCalls sess)
+        collectLateResults ctx strategy False sess
     | otherwise = pure (sess, [])
+
+{- | 'waitForRunningCalls', also ended by unread mail when there is a mailbox.
+
+This is what lets something reach a session that idles on its background
+calls: a message from the user or another session, or a notice from one of
+those very calls ('ToolCallNotice'). Without it such mail would wait for a
+call to end.
+
+Two kinds of mail do not end the wait:
+
+* 'ToolCallFinished'. The engine posts one for every call it ran, the calls
+  being waited for included, and the strategy decides how many of them must
+  be final ('YieldWhenAllDone' waits for all).
+* 'Control'. It renders nothing, so ending the wait on it alone would ask
+  the LLM with an empty turn, and the turn would consume it before the
+  driver of the loop acted on it ('applyControlMail' runs between steps).
+  It is left as it was: seen once the wait ends for another reason.
+-}
+waitForRunningCallsOrMail :: ToolExecutionContext -> Maybe Mailbox -> Cursor -> AsyncYieldStrategy -> [TrackedToolCall] -> IO ()
+waitForRunningCallsOrMail _ _ _ _ [] = pure ()
+waitForRunningCallsOrMail ctx Nothing _ strategy calls = waitForRunningCalls ctx strategy calls
+waitForRunningCallsOrMail ctx (Just mb) cursor strategy calls =
+    void $ race (waitForRunningCalls ctx strategy calls) (atomically (awaitMail mb cursor endsIdleWait))
+  where
+    endsIdleWait :: Envelope -> Bool
+    endsIdleWait e = case e.envBody of
+        ToolCallFinished{} -> False
+        Control _ -> False
+        _ -> True
 
 -- | A background call's final result, on its way to the next user turn.
 data LateResult = LateResult
@@ -1217,6 +1255,13 @@ renderMailEnvelope e =
         ContinuationResult _token result -> renderMailResult result
         WatchedEvent _sid eventName payload ->
             eventName <> ":\n" <> Text.decodeUtf8 (LByteString.toStrict (Aeson.encode payload))
+        ToolCallNotice tcid providerCallId toolName payload ->
+            "tool call "
+                <> fromMaybe (Text.pack (show tcid)) providerCallId
+                <> " ("
+                <> toolName
+                <> ") notifies:\n"
+                <> notifyProgressText payload
         Control _ -> ""
 
     renderMailResult (TextResponse txt) = txt

@@ -22,7 +22,7 @@ module System.Agents.AgentTree.OneShotTool (
 ) where
 
 import Control.Concurrent.STM (atomically, newTVarIO, readTVarIO)
-import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
+import Control.Exception (SomeAsyncException, SomeException, catch, displayException, finally, fromException, throwIO)
 import Control.Monad (forM_)
 import Data.Aeson ((.=))
 import Data.Dynamic (toDyn)
@@ -347,7 +347,12 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                     -- the call twice).
                     Left _resolutionErr ->
                         runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
-                    Right (childSessionId, waiter) ->
+                    Right (childSessionId, waiter) -> do
+                        -- Same report as the in-tool path makes: the call's
+                        -- tracking entity learns its child session, so a
+                        -- detached placeholder shows it and
+                        -- @send-to-tool-call@ can reach the helper.
+                        traverse_ ($ childSessionId) (Ctx.ctxRecordChildSession ctx)
                         runSubAgentViaRunner (Ctx.ctxEmit ctx) parentSessionId depth childSessionId waiter
             Nothing -> runSubAgentInTool ctx parentBaseConvId parentCallStack subcallBaseConvId subcallCallStack query hereBindings restBindings callWith
 
@@ -519,6 +524,26 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
             (\emitFn -> emitFn (EmitSubcallStarted parentSessionId subcallSessionId (Base.slug agent) depth))
             mEmit
 
+        -- While it runs, the helper's own mailbox is addressable on the
+        -- router (@todos/session-mailbox.md@ §5: "the root and every
+        -- sub-agent session register"), so its caller can @send-message@ or
+        -- @send-to-tool-call@ it. It reads that mail before its next LLM
+        -- completion. The server's router keeps no registrations, and there
+        -- a sub-agent is a session of its own anyway.
+        unregister <- case (Ctx.ctxMailRouter ctx, agentWithQuery.ctxMailbox) of
+            (Just router, Just mb) ->
+                router.mrRegister
+                    subcallSessionId
+                    SessionBase.MailboxInfo
+                        { SessionBase.miAgentSlug = Just (Base.slug agent)
+                        , SessionBase.miParent = Just parentSessionId
+                        , SessionBase.miStatus = "running"
+                        , SessionBase.miMailScope = fromMaybe SessionBase.MailScopeSubtree (Base.mailScope agent)
+                        , SessionBase.miInterruptScope = fromMaybe SessionBase.MailScopeChildren (Base.interruptScope agent)
+                        }
+                    mb
+            _ -> pure (pure ())
+
         -- Run the agent and handle result
         -- Session.run uses Base.ConversationId
         result <-
@@ -529,6 +554,7 @@ turnAgentRuntimeIntoIOTool tracer deps node callerSlug _callerId mWith narrowabl
                 mWorld
                 mEmit
                 (Ctx.ctxProgressCallback ctx)
+                `finally` unregister
 
         -- Return the result
         pure $ Text.encodeUtf8 result

@@ -723,8 +723,8 @@ All paths are canonicalized before validation:
 
 The System Toolbox provides agents with contextual information about the running system through a configurable set of capabilities.
 
-The `get-tool-call-status`, `list-running-tool-calls` and `cancel-tool-call`
-capabilities only do something for agents that run tool calls in the
+The `get-tool-call-status`, `list-running-tool-calls`, `cancel-tool-call` and
+`send-to-tool-call` capabilities only do something for agents that run tool calls in the
 background; see [async-tool-calls.md](async-tool-calls.md).
 
 ### Capabilities
@@ -745,6 +745,7 @@ background; see [async-tool-calls.md](async-tool-calls.md).
 | `get-tool-call-status` | Status, progress and result of one of the agent's own tool calls |
 | `list-running-tool-calls` | Tool calls still running in the background |
 | `cancel-tool-call` | Stop a running background tool call |
+| `send-to-tool-call` | Send a message to the sub-agent a running `prompt_agent_<slug>` call started |
 | `list-sessions` | List accessible sessions (requires session introspection config) |
 | `search-sessions` | Full-text search across sessions (requires session introspection config) |
 | `read-session` | Read session content (requires session introspection config) |

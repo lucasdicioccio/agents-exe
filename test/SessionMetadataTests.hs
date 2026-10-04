@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -5,6 +6,8 @@
 module SessionMetadataTests (tests) where
 
 import Control.Concurrent.STM (atomically, writeTVar)
+import Control.Monad (forM_)
+import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as LBS
@@ -31,6 +34,8 @@ import qualified System.Agents.Base as Base
 import System.Agents.Session.Base
 import System.Agents.Session.Loop (run)
 import System.Agents.SessionStore
+import System.Agents.ToolRegistration (registerIOScriptInLLM)
+import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.SystemToolbox.Session (getListSessionsInfo)
 import System.Agents.Tools.SystemToolbox.Types (SessionIntrospectionConfig (..), defaultSessionIntrospectionConfig)
 
@@ -44,6 +49,7 @@ tests =
         , fileBackendTests
         , catalogTests
         , testCase "sub-agent sessions record their agent and parent" subAgentParentTest
+        , testCase "an in-tool sub-agent is addressable by mail while it runs" subAgentMailboxTest
         ]
 
 -------------------------------------------------------------------------------
@@ -326,6 +332,72 @@ subAgentParentTest = do
                         , "arguments" Aeson..= ("{\"what\": \"hello child\"}" :: String)
                         ]
                 ]
+
+{- | Without a runner (@agents-exe run@), a sub-agent runs inside its tool
+call. Its mailbox is on the router while it does: its session is listed
+under its caller, mail sent there is read before its next completion, and
+the entry is gone once the call returned.
+-}
+subAgentMailboxTest :: Assertion
+subAgentMailboxTest = do
+    router <- newMailRouter
+    seenByChild <- newIORef []
+    registered <- newIORef []
+    child <- testNode "{\"slug\": \"child\"}"
+    parent <- testNode "{\"slug\": \"parent\"}"
+    atomically $
+        writeTVar
+            child.osNodeTools
+            [registerIOScriptInLLM (IOTools.IOScript (IOTools.IOScriptDescription "noop" "does nothing") (\_ctx (_ :: Aeson.Value) -> pure "ok")) []]
+    let childCompletion completion
+            | null completion.completeToolResponses = do
+                -- The caller writes to the helper while it works.
+                live <- router.mrList
+                modifyIORef' registered (<> [(sid, info.miParent) | (sid, info) <- live, info.miAgentSlug == Just "child"])
+                forM_ [sid | (sid, info) <- live, info.miAgentSlug == Just "child"] $ \sid -> do
+                    Just (_, mb) <- router.mrLookup sid
+                    mb.mbSend (Outgoing Nothing (FromUser Nothing) Normal 0 (AgentMessage "also check staging" Nothing False))
+                pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [callNoop])
+            | otherwise = do
+                modifyIORef' seenByChild (<> [maybe "" (.queryText) completion.completeQuery])
+                mockCompletion completion
+        deps =
+            mockDeps
+                { adCompletion = Just $ \node completion ->
+                    case Base.slug node.osNodeConfig of
+                        "child" -> childCompletion completion
+                        _
+                            | null completion.completeToolResponses -> pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [callChild])
+                            | otherwise -> mockCompletion completion
+                }
+    childAgentId <- AgentId <$> nextRandom
+    atomically $ writeTVar parent.osNodeTools [OneShotTool.turnAgentRuntimeIntoIOTool silent deps child "parent" childAgentId Nothing True]
+    sid <- newSessionId
+    let convId = sessionIdToConversationId sid
+    agent <- withMailRouter router <$> buildAgent silent deps RootAgent convId parent
+    sPrompt <- agent.sysPrompt
+    sTools <- agent.sysTools
+    sess0 <- newSessionFromPrompt sid sPrompt sTools (UserQuery "ask the child" [])
+    (_, final) <- run convId agent sess0
+    assertBool "parent answered" (sessionStatusOf final == StatusIdle)
+    whileRunning <- readIORef registered
+    map snd whileRunning @?= [Just sid]
+    seen <- readIORef seenByChild
+    case seen of
+        [text] -> assertBool ("the helper read the mail, got " <> show text) ("also check staging" `Text.isInfixOf` text)
+        other -> assertFailure ("expected one later completion of the helper, got " <> show other)
+    after <- router.mrList
+    map fst after @?= []
+  where
+    call name args =
+        LlmToolCall $
+            Aeson.object
+                [ "id" Aeson..= ("call_1" :: String)
+                , "type" Aeson..= ("function" :: String)
+                , "function" Aeson..= Aeson.object ["name" Aeson..= (name :: String), "arguments" Aeson..= (args :: String)]
+                ]
+    callChild = call "io_prompt_agent_child" "{\"what\": \"hello child\"}"
+    callNoop = call "io_noop" "{}"
 
 -------------------------------------------------------------------------------
 -- Fixtures

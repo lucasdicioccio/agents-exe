@@ -306,9 +306,10 @@ default) or `"interrupt"`. `body` is a `MailBody`, tagged JSON:
 {"tag": "control", "message": {"tag": "cancelCalls", "toolCallIds": ["017bb633-…"]}}
 ```
 
-`toolCallFinished`, `continuationResult` and `watchedEvent` are also valid
-`MailBody` tags (the async engine, `completeCall`, and `watch-session`
-produce them respectively), but there is no reason to post one by hand over
+`toolCallFinished`, `continuationResult`, `watchedEvent` and `toolCallNotice`
+are also valid `MailBody` tags (the async engine, `completeCall`,
+`watch-session`, and a tool reporting notify-level progress produce them
+respectively), but there is no reason to post one by hand over
 this endpoint. `POST /v1/sessions/:id/mail` answers `202` with the mail's
 `Receipt`: `{"id": "<message id>", "seq": <int>, "duplicate": false}`.
 

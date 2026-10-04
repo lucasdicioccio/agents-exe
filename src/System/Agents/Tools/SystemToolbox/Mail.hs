@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -20,6 +21,7 @@ entitled to send.
 -}
 module System.Agents.Tools.SystemToolbox.Mail (
     sendMessageToSession,
+    sendToToolCall,
     spawnSession,
     watchSession,
     unwatchSession,
@@ -27,6 +29,7 @@ module System.Agents.Tools.SystemToolbox.Mail (
 ) where
 
 import Control.Concurrent.STM (atomically)
+import Data.Maybe (fromMaybe)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.List (find)
@@ -36,6 +39,13 @@ import Data.Text (Text)
 import qualified Data.UUID as UUID
 import qualified Data.Vector as Vector
 
+import System.Agents.OS.Conversation.Types (
+    ToolCallConfig (..),
+    ToolCallState (..),
+    ToolCallStatus (..),
+    isToolCallCompleted,
+ )
+import System.Agents.OS.Core.World (getComponent)
 import System.Agents.Session.Mailbox (MailRouter (..), Mailbox (..), MailboxInfo (..), WatchRequest (..))
 import System.Agents.Session.Types (
     Envelope (..),
@@ -53,10 +63,13 @@ import System.Agents.Session.Types (
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.Tools.Context (ToolExecutionContext (..))
 import System.Agents.Tools.SystemToolbox.Session (conversationIdToText)
+import System.Agents.Tools.SystemToolbox.ToolCallStatus (resolveEntity, statusText)
 import System.Agents.Tools.SystemToolbox.Types (
     QueryError (..),
     SendMessageParams (..),
     SendMessageResult (..),
+    SendToToolCallParams (..),
+    SendToToolCallResult (..),
     SpawnSessionParams (..),
     SpawnSessionResult (..),
     UnwatchSessionParams (..),
@@ -120,6 +133,57 @@ sendMessageToSession ctx params = case ctxMailRouter ctx of
             , smrDuplicate = receipt.rcptDuplicate
             , smrRecipientStatus = status
             }
+
+{- | Send mail to the child session of one of this session's own running
+sub-agent calls (@todos/session-mailbox.md@, §3), addressed by the id of the
+call rather than by the child's session id.
+
+The call is resolved like @get-tool-call-status@ resolves one, so only a
+call of this session can be addressed. It must still be running and must
+have a child session, which a @prompt_agent_\<slug\>@ call records once it
+has started; a call to any other kind of tool has nothing to receive mail
+(for a bash tool that would be its standard input, which is not planned).
+
+The mail itself is @send-message@ to the child: the same scopes, the same
+'AgentMessage' body, the same receipt. The child reads it at its next
+receive point, that is before its next LLM completion, or at once when
+@interrupt@ is set and allowed.
+-}
+sendToToolCall :: ToolExecutionContext -> SendToToolCallParams -> IO (Either QueryError SendToToolCallResult)
+sendToToolCall ctx params = case ctxWorld ctx of
+    Nothing -> pure $ Left $ SystemInfoError "OS world not available"
+    Just world -> do
+        mEid <- resolveEntity ctx (stpToolCallId params)
+        mComponents <- case mEid of
+            Nothing -> pure Nothing
+            Just eid -> atomically $ do
+                mCfg <- getComponent @ToolCallConfig world eid
+                mSt <- getComponent @ToolCallState world eid
+                pure ((,) <$> mCfg <*> mSt)
+        case mComponents of
+            Nothing -> pure $ Left $ SystemInfoError "tool call not found"
+            Just (cfg, st)
+                | isToolCallCompleted st ->
+                    pure $ Left $ SystemInfoError ("tool call is already " <> statusText (tcStatus st) <> ": nothing is running to receive a message")
+                | otherwise -> case tcChildSessionId cfg of
+                    Nothing
+                        | tcStatus st == TcPending ->
+                            pure $ Left $ SystemInfoError "tool call has not started yet: try again once it is running"
+                        | otherwise ->
+                            pure $ Left $ SystemInfoError ("tool call " <> stpToolCallId params <> " (" <> tcToolName cfg <> ") has no child session: only a running sub-agent call can receive a message")
+                    Just (SessionId childUuid) -> do
+                        let childText = UUID.toText childUuid
+                        sent <-
+                            sendMessageToSession
+                                ctx
+                                SendMessageParams
+                                    { smpTo = childText
+                                    , smpText = stpText params
+                                    , smpInReplyTo = Nothing
+                                    , smpExpectsReply = stpExpectsReply params
+                                    , smpInterrupt = stpInterrupt params
+                                    }
+                        pure $ SendToToolCallResult (fromMaybe (stpToolCallId params) (tcProviderCallId cfg)) childText <$> sent
 
 {- | Start one of this session's helper agents running as a detached child
 session (§5): not call\/return -- it outlives this tool call and answers by
