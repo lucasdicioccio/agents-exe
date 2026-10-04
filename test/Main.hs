@@ -38,6 +38,7 @@ import qualified SessionEditTests
 import qualified SessionDurableTests
 import qualified SessionSearchBackendTests
 import qualified AsyncToolCallsTests
+import qualified AsyncEngineTraceTests
 -- Import SessionPrint tests
 import qualified SessionPrintTests
 -- Import EndpointPredicate tests
@@ -146,6 +147,7 @@ tests =
         , SessionDurableTests.tests
         , SessionSearchBackendTests.tests
         , AsyncToolCallsTests.tests
+        , AsyncEngineTraceTests.tests
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , BindingsTests.tests

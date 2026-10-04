@@ -181,6 +181,42 @@ it can be continued:
 Continue it with `agents-exe session complete` and `agents-exe session resume`
 (see [durable-workflows-howto.md](durable-workflows-howto.md)).
 
+## Logs
+
+Each step of a background call is traced, with the ids needed to follow one
+call through a log:
+
+| `kind` | When | Extra fields |
+|---|---|---|
+| `tool_call.queued` | the call is accepted and waits for a free slot (`maxConcurrency`) | |
+| `tool_call.started` | it got a slot and runs | `queued_ms` |
+| `tool_call.progressed` | the tool reported progress | `payload_bytes` (the payload itself is not logged) |
+| `tool_call.completed` | it returned a result | `elapsed_ms` |
+| `tool_call.failed` | it threw | `elapsed_ms`, `error` |
+| `tool_call.timed_out` | it outlived `asyncCallTimeoutSeconds` | `timeout_seconds` |
+| `tool_call.cancelled` | it was cancelled (`cancel-tool-call`, a pause that cancels, the end of the run) | |
+
+Every line has `session_id`, `conversation_id`, `tool_call_id`, `tool`, and
+`provider_call_id` when the provider gave one; a call made by a sub-agent
+also has `sub_agent: true`. A call ends with exactly one of the last four.
+
+```json
+{"ts":"…","kind":"tool_call.started","session_id":"…","conversation_id":"…","tool_call_id":"…","tool":"bash_run_tests","provider_call_id":"call_abc","queued_ms":0}
+{"ts":"…","kind":"tool_call.completed","session_id":"…","conversation_id":"…","tool_call_id":"…","tool":"bash_run_tests","provider_call_id":"call_abc","elapsed_ms":8412}
+```
+
+Where they go:
+
+- `agents-server` (and `agents-exe serve`): its JSON log on stderr.
+- `agents-exe tui`, `run` and `mcp-server`: the file given with
+  `--log-json-file` (same fields, no `ts`), and, in Haskell `show` form, the
+  `--log-file`.
+
+In Haskell, these are `AsyncTrace` values
+(`System.Agents.Session.Async.Engine`). An agent hands its `ctxAsyncTracer`
+to the engine it creates; `AgentFactory.buildAgent` sets it from its own
+tracer, as `AsyncToolCallTrace`.
+
 ## Session files
 
 Partial turns are stored in the session, with each call's state. `session-print`

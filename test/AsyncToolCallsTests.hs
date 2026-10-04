@@ -25,6 +25,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.UUID as UUID
 import Data.UUID (nil)
+import Prod.Tracer (silent)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@=?), (@?=))
 
@@ -1089,6 +1090,7 @@ mkAgent world strategy tool =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxAsyncTracer = silent
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing

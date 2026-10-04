@@ -454,6 +454,7 @@ executable durable-workflow-demo
     build-depends:    base >=4.20,
                       agents-lib,
                       aeson,
+                      prodapi,
                       text,
                       uuid
     hs-source-dirs:   examples/durable-workflow-demo
@@ -561,6 +562,7 @@ test-suite agents-tests
                     , NarrowingTests
                     , ContinuationConsistencyTests
                     , AsyncToolCallsTests
+                    , AsyncEngineTraceTests
                     , DeveloperToolboxTests
                     , DeveloperToolboxPatchTests
                     , DeveloperToolboxWriteRangeTests

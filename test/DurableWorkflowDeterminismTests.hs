@@ -24,6 +24,7 @@ import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Maybe (fromJust)
 import Data.Text (Text)
 import Data.UUID (nil)
+import Prod.Tracer (silent)
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -107,6 +108,7 @@ mkAsyncAgent policy =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxAsyncTracer = silent
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing

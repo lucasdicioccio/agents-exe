@@ -73,6 +73,8 @@
 - Better experience when running `agents-exe` outside of a project directory
 - Default configuration structure is automatically created in `~/.config/agents-exe/`
 - Example agents (openai-assistant, mistral-assistant, ollama-assistant, orchestrator) created automatically
+- Background tool calls are traced: `tool_call.queued`, `.started`, `.progressed`, `.completed`, `.failed`, `.timed_out` and `.cancelled` lines, each with the session id and the call id, in the server's JSON log and in the `--log-json-file` / `--log-file` of `tui`, `run` and `mcp-server`. See `documentation/async-tool-calls.md` (Logs)
+- Library: `Agent` has a `ctxAsyncTracer` field, and `mkAsyncEngine` / `mkAsyncEngineSharing` take a `Tracer IO AsyncTrace` as first argument (`Prod.Tracer.silent` for none); `AgentFactory.Trace` and `MCP.Server.Trace` have a new `AsyncToolCallTrace` constructor
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

@@ -39,6 +39,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import qualified Data.UUID as UUID
+import Prod.Tracer (silent)
 
 import System.Agents.Base (ConversationId (..), newConversationId)
 import System.Agents.Session.Base
@@ -162,6 +163,7 @@ mkDemoAgent convId = do
             , ctxDeploymentRunner = Nothing
             , ctxSessionBackend = Nothing
             , ctxAsyncEngine = Nothing
+            , ctxAsyncTracer = silent
             , ctxParams = mempty
             , ctxInheritedBindings = []
             , ctxMailbox = Nothing

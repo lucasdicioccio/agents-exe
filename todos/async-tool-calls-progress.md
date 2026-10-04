@@ -430,10 +430,11 @@ Example agent JSON:
   tools (`tool.progressed` events, `get_tool_call_status`).
 
 ### Not done
-- **Tracing.** `Agent` carries no tracer (tracers live in the builders'
-  closures), so `Prod.Tracer` support would mean threading one through the
-  agent and the engine. The activity events (`OSEvent_ToolCallActivity`) and
-  the progress entries on the entity are the observability path for now.
+- **Tracing.** Done since: `Agent` has `ctxAsyncTracer`, which
+  `buildAgent` sets from its tracer and the agent hands to the engine it
+  creates; the engine traces queued / started / progressed / completed /
+  failed / timed out / cancelled as `AsyncTrace`, with the session and call
+  ids (`documentation/async-tool-calls.md`, Logs).
 - Rate limiting beyond a concurrency cap.
 - A pre-existing docs bug found on the way, now fixed: JSON examples used key
   spellings the parsers reject. Every builtin toolbox (`Name`, `Description`,
