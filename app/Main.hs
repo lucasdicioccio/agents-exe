@@ -22,6 +22,7 @@ import Data.Map (Map)
 import Data.Maybe (isJust)
 import System.Environment (getArgs)
 import qualified Data.Map as Map
+import Data.Bifunctor (first)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
@@ -71,6 +72,7 @@ import qualified Data.UUID as UUID
 import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
 import qualified System.Agents.SessionPrint as SessionPrint
 import qualified System.Agents.SessionStore as SessionStore
+import qualified System.Agents.Spectate.Layout as SpectateLayout
 
 import System.Agents.CLI (Trace (..), toJsonTrace)
 
@@ -676,6 +678,29 @@ parseSpectateOptions =
                 ( long "token-file"
                     <> metavar "FILE"
                     <> help "Read the bearer token from FILE"
+                )
+            )
+        <*> optional
+            ( option
+                (eitherReader (first Text.unpack . SpectateLayout.parsePanels . Text.pack))
+                ( long "panels"
+                    <> metavar "SPEC"
+                    <> help "Panels to show (tree, tools, text): ',' separates columns, '+' stacks panels in a column, ':N' is a panel's height share and '/N' a column's width share. Default: tree:60+tools:40/45,text/55"
+                )
+            )
+        <*> optional
+            ( option
+                (eitherReader (first Text.unpack . SpectateLayout.parseRefresh . Text.pack))
+                ( long "refresh"
+                    <> metavar "SECONDS"
+                    <> help "Time between two refreshes of the screen, from 0.1 to 60 (default: 1)"
+                )
+            )
+        <*> optional
+            ( strOption
+                ( long "layout-file"
+                    <> metavar "FILE"
+                    <> help "Saved layout: read at start when it exists, written by the W key (default: ~/.config/agents-exe/spectate-layout)"
                 )
             )
 
