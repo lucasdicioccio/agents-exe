@@ -15,6 +15,7 @@ https://lucasdicioccio.github.io/agents-exe/demo.html
 https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html
 https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html
 https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html
+https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html
 https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html
 https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html
 https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html

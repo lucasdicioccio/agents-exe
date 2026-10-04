@@ -665,6 +665,7 @@ test-suite agents-tui-e2e
                           directory,
                           filepath,
                           http-types,
+                          process,
                           tasty,
                           tasty-hunit,
                           temporary,

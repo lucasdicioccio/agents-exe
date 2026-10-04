@@ -1,4 +1,4 @@
-<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - agents-server: agents over HTTP</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - agents-server: agents over HTTP"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - agents-server: agents over HTTP"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><meta property="og:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="article:published_time" content="2026-10-03T10:37:53Z"><meta name="article:modified_time" content="2026-10-03T10:37:53Z"><meta name="ks:article_json" content="/agents-exe/json/docs-agents-server.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-agents-server.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-03T10:37:53Z","datePublished":"2026-10-03T10:37:53Z","description":"`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s","headline":"agents-server: agents over HTTP","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>agents-server: agents over HTTP</h1><p>On <span>Sat, 03 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 5986 words, 25 code snippets, 18 links, 1images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-MIGRATION-GUIDE.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">2/27</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-tui.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"><code>documentation/agents-server.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - agents-server: agents over HTTP</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - agents-server: agents over HTTP"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - agents-server: agents over HTTP"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html"><meta property="og:description" content="`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s"><meta name="article:published_time" content="2026-10-04T15:53:54Z"><meta name="article:modified_time" content="2026-10-04T15:53:54Z"><meta name="ks:article_json" content="/agents-exe/json/docs-agents-server.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-agents-server.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-04T15:53:54Z","datePublished":"2026-10-04T15:53:54Z","description":"`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s","headline":"agents-server: agents over HTTP","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>agents-server: agents over HTTP</h1><p>On <span>Sun, 04 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 6514 words, 28 code snippets, 19 links, 1images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-MIGRATION-GUIDE.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">2/27</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-tui.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"><code>documentation/agents-server.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
 <h2 id="agents-server-agents-over-http">agents-server: agents over HTTP</h2>
 <p><img src="/agents-exe/gen/images/server-overview.dot.png" alt="The standalone server: clients reach one session runner through the HTTP API." /></p>
 <p><code>agents-server</code> runs agents as a long-lived HTTP service. Sessions live in a
@@ -37,6 +37,8 @@ it.</p>
 <tr><td><code>--no-ui</code></td><td>off</td><td>Do not serve the chat page at <code>/</code>. See [Finding your way around](#finding-your-way-around).</td></tr>
 <tr><td><code>--cors-origin ORIGIN</code></td><td>(none)</td><td>Allow this origin to call the server cross-origin (a browser page on another host or port). Repeatable, or <code>*</code> for any origin — refused at startup together with <code>--auth-tokens</code>. See [Authentication](#authentication).</td></tr>
 <tr><td><code>--socket PATH</code></td><td>(none)</td><td>Also listen on this Unix domain socket, in addition to <code>--bind</code>/<code>--port</code>. A stale file at the path is removed at start; the socket is created with mode <code>0600</code>. Requests over it carry no <code>Origin</code> header and need no bearer token beyond what <code>--auth-tokens</code> imposes elsewhere: the socket, and who can reach it on the filesystem, is the trust boundary. Closed and unlinked on shutdown.</td></tr>
+<tr><td><code>--owner-api-keys OWNER=FILE</code></td><td>(none)</td><td>This owner's sessions call the LLM with the keys in <code>FILE</code> instead of the ones in <code>--api-keys</code>. Repeatable. Needs <code>--auth-tokens</code>. See [API keys per owner](#api-keys-per-owner).</td></tr>
+<tr><td><code>--isolate-tools docker:IMAGE\|process:PATH</code></td><td>(none)</td><td>Run bash and MCP tool calls outside the server process. See [Isolating tool calls](#isolating-tool-calls).</td></tr>
 <tr><td><code>--set NAME=VALUE</code>, <code>--set-json NAME=JSON</code></td><td>(none)</td><td>Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters).</td></tr>
 <tr><td><code>--pin NAME=VALUE</code>, <code>--pin-json NAME=JSON</code></td><td>(none)</td><td>Like <code>--set</code>, but sessions cannot override it. Repeatable. See [Parameters](#parameters).</td></tr>
 </table>
@@ -68,7 +70,8 @@ shares agents-exe’s global <code>--api-keys</code>, <code>--set</code>/<code>-
 <code>--pin-json</code> and <code>--params-file</code>. Its own flags are the rest of this table
 (<code>--db</code>, <code>--bind</code>, <code>--port</code>, <code>--live-session-ttl</code>, <code>--shutdown-grace</code>,
 <code>--auth-tokens</code>, <code>--stream-tokens</code>, <code>--admin-owners</code>, <code>--no-ui</code>,
-<code>--cors-origin</code>, <code>--socket</code>); <code>--db</code> defaults next to the resolved sessions
+<code>--cors-origin</code>, <code>--socket</code>, <code>--owner-api-keys</code>, <code>--isolate-tools</code>); <code>--db</code>
+defaults next to the resolved sessions
 directory instead of <code>./agents-server.db</code>:</p>
 <div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-exe</span> <span class="at">--agent-file</span> ./weather.json serve <span class="at">--port</span> 8080</span>
 <span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="co"># or, from a directory with an agents-exe.cfg.json:</span></span>
@@ -717,7 +720,41 @@ query parameter, because a browser’s <code>EventSource</code> cannot set heade
 other endpoint does, and the request log records no query strings.
 </li>
 </ul>
-<p>All owners share the agents and the API keys of the server.</p>
+<p>All owners share the agents of the server, and its API keys unless they
+have their own (next section).</p>
+<h4 id="api-keys-per-owner">API keys per owner</h4>
+<p>By default every owner’s sessions call the LLM with the keys in
+<code>--api-keys</code>. <code>--owner-api-keys OWNER=FILE</code> gives one owner a keys file of
+their own, in the same format; repeat it for several owners:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="ex">agents-server</span> <span class="at">--agent-file</span> ./weather.json <span class="at">--api-keys</span> ./secrets/keys.json <span class="dt">\</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>    <span class="at">--auth-tokens</span> ./tokens.json <span class="dt">\</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--owner-api-keys</span> alice=./secrets/alice-keys.json <span class="dt">\</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>    <span class="at">--owner-api-keys</span> bob=./secrets/bob-keys.json</span></code></pre></div></div><ul>
+<li>The agents of that owner’s sessions are built with that file: root
+sessions, and the sub-sessions their sub-agents run in. An agent still
+names its key by <code>apiKeyId</code>; the id is looked up in the owner’s file.
+</li>
+<li>The owner’s file replaces <code>--api-keys</code> for that owner, it is not merged
+with it. A key id it does not hold is not looked up in <code>--api-keys</code>: the
+call goes out without a key, and the provider refuses it.
+</li>
+<li>Owners without an entry, and sessions without an owner, use <code>--api-keys</code>,
+as before.
+</li>
+<li>The files are read at startup. A file that is missing or does not parse,
+an owner listed twice, or the flag without <code>--auth-tokens</code>, stops the
+server from starting.
+</li>
+<li>This covers the LLM calls only. A tool parameter whose value comes from
+the keys file is still resolved from <code>--api-keys</code> when the agent loads,
+for every owner.
+</li>
+<li>A sub-agent call that cannot run as a session of its own falls back to
+running inside the calling tool, which does not know the owner. With
+<code>--owner-api-keys</code> in use, such a call is made without any key, rather
+than with the shared ones.
+</li>
+</ul>
 <h4 id="session-tokens-and-sealed-sessions">Session tokens and sealed sessions</h4>
 <p>A backend that opens a chat for an end user should not have to proxy every
 message and event stream, but must not hand the browser its own token either.
@@ -786,6 +823,58 @@ matching what the real request would get.
 works same-origin: <code>EventSource</code> cannot set the <code>Authorization</code> header, so
 with <code>--auth-tokens</code> the token still goes as <code>?access_token=</code> (see above);
 without tokens, a listed origin needs nothing extra.</p>
+<hr />
+<h3 id="isolating-tool-calls">Isolating tool calls</h3>
+<p>By default the server runs every tool in its own process, on its own host,
+for every owner. <code>--isolate-tools</code> sends the calls of bash tools and MCP
+tools to a worker instead:</p>
+<table>
+<tr><th>Value</th><th>Each call is handed to</th></tr>
+<tr><td><code>docker:IMAGE</code></td><td><code>docker run --rm -i IMAGE</code>, one container per call</td></tr>
+<tr><td><code>process:PATH</code></td><td>the executable at <code>PATH</code>, one process per call</td></tr>
+</table>
+<p>The worker reads one JSON envelope on stdin and writes one result envelope
+on stdout:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;token&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;uuid&gt;&quot;</span><span class="fu">,</span> <span class="dt">&quot;toolCall&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;call_1&quot;</span><span class="fu">,</span> <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;function&quot;</span><span class="fu">,</span> <span class="dt">&quot;function&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;name&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_weather&quot;</span><span class="fu">,</span> <span class="dt">&quot;arguments&quot;</span><span class="fu">:</span> <span class="st">&quot;{}&quot;</span><span class="fu">}},</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;contextSnapshot&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tecsSessionId&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">,</span> <span class="dt">&quot;tecsParams&quot;</span><span class="fu">:</span> <span class="fu">{}},</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;policy&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runIsolated&quot;</span><span class="fu">,</span> <span class="dt">&quot;spec&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;docker&quot;</span><span class="fu">,</span> <span class="dt">&quot;image&quot;</span><span class="fu">:</span> <span class="st">&quot;IMAGE&quot;</span><span class="fu">}}}</span></span></code></pre></div></div><div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;token&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;the same uuid&gt;&quot;</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;success&quot;</span><span class="fu">,</span> <span class="dt">&quot;result&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;text&quot;</span><span class="fu">,</span> <span class="dt">&quot;content&quot;</span><span class="fu">:</span> <span class="st">&quot;sunny&quot;</span><span class="fu">}}</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;token&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;the same uuid&gt;&quot;</span><span class="fu">,</span> <span class="dt">&quot;status&quot;</span><span class="fu">:</span> <span class="st">&quot;error&quot;</span><span class="fu">,</span> <span class="dt">&quot;error&quot;</span><span class="fu">:</span> <span class="st">&quot;what went wrong&quot;</span><span class="fu">}</span></span></code></pre></div></div><p>The image, or the executable, is yours to provide: this repository ships no
+worker. It has to hold whatever the tools need (the scripts of a bash
+toolbox, the MCP server to start) and to find the tool from its name.</p>
+<p>What is enforced:</p>
+<ul>
+<li>It applies to every agent the server builds, for every owner and for
+sub-agents, and an agent’s own <code>toolCallPolicyConfig</code> cannot turn it off.
+That policy still decides whether a call is deferred or run in the
+background; when the call is executed, it goes to the worker.
+</li>
+<li>There is no fallback. If the worker cannot be started, exits with an
+error, or answers something else than a result envelope for the call,
+the call fails and its result is <code>isolation error: …</code>.
+</li>
+<li>A bash or MCP tool called from another tool (a Lua script, through the
+tool portal) is refused.
+</li>
+</ul>
+<p>What is not:</p>
+<ul>
+<li>Only bash tools and MCP tools are covered. Skill scripts, Lua, SQLite,
+OpenAPI, PostgREST, the system and developer toolboxes, and agents called
+as tools still run inside the server.
+</li>
+<li>MCP servers are still started by the server when it loads an agent, to
+list their tools; only the calls go to the worker.
+</li>
+<li>Secret parameter values are not written into the envelope. A tool that
+needs one fails in the worker.
+</li>
+<li>The server sets no limit on the worker: no timeout, no network or
+filesystem restriction beyond what the image and your Docker setup give.
+</li>
+<li>It is off unless the flag is given, and applies to this server only:
+<code>agents-exe run</code> and the TUI’s own loop run tools in-process.
+</li>
+</ul>
 <hr />
 <h3 id="mcp-over-http">MCP over HTTP</h3>
 <p><code>POST /mcp</code> serves the agents to MCP clients over the
@@ -1047,7 +1136,12 @@ non-admin token). The token goes in <code>Authorization</code> on commands and i
 <code>?access_token=</code> on streams.</p>
 <h3 id="not-yet-supported">Not yet supported</h3>
 <ul>
-<li>Per-owner API keys: all owners share the server’s keys.
+<li>Tool isolation by default, and for every tool kind: it is opt-in
+(<code>--isolate-tools</code>), covers bash and MCP tools only, and needs a worker
+you provide. See <a href="#isolating-tool-calls">Isolating tool calls</a>.
+</li>
+<li>Issuing or rotating per-owner API keys over the API: the files are read
+at startup.
 </li>
 </ul>
 <p>See <code>todos/web-server-embedding.md</code> for the design and the planned work.</p>

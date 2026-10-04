@@ -1339,11 +1339,21 @@ Two screens are equal when their cells are: characters and colours, at 100
 columns by 30 rows. Session ids are random and the sidebar shows them, so they
 are zeroed before comparing.
 
-Rendering a PNG needs `python3` with Pillow and a monospace TTF: DejaVu Sans
-Mono or Liberation Mono where distributions install them, or the file
-`TUISPEC_FONT_PATH` names. A font without a glyph the TUI uses (the status
-icons of the conversation list) draws a box in its place. The comparison
-itself needs neither. Linux only: tuispec drives a PTY.
+The PNGs are drawn by `test/tui-e2e/render_png.py` from the cells of the
+baseline (characters and colours), the way a terminal would: on the grid of
+the font's advance, with the box-drawing characters as lines running from
+edge to edge of their cell, so that borders are continuous. It needs `python3`
+with Pillow and a monospace TTF: DejaVu Sans Mono or Liberation Mono where
+distributions install them, or the file `TUISPEC_FONT_PATH` names. A glyph
+that font lacks (the status icons of the conversation list: `⧗`, `⏸`) is taken
+from Noto Sans Symbols 2, Noto Sans Math or DejaVu Sans when installed
+(`fonts-noto-core` on Debian and Ubuntu), and is the font's missing-glyph box
+otherwise. The comparison itself needs none of this. Linux only: tuispec
+drives a PTY.
+
+The website shows the same files: `website/scripts/sync-repo-docs.sh` copies
+them into the site, so rendering them again and publishing is all it takes to
+refresh the screenshots there.
 
 `AGENTS_EXE` selects another binary than the one cabal just built. The
 scenarios are in `test/tui-e2e/Main.hs`; tuispec also has a JSON-RPC server

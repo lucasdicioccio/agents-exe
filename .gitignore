@@ -13,11 +13,13 @@ localdev-agents/
 website/www/
 
 # Mirrored pages written by website/scripts/sync-repo-docs.sh from documentation/,
-# todos/ and README.md: mechanical output, not source.
+# todos/ and README.md, and its copies of the TUI screenshots
+# (test/tui-snapshots/png/): mechanical output, not source.
 website/src/docs-*.cmark
 website/src/specs-*.cmark
 website/src/specs.cmark
 website/src/commands.cmark
+website/src/tui-*.png
 website/scripts/__pycache__/
 
 # Per-run captures of the terminal UI end-to-end tests (agents-tui-e2e); the

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-10-03T10:37:53Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-GUIDE.html</id><title type="text">Migration Guide</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/MIGRATION-GUIDE.md"&gt;&lt;code&gt;documentation/MIGRATION-GUIDE.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-10-04T15:53:54Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-GUIDE.html</id><title type="text">Migration Guide</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/MIGRATION-GUIDE.md"&gt;&lt;code&gt;documentation/MIGRATION-GUIDE.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="migration-guide"&gt;Migration Guide&lt;/h2&gt;
 &lt;p&gt;The migration from Runtime-per-agent to OS-native ECS architecture is &lt;strong&gt;COMPLETE&lt;/strong&gt;.&lt;/p&gt;
 &lt;h3 id="status"&gt;Status&lt;/h3&gt;
@@ -23,7 +23,7 @@
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;See &lt;code&gt;documentation/OS-API.md&lt;/code&gt; for the complete API reference.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-GUIDE.html" rel="alternate"/><summary type="text">The migration from Runtime-per-agent to OS-native ECS architecture is **COMPLETE**. ## Status All legacy Runtime code has been removed. The system now uses OS-native structures exclusively. ## Migration Complete - Phase 1 (Dual Mode): COMPL</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html</id><title type="text">agents-server: agents over HTTP</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"&gt;&lt;code&gt;documentation/agents-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-GUIDE.html" rel="alternate"/><summary type="text">The migration from Runtime-per-agent to OS-native ECS architecture is **COMPLETE**. ## Status All legacy Runtime code has been removed. The system now uses OS-native structures exclusively. ## Migration Complete - Phase 1 (Dual Mode): COMPL</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html</id><title type="text">agents-server: agents over HTTP</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"&gt;&lt;code&gt;documentation/agents-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="agents-server-agents-over-http"&gt;agents-server: agents over HTTP&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/server-overview.dot.png" alt="The standalone server: clients reach one session runner through the HTTP API." /&gt;&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;agents-server&lt;/code&gt; runs agents as a long-lived HTTP service. Sessions live in a
@@ -62,6 +62,8 @@ it.&lt;/p&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--no-ui&lt;/code&gt;&lt;/td&gt;&lt;td&gt;off&lt;/td&gt;&lt;td&gt;Do not serve the chat page at &lt;code&gt;/&lt;/code&gt;. See [Finding your way around](#finding-your-way-around).&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--cors-origin ORIGIN&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Allow this origin to call the server cross-origin (a browser page on another host or port). Repeatable, or &lt;code&gt;*&lt;/code&gt; for any origin — refused at startup together with &lt;code&gt;--auth-tokens&lt;/code&gt;. See [Authentication](#authentication).&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--socket PATH&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Also listen on this Unix domain socket, in addition to &lt;code&gt;--bind&lt;/code&gt;/&lt;code&gt;--port&lt;/code&gt;. A stale file at the path is removed at start; the socket is created with mode &lt;code&gt;0600&lt;/code&gt;. Requests over it carry no &lt;code&gt;Origin&lt;/code&gt; header and need no bearer token beyond what &lt;code&gt;--auth-tokens&lt;/code&gt; imposes elsewhere: the socket, and who can reach it on the filesystem, is the trust boundary. Closed and unlinked on shutdown.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--owner-api-keys OWNER=FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;This owner's sessions call the LLM with the keys in &lt;code&gt;FILE&lt;/code&gt; instead of the ones in &lt;code&gt;--api-keys&lt;/code&gt;. Repeatable. Needs &lt;code&gt;--auth-tokens&lt;/code&gt;. See [API keys per owner](#api-keys-per-owner).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--isolate-tools docker:IMAGE\|process:PATH&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Run bash and MCP tool calls outside the server process. See [Isolating tool calls](#isolating-tool-calls).&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--set NAME=VALUE&lt;/code&gt;, &lt;code&gt;--set-json NAME=JSON&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Set a process-scope parameter value, shared by every session. Repeatable. See [Parameters](#parameters).&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--pin NAME=VALUE&lt;/code&gt;, &lt;code&gt;--pin-json NAME=JSON&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Like &lt;code&gt;--set&lt;/code&gt;, but sessions cannot override it. Repeatable. See [Parameters](#parameters).&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
@@ -93,7 +95,8 @@ shares agents-exe’s global &lt;code&gt;--api-keys&lt;/code&gt;, &lt;code&gt;--
 &lt;code&gt;--pin-json&lt;/code&gt; and &lt;code&gt;--params-file&lt;/code&gt;. Its own flags are the rest of this table
 (&lt;code&gt;--db&lt;/code&gt;, &lt;code&gt;--bind&lt;/code&gt;, &lt;code&gt;--port&lt;/code&gt;, &lt;code&gt;--live-session-ttl&lt;/code&gt;, &lt;code&gt;--shutdown-grace&lt;/code&gt;,
 &lt;code&gt;--auth-tokens&lt;/code&gt;, &lt;code&gt;--stream-tokens&lt;/code&gt;, &lt;code&gt;--admin-owners&lt;/code&gt;, &lt;code&gt;--no-ui&lt;/code&gt;,
-&lt;code&gt;--cors-origin&lt;/code&gt;, &lt;code&gt;--socket&lt;/code&gt;); &lt;code&gt;--db&lt;/code&gt; defaults next to the resolved sessions
+&lt;code&gt;--cors-origin&lt;/code&gt;, &lt;code&gt;--socket&lt;/code&gt;, &lt;code&gt;--owner-api-keys&lt;/code&gt;, &lt;code&gt;--isolate-tools&lt;/code&gt;); &lt;code&gt;--db&lt;/code&gt;
+defaults next to the resolved sessions
 directory instead of &lt;code&gt;./agents-server.db&lt;/code&gt;:&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; &lt;span class="at"&gt;--agent-file&lt;/span&gt; ./weather.json serve &lt;span class="at"&gt;--port&lt;/span&gt; 8080&lt;/span&gt;
 &lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# or, from a directory with an agents-exe.cfg.json:&lt;/span&gt;&lt;/span&gt;
@@ -742,7 +745,41 @@ query parameter, because a browser’s &lt;code&gt;EventSource&lt;/code&gt; cann
 other endpoint does, and the request log records no query strings.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;p&gt;All owners share the agents and the API keys of the server.&lt;/p&gt;
+&lt;p&gt;All owners share the agents of the server, and its API keys unless they
+have their own (next section).&lt;/p&gt;
+&lt;h4 id="api-keys-per-owner"&gt;API keys per owner&lt;/h4&gt;
+&lt;p&gt;By default every owner’s sessions call the LLM with the keys in
+&lt;code&gt;--api-keys&lt;/code&gt;. &lt;code&gt;--owner-api-keys OWNER=FILE&lt;/code&gt; gives one owner a keys file of
+their own, in the same format; repeat it for several owners:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-server&lt;/span&gt; &lt;span class="at"&gt;--agent-file&lt;/span&gt; ./weather.json &lt;span class="at"&gt;--api-keys&lt;/span&gt; ./secrets/keys.json &lt;span class="dt"&gt;\&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="at"&gt;--auth-tokens&lt;/span&gt; ./tokens.json &lt;span class="dt"&gt;\&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="at"&gt;--owner-api-keys&lt;/span&gt; alice=./secrets/alice-keys.json &lt;span class="dt"&gt;\&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="at"&gt;--owner-api-keys&lt;/span&gt; bob=./secrets/bob-keys.json&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;ul&gt;
+&lt;li&gt;The agents of that owner’s sessions are built with that file: root
+sessions, and the sub-sessions their sub-agents run in. An agent still
+names its key by &lt;code&gt;apiKeyId&lt;/code&gt;; the id is looked up in the owner’s file.
+&lt;/li&gt;
+&lt;li&gt;The owner’s file replaces &lt;code&gt;--api-keys&lt;/code&gt; for that owner, it is not merged
+with it. A key id it does not hold is not looked up in &lt;code&gt;--api-keys&lt;/code&gt;: the
+call goes out without a key, and the provider refuses it.
+&lt;/li&gt;
+&lt;li&gt;Owners without an entry, and sessions without an owner, use &lt;code&gt;--api-keys&lt;/code&gt;,
+as before.
+&lt;/li&gt;
+&lt;li&gt;The files are read at startup. A file that is missing or does not parse,
+an owner listed twice, or the flag without &lt;code&gt;--auth-tokens&lt;/code&gt;, stops the
+server from starting.
+&lt;/li&gt;
+&lt;li&gt;This covers the LLM calls only. A tool parameter whose value comes from
+the keys file is still resolved from &lt;code&gt;--api-keys&lt;/code&gt; when the agent loads,
+for every owner.
+&lt;/li&gt;
+&lt;li&gt;A sub-agent call that cannot run as a session of its own falls back to
+running inside the calling tool, which does not know the owner. With
+&lt;code&gt;--owner-api-keys&lt;/code&gt; in use, such a call is made without any key, rather
+than with the shared ones.
+&lt;/li&gt;
+&lt;/ul&gt;
 &lt;h4 id="session-tokens-and-sealed-sessions"&gt;Session tokens and sealed sessions&lt;/h4&gt;
 &lt;p&gt;A backend that opens a chat for an end user should not have to proxy every
 message and event stream, but must not hand the browser its own token either.
@@ -811,6 +848,58 @@ matching what the real request would get.
 works same-origin: &lt;code&gt;EventSource&lt;/code&gt; cannot set the &lt;code&gt;Authorization&lt;/code&gt; header, so
 with &lt;code&gt;--auth-tokens&lt;/code&gt; the token still goes as &lt;code&gt;?access_token=&lt;/code&gt; (see above);
 without tokens, a listed origin needs nothing extra.&lt;/p&gt;
+&lt;hr /&gt;
+&lt;h3 id="isolating-tool-calls"&gt;Isolating tool calls&lt;/h3&gt;
+&lt;p&gt;By default the server runs every tool in its own process, on its own host,
+for every owner. &lt;code&gt;--isolate-tools&lt;/code&gt; sends the calls of bash tools and MCP
+tools to a worker instead:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Value&lt;/th&gt;&lt;th&gt;Each call is handed to&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;docker:IMAGE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;docker run --rm -i IMAGE&lt;/code&gt;, one container per call&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;process:PATH&lt;/code&gt;&lt;/td&gt;&lt;td&gt;the executable at &lt;code&gt;PATH&lt;/code&gt;, one process per call&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;The worker reads one JSON envelope on stdin and writes one result envelope
+on stdout:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;token&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;&amp;lt;uuid&amp;gt;&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;toolCall&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;call_1&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;function&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;function&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;bash_weather&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;arguments&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;{}&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt; &lt;span class="dt"&gt;&amp;quot;contextSnapshot&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tecsSessionId&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;tecsParams&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{}},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt; &lt;span class="dt"&gt;&amp;quot;policy&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;runIsolated&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;spec&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;docker&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;image&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;IMAGE&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;token&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;&amp;lt;the same uuid&amp;gt;&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;status&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;success&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;result&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;type&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;text&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;content&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;sunny&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;token&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;&amp;lt;the same uuid&amp;gt;&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;status&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;error&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;error&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;what went wrong&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;The image, or the executable, is yours to provide: this repository ships no
+worker. It has to hold whatever the tools need (the scripts of a bash
+toolbox, the MCP server to start) and to find the tool from its name.&lt;/p&gt;
+&lt;p&gt;What is enforced:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;It applies to every agent the server builds, for every owner and for
+sub-agents, and an agent’s own &lt;code&gt;toolCallPolicyConfig&lt;/code&gt; cannot turn it off.
+That policy still decides whether a call is deferred or run in the
+background; when the call is executed, it goes to the worker.
+&lt;/li&gt;
+&lt;li&gt;There is no fallback. If the worker cannot be started, exits with an
+error, or answers something else than a result envelope for the call,
+the call fails and its result is &lt;code&gt;isolation error: …&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;A bash or MCP tool called from another tool (a Lua script, through the
+tool portal) is refused.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;What is not:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Only bash tools and MCP tools are covered. Skill scripts, Lua, SQLite,
+OpenAPI, PostgREST, the system and developer toolboxes, and agents called
+as tools still run inside the server.
+&lt;/li&gt;
+&lt;li&gt;MCP servers are still started by the server when it loads an agent, to
+list their tools; only the calls go to the worker.
+&lt;/li&gt;
+&lt;li&gt;Secret parameter values are not written into the envelope. A tool that
+needs one fails in the worker.
+&lt;/li&gt;
+&lt;li&gt;The server sets no limit on the worker: no timeout, no network or
+filesystem restriction beyond what the image and your Docker setup give.
+&lt;/li&gt;
+&lt;li&gt;It is off unless the flag is given, and applies to this server only:
+&lt;code&gt;agents-exe run&lt;/code&gt; and the TUI’s own loop run tools in-process.
+&lt;/li&gt;
+&lt;/ul&gt;
 &lt;hr /&gt;
 &lt;h3 id="mcp-over-http"&gt;MCP over HTTP&lt;/h3&gt;
 &lt;p&gt;&lt;code&gt;POST /mcp&lt;/code&gt; serves the agents to MCP clients over the
@@ -1072,11 +1161,16 @@ non-admin token). The token goes in &lt;code&gt;Authorization&lt;/code&gt; on co
 &lt;code&gt;?access_token=&lt;/code&gt; on streams.&lt;/p&gt;
 &lt;h3 id="not-yet-supported"&gt;Not yet supported&lt;/h3&gt;
 &lt;ul&gt;
-&lt;li&gt;Per-owner API keys: all owners share the server’s keys.
+&lt;li&gt;Tool isolation by default, and for every tool kind: it is opt-in
+(&lt;code&gt;--isolate-tools&lt;/code&gt;), covers bash and MCP tools only, and needs a worker
+you provide. See &lt;a href="#isolating-tool-calls"&gt;Isolating tool calls&lt;/a&gt;.
+&lt;/li&gt;
+&lt;li&gt;Issuing or rotating per-owner API keys over the API: the files are read
+at startup.
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;See &lt;code&gt;todos/web-server-embedding.md&lt;/code&gt; for the design and the planned work.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html" rel="alternate"/><summary type="text">`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-tui.html</id><title type="text">Terminal UI (TUI)</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tui.md"&gt;&lt;code&gt;documentation/tui.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html" rel="alternate"/><summary type="text">`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-tui.html</id><title type="text">Terminal UI (TUI)</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tui.md"&gt;&lt;code&gt;documentation/tui.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="terminal-ui-tui"&gt;Terminal UI (TUI)&lt;/h2&gt;
 &lt;p&gt;The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tabbed interface for organizing different views.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -1113,6 +1207,7 @@ non-admin token). The token goes in &lt;code&gt;Authorization&lt;/code&gt; on co
 &lt;tr&gt;&lt;td&gt;&lt;strong&gt;History&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;Past sessions&lt;/td&gt;&lt;td&gt;Session list and history view&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Help&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;Keyboard shortcuts&lt;/td&gt;&lt;td&gt;Command reference and key bindings&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
+&lt;p&gt;&lt;img src="/agents-exe/images/tui-agents-tab.png" alt="The Agents tab" /&gt;&lt;/p&gt;
 &lt;h4 id="tab-navigation"&gt;Tab Navigation&lt;/h4&gt;
 &lt;table&gt;
 &lt;tr&gt;&lt;th&gt;Key&lt;/th&gt;&lt;th&gt;Action&lt;/th&gt;&lt;/tr&gt;
@@ -1329,6 +1424,7 @@ token, and its arguments:&lt;/p&gt;
 │ - search (token 5e6f7a8b): {&amp;quot;q&amp;quot;: &amp;quot;todo&amp;quot;}           │
 └─────────────────────────────────────────────────────┘
 &lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src="/agents-exe/images/tui-pending-panel.png" alt="The Pending panel, with one deferred call" /&gt;&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;&amp;gt;&lt;/code&gt; marks the selected call, the first one with a continuation token until
 you move it: &lt;code&gt;Ctrl+O&lt;/code&gt; (&lt;code&gt;select-pending&lt;/code&gt;) selects the next one, wrapping
 around. &lt;code&gt;Ctrl+Y&lt;/code&gt; and &lt;code&gt;Ctrl+W&lt;/code&gt; act on the selected call.&lt;/p&gt;
@@ -2178,7 +2274,60 @@ Press &lt;code&gt;Ctrl+r&lt;/code&gt; to view the session in reverse chronologic
 &lt;span id="51"&gt;&lt;a href="#51" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            , appAttrMap &lt;span class="ot"&gt;=&lt;/span&gt; tui_appAttrMap&lt;/span&gt;
 &lt;span id="52"&gt;&lt;a href="#52" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            }&lt;/span&gt;
 &lt;span id="53"&gt;&lt;a href="#53" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
-&lt;span id="54"&gt;&lt;a href="#54" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    void &lt;span class="op"&gt;$&lt;/span&gt; customMainWithDefaultVty (&lt;span class="dt"&gt;Just&lt;/span&gt; evChan) app st&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h3 id="styling"&gt;Styling&lt;/h3&gt;
+&lt;span id="54"&gt;&lt;a href="#54" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    void &lt;span class="op"&gt;$&lt;/span&gt; customMainWithDefaultVty (&lt;span class="dt"&gt;Just&lt;/span&gt; evChan) app st&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h3 id="screenshots-and-end-to-end-tests"&gt;Screenshots and end-to-end tests&lt;/h3&gt;
+&lt;p&gt;The screenshots on this page are not taken by hand. The &lt;code&gt;agents-tui-e2e&lt;/code&gt;
+test-suite runs the real &lt;code&gt;agents-exe tui&lt;/code&gt; in a pseudo-terminal with
+&lt;a href="https://github.com/Tritlo/tuispec"&gt;tuispec&lt;/a&gt;, sends it keys, and compares the
+screen with a baseline at the end of each step. The model is a fake
+OpenAI-compatible endpoint the suite serves itself, with fixed answers, and
+&lt;code&gt;HOME&lt;/code&gt; is a scratch directory: no API key, no network, none of your own
+configuration.&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Scenario&lt;/th&gt;&lt;th&gt;Keys&lt;/th&gt;&lt;th&gt;Snapshots&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;launch&lt;/code&gt;&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;&lt;code&gt;agents-tab&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;chat&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;Ctrl+N&lt;/code&gt;, &lt;code&gt;Ctrl+]&lt;/code&gt;, &lt;code&gt;Tab&lt;/code&gt; twice, a message, &lt;code&gt;Meta+Enter&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;message-typed&lt;/code&gt;, &lt;code&gt;reply&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;pending&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;Down&lt;/code&gt;, the same with an agent whose tool calls are deferred, then &lt;code&gt;Ctrl+Y&lt;/code&gt;, an answer, &lt;code&gt;Meta+Enter&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;pending-panel&lt;/code&gt;, &lt;code&gt;pending-answered&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;&lt;img src="/agents-exe/images/tui-reply.png" alt="A reply from the scripted model" /&gt;&lt;/p&gt;
+&lt;p&gt;The suite is opt-in, behind the &lt;code&gt;tui-e2e&lt;/code&gt; cabal flag, so a plain &lt;code&gt;cabal test&lt;/code&gt;
+neither builds tuispec nor needs a terminal:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# compare the screens with the baselines&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;cabal&lt;/span&gt; test agents-tui-e2e &lt;span class="at"&gt;-ftui-e2e&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# accept the screens as the new baselines, after a deliberate UI change&lt;/span&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="va"&gt;TUISPEC_UPDATE_SNAPSHOTS&lt;/span&gt;&lt;span class="op"&gt;=&lt;/span&gt;1 &lt;span class="ex"&gt;cabal&lt;/span&gt; test agents-tui-e2e &lt;span class="at"&gt;-ftui-e2e&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# the same, and render the screenshots again&lt;/span&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="va"&gt;TUISPEC_UPDATE_SNAPSHOTS&lt;/span&gt;&lt;span class="op"&gt;=&lt;/span&gt;1 &lt;span class="va"&gt;AGENTS_TUI_E2E_PNG&lt;/span&gt;&lt;span class="op"&gt;=&lt;/span&gt;1 &lt;span class="ex"&gt;cabal&lt;/span&gt; test agents-tui-e2e &lt;span class="at"&gt;-ftui-e2e&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;Files, under &lt;code&gt;test/tui-snapshots/&lt;/code&gt;:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Path&lt;/th&gt;&lt;th&gt;Content&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;snapshots/&amp;lt;scenario&amp;gt;/&amp;lt;name&amp;gt;.ansi.txt&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The baseline: what the terminal received, with session ids zeroed&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;snapshots/&amp;lt;scenario&amp;gt;/&amp;lt;name&amp;gt;.txt&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The same screen as plain text, to read a change in a diff&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;snapshots/&amp;lt;scenario&amp;gt;/&amp;lt;name&amp;gt;.meta.json&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The terminal size (100x30)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;png/&amp;lt;name&amp;gt;.png&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The screenshot, written only with &lt;code&gt;AGENTS_TUI_E2E_PNG&lt;/code&gt; set&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tests/&lt;/code&gt;&lt;/td&gt;&lt;td&gt;What the last run captured, and a failure bundle per failed scenario; not tracked&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;Two screens are equal when their cells are: characters and colours, at 100
+columns by 30 rows. Session ids are random and the sidebar shows them, so they
+are zeroed before comparing.&lt;/p&gt;
+&lt;p&gt;The PNGs are drawn by &lt;code&gt;test/tui-e2e/render_png.py&lt;/code&gt; from the cells of the
+baseline (characters and colours), the way a terminal would: on the grid of
+the font’s advance, with the box-drawing characters as lines running from
+edge to edge of their cell, so that borders are continuous. It needs &lt;code&gt;python3&lt;/code&gt;
+with Pillow and a monospace TTF: DejaVu Sans Mono or Liberation Mono where
+distributions install them, or the file &lt;code&gt;TUISPEC_FONT_PATH&lt;/code&gt; names. A glyph
+that font lacks (the status icons of the conversation list: &lt;code&gt;⧗&lt;/code&gt;, &lt;code&gt;⏸&lt;/code&gt;) is taken
+from Noto Sans Symbols 2, Noto Sans Math or DejaVu Sans when installed
+(&lt;code&gt;fonts-noto-core&lt;/code&gt; on Debian and Ubuntu), and is the font’s missing-glyph box
+otherwise. The comparison itself needs none of this. Linux only: tuispec
+drives a PTY.&lt;/p&gt;
+&lt;p&gt;The website shows the same files: &lt;code&gt;website/scripts/sync-repo-docs.sh&lt;/code&gt; copies
+them into the site, so rendering them again and publishing is all it takes to
+refresh the screenshots there.&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;AGENTS_EXE&lt;/code&gt; selects another binary than the one cabal just built. The
+scenarios are in &lt;code&gt;test/tui-e2e/Main.hs&lt;/code&gt;; tuispec also has a JSON-RPC server
+(&lt;code&gt;tuispec server&lt;/code&gt;) for driving the TUI from another program.&lt;/p&gt;
+&lt;h3 id="styling"&gt;Styling&lt;/h3&gt;
 &lt;h4 id="attributes"&gt;Attributes&lt;/h4&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ot"&gt;tui_appAttrMap ::&lt;/span&gt; &lt;span class="dt"&gt;TuiState&lt;/span&gt; &lt;span class="ot"&gt;-&amp;gt;&lt;/span&gt; &lt;span class="dt"&gt;AttrMap&lt;/span&gt;&lt;/span&gt;
 &lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;tui_appAttrMap _ &lt;span class="ot"&gt;=&lt;/span&gt;&lt;/span&gt;
@@ -2327,7 +2476,7 @@ Press &lt;code&gt;Ctrl+r&lt;/code&gt; to view the session in reverse chronologic
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.OS.Events&lt;/code&gt;&lt;/td&gt;&lt;td&gt;OS event types for subcall visibility&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.AgentTree.OneShotTool&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Subcall execution&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-tui.html" rel="alternate"/><summary type="text">The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tab</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html</id><title type="text">Analysis of Issue Dependencies and DAG-Aware Agent Processing</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-dag.md"&gt;&lt;code&gt;documentation/sqq-dag.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-tui.html" rel="alternate"/><summary type="text">The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tab</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html</id><title type="text">Analysis of Issue Dependencies and DAG-Aware Agent Processing</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-dag.md"&gt;&lt;code&gt;documentation/sqq-dag.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="analysis-of-issue-dependencies-and-dag-aware-agent-processing"&gt;Analysis of Issue Dependencies and DAG-Aware Agent Processing&lt;/h2&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
 &lt;p&gt;This document analyzes the current interaction between &lt;code&gt;sqq-agent.sh&lt;/code&gt; and &lt;code&gt;create-issue.sh&lt;/code&gt;, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management.&lt;/p&gt;
@@ -2435,7 +2584,7 @@ Press &lt;code&gt;Ctrl+r&lt;/code&gt; to view the session in reverse chronologic
 &lt;li&gt;&lt;strong&gt;Clean Main:&lt;/strong&gt; Prevents the “unfinished work” syndrome by ensuring a logical ordering of merges.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html" rel="alternate"/><summary type="text">## Overview This document analyzes the current interaction between `sqq-agent.sh` and `create-issue.sh`, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management. ## Current S</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-tools.html</id><title type="text">Tool System</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tools.md"&gt;&lt;code&gt;documentation/tools.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html" rel="alternate"/><summary type="text">## Overview This document analyzes the current interaction between `sqq-agent.sh` and `create-issue.sh`, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management. ## Current S</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-tools.html</id><title type="text">Tool System</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tools.md"&gt;&lt;code&gt;documentation/tools.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="tool-system"&gt;Tool System&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/agent-tree.dot.png" alt="What an agent can call: helper agents, executable tools, MCP servers and OpenAPI operations all reach the model as functions." /&gt;&lt;/p&gt;
 &lt;p&gt;The tool system provides agents with the ability to execute external commands, call APIs, and interact with other agents. Tools are dynamically registered and exposed to the LLM via the OpenAI function calling API.&lt;/p&gt;
@@ -2833,7 +2982,8 @@ see &lt;a href="/agents-exe/docs-parameters-and-bindings.html"&gt;Parameters, Bi
 └─────────────────────────────────────────────────────────────────┘
 &lt;/code&gt;&lt;/pre&gt;
 &lt;h4 id="filesandboxconfig"&gt;FileSandboxConfig&lt;/h4&gt;
-&lt;p&gt;Each sandboxed toolbox accepts an optional &lt;code&gt;FileSandbox&lt;/code&gt; configuration:&lt;/p&gt;
+&lt;p&gt;Each sandboxed toolbox accepts an optional &lt;code&gt;FileSandbox&lt;/code&gt; configuration, either
+inline (below) or as a reference to a &lt;a href="#named-sandboxes"&gt;named sandbox&lt;/a&gt;:&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="kw"&gt;data&lt;/span&gt; &lt;span class="dt"&gt;FileSandboxConfig&lt;/span&gt; &lt;span class="ot"&gt;=&lt;/span&gt; &lt;span class="dt"&gt;FileSandboxConfig&lt;/span&gt;&lt;/span&gt;
 &lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    {&lt;span class="ot"&gt; fsbPredicate ::&lt;/span&gt; &lt;span class="dt"&gt;PathPredicate&lt;/span&gt;     &lt;span class="co"&gt;-- Defines allowed file paths&lt;/span&gt;&lt;/span&gt;
 &lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    ,&lt;span class="ot"&gt; fsbMaxFileSize ::&lt;/span&gt; &lt;span class="dt"&gt;Maybe&lt;/span&gt; &lt;span class="dt"&gt;Integer&lt;/span&gt;   &lt;span class="co"&gt;-- Max file size in bytes (Nothing = no limit)&lt;/span&gt;&lt;/span&gt;
@@ -2844,7 +2994,82 @@ see &lt;a href="/agents-exe/docs-parameters-and-bindings.html"&gt;Parameters, Bi
 &lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    { fsbPredicate &lt;span class="ot"&gt;=&lt;/span&gt; &lt;span class="dt"&gt;AlwaysDeny&lt;/span&gt;          &lt;span class="co"&gt;-- Deny all access by default&lt;/span&gt;&lt;/span&gt;
 &lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    , fsbMaxFileSize &lt;span class="ot"&gt;=&lt;/span&gt; &lt;span class="dt"&gt;Just&lt;/span&gt; (&lt;span class="dv"&gt;50&lt;/span&gt; &lt;span class="op"&gt;*&lt;/span&gt; &lt;span class="dv"&gt;1024&lt;/span&gt; &lt;span class="op"&gt;*&lt;/span&gt; &lt;span class="dv"&gt;1024&lt;/span&gt;)  &lt;span class="co"&gt;-- 50MB default limit&lt;/span&gt;&lt;/span&gt;
 &lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    , fsbName &lt;span class="ot"&gt;=&lt;/span&gt; &lt;span class="dt"&gt;Nothing&lt;/span&gt;&lt;/span&gt;
-&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    }&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h4 id="pathpredicate-dsl"&gt;PathPredicate DSL&lt;/h4&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    }&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h4 id="named-sandboxes"&gt;Named Sandboxes&lt;/h4&gt;
+&lt;p&gt;A sandbox can be written once, under a name, in the agent’s &lt;code&gt;fileSandboxes&lt;/code&gt;
+map, and referenced from any builtin toolbox of that agent with
+&lt;code&gt;{&amp;quot;ref&amp;quot;: &amp;quot;&amp;lt;name&amp;gt;&amp;quot;}&lt;/code&gt; in place of the inline definition:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;OpenAIAgentDescription&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;slug&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;coder&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;fileSandboxes&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="dt"&gt;&amp;quot;project&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;fsbPredicate&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;DirectoryRecursive&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;./src&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;fsbMaxFileSize&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;10485760&lt;/span&gt;&lt;/span&gt;
+&lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="10"&gt;&lt;a href="#10" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="dt"&gt;&amp;quot;scratch&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="11"&gt;&lt;a href="#11" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;fsbPredicate&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;DirectoryRecursive&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;/tmp/scratch&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="13"&gt;&lt;a href="#13" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="14"&gt;&lt;a href="#14" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;builtinToolboxes&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;/span&gt;
+&lt;span id="15"&gt;&lt;a href="#15" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;DeveloperToolbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="16"&gt;&lt;a href="#16" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;dev&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;Description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;Development tools&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="17"&gt;&lt;a href="#17" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;Capabilities&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;read-file-range&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;patch-file&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="18"&gt;&lt;a href="#18" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;FileSandbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;ref&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;project&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="19"&gt;&lt;a href="#19" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;LuaToolbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="20"&gt;&lt;a href="#20" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;lua&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;Description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;Lua orchestration&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="21"&gt;&lt;a href="#21" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;MaxMemoryMB&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;256&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;MaxExecutionTimeSeconds&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;300&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="22"&gt;&lt;a href="#22" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;AllowedTools&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;AllowedHosts&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="23"&gt;&lt;a href="#23" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;FileSandbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;ref&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;project&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="24"&gt;&lt;a href="#24" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;SystemToolbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="25"&gt;&lt;a href="#25" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;system&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;Description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;System context&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="26"&gt;&lt;a href="#26" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;Capabilities&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;attach-file&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="27"&gt;&lt;a href="#27" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;FileSandbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;ref&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;scratch&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="28"&gt;&lt;a href="#28" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="ot"&gt;]&lt;/span&gt;&lt;/span&gt;
+&lt;span id="29"&gt;&lt;a href="#29" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="30"&gt;&lt;a href="#30" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;The value of &lt;code&gt;FileSandbox&lt;/code&gt; is therefore one of two things:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Form&lt;/th&gt;&lt;th&gt;JSON&lt;/th&gt;&lt;th&gt;Meaning&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Inline&lt;/td&gt;&lt;td&gt;&lt;code&gt;{"fsbPredicate": ..., "fsbMaxFileSize": ..., "fsbName": ...}&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The sandbox itself, as before. Existing agent files need no change.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Reference&lt;/td&gt;&lt;td&gt;&lt;code&gt;{"ref": "project"}&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The sandbox declared as &lt;code&gt;project&lt;/code&gt; in this agent's &lt;code&gt;fileSandboxes&lt;/code&gt;.&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;Rules:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Resolution happens when the agent’s toolboxes are loaded.&lt;/strong&gt; Each reference
+is replaced by the named definition, and the toolbox then behaves exactly as
+if the definition had been written inline.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;An undeclared name is an error&lt;/strong&gt;, not an empty sandbox: the agent fails to
+load with a message naming the toolbox and the missing sandbox, and
+&lt;code&gt;validate-agent&lt;/code&gt; reports it too.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;ref&lt;/code&gt; stands alone.&lt;/strong&gt; An object carrying both &lt;code&gt;ref&lt;/code&gt; and inline fields is
+refused, so that a sandbox is never silently widened or narrowed at the
+place it is used.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;The name is the default &lt;code&gt;fsbName&lt;/code&gt;.&lt;/strong&gt; A referenced sandbox that sets no
+&lt;code&gt;fsbName&lt;/code&gt; is named after its key in &lt;code&gt;fileSandboxes&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Each toolbox gets its own sandbox instance&lt;/strong&gt; built from the shared
+definition: the rules are shared, nothing else is.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;fileSandboxes&lt;/code&gt; is optional; an agent without it loads as before.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;What this does and does not do.&lt;/strong&gt; Naming a sandbox changes where the rules
+are written, not what is enforced. The enforcement is the one described in
+this section: a path predicate and a size limit checked by the builtin tools
+that take a &lt;code&gt;FileSandbox&lt;/code&gt; (&lt;code&gt;attach-file&lt;/code&gt; and &lt;code&gt;list-directory&lt;/code&gt; in the System
+Toolbox, the file capabilities of the Developer Toolbox, the Lua &lt;code&gt;fs&lt;/code&gt; module).
+It is not an operating-system sandbox: bash tools, MCP servers,
+&lt;code&gt;execute-command&lt;/code&gt; and &lt;code&gt;build-command&lt;/code&gt; run as ordinary processes and are not
+confined by it.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Scope.&lt;/strong&gt; &lt;code&gt;fileSandboxes&lt;/code&gt; belongs to one agent file; a name declared in one
+agent is not visible from another, including its sub-agents. To share one
+definition across several agent files, use an &lt;a href="/agents-exe/docs-agent-templates.html"&gt;agent template&lt;/a&gt;
+library: define the sandbox once there and either pass it inline to each
+toolbox or put it in the &lt;code&gt;fileSandboxes&lt;/code&gt; of each agent.&lt;/p&gt;
+&lt;h4 id="pathpredicate-dsl"&gt;PathPredicate DSL&lt;/h4&gt;
 &lt;p&gt;The &lt;code&gt;PathPredicate&lt;/code&gt; DSL provides a rich, composable language for defining file access permissions:&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="kw"&gt;data&lt;/span&gt; &lt;span class="dt"&gt;PathPredicate&lt;/span&gt;&lt;/span&gt;
 &lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="ot"&gt;=&lt;/span&gt; &lt;span class="dt"&gt;FileExactly&lt;/span&gt; &lt;span class="dt"&gt;FilePath&lt;/span&gt;              &lt;span class="co"&gt;-- Exact file match&lt;/span&gt;&lt;/span&gt;
@@ -3161,7 +3386,7 @@ When &lt;code&gt;CommandFilter&lt;/code&gt; is configured, every command is firs
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;SessionIntrospectionScope&lt;/code&gt;&lt;/td&gt;&lt;td&gt;string?&lt;/td&gt;&lt;td&gt;Scope of accessible sessions (default: "subtree")&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;SessionIntrospectionMaxResults&lt;/code&gt;&lt;/td&gt;&lt;td&gt;number?&lt;/td&gt;&lt;td&gt;Max sessions to return (default: 50)&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;SessionIntrospectionIncludeToolOutputs&lt;/code&gt;&lt;/td&gt;&lt;td&gt;boolean?&lt;/td&gt;&lt;td&gt;Include tool outputs in read operations (default: true)&lt;/td&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;code&gt;FileSandbox&lt;/code&gt;&lt;/td&gt;&lt;td&gt;object?&lt;/td&gt;&lt;td&gt;File sandbox for attach-file/list-directory capabilities (default: deny all)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;FileSandbox&lt;/code&gt;&lt;/td&gt;&lt;td&gt;object?&lt;/td&gt;&lt;td&gt;File sandbox for attach-file/list-directory capabilities (default: deny all); inline or &lt;code&gt;{"ref": name}&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;CommandFilter&lt;/code&gt;&lt;/td&gt;&lt;td&gt;string?&lt;/td&gt;&lt;td&gt;Optional command approval filter for execute-command&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
 &lt;h4 id="security-considerations"&gt;Security Considerations&lt;/h4&gt;
@@ -3704,7 +3929,7 @@ When a context mismatch occurs, the error includes both expected and actual line
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;MaxExecutionTimeSeconds&lt;/code&gt;&lt;/td&gt;&lt;td&gt;integer&lt;/td&gt;&lt;td&gt;Maximum script execution time in seconds&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;AllowedTools&lt;/code&gt;&lt;/td&gt;&lt;td&gt;[string]&lt;/td&gt;&lt;td&gt;Whitelist of tool names Lua scripts can call via the portal&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;AllowedHosts&lt;/code&gt;&lt;/td&gt;&lt;td&gt;[string]&lt;/td&gt;&lt;td&gt;Whitelist of network hosts accessible to Lua HTTP module&lt;/td&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;code&gt;FileSandbox&lt;/code&gt;&lt;/td&gt;&lt;td&gt;object?&lt;/td&gt;&lt;td&gt;File sandbox configuration for Lua &lt;code&gt;fs&lt;/code&gt; module&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;FileSandbox&lt;/code&gt;&lt;/td&gt;&lt;td&gt;object?&lt;/td&gt;&lt;td&gt;File sandbox configuration for Lua &lt;code&gt;fs&lt;/code&gt; module; inline or &lt;code&gt;{"ref": name}&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
 &lt;h4 id="file-sandbox-for-lua"&gt;File Sandbox for Lua&lt;/h4&gt;
 &lt;p&gt;The Lua &lt;code&gt;fs&lt;/code&gt; module uses the unified file sandbox system. When &lt;code&gt;FileSandbox&lt;/code&gt; is configured, all filesystem operations (&lt;code&gt;fs.read&lt;/code&gt;, &lt;code&gt;fs.write&lt;/code&gt;, &lt;code&gt;fs.list&lt;/code&gt;, etc.) are validated against the sandbox.&lt;/p&gt;
@@ -3730,7 +3955,7 @@ Use &lt;code&gt;FileSandbox&lt;/code&gt; instead:&lt;/p&gt;
 &lt;span id="17"&gt;&lt;a href="#17" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h4 id="security-features-1"&gt;Security Features&lt;/h4&gt;
 &lt;p&gt;The Lua toolbox provides a sandboxed execution environment:&lt;/p&gt;
 &lt;ul&gt;
-&lt;li&gt;&lt;strong&gt;Memory limits&lt;/strong&gt;: Lua state memory is constrained via allocator hooks
+&lt;li&gt;&lt;strong&gt;Memory limits&lt;/strong&gt;: a script whose Lua heap grows past &lt;code&gt;MaxMemoryMB&lt;/code&gt; fails with a memory-limit error (&lt;code&gt;0&lt;/code&gt; disables the limit)
 &lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Timeout enforcement&lt;/strong&gt;: Scripts that exceed &lt;code&gt;MaxExecutionTimeSeconds&lt;/code&gt; are terminated
 &lt;/li&gt;
@@ -4537,7 +4762,7 @@ Simply use the module name directly (e.g., &lt;code&gt;json.encode()&lt;/code&gt
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.FileSandbox.Predicate&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Path predicate DSL&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.OS.Events&lt;/code&gt;&lt;/td&gt;&lt;td&gt;OS event types for subcall visibility&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-tools.html" rel="alternate"/><summary type="text">The tool system provides agents with the ability to execute external commands, call APIs, and interact with other agents. Tools are dynamically registered and exposed to the LLM via the OpenAI function calling API. ## Overview ``` ┌──</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-OS.html</id><title type="text">OS Model Migration Guide</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/MIGRATION-OS.md"&gt;&lt;code&gt;documentation/MIGRATION-OS.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-tools.html" rel="alternate"/><summary type="text">The tool system provides agents with the ability to execute external commands, call APIs, and interact with other agents. Tools are dynamically registered and exposed to the LLM via the OpenAI function calling API. ## Overview ``` ┌──</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-OS.html</id><title type="text">OS Model Migration Guide</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/MIGRATION-OS.md"&gt;&lt;code&gt;documentation/MIGRATION-OS.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="os-model-migration-guide"&gt;OS Model Migration Guide&lt;/h2&gt;
 &lt;p&gt;Complete migration guide for transitioning from the legacy Runtime-based architecture to the new ECS-based OS Model.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -4965,7 +5190,7 @@ Simply use the module name directly (e.g., &lt;code&gt;json.encode()&lt;/code&gt
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;p&gt;For new code, use the OS Model directly. For legacy code, use the compatibility layer during migration.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-OS.html" rel="alternate"/><summary type="text">Complete migration guide for transitioning from the legacy Runtime-based architecture to the new ECS-based OS Model. ## Overview The Agents framework has migrated from a **Runtime-per-agent** model to an **Entity-Component-System (ECS)** ar</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html</id><title type="text">OS Model API Reference</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/OS-API.md"&gt;&lt;code&gt;documentation/OS-API.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-OS.html" rel="alternate"/><summary type="text">Complete migration guide for transitioning from the legacy Runtime-based architecture to the new ECS-based OS Model. ## Overview The Agents framework has migrated from a **Runtime-per-agent** model to an **Entity-Component-System (ECS)** ar</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html</id><title type="text">OS Model API Reference</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/OS-API.md"&gt;&lt;code&gt;documentation/OS-API.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="os-model-api-reference"&gt;OS Model API Reference&lt;/h2&gt;
 &lt;p&gt;Complete API reference for the Entity-Component-System (ECS) based OS architecture.&lt;/p&gt;
 &lt;h3 id="table-of-contents"&gt;Table of Contents&lt;/h3&gt;
@@ -5771,7 +5996,7 @@ failure, so it is not surfaced as one); see &lt;code&gt;documentation/tui.md&lt;
 &lt;li&gt;&lt;code&gt;EntityQuery&lt;/code&gt; - Query specification
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html" rel="alternate"/><summary type="text">Complete API reference for the Entity-Component-System (ECS) based OS architecture. ## Table of Contents 1. [Core ECS Types](#core-ecs-types) 2. [World Operations](#world-operations) 3. [Agent Operations](#agent-operations) 4. [Toolbox Oper</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html</id><title type="text">Durable Workflows How-To</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/durable-workflows-howto.md"&gt;&lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html" rel="alternate"/><summary type="text">Complete API reference for the Entity-Component-System (ECS) based OS architecture. ## Table of Contents 1. [Core ECS Types](#core-ecs-types) 2. [World Operations](#world-operations) 3. [Agent Operations](#agent-operations) 4. [Toolbox Oper</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html</id><title type="text">Durable Workflows How-To</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/durable-workflows-howto.md"&gt;&lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="durable-workflows-how-to"&gt;Durable Workflows How-To&lt;/h2&gt;
 &lt;p&gt;This guide shows how to exercise and extend the durable-workflow features in
 &lt;code&gt;agents-exe&lt;/code&gt;.  Durable workflows let an agent turn pause after some tool calls,
@@ -6071,7 +6296,7 @@ with progress, cancellation and partial answers.
 and live events.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html" rel="alternate"/><summary type="text">This guide shows how to exercise and extend the durable-workflow features in `agents-exe`. Durable workflows let an agent turn pause after some tool calls, persist its state, and resume later when external results arrive. The canonical exam</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html</id><title type="text">Asynchronous Tool Calls</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/async-tool-calls.md"&gt;&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html" rel="alternate"/><summary type="text">This guide shows how to exercise and extend the durable-workflow features in `agents-exe`. Durable workflows let an agent turn pause after some tool calls, persist its state, and resume later when external results arrive. The canonical exam</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html</id><title type="text">Asynchronous Tool Calls</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/async-tool-calls.md"&gt;&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="asynchronous-tool-calls"&gt;Asynchronous Tool Calls&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/async-tool-call.dot.png" alt="One tool call in asynchronous mode: a placeholder while it runs, a notice when it finishes." /&gt;&lt;/p&gt;
 &lt;p&gt;By default an agent runs every tool call of a turn one after another and only
@@ -6234,7 +6459,7 @@ repeats it once.
 limit built with &lt;code&gt;newAsyncConcurrencyLimit&lt;/code&gt; between their engines.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html" rel="alternate"/><summary type="text">By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-ai-assistant-guidelines.html</id><title type="text">AI Assistant Guidelines - Agents Framework</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ai-assistant-guidelines.md"&gt;&lt;code&gt;documentation/ai-assistant-guidelines.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html" rel="alternate"/><summary type="text">By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-ai-assistant-guidelines.html</id><title type="text">AI Assistant Guidelines - Agents Framework</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ai-assistant-guidelines.md"&gt;&lt;code&gt;documentation/ai-assistant-guidelines.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="ai-assistant-guidelines---agents-framework"&gt;AI Assistant Guidelines - Agents Framework&lt;/h2&gt;
 &lt;p&gt;This document provides guidance for AI assistants (including future instances of myself) working on the Agents framework codebase.&lt;/p&gt;
 &lt;h3 id="quick-start-for-ai-assistants"&gt;Quick Start for AI Assistants&lt;/h3&gt;
@@ -6548,7 +6773,7 @@ limit built with &lt;code&gt;newAsyncConcurrencyLimit&lt;/code&gt; between their
 &lt;/table&gt;
 &lt;hr /&gt;
 &lt;p&gt;Remember: This documentation is for AI assistants. Keep it practical, specific to this codebase, and actionable.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-ai-assistant-guidelines.html" rel="alternate"/><summary type="text">This document provides guidance for AI assistants (including future instances of myself) working on the Agents framework codebase. ## Quick Start for AI Assistants ### First Steps When invoked on this codebase, always: 1. **Check the knowle</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sqq-flow.html</id><title type="text">SQQ Agent Flow Documentation</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-flow.md"&gt;&lt;code&gt;documentation/sqq-flow.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-ai-assistant-guidelines.html" rel="alternate"/><summary type="text">This document provides guidance for AI assistants (including future instances of myself) working on the Agents framework codebase. ## Quick Start for AI Assistants ### First Steps When invoked on this codebase, always: 1. **Check the knowle</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sqq-flow.html</id><title type="text">SQQ Agent Flow Documentation</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-flow.md"&gt;&lt;code&gt;documentation/sqq-flow.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="sqq-agent-flow-documentation"&gt;SQQ Agent Flow Documentation&lt;/h2&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
 &lt;p&gt;The &lt;code&gt;sqq-agent.sh&lt;/code&gt; is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests with the results.&lt;/p&gt;
@@ -6753,7 +6978,7 @@ limit built with &lt;code&gt;newAsyncConcurrencyLimit&lt;/code&gt; between their
 &lt;li&gt;&lt;strong&gt;Critical:&lt;/strong&gt; &lt;code&gt;GITHUB_USERNAME&lt;/code&gt; environment variable filters GitHub issues by author to prevent processing malicious issues from third parties on public repositories. Default is &lt;code&gt;lucasdicioccio&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-flow.html" rel="alternate"/><summary type="text">## Overview The `sqq-agent.sh` is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html</id><title type="text">Adding New Executable-Program Tools</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/binary-tool.md"&gt;&lt;code&gt;documentation/binary-tool.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-flow.html" rel="alternate"/><summary type="text">## Overview The `sqq-agent.sh` is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html</id><title type="text">Adding New Executable-Program Tools</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/binary-tool.md"&gt;&lt;code&gt;documentation/binary-tool.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="adding-new-executable-program-tools"&gt;Adding New Executable-Program Tools&lt;/h2&gt;
 &lt;p&gt;Executable-program tools (also called “bash tools”) are external programs that &lt;code&gt;agents-exe&lt;/code&gt; can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, probing the network, or interacting with external APIs.&lt;/p&gt;
 &lt;h3 id="tool-protocol-overview"&gt;Tool Protocol Overview&lt;/h3&gt;
@@ -7038,7 +7263,7 @@ limit built with &lt;code&gt;newAsyncConcurrencyLimit&lt;/code&gt; between their
 &lt;li&gt;Comparing internal vs. LLM-facing representations
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html" rel="alternate"/><summary type="text">Executable-program tools (also called \"bash tools\") are external programs that `agents-exe` can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, pro</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-README.html</id><title type="text">Agents - AI Agent Framework</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/README.md"&gt;&lt;code&gt;documentation/README.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html" rel="alternate"/><summary type="text">Executable-program tools (also called \"bash tools\") are external programs that `agents-exe` can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, pro</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-README.html</id><title type="text">Agents - AI Agent Framework</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/README.md"&gt;&lt;code&gt;documentation/README.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="agents---ai-agent-framework"&gt;Agents - AI Agent Framework&lt;/h2&gt;
 &lt;p&gt;A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -7235,7 +7460,7 @@ including a runnable mock-LLM demonstrator.&lt;/p&gt;
 &lt;/ol&gt;
 &lt;h3 id="license"&gt;License&lt;/h3&gt;
 &lt;p&gt;See the project LICENSE file for details.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-README.html" rel="alternate"/><summary type="text">A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations. ## Overview The Agents framework provides a complete infrastructure for: - **Agent Definition**</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-export-import.html</id><title type="text">Export/Import</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/export-import.md"&gt;&lt;code&gt;documentation/export-import.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-README.html" rel="alternate"/><summary type="text">A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations. ## Overview The Agents framework provides a complete infrastructure for: - **Agent Definition**</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-export-import.html</id><title type="text">Export/Import</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/export-import.md"&gt;&lt;code&gt;documentation/export-import.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="exportimport"&gt;Export/Import&lt;/h2&gt;
 &lt;p&gt;&lt;strong&gt;Status: Removed&lt;/strong&gt;&lt;/p&gt;
 &lt;p&gt;The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we’re taking another approach (see issue #339).&lt;/p&gt;
@@ -7309,7 +7534,7 @@ including a runnable mock-LLM demonstrator.&lt;/p&gt;
 &lt;p&gt;&lt;strong&gt;Configuration management&lt;/strong&gt;: Use tools like Ansible, Chef, or simple shell scripts&lt;/p&gt;
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-export-import.html" rel="alternate"/><summary type="text">**Status: Removed** The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we're taking another approach (see issue &amp;#35;339). ## Alternatives For sharing agents and tools, consider these alternati</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-mcp.html</id><title type="text">MCP Protocol</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/mcp.md"&gt;&lt;code&gt;documentation/mcp.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-export-import.html" rel="alternate"/><summary type="text">**Status: Removed** The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we're taking another approach (see issue &amp;#35;339). ## Alternatives For sharing agents and tools, consider these alternati</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-mcp.html</id><title type="text">MCP Protocol</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/mcp.md"&gt;&lt;code&gt;documentation/mcp.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="mcp-protocol"&gt;MCP Protocol&lt;/h2&gt;
 &lt;p&gt;The Model Context Protocol (MCP) integration allows agents to connect to external servers that provide dynamic tool listings and execution capabilities.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -7720,7 +7945,7 @@ names only, so a secret parameter does not leak through &lt;code&gt;ps&lt;/code&
 &lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;server&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;filesystem&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
 &lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;val&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;x&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;tool-call-start&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;read_file&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
 &lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
-&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-mcp.html" rel="alternate"/><summary type="text">The Model Context Protocol (MCP) integration allows agents to connect to external servers that provide dynamic tool listings and execution capabilities. ## Overview MCP is a protocol for model context exchange that enables: - **Dynamic tool</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html</id><title type="text">CLI Reference</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/cli-commands.md"&gt;&lt;code&gt;documentation/cli-commands.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-mcp.html" rel="alternate"/><summary type="text">The Model Context Protocol (MCP) integration allows agents to connect to external servers that provide dynamic tool listings and execution capabilities. ## Overview MCP is a protocol for model context exchange that enables: - **Dynamic tool</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html</id><title type="text">CLI Reference</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/cli-commands.md"&gt;&lt;code&gt;documentation/cli-commands.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="cli-reference"&gt;CLI Reference&lt;/h2&gt;
 &lt;p&gt;Complete reference for the Agents CLI commands and options.&lt;/p&gt;
 &lt;h3 id="global-options"&gt;Global Options&lt;/h3&gt;
@@ -7937,23 +8162,28 @@ running &lt;code&gt;agents-exe serve&lt;/code&gt;/&lt;code&gt;agents-server&lt;/
 &lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; tui &lt;span class="at"&gt;--attach&lt;/span&gt; unix:///run/agents/agents.sock&lt;/span&gt;
 &lt;span id="13"&gt;&lt;a href="#13" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; tui &lt;span class="at"&gt;--attach&lt;/span&gt; https://agents.example &lt;span class="at"&gt;--token-file&lt;/span&gt; ~/.agents-token&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h4 id="spectate"&gt;spectate&lt;/h4&gt;
 &lt;p&gt;Watch a running server: a read-only, live dashboard.&lt;/p&gt;
-&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; spectate &lt;span class="at"&gt;--attach&lt;/span&gt; URL&lt;span class="kw"&gt;|&lt;/span&gt;&lt;span class="ex"&gt;PATH&lt;/span&gt; [--token TOKEN &lt;span class="kw"&gt;|&lt;/span&gt; &lt;span class="ex"&gt;--token-file&lt;/span&gt; FILE]&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;spectate&lt;/code&gt; is one more client of a running &lt;code&gt;agents-exe serve&lt;/code&gt;/&lt;code&gt;agents-server&lt;/code&gt;,
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; spectate &lt;span class="at"&gt;--attach&lt;/span&gt; URL&lt;span class="kw"&gt;|&lt;/span&gt;&lt;span class="ex"&gt;PATH&lt;/span&gt; [--token TOKEN &lt;span class="kw"&gt;|&lt;/span&gt; &lt;span class="ex"&gt;--token-file&lt;/span&gt; FILE]&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;                    &lt;span class="ex"&gt;[--panels&lt;/span&gt; SPEC] [--refresh SECONDS] [--layout-file FILE]&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;spectate&lt;/code&gt; is one more client of a running &lt;code&gt;agents-exe serve&lt;/code&gt;/&lt;code&gt;agents-server&lt;/code&gt;,
 like &lt;code&gt;tui --attach&lt;/code&gt;, except that it only reads: it follows the server’s
-event feed and changes nothing. It is made for watching one long run, on a
-fixed screen:&lt;/p&gt;
+event feed and changes nothing. It is made for watching one long run, in
+three panels:&lt;/p&gt;
 &lt;ul&gt;
-&lt;li&gt;&lt;strong&gt;agents&lt;/strong&gt; (top left): the tree of sessions and of the sub-agent calls
-they make, indented by depth, each with its state and for how long.
+&lt;li&gt;&lt;strong&gt;agents&lt;/strong&gt; (&lt;code&gt;tree&lt;/code&gt;; top left by default): the tree of sessions and of the
+sub-agent calls they make, indented by depth, each with its state and for
+how long.
 &lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;tool calls&lt;/strong&gt; (bottom left): the calls running now, with elapsed time
-and the latest progress a background call reported, then the ones that
-finished recently.
+&lt;li&gt;&lt;strong&gt;tool calls&lt;/strong&gt; (&lt;code&gt;tools&lt;/code&gt;; bottom left): the calls running now, with elapsed
+time and the latest progress a background call reported, then the ones
+that finished recently.
 &lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;text&lt;/strong&gt; (right): what the model writes in one session, with the user
-queries it answers. By default the pane follows the session that wrote
-last; selecting a row of the tree pins it to that session.
+&lt;li&gt;&lt;strong&gt;text&lt;/strong&gt; (&lt;code&gt;text&lt;/code&gt;; right): what the model writes in one session, with the
+user queries it answers. By default the panel follows the session that
+wrote last; selecting a row of the tree pins it to that session.
 &lt;/li&gt;
 &lt;/ul&gt;
+&lt;p&gt;Which panels show, where, how large, and how often the screen refreshes can
+be chosen on the command line and changed while running, as in &lt;code&gt;top&lt;/code&gt;: see
+&lt;a href="#spectate-layout"&gt;Layout&lt;/a&gt; below.&lt;/p&gt;
 &lt;p&gt;The events carry no timestamp, so every duration is measured by
 &lt;code&gt;spectate&lt;/code&gt; from the moment it received the event; a run that started
 before &lt;code&gt;spectate&lt;/code&gt; attached counts from the attach. Text arrives as the
@@ -7968,25 +8198,82 @@ attaches shows its text from its next turn on.&lt;/p&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--attach URL\|PATH&lt;/code&gt;&lt;/td&gt;&lt;td&gt;required&lt;/td&gt;&lt;td&gt;The server to watch. Same forms as &lt;code&gt;tui --attach&lt;/code&gt;: &lt;code&gt;http://HOST:PORT&lt;/code&gt;, &lt;code&gt;https://...&lt;/code&gt;, &lt;code&gt;unix:///path/to.sock&lt;/code&gt;, or a bare socket path.&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--token TOKEN&lt;/code&gt;&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;Bearer token, when the server runs with &lt;code&gt;--auth-tokens&lt;/code&gt;. &lt;code&gt;spectate&lt;/code&gt; then sees that owner's sessions only.&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--token-file FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;none&lt;/td&gt;&lt;td&gt;The same, read from a file.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--panels SPEC&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;tree:60+tools:40/45,text/55&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The panels shown, their places and sizes (see below).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--refresh SECONDS&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;1&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Time between two refreshes of the screen, from &lt;code&gt;0.1&lt;/code&gt; to &lt;code&gt;60&lt;/code&gt;; decimals are accepted (&lt;code&gt;0.5&lt;/code&gt;).&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--layout-file FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;~/.config/agents-exe/spectate-layout&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The saved layout: read at start when the file exists, written by the &lt;code&gt;W&lt;/code&gt; key.&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
+&lt;p&gt;&lt;a id="spectate-layout"&gt;&lt;/a&gt;
+&lt;strong&gt;Layout:&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;The screen is columns, left to right, each a stack of panels, top to
+bottom. &lt;code&gt;--panels&lt;/code&gt; describes it in one string:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;,&lt;/code&gt; separates columns, and &lt;code&gt;+&lt;/code&gt; the panels stacked in one column;
+&lt;/li&gt;
+&lt;li&gt;a panel is &lt;code&gt;tree&lt;/code&gt; (or &lt;code&gt;agents&lt;/code&gt;), &lt;code&gt;tools&lt;/code&gt; or &lt;code&gt;text&lt;/code&gt;; one that is not named
+is hidden, and none can be named twice;
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;:N&lt;/code&gt; after a panel is its share of its column’s height, and &lt;code&gt;/N&lt;/code&gt; after a
+column its share of the screen’s width. Shares go from 1 to 100, count
+relative to their neighbours, and are 50 when left out.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;--panels&lt;/span&gt; tree,tools,text               &lt;span class="co"&gt;# three equal columns&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;--panels&lt;/span&gt; text                          &lt;span class="co"&gt;# only the text&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;--panels&lt;/span&gt; tree+tools+text               &lt;span class="co"&gt;# one stack&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;--panels&lt;/span&gt; text/70,tree:30+tools:70/30   &lt;span class="co"&gt;# text on the left, wide&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;Between two refreshes the events received wait, and the durations stand
+still: a longer interval makes a busy run calmer to read, a shorter one
+more live. Durations are still counted from when each event was received.&lt;/p&gt;
+&lt;p&gt;The layout is remembered only when asked, as &lt;code&gt;top&lt;/code&gt; does with &lt;code&gt;W&lt;/code&gt;: the &lt;code&gt;W&lt;/code&gt;
+key writes it to the layout file, and the next &lt;code&gt;spectate&lt;/code&gt; starts from that
+file. &lt;code&gt;--panels&lt;/code&gt; and &lt;code&gt;--refresh&lt;/code&gt; each go over what the file says, so a
+scripted layout (for a screenshot, say) is the same whatever was saved. A
+layout file that cannot be read is an error, not a layout silently dropped.
+The file holds what the flags take:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;panels tree:60+tools:40/45,text/55
+refresh 1
+&lt;/code&gt;&lt;/pre&gt;
 &lt;p&gt;&lt;strong&gt;Keyboard Shortcuts:&lt;/strong&gt;&lt;/p&gt;
 &lt;ul&gt;
-&lt;li&gt;&lt;code&gt;Up&lt;/code&gt; / &lt;code&gt;Down&lt;/code&gt; (or &lt;code&gt;k&lt;/code&gt; / &lt;code&gt;j&lt;/code&gt;) - Select a session in the tree; the text pane shows it
+&lt;li&gt;&lt;code&gt;Up&lt;/code&gt; / &lt;code&gt;Down&lt;/code&gt; (or &lt;code&gt;k&lt;/code&gt; / &lt;code&gt;j&lt;/code&gt;) - Select a session in the tree; the text panel shows it
 &lt;/li&gt;
 &lt;li&gt;&lt;code&gt;f&lt;/code&gt; - Follow the session that writes, again
 &lt;/li&gt;
 &lt;li&gt;&lt;code&gt;PgUp&lt;/code&gt; / &lt;code&gt;PgDn&lt;/code&gt; - Scroll the text
 &lt;/li&gt;
+&lt;li&gt;&lt;code&gt;1&lt;/code&gt; / &lt;code&gt;2&lt;/code&gt; / &lt;code&gt;3&lt;/code&gt; - Show or hide the agents, tool calls, text panel (the last one shown stays); a panel that comes back is a new last column
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;Tab&lt;/code&gt; / &lt;code&gt;Shift+Tab&lt;/code&gt; - Choose the panel the next keys act on; its title is in brackets
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;&amp;lt;&lt;/code&gt; / &lt;code&gt;&amp;gt;&lt;/code&gt; - Exchange it with the panel before or after
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;[&lt;/code&gt; / &lt;code&gt;]&lt;/code&gt; - Narrow or widen its column
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;-&lt;/code&gt; / &lt;code&gt;+&lt;/code&gt; - Shorten or heighten it in its column
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;s&lt;/code&gt; - Stack it under the column before, or give it a column of its own
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;0&lt;/code&gt; - Back to the layout at start
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;d&lt;/code&gt; / &lt;code&gt;D&lt;/code&gt; - Longer or shorter refresh interval (0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60 seconds)
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;W&lt;/code&gt; - Save the layout to the layout file
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;?&lt;/code&gt; or &lt;code&gt;h&lt;/code&gt; - Show the keys, and the &lt;code&gt;--panels&lt;/code&gt;/&lt;code&gt;--refresh&lt;/code&gt; flags that reproduce the layout on screen
+&lt;/li&gt;
 &lt;li&gt;&lt;code&gt;q&lt;/code&gt;, &lt;code&gt;Esc&lt;/code&gt; or &lt;code&gt;Ctrl+C&lt;/code&gt; - Quit (the runs go on)
 &lt;/li&gt;
 &lt;/ul&gt;
+&lt;p&gt;No key sends anything to the server or to the agents.&lt;/p&gt;
 &lt;p&gt;&lt;strong&gt;Examples:&lt;/strong&gt;&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# In one terminal: a server, and a TUI or any other client driving it&lt;/span&gt;&lt;/span&gt;
 &lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; serve &lt;span class="at"&gt;--socket&lt;/span&gt; /run/agents/agents.sock &lt;span class="at"&gt;--stream-tokens&lt;/span&gt;&lt;/span&gt;
 &lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; tui &lt;span class="at"&gt;--attach&lt;/span&gt; /run/agents/agents.sock&lt;/span&gt;
 &lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
 &lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# In another: watch&lt;/span&gt;&lt;/span&gt;
-&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; spectate &lt;span class="at"&gt;--attach&lt;/span&gt; /run/agents/agents.sock&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;A TUI started without &lt;code&gt;--attach&lt;/code&gt; runs its agents in its own process and
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; spectate &lt;span class="at"&gt;--attach&lt;/span&gt; /run/agents/agents.sock&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# The same, as three columns refreshed twice a second&lt;/span&gt;&lt;/span&gt;
+&lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; spectate &lt;span class="at"&gt;--attach&lt;/span&gt; /run/agents/agents.sock &lt;span class="at"&gt;--panels&lt;/span&gt; tree,tools,text &lt;span class="at"&gt;--refresh&lt;/span&gt; 0.5&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;A TUI started without &lt;code&gt;--attach&lt;/code&gt; runs its agents in its own process and
 exposes no endpoint, so there is nothing for &lt;code&gt;spectate&lt;/code&gt; to attach to: run
 &lt;code&gt;agents-exe serve&lt;/code&gt; and attach both.&lt;/p&gt;
 &lt;h4 id="mcp-server"&gt;mcp-server&lt;/h4&gt;
@@ -8347,6 +8634,8 @@ not repeated below.&lt;/p&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--no-ui&lt;/code&gt;&lt;/td&gt;&lt;td&gt;off&lt;/td&gt;&lt;td&gt;Do not serve the chat page at &lt;code&gt;/&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--cors-origin ORIGIN&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Allow this origin to call the server cross-origin; repeatable, or &lt;code&gt;*&lt;/code&gt; for any (needs no &lt;code&gt;--auth-tokens&lt;/code&gt;)&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;--socket PATH&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Also listen on this Unix domain socket, in addition to &lt;code&gt;--bind&lt;/code&gt;/&lt;code&gt;--port&lt;/code&gt;; created &lt;code&gt;0600&lt;/code&gt;, a stale file removed at start, closed and unlinked on shutdown. The socket is the local trust boundary: no &lt;code&gt;Origin&lt;/code&gt;, no bearer token beyond &lt;code&gt;--auth-tokens&lt;/code&gt;.&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--owner-api-keys OWNER=FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;This owner's sessions call the LLM with the keys in &lt;code&gt;FILE&lt;/code&gt; instead of the shared ones; repeatable (needs &lt;code&gt;--auth-tokens&lt;/code&gt;)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--isolate-tools docker:IMAGE\|process:PATH&lt;/code&gt;&lt;/td&gt;&lt;td&gt;(none)&lt;/td&gt;&lt;td&gt;Run bash and MCP tool calls outside the server, in a worker you provide&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
 &lt;p&gt;See &lt;a href="/agents-exe/docs-agents-server.html"&gt;agents-server.md&lt;/a&gt; for everything the running server
 does (the HTTP API, sessions, deferred calls, CORS, authentication, running
@@ -8402,54 +8691,121 @@ Please correct these issues and try again.
 &lt;p&gt;Create scaffolding for new agents or tools.&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new &lt;span class="er"&gt;(&lt;/span&gt;&lt;span class="ex"&gt;agent&lt;/span&gt;&lt;span class="kw"&gt;|&lt;/span&gt;&lt;span class="ex"&gt;tool&lt;/span&gt;&lt;span class="kw"&gt;)&lt;/span&gt; &lt;span class="ex"&gt;[OPTIONS]&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h5 id="new-agent"&gt;new agent&lt;/h5&gt;
 &lt;p&gt;Create a new agent configuration file from a template.&lt;/p&gt;
-&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent SLUG &lt;span class="pp"&gt;[&lt;/span&gt;&lt;span class="ss"&gt;FILE&lt;/span&gt;&lt;span class="pp"&gt;]&lt;/span&gt; &lt;span class="pp"&gt;[&lt;/span&gt;&lt;span class="ss"&gt;MODEL&lt;/span&gt;&lt;span class="pp"&gt;]&lt;/span&gt; &lt;span class="pp"&gt;[&lt;/span&gt;&lt;span class="ss"&gt;OPTIONS&lt;/span&gt;&lt;span class="pp"&gt;]&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;Arguments:&lt;/strong&gt;&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent SLUG FILE &lt;span class="pp"&gt;[&lt;/span&gt;&lt;span class="ss"&gt;MODEL&lt;/span&gt;&lt;span class="pp"&gt;]&lt;/span&gt; &lt;span class="pp"&gt;[&lt;/span&gt;&lt;span class="ss"&gt;OPTIONS&lt;/span&gt;&lt;span class="pp"&gt;]&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;Arguments:&lt;/strong&gt;&lt;/p&gt;
 &lt;table&gt;
 &lt;tr&gt;&lt;th&gt;Argument&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;SLUG&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Unique identifier for the agent&lt;/td&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;code&gt;FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Output file path (default: &lt;code&gt;./{slug}.json&lt;/code&gt;)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Output file path&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;MODEL&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Model name (e.g., gpt-4o, mistral-large). The provider preset is inferred from the model catalog.&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
 &lt;p&gt;&lt;strong&gt;Options:&lt;/strong&gt;&lt;/p&gt;
 &lt;table&gt;
 &lt;tr&gt;&lt;th&gt;Option&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;
-&lt;tr&gt;&lt;td&gt;&lt;code&gt;-f, --force&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Overwrite existing file&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--add-to-config&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Add the agent to the &lt;code&gt;agentsFiles&lt;/code&gt; of &lt;code&gt;agents-exe.cfg.json&lt;/code&gt; when it is not listed there, without asking&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;--no-add-to-config&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Never modify &lt;code&gt;agents-exe.cfg.json&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;-f, --force&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Overwrite existing file (given before the subcommand: &lt;code&gt;agents-exe new --force agent ...&lt;/code&gt;)&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
 &lt;p&gt;Provider presets (URL, default model, API key ID) are selected automatically
 based on the model name. Use &lt;code&gt;agents-exe new models list&lt;/code&gt; to see the built-in
 model patterns and &lt;code&gt;agents-exe new models init&lt;/code&gt; to customize them locally.&lt;/p&gt;
 &lt;p&gt;&lt;strong&gt;Examples:&lt;/strong&gt;&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# Create agent with the default OpenAI preset&lt;/span&gt;&lt;/span&gt;
-&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent my-assistant&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent my-assistant ./my-assistant.json&lt;/span&gt;
 &lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
 &lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# Create agent with custom model (preset inferred from the catalog)&lt;/span&gt;&lt;/span&gt;
-&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent coder &lt;span class="at"&gt;--model&lt;/span&gt; gpt-4o&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent coder ./coder.json gpt-4o&lt;/span&gt;
 &lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
-&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# Create agent with custom output path&lt;/span&gt;&lt;/span&gt;
-&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent my-assistant ./agents/assistant.json&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# Create agent in a subdirectory and list it in agents-exe.cfg.json&lt;/span&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent my-assistant ./agents/assistant.json &lt;span class="at"&gt;--add-to-config&lt;/span&gt;&lt;/span&gt;
 &lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
 &lt;span id="10"&gt;&lt;a href="#10" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# Overwrite existing&lt;/span&gt;&lt;/span&gt;
-&lt;span id="11"&gt;&lt;a href="#11" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent my-assistant &lt;span class="at"&gt;--force&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;Generated agent file:&lt;/strong&gt;&lt;/p&gt;
+&lt;span id="11"&gt;&lt;a href="#11" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new &lt;span class="at"&gt;--force&lt;/span&gt; agent my-assistant ./my-assistant.json&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;What a new agent can do:&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;A new agent works on the directory it is started from:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Toolbox&lt;/th&gt;&lt;th&gt;Gives the agent&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;developer&lt;/code&gt; (DeveloperToolbox)&lt;/td&gt;&lt;td&gt;Reading and editing files (&lt;code&gt;read-file-range&lt;/code&gt;, &lt;code&gt;write-file-range&lt;/code&gt;, &lt;code&gt;patch-file&lt;/code&gt;), and the agent/tool scaffolding helpers&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;system&lt;/code&gt; (SystemToolbox)&lt;/td&gt;&lt;td&gt;The working directory and directory listings (&lt;code&gt;working-directory&lt;/code&gt;, &lt;code&gt;list-directory&lt;/code&gt;)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;memory&lt;/code&gt; (SqliteToolbox)&lt;/td&gt;&lt;td&gt;A read-write SQLite database, &lt;code&gt;./{slug}-memory.sqlite&lt;/code&gt;, created on first use&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;File access is limited by one file sandbox, &lt;code&gt;workspace&lt;/code&gt;, declared in the
+agent’s &lt;code&gt;fileSandboxes&lt;/code&gt; and shared by the &lt;code&gt;developer&lt;/code&gt; and &lt;code&gt;system&lt;/code&gt; toolboxes.
+It allows reading and writing &lt;code&gt;./&lt;/code&gt; and everything below it, where &lt;code&gt;./&lt;/code&gt; is the
+directory the agent runs in (not the directory of the agent file). Edit its
+&lt;code&gt;fsbPredicate&lt;/code&gt; to narrow or widen what the agent may touch; see
+&lt;a href="/agents-exe/docs-tools.html"&gt;Tools&lt;/a&gt; for the predicates.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Generated agent file:&lt;/strong&gt;&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
-&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;agent&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
-&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;slug&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;my-assistant&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;apiKeyId&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;main-key&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;flavor&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;OpenAIv1&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;modelUrl&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;https://api.openai.com/v1&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;modelName&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;gpt-4-turbo-preview&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;announce&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;a helpful assistant powered by gpt-4-turbo-preview&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;systemPrompt&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;/span&gt;
-&lt;span id="10"&gt;&lt;a href="#10" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="st"&gt;&amp;quot;You are my-assistant, a helpful AI assistant.&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="11"&gt;&lt;a href="#11" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="st"&gt;&amp;quot;You provide clear, accurate, and concise responses.&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="st"&gt;&amp;quot;When using tools, you explain your actions to the user.&amp;quot;&lt;/span&gt;&lt;/span&gt;
-&lt;span id="13"&gt;&lt;a href="#13" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="14"&gt;&lt;a href="#14" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;toolDirectory&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;tools&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="15"&gt;&lt;a href="#15" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;mcpServers&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="16"&gt;&lt;a href="#16" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;openApiToolboxes&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="kw"&gt;null&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="17"&gt;&lt;a href="#17" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;postgrestToolboxes&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="kw"&gt;null&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="18"&gt;&lt;a href="#18" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;builtinToolboxes&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="19"&gt;&lt;a href="#19" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;extraAgents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="kw"&gt;null&lt;/span&gt;&lt;/span&gt;
-&lt;span id="20"&gt;&lt;a href="#20" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
-&lt;span id="21"&gt;&lt;a href="#21" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h5 id="new-tool"&gt;new tool&lt;/h5&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;OpenAIAgentDescription&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;slug&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;my-assistant&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;apiKeyId&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;main-key&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;flavor&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;OpenAIv1&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;modelUrl&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;https://api.openai.com/v1&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;modelName&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;gpt-4-turbo-preview&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;announce&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;a helpful assistant powered by gpt-4-turbo-preview&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="10"&gt;&lt;a href="#10" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;systemPrompt&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;/span&gt;
+&lt;span id="11"&gt;&lt;a href="#11" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="st"&gt;&amp;quot;You are my-assistant, a helpful AI assistant.&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="st"&gt;&amp;quot;You provide clear, accurate, and concise responses.&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="13"&gt;&lt;a href="#13" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="st"&gt;&amp;quot;When using tools, you explain your actions to the user.&amp;quot;&lt;/span&gt;&lt;/span&gt;
+&lt;span id="14"&gt;&lt;a href="#14" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="15"&gt;&lt;a href="#15" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;toolDirectory&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;tools&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="16"&gt;&lt;a href="#16" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;mcpServers&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="17"&gt;&lt;a href="#17" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;fileSandboxes&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="18"&gt;&lt;a href="#18" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="dt"&gt;&amp;quot;workspace&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="19"&gt;&lt;a href="#19" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;fsbPredicate&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;DirectoryRecursive&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;./&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="20"&gt;&lt;a href="#20" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;fsbMaxFileSize&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;52428800&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="21"&gt;&lt;a href="#21" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;fsbName&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="kw"&gt;null&lt;/span&gt;&lt;/span&gt;
+&lt;span id="22"&gt;&lt;a href="#22" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="23"&gt;&lt;a href="#23" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="24"&gt;&lt;a href="#24" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;builtinToolboxes&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;/span&gt;
+&lt;span id="25"&gt;&lt;a href="#25" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="26"&gt;&lt;a href="#26" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;DeveloperToolbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="27"&gt;&lt;a href="#27" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="28"&gt;&lt;a href="#28" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;developer&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="29"&gt;&lt;a href="#29" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;Tools for developing agents and tools&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="30"&gt;&lt;a href="#30" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Capabilities&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;show-spec&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;validate-agent&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;create-agent&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;create-tool&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;read-file-range&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;write-file-range&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;patch-file&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="31"&gt;&lt;a href="#31" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;FileSandbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;ref&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;workspace&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="32"&gt;&lt;a href="#32" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="33"&gt;&lt;a href="#33" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="34"&gt;&lt;a href="#34" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="35"&gt;&lt;a href="#35" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;SystemToolbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="36"&gt;&lt;a href="#36" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="37"&gt;&lt;a href="#37" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;system&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="38"&gt;&lt;a href="#38" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;Working directory and directory listings&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="39"&gt;&lt;a href="#39" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Capabilities&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;working-directory&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;list-directory&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="40"&gt;&lt;a href="#40" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;FileSandbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;ref&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;workspace&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="41"&gt;&lt;a href="#41" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="42"&gt;&lt;a href="#42" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="43"&gt;&lt;a href="#43" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="44"&gt;&lt;a href="#44" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;SqliteToolbox&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="45"&gt;&lt;a href="#45" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="46"&gt;&lt;a href="#46" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;memory&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="47"&gt;&lt;a href="#47" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;Notes and facts to remember across conversations&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="48"&gt;&lt;a href="#48" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;          &lt;span class="dt"&gt;&amp;quot;Versioning&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;SqliteReadWrite&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;path&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;./my-assistant-memory.sqlite&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="49"&gt;&lt;a href="#49" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="50"&gt;&lt;a href="#50" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="51"&gt;&lt;a href="#51" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="ot"&gt;]&lt;/span&gt;&lt;/span&gt;
+&lt;span id="52"&gt;&lt;a href="#52" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="53"&gt;&lt;a href="#53" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;Listing the agent in &lt;code&gt;agents-exe.cfg.json&lt;/code&gt;:&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;After writing the file, &lt;code&gt;new agent&lt;/code&gt; looks for an &lt;code&gt;agents-exe.cfg.json&lt;/code&gt; (in the
+current directory, then upward) and reports whether the new agent is loaded by
+it, that is, named in &lt;code&gt;agentsFiles&lt;/code&gt; or sitting directly in one of the
+&lt;code&gt;agentsDirectories&lt;/code&gt;:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;listed: nothing else to do;
+&lt;/li&gt;
+&lt;li&gt;not listed, on an interactive terminal: it asks whether to add the file to
+&lt;code&gt;agentsFiles&lt;/code&gt; (default: no);
+&lt;/li&gt;
+&lt;li&gt;not listed, not interactive: it prints the entry to add. Pass
+&lt;code&gt;--add-to-config&lt;/code&gt; to add it without being asked, &lt;code&gt;--no-add-to-config&lt;/code&gt; to
+never be asked.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Adding the entry rewrites the config file as formatted JSON; every other field
+is kept. Without any &lt;code&gt;agents-exe.cfg.json&lt;/code&gt;, pass the file with &lt;code&gt;--agent-file&lt;/code&gt;
+or create a config with &lt;code&gt;agents-exe config local init&lt;/code&gt;.&lt;/p&gt;
+&lt;h5 id="new-tool"&gt;new tool&lt;/h5&gt;
 &lt;p&gt;Create a new tool script from a template.&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new tool SLUG LANGUAGE FILE &lt;span class="pp"&gt;[&lt;/span&gt;&lt;span class="ss"&gt;OPTIONS&lt;/span&gt;&lt;span class="pp"&gt;]&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;Arguments:&lt;/strong&gt;&lt;/p&gt;
 &lt;table&gt;
@@ -8519,7 +8875,56 @@ model patterns and &lt;code&gt;agents-exe new models init&lt;/code&gt; to custom
 &lt;li&gt;Test with: &lt;code&gt;agents-exe describe-tool ./tools/my-tool&lt;/code&gt;
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;h4 id="spec"&gt;spec&lt;/h4&gt;
+&lt;h4 id="config"&gt;config&lt;/h4&gt;
+&lt;p&gt;Configure agents-exe itself: the project config file, the TUI keymap and the
+API keys file, without writing their JSON by hand.&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config [-f&lt;span class="kw"&gt;|&lt;/span&gt;&lt;span class="ex"&gt;--force]&lt;/span&gt; &lt;span class="er"&gt;(&lt;/span&gt;&lt;span class="bu"&gt;local&lt;/span&gt;&lt;span class="kw"&gt;|&lt;/span&gt;&lt;span class="ex"&gt;keymap&lt;/span&gt;&lt;span class="kw"&gt;|&lt;/span&gt;&lt;span class="ex"&gt;api-key&lt;/span&gt;&lt;span class="kw"&gt;)&lt;/span&gt; &lt;span class="ex"&gt;...&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;Options:&lt;/strong&gt;&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Option&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;-f, --force&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Overwrite an existing file or API key entry. It belongs to &lt;code&gt;config&lt;/code&gt;, so it goes last: &lt;code&gt;agents-exe config local init --force&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;h5 id="config-local-init"&gt;config local init&lt;/h5&gt;
+&lt;p&gt;Create an &lt;code&gt;agents-exe.cfg.json&lt;/code&gt; in the current directory.&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config local init&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;The file is minimal: &lt;code&gt;agentsConfigDir&lt;/code&gt; pointing at &lt;code&gt;~/.config/agents-exe&lt;/code&gt; and
+an empty &lt;code&gt;agentsFiles&lt;/code&gt;. Add agents to &lt;code&gt;agentsFiles&lt;/code&gt; or &lt;code&gt;agentsDirectories&lt;/code&gt;
+(see &lt;a href="#configuration-file"&gt;Configuration File&lt;/a&gt;); &lt;code&gt;agents-exe new agent&lt;/code&gt; offers
+to do it for the agents it creates. Only the current directory is checked for
+an existing file, not its parents; an existing file is kept unless &lt;code&gt;--force&lt;/code&gt;
+is given.&lt;/p&gt;
+&lt;h5 id="config-keymap-init"&gt;config keymap init&lt;/h5&gt;
+&lt;p&gt;Write a keymap file holding the default TUI key bindings and input settings,
+as a starting point for customization.&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config keymap init FILE&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Argument&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;FILE&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Path where the keymap file is created (parent directories are created as needed)&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;Point the &lt;code&gt;keymap&lt;/code&gt; field of &lt;code&gt;agents-exe.cfg.json&lt;/code&gt; at the file to use it. An
+existing file is kept unless &lt;code&gt;--force&lt;/code&gt; is given.&lt;/p&gt;
+&lt;h5 id="config-api-key-list"&gt;config api-key list&lt;/h5&gt;
+&lt;p&gt;List the names of the configured API keys (never their values).&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config api-key list&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h5 id="config-api-key-create"&gt;config api-key create&lt;/h5&gt;
+&lt;p&gt;Add an entry to the API keys file with a placeholder value, to be replaced by
+the real key in an editor.&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config api-key create NAME&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Argument&lt;/th&gt;&lt;th&gt;Description&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;NAME&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Name of the key, as referenced by an agent's &lt;code&gt;apiKeyId&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;An existing entry of that name is kept unless &lt;code&gt;--force&lt;/code&gt; is given, in which
+case it is reset to the placeholder.&lt;/p&gt;
+&lt;p&gt;Both &lt;code&gt;api-key&lt;/code&gt; subcommands work on the &lt;code&gt;secret-keys&lt;/code&gt; file of the config
+directory (&lt;code&gt;~/.config/agents-exe/secret-keys&lt;/code&gt; by default), and create it empty
+if it does not exist. The global &lt;code&gt;--api-keys&lt;/code&gt; option does not redirect them.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Examples:&lt;/strong&gt;&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# Start a project: config file, then an agent listed in it&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config local init&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; new agent helper ./helper.json &lt;span class="at"&gt;--add-to-config&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# Declare the key the agent&amp;#39;s preset refers to, then fill in its value&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config api-key create main-key&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config api-key list&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;/span&gt;
+&lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="co"&gt;# Customize the TUI key bindings&lt;/span&gt;&lt;/span&gt;
+&lt;span id="10"&gt;&lt;a href="#10" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; config keymap init ./keymap.json&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;h4 id="spec"&gt;spec&lt;/h4&gt;
 &lt;p&gt;Display embedded specification documentation.&lt;/p&gt;
 &lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ex"&gt;agents-exe&lt;/span&gt; spec TOPIC&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;strong&gt;Topics:&lt;/strong&gt;&lt;/p&gt;
 &lt;table&gt;
@@ -8988,7 +9393,7 @@ If no message is provided, reads from stdin.&lt;/p&gt;
 &lt;li&gt;&lt;a href="/agents-exe/docs-architecture.html"&gt;architecture.md&lt;/a&gt; - System architecture
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html" rel="alternate"/><summary type="text">Complete reference for the Agents CLI commands and options. ## Global Options These options apply to all commands: ```bash agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS] ``` | Option | Default | Description | |--------|---------|----------</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html</id><title type="text">Internal Tool Mapping Documentation</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/internal-tool-mapping.md"&gt;&lt;code&gt;documentation/internal-tool-mapping.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html" rel="alternate"/><summary type="text">Complete reference for the Agents CLI commands and options. ## Global Options These options apply to all commands: ```bash agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS] ``` | Option | Default | Description | |--------|---------|----------</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html</id><title type="text">Internal Tool Mapping Documentation</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/internal-tool-mapping.md"&gt;&lt;code&gt;documentation/internal-tool-mapping.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="internal-tool-mapping-documentation"&gt;Internal Tool Mapping Documentation&lt;/h2&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
 &lt;p&gt;This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints.&lt;/p&gt;
@@ -9339,7 +9744,7 @@ Execute HTTP request
 &lt;li&gt;&lt;strong&gt;Reporting&lt;/strong&gt;: Log warnings when names are normalized
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html" rel="alternate"/><summary type="text">## Overview This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints. ## The Problem LLM AP</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html</id><title type="text">AI Context - Working on the Agents Framework</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/AI-CONTEXT.md"&gt;&lt;code&gt;documentation/AI-CONTEXT.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html" rel="alternate"/><summary type="text">## Overview This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints. ## The Problem LLM AP</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html</id><title type="text">AI Context - Working on the Agents Framework</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/AI-CONTEXT.md"&gt;&lt;code&gt;documentation/AI-CONTEXT.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="ai-context---working-on-the-agents-framework"&gt;AI Context - Working on the Agents Framework&lt;/h2&gt;
 &lt;blockquote&gt;
 &lt;p&gt;&lt;strong&gt;READ THIS FIRST&lt;/strong&gt; when invoked on this codebase.&lt;/p&gt;
@@ -9834,7 +10239,7 @@ cabal bench
 &lt;li&gt;&lt;strong&gt;New tests&lt;/strong&gt;: Integration, Compatibility, benchmarks
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html" rel="alternate"/><summary type="text">&gt; **READ THIS FIRST** when invoked on this codebase. ## Immediate First Steps When you're invoked on this project, run these queries immediately: ```sql -- 1. What is this project? SELECT * FROM project_overview; -- 2. What docs exist? SELE</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html</id><title type="text">Changelog: OS Model Migration</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/CHANGELOG-OS-MIGRATION.md"&gt;&lt;code&gt;documentation/CHANGELOG-OS-MIGRATION.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html" rel="alternate"/><summary type="text">&gt; **READ THIS FIRST** when invoked on this codebase. ## Immediate First Steps When you're invoked on this project, run these queries immediately: ```sql -- 1. What is this project? SELECT * FROM project_overview; -- 2. What docs exist? SELE</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html</id><title type="text">Changelog: OS Model Migration</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/CHANGELOG-OS-MIGRATION.md"&gt;&lt;code&gt;documentation/CHANGELOG-OS-MIGRATION.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="changelog-os-model-migration"&gt;Changelog: OS Model Migration&lt;/h2&gt;
 &lt;p&gt;&lt;strong&gt;Date:&lt;/strong&gt; March 2026&lt;br /&gt;
 &lt;strong&gt;Commits:&lt;/strong&gt; &lt;code&gt;0eb5263&lt;/code&gt; to &lt;code&gt;cb52af7&lt;/code&gt;&lt;/p&gt;
@@ -10081,7 +10486,7 @@ cabal bench
 &lt;/ul&gt;
 &lt;hr /&gt;
 &lt;p&gt;For questions about the migration, see &lt;code&gt;documentation/MIGRATION-OS.md&lt;/code&gt; or file an issue with the “migration” label.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html" rel="alternate"/><summary type="text">**Date:** March 2026 **Commits:** `0eb5263` to `cb52af7` ## Summary This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-architecture.html</id><title type="text">Architecture</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/architecture.md"&gt;&lt;code&gt;documentation/architecture.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html" rel="alternate"/><summary type="text">**Date:** March 2026 **Commits:** `0eb5263` to `cb52af7` ## Summary This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-architecture.html</id><title type="text">Architecture</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/architecture.md"&gt;&lt;code&gt;documentation/architecture.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="architecture"&gt;Architecture&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/architecture-layers.dot.png" alt="The layers: interfaces on top, the session runner and OS model, the agent tree, and the foundation they share." /&gt;&lt;/p&gt;
 &lt;p&gt;This document describes the runtime architecture and core components of the Agents framework.&lt;/p&gt;
@@ -10558,7 +10963,7 @@ OS Layer
 &lt;li&gt;&lt;strong&gt;Type Erasure&lt;/strong&gt;: Using &lt;code&gt;Any&lt;/code&gt; requires careful casting but enables heterogeneous storage
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-architecture.html" rel="alternate"/><summary type="text">This document describes the runtime architecture and core components of the Agents framework. ## Core Architecture The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sessions.html</id><title type="text">Session Management</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sessions.md"&gt;&lt;code&gt;documentation/sessions.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-architecture.html" rel="alternate"/><summary type="text">This document describes the runtime architecture and core components of the Agents framework. ## Core Architecture The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sessions.html</id><title type="text">Session Management</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sessions.md"&gt;&lt;code&gt;documentation/sessions.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="session-management"&gt;Session Management&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/session-lifecycle.dot.png" alt="The statuses of a session and what moves it from one to the next." /&gt;&lt;/p&gt;
 &lt;p&gt;Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified read view.&lt;/p&gt;
@@ -11676,7 +12081,7 @@ Total: 58 KiB
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.SessionPrint&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Markdown printing and statistics&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.SessionPrint.Inject&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Session content injection&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sessions.html" rel="alternate"/><summary type="text">Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified re</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html</id><title type="text">Parameters, bindings, and narrowing sub-agents</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/parameters-and-bindings.md"&gt;&lt;code&gt;documentation/parameters-and-bindings.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sessions.html" rel="alternate"/><summary type="text">Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified re</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html</id><title type="text">Parameters, bindings, and narrowing sub-agents</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/parameters-and-bindings.md"&gt;&lt;code&gt;documentation/parameters-and-bindings.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="parameters-bindings-and-narrowing-sub-agents"&gt;Parameters, bindings, and narrowing sub-agents&lt;/h2&gt;
 &lt;p&gt;Most agent frameworks give a tool’s arguments to the model in full, or hide
 them entirely behind a wrapper script the author has to hand-maintain. This
@@ -11992,7 +12397,7 @@ server.
 &lt;p&gt;See &lt;code&gt;todos/tool-partial-application.md&lt;/code&gt; in the repository for the full
 design rationale and the phased implementation history, if you want the
 “why” behind any of the above in more depth.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html" rel="alternate"/><summary type="text">Most agent frameworks give a tool's arguments to the model in full, or hide them entirely behind a wrapper script the author has to hand-maintain. This feature gives you a middle ground with no code: an agent's author declares a handful of</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html</id><title type="text">Advanced Configuration</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/advanced-configuration.md"&gt;&lt;code&gt;documentation/advanced-configuration.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html" rel="alternate"/><summary type="text">Most agent frameworks give a tool's arguments to the model in full, or hide them entirely behind a wrapper script the author has to hand-maintain. This feature gives you a middle ground with no code: an agent's author declares a handful of</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html</id><title type="text">Advanced Configuration</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/advanced-configuration.md"&gt;&lt;code&gt;documentation/advanced-configuration.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="advanced-configuration"&gt;Advanced Configuration&lt;/h2&gt;
 &lt;p&gt;This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls.&lt;/p&gt;
 &lt;h3 id="table-of-contents"&gt;Table of Contents&lt;/h3&gt;
@@ -12570,7 +12975,7 @@ the &lt;code&gt;extraAgents&lt;/code&gt; slug is &lt;code&gt;&amp;quot;task-plan
 &lt;li&gt;&lt;code&gt;System.Agents.Base&lt;/code&gt; - &lt;code&gt;ExtraAgentRef&lt;/code&gt; type
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html" rel="alternate"/><summary type="text">This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls. ## Table of Contents - [Recursive Agent References](#recursive-agent-references) - [Self-</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html</id><title type="text">Agent templates</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agent-templates.md"&gt;&lt;code&gt;documentation/agent-templates.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html" rel="alternate"/><summary type="text">This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls. ## Table of Contents - [Recursive Agent References](#recursive-agent-references) - [Self-</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html</id><title type="text">Agent templates</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agent-templates.md"&gt;&lt;code&gt;documentation/agent-templates.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="agent-templates"&gt;Agent templates&lt;/h2&gt;
 &lt;p&gt;An agent file can be a &lt;a href="https://github.com/lucasdicioccio/tramaj"&gt;tramaj&lt;/a&gt;
 program instead of JSON. The program is evaluated once, when the agent is
@@ -12722,6 +13127,18 @@ fields marked optional may be left out.&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;sandbox({allow, deny, name, maxFileSize})&lt;/code&gt;: &lt;code&gt;allow&lt;/code&gt; is a list of predicates
 and is required; &lt;code&gt;deny&lt;/code&gt;, &lt;code&gt;name&lt;/code&gt; and &lt;code&gt;maxFileSize&lt;/code&gt; are optional. A path is
 allowed when an &lt;code&gt;allow&lt;/code&gt; entry matches and no &lt;code&gt;deny&lt;/code&gt; entry does.&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;sandbox-ref(name)&lt;/code&gt;: a reference to a sandbox the agent declares in its
+&lt;code&gt;fileSandboxes&lt;/code&gt; map (see &lt;a href="/agents-exe/docs-tools.html#named-sandboxes"&gt;Named Sandboxes&lt;/a&gt;), usable
+wherever a toolbox takes &lt;code&gt;sandbox&lt;/code&gt;:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;$a.agent({
+  ...,
+  fileSandboxes: {code: $a.sandbox({allow: [$a.dir(&amp;quot;./src&amp;quot;)]})},
+  builtinToolboxes: [
+    $a.developer-toolbox({name: &amp;quot;dev&amp;quot;, capabilities: [&amp;quot;read-file-range&amp;quot;], sandbox: $a.sandbox-ref(&amp;quot;code&amp;quot;)}),
+    $a.lua-toolbox({name: &amp;quot;lua&amp;quot;, sandbox: $a.sandbox-ref(&amp;quot;code&amp;quot;)})
+  ]
+})
+&lt;/code&gt;&lt;/pre&gt;
 &lt;p&gt;&lt;strong&gt;Toolboxes&lt;/strong&gt;&lt;/p&gt;
 &lt;table&gt;
 &lt;tr&gt;&lt;th&gt;function&lt;/th&gt;&lt;th&gt;fields&lt;/th&gt;&lt;/tr&gt;
@@ -12756,7 +13173,7 @@ cannot be a template yet, and there are no stored libraries.
 adds the &lt;code&gt;tramajLibraries&lt;/code&gt; of &lt;code&gt;agents-exe.cfg.json&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html" rel="alternate"/><summary type="text">An agent file can be a [tramaj](https://github.com/lucasdicioccio/tramaj) program instead of JSON. The program is evaluated once, when the agent is loaded, and must produce the JSON an agent file holds. From there on nothing changes: the va</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html</id><title type="text">File Loader</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/file-loader.md"&gt;&lt;code&gt;documentation/file-loader.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html" rel="alternate"/><summary type="text">An agent file can be a [tramaj](https://github.com/lucasdicioccio/tramaj) program instead of JSON. The program is evaluated once, when the agent is loaded, and must produce the JSON an agent file holds. From there on nothing changes: the va</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html</id><title type="text">File Loader</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/file-loader.md"&gt;&lt;code&gt;documentation/file-loader.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="file-loader"&gt;File Loader&lt;/h2&gt;
 &lt;p&gt;The file loader utilities provide JSON file loading, section-based file parsing, and directory scanning for agent configurations and tools.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -13148,7 +13565,7 @@ adds the &lt;code&gt;tramajLibraries&lt;/code&gt; of &lt;code&gt;agents-exe.cfg.
 &lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="fu"&gt;return&lt;/span&gt; &lt;span class="op"&gt;$&lt;/span&gt; &lt;span class="dt"&gt;ArgParserArgs&lt;/span&gt;&lt;/span&gt;
 &lt;span id="13"&gt;&lt;a href="#13" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            { defaultAgentFiles &lt;span class="ot"&gt;=&lt;/span&gt; agentsFiles config &lt;span class="op"&gt;&amp;lt;&amp;gt;&lt;/span&gt; &lt;span class="fu"&gt;concat&lt;/span&gt; jsonPaths&lt;/span&gt;
 &lt;span id="14"&gt;&lt;a href="#14" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            , &lt;span class="op"&gt;...&lt;/span&gt;&lt;/span&gt;
-&lt;span id="15"&gt;&lt;a href="#15" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            }&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html" rel="alternate"/><summary type="text">The file loader utilities provide JSON file loading, section-based file parsing, and directory scanning for agent configurations and tools. ## Overview ``` ┌───────────────────────────</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html</id><title type="text">Iterative Development Workflow</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ITERATIVE-WORKFLOW.md"&gt;&lt;code&gt;documentation/ITERATIVE-WORKFLOW.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;span id="15"&gt;&lt;a href="#15" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            }&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html" rel="alternate"/><summary type="text">The file loader utilities provide JSON file loading, section-based file parsing, and directory scanning for agent configurations and tools. ## Overview ``` ┌───────────────────────────</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html</id><title type="text">Iterative Development Workflow</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ITERATIVE-WORKFLOW.md"&gt;&lt;code&gt;documentation/ITERATIVE-WORKFLOW.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="iterative-development-workflow"&gt;Iterative Development Workflow&lt;/h2&gt;
 &lt;blockquote&gt;
 &lt;p&gt;How to handle multi-step, recursive, or iterative invocations on this codebase.&lt;/p&gt;

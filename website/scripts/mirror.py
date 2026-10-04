@@ -8,9 +8,11 @@ Two things Kitchen-Sink's cmark renderer needs done for it: pipe tables are
 not CommonMark, so they become raw <table> blocks (md_tables_to_html.py), and
 the repository's relative links are rewritten to where the mirrored pages
 live: `documentation/x.md` becomes `/docs-x.html`, `todos/x.md` becomes
-`/specs-x.html`, an image becomes its raw.githubusercontent.com URL, and any
-other repository-relative link becomes a GitHub blob URL, so nothing on the
-site points at a path that only exists in a checkout.
+`/specs-x.html`, a TUI screenshot (`test/tui-snapshots/png/x.png`, which
+sync-repo-docs.sh copies into the site) becomes `/images/tui-x.png`, any
+other image becomes its raw.githubusercontent.com URL, and any other
+repository-relative link becomes a GitHub blob URL, so nothing on the site
+points at a path that only exists in a checkout.
 """
 import argparse
 import os
@@ -32,6 +34,9 @@ def rewrite_links(text, base_dir):
         path, _, anchor = target.partition("#")
         norm = os.path.normpath(os.path.join(base_dir, path)) if base_dir else os.path.normpath(path)
         anchor = ("#" + anchor) if anchor else ""
+        shot = re.fullmatch(r"test/tui-snapshots/png/([^/]+\.png)", norm)
+        if bang and shot:
+            return f"![{label}](/images/tui-{shot.group(1)})"
         if bang:
             return f"![{label}]({RAW}/{norm})"
         dm = re.fullmatch(r"documentation/([^/]+)\.md", norm)
