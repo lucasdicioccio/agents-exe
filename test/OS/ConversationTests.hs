@@ -33,6 +33,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
 import Data.UUID (nil)
+import Prod.Tracer (silent)
 import GHC.Generics (Generic)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, assertFailure, testCase, (@?=))
@@ -951,6 +952,7 @@ mkAgentWithWorld world mode policy =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxAsyncTracer = silent
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing
@@ -979,7 +981,7 @@ asyncEngineTests =
             world <- atomically newWorld
             world' <- atomically $ registerToolCallComponents world
             let delayMicros = 200000 -- 200 ms per call
-            engine <- AsyncEngine.mkAsyncEngine world' (sleepExecutor delayMicros) 2 Nothing Nothing
+            engine <- AsyncEngine.mkAsyncEngine silent world' (sleepExecutor delayMicros) 2 Nothing Nothing
             (tc1, eid1) <- mkAsyncTrackedCall world' "sleep_a"
             (tc2, eid2) <- mkAsyncTrackedCall world' "sleep_b"
             let baseCtx = mkMinimalContext asyncSessId asyncConvId asyncTurnId stepDummyPortal
@@ -999,7 +1001,7 @@ asyncEngineTests =
         , testCase "progress callback emits ToolCallProgress entries" $ do
             world <- atomically newWorld
             world' <- atomically $ registerToolCallComponents world
-            engine <- AsyncEngine.mkAsyncEngine world' progressExecutor 2 Nothing Nothing
+            engine <- AsyncEngine.mkAsyncEngine silent world' progressExecutor 2 Nothing Nothing
             (tc, eid) <- mkAsyncTrackedCall world' "progress_tool"
             let baseCtx = mkMinimalContext asyncSessId asyncConvId asyncTurnId stepDummyPortal
             batch <- AsyncEngine.startAsyncBatch engine baseCtx [tc]
@@ -1013,7 +1015,7 @@ asyncEngineTests =
         , testCase "cancelToolCall marks entity cancelled and engine completion does not overwrite" $ do
             world <- atomically newWorld
             world' <- atomically $ registerToolCallComponents world
-            engine <- AsyncEngine.mkAsyncEngine world' (sleepExecutor 500000) 2 Nothing Nothing
+            engine <- AsyncEngine.mkAsyncEngine silent world' (sleepExecutor 500000) 2 Nothing Nothing
             (tcSlow, eidSlow) <- mkAsyncTrackedCall world' "slow_tool"
             (tcFast, eidFast) <- mkAsyncTrackedCall world' "fast_tool"
             let baseCtx = mkMinimalContext asyncSessId asyncConvId asyncTurnId stepDummyPortal

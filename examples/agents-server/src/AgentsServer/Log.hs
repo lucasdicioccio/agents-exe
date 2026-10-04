@@ -38,6 +38,7 @@ import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import System.Agents.Host (HostTrace (..))
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
+import System.Agents.Session.Async.Engine (asyncTraceFields, asyncTraceKind)
 
 -- | Writes one JSON object per line.
 newtype Logger = Logger ([Pair] -> IO ())
@@ -77,6 +78,7 @@ hostTraceLogger logger = Tracer $ \case
         AgentFactory.OpenAITrace t -> openAITrace extra t
         AgentFactory.ToolRegistrationTrace t -> logLine logger "tool" (("event" .= constructorName t) : extra)
         AgentFactory.ToolPortalTrace t -> logLine logger "tool.portal" (("event" .= constructorName t) : extra)
+        AgentFactory.AsyncToolCallTrace t -> logLine logger (asyncTraceKind t) (asyncTraceFields t <> extra)
 
     openAITrace :: [Pair] -> OpenAI.Trace -> IO ()
     openAITrace extra = \case

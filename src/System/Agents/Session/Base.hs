@@ -126,6 +126,9 @@ module System.Agents.Session.Base (
 
     -- * Async engine
     AsyncEngine (..),
+    AsyncTrace (..),
+    AsyncCallInfo (..),
+    AsyncCallEvent (..),
 
     -- * Session backend (re-exported from SessionStore)
     SessionBackend (..),
@@ -199,12 +202,14 @@ module System.Agents.Session.Base (
     noNarrowing,
 ) where
 
+import Prod.Tracer (Tracer)
+
 import System.Agents.Base (ConversationId)
 import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Core.World (World)
 import System.Agents.OS.Events (OSEmission)
 import System.Agents.Session.Async (ContinuationStore (..))
-import System.Agents.Session.Async.Engine (AsyncEngine (..), mkAsyncEngine)
+import System.Agents.Session.Async.Engine (AsyncCallEvent (..), AsyncCallInfo (..), AsyncEngine (..), AsyncTrace (..), mkAsyncEngine)
 import System.Agents.Session.Mailbox (
     Mailbox (..),
     MailboxInfo (..),
@@ -337,6 +342,7 @@ Version 2 additions for async/resumable execution:
 * 'ctxDeploymentRunner' - Optional isolated-deployment runner
 * 'ctxSessionBackend' - Optional durable session storage backend
 * 'ctxAsyncEngine' - Optional concurrent async execution engine
+* 'ctxAsyncTracer' - Tracer for the lifecycle of background tool calls
 -}
 data Agent r = Agent
     { step :: Session -> IO (Action r)
@@ -423,6 +429,14 @@ data Agent r = Agent
     {- ^ Optional concurrent async execution engine. When present,
     'RunAsync' calls are executed concurrently in background threads
     and their OS entity lifecycle is kept in sync.
+    -}
+    , ctxAsyncTracer :: Tracer IO AsyncTrace
+    {- ^ Tracer handed to the async engine this agent creates (on demand in
+    an asynchronous step, or with 'withAsyncEngine'): it receives the
+    lifecycle of every background tool call, with the session and call ids.
+    'System.Agents.AgentFactory.buildAgent' wires it to the front-end's
+    tracer; 'Prod.Tracer.silent' traces nothing. An engine installed by
+    hand in 'ctxAsyncEngine' keeps the tracer it was made with.
     -}
     , ctxParams :: Params
     {- ^ This agent's parameters, resolved against process-level (and,
@@ -749,7 +763,7 @@ withAsyncEngine maxConcurrency agent =
             -- Register the tool-call stores first so the engine and the
             -- agent share the same world value.
             world <- TCT.ensureToolCallComponentsIO world0
-            engine <- mkAsyncEngine world (executeCallSync agent) maxConcurrency agent.ctxAsyncCallTimeout agent.ctxMailbox
+            engine <- mkAsyncEngine agent.ctxAsyncTracer world (executeCallSync agent) maxConcurrency agent.ctxAsyncCallTimeout agent.ctxMailbox
             pure agent{ctxWorld = Just world, ctxAsyncEngine = Just engine}
 
 {- | Execute a call synchronously through the agent's executor (or its

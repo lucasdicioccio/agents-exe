@@ -36,9 +36,14 @@ import qualified System.Agents.CLI.TUI as TUICmd
 -- import qualified System.Agents.HttpClient as HttpClient
 -- import qualified System.Agents.HttpLogger as HttpLogger
 
+import qualified System.Agents.AgentFactory as AgentFactory
+import qualified System.Agents.AgentTree.OneShotTool as OneShotTool
 import qualified System.Agents.CLI.ToolCall as ToolCall
+import qualified System.Agents.Host as Host
 import qualified System.Agents.MCP.Client as McpClient (LoopTrace (..))
 import qualified System.Agents.MCP.Client.Runtime as McpClientRuntime
+import qualified System.Agents.MCP.Server as McpServer
+import System.Agents.Session.Async.Engine (AsyncTrace, asyncTraceFields, asyncTraceKind)
 
 -- import qualified System.Agents.OneShot as OneShot
 -- import System.Agents.SessionPrint (PrintAmount (..), PrintVisibility (..))
@@ -145,8 +150,42 @@ toJsonTrace (AgentTreeTrace x) = case x of
                     [ "x" .= ("tool-call-end" :: Text)
                     , "name" .= n
                     ]
-toJsonTrace (McpServerCmdTrace _) = Nothing
-toJsonTrace (OneShotCmdTrace _) = Nothing
+toJsonTrace (McpServerCmdTrace x) = case x of
+    McpServerCmd.McpServerTrace (McpServer.AsyncToolCallTrace t) -> Just (encodeAsyncTrace False t)
+    McpServerCmd.McpServerTrace _ -> Nothing
+    McpServerCmd.OneShotToolTrace t -> encodeSubAgentTrace t
+    McpServerCmd.AgentTreeTrace _ -> Nothing
+toJsonTrace (OneShotCmdTrace x) = case x of
+    OneShotCmd.OneShotTrace t -> encodeAgentTrace False t
+    OneShotCmd.OneShotToolTrace t -> encodeSubAgentTrace t
+    OneShotCmd.AgentTreeTrace _ -> Nothing
 toJsonTrace (ToolCallTrace _) = Nothing
-toJsonTrace (TUICmdTrace _) = Nothing
+toJsonTrace (TUICmdTrace x) = case x of
+    TUICmd.HostTrace (Host.HostAgentTrace t) -> encodeAgentTrace False t
+    TUICmd.HostTrace (Host.HostSubAgentTrace t) -> encodeSubAgentTrace t
+    TUICmd.HostTrace _ -> Nothing
+    TUICmd.TUITrace _ -> Nothing
 toJsonTrace (CheckCmdTrace _) = Nothing
+
+-- | What an agent built by 'AgentFactory.buildAgent' reports, of which the
+-- lifecycle of background tool calls is logged.
+encodeAgentTrace :: Bool -> AgentFactory.Trace -> Maybe Aeson.Value
+encodeAgentTrace isSubAgent trace = case trace of
+    AgentFactory.AsyncToolCallTrace t -> Just (encodeAsyncTrace isSubAgent t)
+    AgentFactory.ToolRegistrationTrace _ -> Nothing
+    AgentFactory.ToolPortalTrace _ -> Nothing
+    AgentFactory.OpenAITrace _ -> Nothing
+
+-- | The same, for an agent called as a tool by another agent.
+encodeSubAgentTrace :: OneShotTool.Trace -> Maybe Aeson.Value
+encodeSubAgentTrace (OneShotTool.OneShotTrace t) = encodeAgentTrace True t
+
+{- | One background tool call lifecycle step, with the same @kind@ and fields
+as the server's log lines (see @documentation/agents-server.md@, Logs).
+-}
+encodeAsyncTrace :: Bool -> AsyncTrace -> Aeson.Value
+encodeAsyncTrace isSubAgent t =
+    Aeson.object $
+        ("kind" .= asyncTraceKind t)
+            : asyncTraceFields t
+                <> ["sub_agent" .= True | isSubAgent]

@@ -76,6 +76,8 @@ data Trace
     = ToolRegistrationTrace !ToolRegistration.Trace
     | ToolPortalTrace !ToolPortal.Trace
     | OpenAITrace !OpenAI.Trace
+    | -- | Lifecycle of a background tool call (see "System.Agents.Session.Async.Engine")
+      AsyncToolCallTrace !AsyncTrace
     deriving (Show)
 
 mapProgressiveDisclosureTrace :: ProgressiveDisclosure.Trace -> Trace
@@ -217,6 +219,7 @@ buildAgent tracer deps role convId node = do
                 , ctxDeploymentRunner = Nothing
                 , ctxSessionBackend = sinkBackend deps.adSessionSink
                 , ctxAsyncEngine = Nothing
+                , ctxAsyncTracer = contramap AsyncToolCallTrace tracer
                 , ctxParams = resolvedParams
                 , ctxInheritedBindings = []
                 , ctxMailbox = Nothing

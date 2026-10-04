@@ -752,7 +752,7 @@ prepareAsyncEngine agent =
     case (agent.ctxExecutionMode, agent.ctxWorld, agent.ctxAsyncEngine) of
         (Asynchronous, Just world, Nothing) -> do
             let limit = maybe defaultMaxConcurrency (max 1) agent.ctxMaxConcurrency
-            engine <- mkAsyncEngine world (executeCall agent) limit agent.ctxAsyncCallTimeout agent.ctxMailbox
+            engine <- mkAsyncEngine agent.ctxAsyncTracer world (executeCall agent) limit agent.ctxAsyncCallTimeout agent.ctxMailbox
             pure agent{ctxAsyncEngine = Just engine}
         _ -> pure agent
 

@@ -22,6 +22,7 @@ import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (nil)
+import Prod.Tracer (silent)
 import System.IO.Temp (withSystemTempDirectory)
 import System.Timeout (timeout)
 import Test.Tasty
@@ -113,6 +114,7 @@ mkAsyncAgent policy =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxAsyncTracer = silent
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing

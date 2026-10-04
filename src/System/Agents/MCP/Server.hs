@@ -65,6 +65,7 @@ data Trace
     | LlmCompletionTrace !OpenAI.Trace
     | ToolPortalTrace !ToolPortal.Trace
     | ToolTrace !Tools.ToolTrace
+    | AsyncToolCallTrace !SessionBase.AsyncTrace
     deriving (Show)
 
 -- | Configuration for the MCP server.
@@ -300,6 +301,7 @@ agentFactoryTrace :: AgentFactory.Trace -> Trace
 agentFactoryTrace (AgentFactory.ToolRegistrationTrace t) = ToolRegistrationTrace t
 agentFactoryTrace (AgentFactory.ToolPortalTrace t) = ToolPortalTrace t
 agentFactoryTrace (AgentFactory.OpenAITrace t) = LlmCompletionTrace t
+agentFactoryTrace (AgentFactory.AsyncToolCallTrace t) = AsyncToolCallTrace t
 
 -------------------------------------------------------------------------------
 

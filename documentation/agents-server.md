@@ -1192,6 +1192,7 @@ and, when known, `session_id`:
 | `agents.stored_skipped` | `slug`, `reason`: a stored agent hidden by an agent file |
 | `agent_tree`, `tool`, `tool.portal` | `event`: what the agent loader and the tools reported |
 | `llm.backoff` | `attempt`, `delay_seconds` |
+| `tool_call.queued`, `tool_call.started`, `tool_call.progressed`, `tool_call.completed`, `tool_call.failed`, `tool_call.timed_out`, `tool_call.cancelled` | `session_id`, `conversation_id`, `tool_call_id`, `tool`, `provider_call_id`, and per step `queued_ms`, `elapsed_ms`, `error`, `timeout_seconds`, `payload_bytes`; `sub_agent` for a sub-agent's call. The lifecycle of a background tool call, see [async-tool-calls.md](async-tool-calls.md) (Logs) |
 | `server.signal`, `server.stopping`, `server.stopped`, `server.failed` | |
 
 Prompts, LLM payloads, HTTP headers, and API keys are never logged.

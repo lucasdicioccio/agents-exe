@@ -63,6 +63,7 @@ import Data.Text (Text, unpack)
 import qualified Data.Text as Text
 import Data.Time (UTCTime)
 import Data.UUID (nil)
+import Prod.Tracer (silent)
 import Database.SQLite.Simple (open)
 import System.Directory (emptyPermissions, executable, readable, setPermissions)
 import System.IO.Temp (emptySystemTempFile, withSystemTempDirectory)
@@ -284,6 +285,7 @@ mkAsyncAgent policy mCache mStore mBackend mRunner =
         , ctxDeploymentRunner = mRunner
         , ctxSessionBackend = mBackend
         , ctxAsyncEngine = Nothing
+        , ctxAsyncTracer = silent
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing
@@ -321,6 +323,7 @@ mkSimpleAgent =
         , ctxDeploymentRunner = Nothing
         , ctxSessionBackend = Nothing
         , ctxAsyncEngine = Nothing
+        , ctxAsyncTracer = silent
         , ctxParams = mempty
         , ctxInheritedBindings = []
         , ctxMailbox = Nothing

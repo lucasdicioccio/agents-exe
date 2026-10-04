@@ -32,12 +32,25 @@ The engine is intentionally small and does not persist in-progress calls.
 After a process restart, calls referenced in chat history that have no OS
 entity are reported as @orphaned@ by the system capability layer
 (Phase 3).
+
+Every lifecycle step of a call (queued, started, progressed, completed,
+failed, timed out, cancelled) is also reported to the engine's
+'Prod.Tracer.Tracer' as an 'AsyncTrace', which carries the session and call
+ids. This is the logging path; the 'ctxEmit' activity events are the one for
+clients.
 -}
 module System.Agents.Session.Async.Engine (
     -- * Engine and batch types
     AsyncEngine (..),
     AsyncBatch (..),
     AsyncBatchUpdate (..),
+
+    -- * Traces
+    AsyncTrace (..),
+    AsyncCallInfo (..),
+    AsyncCallEvent (..),
+    asyncTraceKind,
+    asyncTraceFields,
 
     -- * Construction
     mkAsyncEngine,
@@ -62,22 +75,28 @@ import System.IO.Unsafe (unsafePerformIO)
 import Control.Exception (SomeAsyncException, SomeException, bracket_, catch, displayException, finally, fromException, throwIO)
 import Control.Monad (forM, forM_, void, when)
 import Data.Aeson (Value, object, toJSON, (.=))
-import Data.Maybe (isJust)
+import qualified Data.Aeson as Aeson
+import Data.Aeson.Types (Pair)
+import qualified Data.ByteString.Lazy as LByteString
+import Data.Maybe (isJust, isNothing)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Time (getCurrentTime)
+import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
+import Prod.Tracer (Tracer, runTracer)
 import System.Timeout (timeout)
 
 import qualified System.Agents.OS.Conversation.ToolCalls as TCT
 import System.Agents.OS.Conversation.Types (ProgressKind (..), ToolCallProgress (..), ToolCallState (tcStatus), ToolCallStatus (..))
+import System.Agents.Base (ConversationId)
 import System.Agents.OS.Core.Types (EntityId)
 import System.Agents.OS.Core.World (World, getComponent)
 import System.Agents.OS.Events (OSEmission (..), ToolCallActivity (..), ToolCallPhase (..))
 import System.Agents.Session.Mailbox (Mailbox (..))
 import System.Agents.Session.Types (
     LlmToolCall (..),
+    SessionId,
     ToolCallId (..),
     TrackedToolCall (..),
     UserToolResponse (..),
@@ -115,6 +134,8 @@ data AsyncEngine = AsyncEngine
     the OS entity state is still the source of truth for
     'get-tool-call-status' and late-result delivery.
     -}
+    , aeTracer :: Tracer IO AsyncTrace
+    -- ^ Receives one 'AsyncTrace' per lifecycle step of every call
     }
 
 {- | A running batch of async calls.
@@ -135,6 +156,8 @@ data AsyncCallHandle = AsyncCallHandle
     , achAsync :: Async UserToolResponse
     , achEmit :: ToolCallPhase -> IO ()
     -- ^ Publishes an activity event for this call (no-op without an event queue)
+    , achTrace :: AsyncCallEvent -> IO ()
+    -- ^ Reports a lifecycle step of this call to the engine's tracer
     }
 
 {- | Result of waiting for progress in a batch.
@@ -168,6 +191,91 @@ forgetCalls engine callIds = do
     modifyTVar' runningCallOwners $ \owners -> foldr Map.delete owners callIds
 
 -------------------------------------------------------------------------------
+-- Traces
+-------------------------------------------------------------------------------
+
+-- | A lifecycle step of one background tool call.
+data AsyncTrace = AsyncCallTrace !AsyncCallInfo !AsyncCallEvent
+    deriving (Show, Eq)
+
+-- | Which call a trace is about.
+data AsyncCallInfo = AsyncCallInfo
+    { aciSessionId :: !SessionId
+    -- ^ Session holding the call
+    , aciConversationId :: !ConversationId
+    -- ^ Conversation holding the call
+    , aciToolCallId :: !ToolCallId
+    -- ^ Session-level id of the call
+    , aciProviderCallId :: !(Maybe Text)
+    -- ^ Id the LLM provider gave the call, when known
+    , aciToolName :: !Text
+    -- ^ Name of the called tool
+    }
+    deriving (Show, Eq)
+
+{- | What happened to the call. Durations are in milliseconds.
+
+A call that ends is reported with exactly one of 'AsyncCallCompleted',
+'AsyncCallFailed', 'AsyncCallTimedOut' or 'AsyncCallCancelled'.
+-}
+data AsyncCallEvent
+    = -- | Accepted by the engine; it now waits for a concurrency slot
+      AsyncCallQueued
+    | -- | Got a slot and runs, after waiting this long for it
+      AsyncCallStarted !Int
+    | -- | The tool reported a progress payload
+      AsyncCallProgressed !Value
+    | -- | Returned a result after running this long
+      AsyncCallCompleted !Int
+    | -- | The executor threw, after running this long
+      AsyncCallFailed !Int !Text
+    | -- | Given up on after 'aeCallTimeout' seconds
+      AsyncCallTimedOut !Int
+    | -- | Stopped by 'cancelToolCall', 'cancelAsyncBatch' or 'shutdownAsyncEngine'
+      AsyncCallCancelled
+    deriving (Show, Eq)
+
+{- | A short, stable name for the step, for log lines:
+@tool_call.queued@, @tool_call.started@, @tool_call.progressed@,
+@tool_call.completed@, @tool_call.failed@, @tool_call.timed_out@,
+@tool_call.cancelled@.
+-}
+asyncTraceKind :: AsyncTrace -> Text
+asyncTraceKind (AsyncCallTrace _ event) = case event of
+    AsyncCallQueued -> "tool_call.queued"
+    AsyncCallStarted _ -> "tool_call.started"
+    AsyncCallProgressed _ -> "tool_call.progressed"
+    AsyncCallCompleted _ -> "tool_call.completed"
+    AsyncCallFailed _ _ -> "tool_call.failed"
+    AsyncCallTimedOut _ -> "tool_call.timed_out"
+    AsyncCallCancelled -> "tool_call.cancelled"
+
+{- | The fields of a log line for the step: the ids of the session, the
+conversation and the call, the tool name, and what the step carries
+(@queued_ms@, @elapsed_ms@, @error@, @timeout_seconds@). A progress payload
+is tool output of any size, so only its encoded size is given
+(@payload_bytes@).
+-}
+asyncTraceFields :: AsyncTrace -> [Pair]
+asyncTraceFields (AsyncCallTrace info event) =
+    [ "session_id" .= info.aciSessionId
+    , "conversation_id" .= info.aciConversationId
+    , "tool_call_id" .= info.aciToolCallId
+    , "tool" .= info.aciToolName
+    ]
+        <> maybe [] (\pid -> ["provider_call_id" .= pid]) info.aciProviderCallId
+        <> eventFields
+  where
+    eventFields = case event of
+        AsyncCallQueued -> []
+        AsyncCallStarted queuedMs -> ["queued_ms" .= queuedMs]
+        AsyncCallProgressed payload -> ["payload_bytes" .= LByteString.length (Aeson.encode payload)]
+        AsyncCallCompleted elapsedMs -> ["elapsed_ms" .= elapsedMs]
+        AsyncCallFailed elapsedMs err -> ["elapsed_ms" .= elapsedMs, "error" .= err]
+        AsyncCallTimedOut seconds -> ["timeout_seconds" .= seconds]
+        AsyncCallCancelled -> []
+
+-------------------------------------------------------------------------------
 -- Construction
 -------------------------------------------------------------------------------
 
@@ -177,6 +285,8 @@ The executor is invoked in a background thread for each 'RunAsync' call. The
 concurrency limit is enforced by a shared 'QSem'.
 -}
 mkAsyncEngine ::
+    -- | Receives the lifecycle of every call ('Prod.Tracer.silent' for none)
+    Tracer IO AsyncTrace ->
     World ->
     (ToolExecutionContext -> LlmToolCall -> IO UserToolResponse) ->
     Int ->
@@ -185,9 +295,9 @@ mkAsyncEngine ::
     -- | Mailbox to post 'ST.ToolCallFinished' mail to, if any
     Maybe Mailbox ->
     IO AsyncEngine
-mkAsyncEngine world executor maxConcurrency callTimeout mailbox = do
+mkAsyncEngine tracer world executor maxConcurrency callTimeout mailbox = do
     sem <- newAsyncConcurrencyLimit maxConcurrency
-    mkAsyncEngineSharing sem world executor maxConcurrency callTimeout mailbox
+    mkAsyncEngineSharing tracer sem world executor maxConcurrency callTimeout mailbox
 
 {- | A concurrency limit that several engines can share.
 
@@ -200,6 +310,7 @@ newAsyncConcurrencyLimit maxConcurrency = newQSem (max maxConcurrency 1)
 
 -- | Like 'mkAsyncEngine', but with a semaphore shared with other engines.
 mkAsyncEngineSharing ::
+    Tracer IO AsyncTrace ->
     QSem ->
     World ->
     (ToolExecutionContext -> LlmToolCall -> IO UserToolResponse) ->
@@ -207,9 +318,9 @@ mkAsyncEngineSharing ::
     Maybe Int ->
     Maybe Mailbox ->
     IO AsyncEngine
-mkAsyncEngineSharing sem world executor maxConcurrency callTimeout mailbox = do
+mkAsyncEngineSharing tracer sem world executor maxConcurrency callTimeout mailbox = do
     registry <- newTVarIO Map.empty
-    pure $ AsyncEngine world executor maxConcurrency callTimeout sem registry mailbox
+    pure $ AsyncEngine world executor maxConcurrency callTimeout sem registry mailbox tracer
 
 -------------------------------------------------------------------------------
 -- Batch lifecycle
@@ -296,11 +407,15 @@ cancelAsyncBatch :: AsyncBatch -> IO ()
 cancelAsyncBatch batch = do
     handles <- readTVarIO (abCalls batch)
     forM_ handles $ \h -> do
+        -- A call that already ended and only waits to be collected has
+        -- reported how it ended: it is not traced as cancelled as well.
+        stillRunning <- isNothing <$> poll (achAsync h)
         cancel (achAsync h)
         case tcEntityId (achTracked h) of
             Just eid -> TCT.cancelToolCall (abWorld batch) eid
             Nothing -> pure ()
         achEmit h ToolCallCancelled
+        when stillRunning $ achTrace h AsyncCallCancelled
     atomically $ do
         modifyTVar' (abCalls batch) $ const Map.empty
         removeFromRegistry batch (Map.keys handles)
@@ -337,6 +452,7 @@ cancelToolCall engine callId = do
                             let cancelled = fmap tcStatus mState == Just TcCancelled
                             when cancelled $ do
                                 achEmit h ToolCallCancelled
+                                achTrace h AsyncCallCancelled
                                 notifyMailbox engine (achTracked h) ST.Failed (TextResponse "tool call cancelled")
                             pure cancelled
                         Nothing -> pure False
@@ -392,31 +508,45 @@ startCall engine _batch baseCtx tc = do
     let world = aeWorld engine
     eid <- requireEntityId tc
     let emit = emitActivity baseCtx tc
-    let onProgress payload = makeProgressCallback world eid payload >> emit (ToolCallProgressed payload)
+    let trace = runTracer (aeTracer engine) . AsyncCallTrace (callInfo baseCtx tc)
+    let onProgress payload = do
+            makeProgressCallback world eid payload
+            emit (ToolCallProgressed payload)
+            trace (AsyncCallProgressed payload)
     let ctx =
             baseCtx
                 { ctxProgressCallback = Just onProgress
                 , ctxRecordChildSession = Just (TCT.recordChildSession world eid)
                 }
+    queuedAt <- getCurrentTime
+    trace AsyncCallQueued
     a <- async $ (`finally` unregister) $ do
         bracket_ (waitQSem sem) (signalQSem sem) $ do
             TCT.startToolCall world eid
             emitStartedProgress world eid
             emit ToolCallStarted
+            startedAt <- getCurrentTime
+            trace (AsyncCallStarted (millisBetween queuedAt startedAt))
             result <- runCallWithTimeout engine ctx (tcCall tc)
+            elapsedMs <- millisBetween startedAt <$> getCurrentTime
             case result of
                 Right response -> do
                     TCT.completeToolCall world eid (toJSON response)
                     notifyMailbox engine tc ST.Completed response
                     emit ToolCallCompleted
+                    trace (AsyncCallCompleted elapsedMs)
                     pure response
-                Left err -> do
+                Left failure -> do
+                    let err = callFailureText failure
                     let response = TextResponse $ "async tool call failed: " <> err
                     TCT.failToolCall world eid err
                     notifyMailbox engine tc ST.Failed response
                     emit (ToolCallFailed err)
+                    trace $ case failure of
+                        CallThrew _ -> AsyncCallFailed elapsedMs err
+                        CallTimedOut seconds -> AsyncCallTimedOut seconds
                     pure response
-    pure $ AsyncCallHandle tc a emit
+    pure $ AsyncCallHandle tc a emit trace
   where
     sem = aeSemaphore engine
     unregister = atomically $ forgetCalls engine [tcId tc]
@@ -445,6 +575,19 @@ notifyMailbox engine tc state response =
                         , ST.outBody = ST.ToolCallFinished (tcId tc) state response
                         }
 
+-- | Why a call did not return a result.
+data CallFailure
+    = -- | The executor threw this exception
+      CallThrew Text
+    | -- | The call outlived 'aeCallTimeout' (in seconds)
+      CallTimedOut Int
+
+-- | The error recorded on the OS entity and sent to the model.
+callFailureText :: CallFailure -> Text
+callFailureText failure = case failure of
+    CallThrew err -> err
+    CallTimedOut seconds -> "async tool call timed out after " <> Text.pack (show seconds) <> "s"
+
 {- | Run a call, giving up after 'aeCallTimeout' seconds.
 
 A timed-out call is reported as failed. The executor is interrupted, so a
@@ -455,7 +598,7 @@ runCallWithTimeout ::
     AsyncEngine ->
     ToolExecutionContext ->
     LlmToolCall ->
-    IO (Either Text UserToolResponse)
+    IO (Either CallFailure UserToolResponse)
 runCallWithTimeout engine ctx call =
     case aeCallTimeout engine of
         Nothing -> runCall engine ctx call
@@ -463,7 +606,7 @@ runCallWithTimeout engine ctx call =
             mResult <- timeout (max 1 seconds * 1000000) (runCall engine ctx call)
             pure $ case mResult of
                 Just result -> result
-                Nothing -> Left $ "async tool call timed out after " <> Text.pack (show seconds) <> "s"
+                Nothing -> Left (CallTimedOut seconds)
 
 -- | Run the executor and catch any synchronous exception. Asynchronous
 -- exceptions (e.g. from 'cancel') are rethrown so cancellation stops the call.
@@ -471,14 +614,29 @@ runCall ::
     AsyncEngine ->
     ToolExecutionContext ->
     LlmToolCall ->
-    IO (Either Text UserToolResponse)
+    IO (Either CallFailure UserToolResponse)
 runCall engine ctx call =
     (Right <$> aeExecutor engine ctx call) `catch` handler
   where
-    handler :: SomeException -> IO (Either Text UserToolResponse)
+    handler :: SomeException -> IO (Either CallFailure UserToolResponse)
     handler e = case fromException e of
         Just (_ :: SomeAsyncException) -> throwIO e
-        Nothing -> pure $ Left (Text.pack $ displayException e)
+        Nothing -> pure $ Left (CallThrew (Text.pack $ displayException e))
+
+-- | The ids and tool name a trace about this call carries.
+callInfo :: ToolExecutionContext -> TrackedToolCall -> AsyncCallInfo
+callInfo ctx tc =
+    AsyncCallInfo
+        { aciSessionId = ctxSessionId ctx
+        , aciConversationId = ctxConversationId ctx
+        , aciToolCallId = tcId tc
+        , aciProviderCallId = providerToolCallId (tcCall tc)
+        , aciToolName = llmToolCallName (tcCall tc)
+        }
+
+-- | Whole milliseconds from the first time to the second.
+millisBetween :: UTCTime -> UTCTime -> Int
+millisBetween from to = round (realToFrac (diffUTCTime to from) * 1000 :: Double)
 
 -- | Publish an activity event through the context's 'ctxEmit' hook
 -- (@todos/os-as-standalone-server.md@ G3), if present.
