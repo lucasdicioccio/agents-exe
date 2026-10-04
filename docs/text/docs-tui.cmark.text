@@ -46,6 +46,8 @@ The TUI features a tabbed interface with four main tabs:
 </table>
 ```
 
+![The Agents tab](/images/tui-agents-tab.png )
+
 ### Tab Navigation
 
 ```html
@@ -216,6 +218,8 @@ When a run stops on deferred calls (`calls.deferred`), the conversation's status
 │ - search (token 5e6f7a8b): {"q": "todo"}           │
 └─────────────────────────────────────────────────────┘
 ```
+
+![The Pending panel, with one deferred call](/images/tui-pending-panel.png )
 
 `>` marks the selected call, the first one with a continuation token until you move it: `Ctrl+O` (`select-pending`) selects the next one, wrapping around. `Ctrl+Y` and `Ctrl+W` act on the selected call.
 
@@ -1306,6 +1310,55 @@ runTUIWithConfig tracer config props = do
 
     void $ customMainWithDefaultVty (Just evChan) app st
 ```
+
+## Screenshots and end-to-end tests
+
+The screenshots on this page are not taken by hand. The `agents-tui-e2e` test-suite runs the real `agents-exe tui` in a pseudo-terminal with [tuispec](https://github.com/Tritlo/tuispec ), sends it keys, and compares the screen with a baseline at the end of each step. The model is a fake OpenAI-compatible endpoint the suite serves itself, with fixed answers, and `HOME` is a scratch directory: no API key, no network, none of your own configuration.
+
+```html
+<table>
+<tr><th>Scenario</th><th>Keys</th><th>Snapshots</th></tr>
+<tr><td><code>launch</code></td><td>none</td><td><code>agents-tab</code></td></tr>
+<tr><td><code>chat</code></td><td><code>Ctrl+N</code>, <code>Ctrl+]</code>, <code>Tab</code> twice, a message, <code>Meta+Enter</code></td><td><code>message-typed</code>, <code>reply</code></td></tr>
+<tr><td><code>pending</code></td><td><code>Down</code>, the same with an agent whose tool calls are deferred, then <code>Ctrl+Y</code>, an answer, <code>Meta+Enter</code></td><td><code>pending-panel</code>, <code>pending-answered</code></td></tr>
+</table>
+```
+
+![A reply from the scripted model](/images/tui-reply.png )
+
+The suite is opt-in, behind the `tui-e2e` cabal flag, so a plain `cabal test` neither builds tuispec nor needs a terminal:
+
+```bash
+# compare the screens with the baselines
+cabal test agents-tui-e2e -ftui-e2e
+
+# accept the screens as the new baselines, after a deliberate UI change
+TUISPEC_UPDATE_SNAPSHOTS=1 cabal test agents-tui-e2e -ftui-e2e
+
+# the same, and render the screenshots again
+TUISPEC_UPDATE_SNAPSHOTS=1 AGENTS_TUI_E2E_PNG=1 cabal test agents-tui-e2e -ftui-e2e
+```
+
+Files, under `test/tui-snapshots/`:
+
+```html
+<table>
+<tr><th>Path</th><th>Content</th></tr>
+<tr><td><code>snapshots/&lt;scenario&gt;/&lt;name&gt;.ansi.txt</code></td><td>The baseline: what the terminal received, with session ids zeroed</td></tr>
+<tr><td><code>snapshots/&lt;scenario&gt;/&lt;name&gt;.txt</code></td><td>The same screen as plain text, to read a change in a diff</td></tr>
+<tr><td><code>snapshots/&lt;scenario&gt;/&lt;name&gt;.meta.json</code></td><td>The terminal size (100x30)</td></tr>
+<tr><td><code>png/&lt;name&gt;.png</code></td><td>The screenshot, written only with <code>AGENTS_TUI_E2E_PNG</code> set</td></tr>
+<tr><td><code>tests/</code></td><td>What the last run captured, and a failure bundle per failed scenario; not tracked</td></tr>
+</table>
+```
+
+Two screens are equal when their cells are: characters and colours, at 100 columns by 30 rows. Session ids are random and the sidebar shows them, so they are zeroed before comparing.
+
+The PNGs are drawn by `test/tui-e2e/render_png.py` from the cells of the baseline (characters and colours), the way a terminal would: on the grid of the font's advance, with the box-drawing characters as lines running from edge to edge of their cell, so that borders are continuous. It needs `python3` with Pillow and a monospace TTF: DejaVu Sans Mono or Liberation Mono where distributions install them, or the file `TUISPEC_FONT_PATH` names. A glyph that font lacks (the status icons of the conversation list: `⧗`, `⏸`) is taken from Noto Sans Symbols 2, Noto Sans Math or DejaVu Sans when installed (`fonts-noto-core` on Debian and Ubuntu), and is the font's missing-glyph box otherwise. The comparison itself needs none of this. Linux only: tuispec drives a PTY.
+
+The website shows the same files: `website/scripts/sync-repo-docs.sh` copies them into the site, so rendering them again and publishing is all it takes to refresh the screenshots there.
+
+`AGENTS_EXE` selects another binary than the one cabal just built. The scenarios are in `test/tui-e2e/Main.hs`; tuispec also has a JSON-RPC server (`tuispec server`) for driving the TUI from another program.
 
 ## Styling
 

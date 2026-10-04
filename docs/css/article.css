@@ -329,3 +329,9 @@ span.hashtag {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* images (diagrams, TUI screenshots) never wider than the text column */
+.main img {
+  max-width: 100%;
+  height: auto;
+}

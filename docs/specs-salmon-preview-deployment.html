@@ -1,0 +1,281 @@
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: a salmon-driven preview deployment of agents-server</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: proposal, 2026-10-03. Nothing implemented. A design pass with a"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: a salmon-driven preview deployment of agents-server"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: proposal, 2026-10-03. Nothing implemented. A design pass with a"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: a salmon-driven preview deployment of agents-server"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html"><meta property="og:description" content="Status: proposal, 2026-10-03. Nothing implemented. A design pass with a"><meta name="article:published_time" content="2026-10-04T15:53:54Z"><meta name="article:modified_time" content="2026-10-04T15:53:54Z"><meta name="ks:article_json" content="/agents-exe/json/specs-salmon-preview-deployment.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-salmon-preview-deployment.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-04T15:53:54Z","datePublished":"2026-10-04T15:53:54Z","description":"Status: proposal, 2026-10-03. Nothing implemented. A design pass with a","headline":"Spec: a salmon-driven preview deployment of agents-server","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: a salmon-driven preview deployment of agents-server</h1><p>On <span>Sun, 04 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1514 words, 1 code snippets, 1 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-async-tool-calls.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">9/13</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.progress.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/salmon-preview-deployment.md"><code>todos/salmon-preview-deployment.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<h2 id="spec-a-salmon-driven-preview-deployment-of-agents-server">Spec: a salmon-driven preview deployment of agents-server</h2>
+<p>Status: proposal, 2026-10-03. Nothing implemented. A design pass with a
+recommendation; the points marked <strong>Decide</strong> need the owner before any
+phase starts.</p>
+<h3 id="goal">Goal</h3>
+<p>Run the <em>built</em> <code>agents-server</code> as it would run in production (its own
+process, its files on disk, a real database, later a real init system),
+check it over the network, and tear it down. The same recipe, left up
+instead of torn down, is a preview of a branch.</p>
+<p><a href="https://github.com/lucasdicioccio/salmon">salmon</a> is the tool that brings
+the deployment up and down: it expresses the deployment as a graph of
+idempotent ops with <code>up</code>/<code>down</code>/<code>check</code>, and it already has the pieces this
+needs (podman containers, systemd units, postgres, qemu VMs, files).</p>
+<h3 id="where-things-stand">Where things stand</h3>
+<p>What is tested today, and how:</p>
+<table>
+<tr><th>What</th><th>Where</th><th>How real</th></tr>
+<tr><td>Runtime, sessions, tools</td><td><code>agents-tests</code> (<code>test/</code>)</td><td>in-process, in-memory persistence</td></tr>
+<tr><td>HTTP API, auth, events, mail</td><td><code>agents-server-tests</code> (<code>examples/agents-server/test</code>)</td><td>in-process WAI application on a free port, the LLM replaced by a Haskell function, a temporary SQLite file</td></tr>
+<tr><td>Postgres store, leases, takeover</td><td><code>agents-postgres-tests</code> (<code>postgres/test</code>)</td><td>a real cluster from <code>initdb</code>/<code>pg_ctl</code> (or <code>AGENTS_TEST_POSTGRES_URL</code>); skipped when neither is there</td></tr>
+<tr><td>TUI against a real binary</td><td><code>checks/*-e2e</code></td><td>the built <code>agents-exe</code> under a pty, with <code>checks/lib/fake_llm.py</code> as an OpenAI-compatible LLM</td></tr>
+</table>
+<p>What none of them runs:</p>
+<ul>
+<li>the <code>agents-server</code> executable itself: its option parser, its startup
+order, its exit codes, its JSON log lines;
+</li>
+<li>the units in <code>bundling/systemd/</code> (<code>User=</code>, <code>StateDirectory=</code>,
+<code>TimeoutStopSec</code> against <code>--shutdown-grace</code>, <code>Restart=on-failure</code>);
+</li>
+<li><code>SIGTERM</code> and <code>SIGKILL</code> on a real process, and what a restart finds;
+</li>
+<li>a database written by one version and opened by the next;
+</li>
+<li>two server processes on one Postgres, one of them killed;
+</li>
+<li>a client on another machine: <code>--bind</code>, <code>--auth-tokens</code>, <code>--cors-origin</code>,
+<code>agents-exe tui --attach URL</code>;
+</li>
+<li>the binary on a machine other than the one that built it.
+</li>
+</ul>
+<p>salmon is not used by this repository. The two mentions are incidental
+(<code>dbs/README.md</code>, <code>website/README.md</code>).</p>
+<h3 id="what-salmon-provides">What salmon provides</h3>
+<p>Read from salmon’s README and <code>resources/howto-ops.md</code> (section 10); none of
+it has been run for this spec.</p>
+<ul>
+<li>Builtin nodes for <code>Podman</code> (and quadlets), <code>Systemd</code>, <code>Postgres</code>, <code>Qemu</code>,
+<code>Filesystem</code>, <code>Cabal</code>, <code>Daemon</code> (a process salmon keeps running where
+there is no systemd), <code>Certificates</code>.
+</li>
+<li>A binary built on salmon speaks <code>config &lt;seed&gt; | run up</code>, <code>run down</code>,
+<code>run tree</code>. Teardown is the graph walked backwards.
+</li>
+<li>Its own tests are in four layers by cost: graph shape only (0), temporary
+directories (1), disposable podman containers (2), a qemu VM for systemd
+as PID 1 and real interfaces (3). Layers 2 and 3 skip loudly when podman
+or the VM privileges are missing.
+</li>
+<li><code>SreBox.Gcp.PreviewEnvironment</code> groups several Cloud Run deploys into one
+node per branch. It is the precedent for “one thing to point <code>run up</code> and
+<code>run down</code> at”, on a host this spec does not propose.
+</li>
+<li><code>salmon-core</code>, <code>salmon-ops</code> and <code>salmon-ops-recipes</code> are on Hackage. The
+test harness (<code>Test.Harness</code>: <code>withContainer</code>, <code>withVm</code>, <code>sshToVm</code>, …)
+is in salmon’s test tree, not in a library, so it cannot be imported from
+here as it is.
+</li>
+</ul>
+<h3 id="recommendation">Recommendation</h3>
+<p>Build one salmon recipe, in this repository, that describes an
+agents-server deployment, and use it two ways: a test driver runs <code>up</code>,
+checks, <code>down</code>; an operator runs <code>up</code> and keeps it. Start with a container
+and SQLite, and add Postgres and a VM as later phases. Do not make it a
+tier of <code>cabal test</code>.</p>
+<h4 id="one-graph-two-uses">One graph, two uses</h4>
+<pre><code>agents-preview config --name NAME --host container|vm --db sqlite|postgres ...
+    | agents-preview run up        # or: run down, run tree
+</code></pre>
+<p>The graph, from the leaves:</p>
+<ol>
+<li>the <code>agents-server</code> binary for the target (see “The binary” below);
+</li>
+<li>the host: a podman container, or a qemu VM;
+</li>
+<li>files on the host: agent file, keys file, token file, and for the VM the
+unit from <code>bundling/systemd/</code>, copied as it is shipped;
+</li>
+<li>the LLM: <code>checks/lib/fake_llm.py</code> with a script, listening next to the
+server; the agent file’s <code>modelUrl</code> points at it, as <code>checks/lib/e2e.py</code>
+already does. No API key, so no secret is involved;
+</li>
+<li>optionally Postgres and its database;
+</li>
+<li>the server process (container command or <code>Daemon</code> in the container,
+the systemd unit in the VM);
+</li>
+<li>a last node whose <code>check</code> is <code>GET /healthz</code> answering <code>200</code>.
+</li>
+</ol>
+<p><code>run up</code> prints where the server listens and a token. A preview is this,
+left standing; <code>run down</code> removes it.</p>
+<h4 id="where-it-lives">Where it lives</h4>
+<p>A separate cabal package, <code>preview/</code>, with its own project file
+(<code>cabal.preview.project</code>), depending on <code>salmon-ops</code> and
+<code>salmon-ops-recipes</code> from Hackage and on <code>agents-lib</code> for the HTTP client.
+The repository has no <code>cabal.project</code> today, only a freeze file, so the
+default build and <code>cabal test</code> are untouched and nobody needs salmon, podman
+or qemu to work on agents-exe. This is what salmon does for its own
+experimental packages (<code>cabal.perso.project</code>).</p>
+<p>Not recommended:</p>
+<ul>
+<li><em>A new test-suite in <code>agents.cabal</code></em>. It would put salmon and all its
+dependencies in the freeze file of every build, for tests that most
+machines skip.
+</li>
+<li><em>The recipe in the salmon repository</em>. agents-server’s flags and files
+change here; the recipe must change in the same commit.
+</li>
+<li><em>A shell script around <code>podman</code></em>. It would work for phase 1. It gives no
+<code>down</code> that matches <code>up</code>, no <code>check</code>, and nothing to reuse for the VM.
+</li>
+</ul>
+<h4 id="the-checks">The checks</h4>
+<p>Written in Haskell in the same package, against the address <code>run up</code>
+printed, with <code>System.Agents.Host.Client.Http</code> (the client the TUI attaches
+with). They take a URL and a token and nothing else, so they also run
+against a server deployed by other means.</p>
+<p>Phase 1, container and SQLite:</p>
+<ol>
+<li><code>/healthz</code> answers; the <code>server.started</code> log line says
+<code>authentication: bearer</code>.
+</li>
+<li>A request without a token is refused; one owner cannot read another’s
+session.
+</li>
+<li>A scripted run: create a session with a prompt, wait, read the answer
+the fake LLM was scripted to give, with one tool call on the way.
+</li>
+<li>The events stream of that run carries <code>run.started</code> … <code>run.stopped</code>.
+</li>
+<li><code>SIGTERM</code> during a run: the process exits within <code>--shutdown-grace</code>, the
+session is stored.
+</li>
+<li><code>SIGKILL</code> during a run, then start: <code>sessions.recovered</code> names the
+session, its status is the one its turns imply, <code>resume</code> continues it.
+</li>
+<li><code>agents-exe tui --attach URL</code> from outside the container (the existing
+<code>checks/phase4-attach-e2e</code>, given a URL).
+</li>
+<li>Upgrade: bring up the binary built from <code>main</code>, run check 3, replace the
+binary with the branch’s, start on the same database, read the old
+session and run check 3 again.
+</li>
+</ol>
+<p>Phase 2, Postgres:</p>
+<ol start="9">
+<li>The server creates its tables in an empty database.
+</li>
+<li>Two servers on one database: a message sent to one reaches a run on the
+other; kill the owner, and the other logs <code>sessions.taken_over</code> after
+the lease expires.
+</li>
+<li>Check 8 with Postgres.
+</li>
+</ol>
+<p>Phase 3, a VM with systemd:</p>
+<ol start="12">
+<li><code>bundling/systemd/agents-server.service</code>, installed as the
+documentation says, starts as the <code>agents-server</code> user and creates its
+state directory.
+</li>
+<li><code>systemctl stop</code> during a run ends cleanly, before <code>TimeoutStopSec</code>.
+</li>
+<li>A killed server is restarted by systemd and recovers its sessions.
+</li>
+<li><code>journalctl -u agents-server -o cat</code> is one JSON object per line.
+</li>
+<li>The VM reboots; the service comes back with its sessions.
+</li>
+</ol>
+<h4 id="the-binary">The binary</h4>
+<p>A binary built on the developer’s machine is linked against that machine’s
+glibc and libraries, and may not start in a <code>debian:bookworm</code> container.
+Two ways:</p>
+<ul>
+<li>build inside a container of the target’s distribution and copy the binary
+out (<code>bundling/Containerfile.build</code> does this for <code>agents-exe</code>, from a
+clone of GitHub rather than the working tree, and on <code>haskell:9.8.4</code>
+while <code>agents.cabal</code> asks for <code>base &gt;=4.20</code>: it looks out of date, and
+was not built for this spec);
+</li>
+<li>choose the container image to match the host that builds.
+</li>
+</ul>
+<p>The first is right for a preview that must be like production and slow
+(a full build, once per image, cached after). The second is enough for
+phase 1 on the owner’s machine. Phase 1 takes the path of a binary as a
+seed argument, so the choice can be made later.</p>
+<h4 id="phases">Phases</h4>
+<p>Each is useful alone and can stop there.</p>
+<table>
+<tr><th>Phase</th><th>Adds</th><th>Needs on the machine</th></tr>
+<tr><td>0</td><td>the <code>preview/</code> package, the graph with a container and no server (<code>run tree</code>, <code>up</code>, <code>down</code>), a graph-shape test</td><td>podman</td></tr>
+<tr><td>1</td><td>server, fake LLM, SQLite, checks 1 to 8</td><td>podman, python3</td></tr>
+<tr><td>2</td><td>Postgres, a second server, checks 9 to 11</td><td>podman</td></tr>
+<tr><td>3</td><td>VM host, the shipped unit, checks 12 to 16</td><td>qemu, root or the <code>setcap</code> grants salmon's harness documents</td></tr>
+<tr><td>4</td><td>a preview on a host other than this machine</td><td><strong>Decide</strong>: see below</td></tr>
+</table>
+<p>Phase 3 depends on salmon’s VM harness being usable from outside salmon’s
+test tree. That is a change in salmon and is not part of this work: ask for
+it there, or copy the few functions needed here until it exists.</p>
+<h3 id="the-other-reading-salmon-as-a-feature">The other reading: salmon as a feature</h3>
+<p>The request also said “or integrate as a new feature”. Two candidates were
+considered, and neither is recommended now.</p>
+<ul>
+<li><em>Agents that operate salmon</em>. <code>salmon run serve --http</code> has an HTTP API
+with an OpenAPI description (<code>salmon-ops/openapi/serve-api.openapi.json</code>),
+and agents-exe has an OpenAPI toolbox. An agent that lists, converges and
+inspects a salmon world may need no code at all, only an agent file and a
+page of documentation. Worth one experiment after phase 1, when there is
+a salmon graph in this repository to point it at.
+</li>
+<li><em>salmon as the way to install agents-server</em>. The units in
+<code>bundling/systemd/</code> and a page of documentation do this today. A salmon
+recipe for production installs is the phase 1 graph with a real host, and
+should wait until the preview has shown the graph is right.
+</li>
+</ul>
+<h3 id="not-in-scope">Not in scope</h3>
+<ul>
+<li>Deploying anywhere but the machine that runs the recipe (until phase 4 is
+decided).
+</li>
+<li>TLS, a reverse proxy, DNS. The server binds a plain port; the
+documentation puts a proxy in front. A later check, not a first one.
+</li>
+<li>A real LLM. Every check uses the fake one. A preview an operator keeps
+may be given real keys by hand; the recipe does not handle them.
+</li>
+<li>CI. The repository has no CI configuration; this spec adds none.
+</li>
+<li>Changes to the salmon repository.
+</li>
+</ul>
+<h3 id="decide">Decide</h3>
+<ol>
+<li><strong>Scope of the first step.</strong> Recommended: phases 0 and 1 (container,
+SQLite), then stop and look. The alternative is to go straight to
+Postgres and systemd, which is closer to production and much more
+work before the first result.
+</li>
+<li><strong>Host.</strong> Recommended: podman container first, qemu VM in phase 3 for
+systemd. The alternative is the VM from the start (one host kind, but
+every run needs VM privileges and a rootfs).
+</li>
+<li><strong>Package location.</strong> Recommended: <code>preview/</code> with its own project
+file. Is a second cabal project in this repository acceptable?
+</li>
+<li><strong>The checks’ language.</strong> Recommended: Haskell with the existing HTTP
+client. The alternative is Python next to <code>checks/lib</code>, which reuses
+<code>fake_llm.py</code>’s conventions and adds no Haskell dependency, but
+duplicates the client.
+</li>
+<li><strong>Phase 4.</strong> Is a preview on another host wanted at all (a URL to open
+per branch), and if so on what: a machine of the owner’s over ssh, or
+Cloud Run as salmon’s <code>PreviewEnvironment</code> does? This one involves real
+hosts, credentials and cost, and nothing is proposed until it is
+answered.
+</li>
+<li><strong>The salmon harness.</strong> May the VM helpers move from salmon’s test tree
+to a library, or should phase 3 copy them?
+</li>
+<li><strong><code>bundling/Containerfile.build</code>.</strong> Fix it as part of phase 1 (build
+from the working tree, a GHC that satisfies <code>base &gt;=4.20</code>, also produce
+<code>agents-server</code>), or leave it?
+</li>
+</ol>
+</section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-10-03T10:37:53Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html</id><title type="text">Plan: Durable execution from the CLI</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows-cli-start-plan.md"&gt;&lt;code&gt;todos/durable-workflows-cli-start-plan.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-10-04T15:53:54Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html</id><title type="text">Plan: Durable execution from the CLI</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows-cli-start-plan.md"&gt;&lt;code&gt;todos/durable-workflows-cli-start-plan.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="plan-durable-execution-from-the-cli"&gt;Plan: Durable execution from the CLI&lt;/h2&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;Make the durable-workflow execution mode accessible from the CLI in one-shot
@@ -366,7 +366,7 @@ handlers.
 &lt;li&gt;&lt;code&gt;src/System/Agents/Session/Loop.hs&lt;/code&gt; — &lt;code&gt;runAsync&lt;/code&gt; and &lt;code&gt;runStepM&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs.html</id><title type="text">Specs</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="specs"&gt;Specs&lt;/h2&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs.html</id><title type="text">Specs</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="specs"&gt;Specs&lt;/h2&gt;
 &lt;p&gt;The &lt;code&gt;todos/&lt;/code&gt; directory holds the design documents behind the larger
 features (durable workflows, asynchronous tool calls, the session mailbox,
 partial application of tool arguments, the standalone server) and their
@@ -389,6 +389,8 @@ canonical source, and may be ahead of what is published here.&lt;/p&gt;
 &lt;/li&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-os-as-standalone-server.html"&gt;&lt;strong&gt;Spec: the OS as a standalone server (TUI and web UI as clients)&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposal, 2026-09-23, revised the same day after checking service
 &lt;/li&gt;
+&lt;li&gt;&lt;a href="/agents-exe/specs-salmon-preview-deployment.html"&gt;&lt;strong&gt;Spec: a salmon-driven preview deployment of agents-server&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposal, 2026-10-03. Nothing implemented. A design pass with a
+&lt;/li&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-session-mailbox.html"&gt;&lt;strong&gt;Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
 &lt;/li&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-tool-partial-application.html"&gt;&lt;strong&gt;Spec: partial application of tool arguments&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; Phases 1-7 and §8.4 (&lt;code&gt;derive_agent&lt;/code&gt;) done as of 2026-09-21. Phase 1 done
@@ -398,7 +400,7 @@ canonical source, and may be ahead of what is published here.&lt;/p&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-web-server-embedding.progress.html"&gt;&lt;strong&gt;Web server embedding — Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs.html" rel="alternate"/><summary type="text">The design documents under todos/, each headed by a Status line saying what of it has shipped.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html</id><title type="text">Spec: the OS as a standalone server (TUI and web UI as clients)</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"&gt;&lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs.html" rel="alternate"/><summary type="text">The design documents under todos/, each headed by a Status line saying what of it has shipped.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html</id><title type="text">Spec: the OS as a standalone server (TUI and web UI as clients)</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"&gt;&lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-the-os-as-a-standalone-server-tui-and-web-ui-as-clients"&gt;Spec: the OS as a standalone server (TUI and web UI as clients)&lt;/h2&gt;
 &lt;p&gt;Status: proposal, 2026-09-23, revised the same day after checking service
 readiness. Phases 0 and 1 done on branch &lt;code&gt;feature/os-standalone-server&lt;/code&gt;
@@ -1035,7 +1037,7 @@ Phases 0 and 1.
 goes with D1.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-23, revised the same day after checking service</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html</id><title type="text">Plan: Durable Workflows for agents-exe</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.md"&gt;&lt;code&gt;todos/durable-workflows.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-23, revised the same day after checking service</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html</id><title type="text">Plan: Durable Workflows for agents-exe</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.md"&gt;&lt;code&gt;todos/durable-workflows.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="plan-durable-workflows-for-agents-exe"&gt;Plan: Durable Workflows for agents-exe&lt;/h2&gt;
 &lt;p&gt;See &lt;a href="/agents-exe/specs-durable-workflows.progress.html"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt; for implementation progress.&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
@@ -1397,7 +1399,7 @@ A UUID is safer for external workers and database keys; an index is smaller and 
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;p&gt;This milestone delivers the requested primitives without yet building Docker runners or Postgres backends.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html</id><title type="text">Async Tool Calls Implementation Progress</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls-progress.md"&gt;&lt;code&gt;todos/async-tool-calls-progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html</id><title type="text">Async Tool Calls Implementation Progress</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls-progress.md"&gt;&lt;code&gt;todos/async-tool-calls-progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="async-tool-calls-implementation-progress"&gt;Async Tool Calls Implementation Progress&lt;/h2&gt;
 &lt;h3 id="plan"&gt;Plan&lt;/h3&gt;
 &lt;p&gt;See &lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;.&lt;/p&gt;
@@ -2135,7 +2137,7 @@ the agent JSON schema for async.
 &lt;li&gt;Clarify whether MCP / OpenAPI tools can stream into the progress callback.
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html</id><title type="text">Web server embedding — Implementation Progress</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.progress.md"&gt;&lt;code&gt;todos/web-server-embedding.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html</id><title type="text">Web server embedding — Implementation Progress</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.progress.md"&gt;&lt;code&gt;todos/web-server-embedding.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="web-server-embedding--implementation-progress"&gt;Web server embedding — Implementation Progress&lt;/h2&gt;
 &lt;p&gt;Progress tracker for &lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="phase-1--storage-wiring-fix-white_check_mark-complete"&gt;Phase 1 — Storage wiring fix ✅ COMPLETE&lt;/h3&gt;
@@ -2650,7 +2652,7 @@ server is &lt;code&gt;agents-exe mcp-server&lt;/code&gt;, and its tool
 &lt;/ul&gt;
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html</id><title type="text">Spec: embedding agents-exe in a web server</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.md"&gt;&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html</id><title type="text">Spec: embedding agents-exe in a web server</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.md"&gt;&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-embedding-agents-exe-in-a-web-server"&gt;Spec: embedding agents-exe in a web server&lt;/h2&gt;
 &lt;p&gt;Status: proposed (2026-09-18)&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
@@ -3711,7 +3713,31 @@ and out, &lt;code&gt;unknown_helper&lt;/code&gt;, &lt;code&gt;helper_cycle&lt;/c
 &lt;ul&gt;
 &lt;li&gt;&lt;strong&gt;Per-owner API keys and isolation&lt;/strong&gt;: build agents per owner, including
 sub-agent tools; default policy &lt;code&gt;runIsolated&lt;/code&gt; for bash and MCP tools, backed
-by &lt;code&gt;dockerRunner&lt;/code&gt;.
+by &lt;code&gt;dockerRunner&lt;/code&gt;. Partly done:
+&lt;ul&gt;
+&lt;li&gt;Keys: &lt;code&gt;HostConfig.hcOwnerApiKeysFiles&lt;/code&gt; (&lt;code&gt;--owner-api-keys OWNER=FILE&lt;/code&gt;),
+loaded into &lt;code&gt;Host.hostOwnerApiKeys&lt;/code&gt;. The runner already builds one agent
+per session, so it picks the keys there (&lt;code&gt;Runner.newAgent&lt;/code&gt;), from the
+owner of the session’s root. Sub-agents needed one fix to be covered:
+&lt;code&gt;createSessionForNodeWith&lt;/code&gt; now always builds the agent from the node it
+was given. Before, a helper that was not also a root agent failed
+&lt;code&gt;lookupAgent&lt;/code&gt; and silently fell back to the in-tool path, which is built
+at load time and knows no owner. That fallback remains for real
+failures, and gets no key at all when per-owner keys are in use.
+&lt;/li&gt;
+&lt;li&gt;Isolation: &lt;code&gt;System.Agents.Tools.Isolated&lt;/code&gt;, &lt;code&gt;AgentDeps.adToolIsolation&lt;/code&gt;,
+&lt;code&gt;HostConfig.hcToolIsolation&lt;/code&gt; (&lt;code&gt;--isolate-tools docker:IMAGE|process:PATH&lt;/code&gt;).
+Enforced in &lt;code&gt;buildAgent&lt;/code&gt;, around the tool execution rather than through
+&lt;code&gt;ToolCallPolicy&lt;/code&gt;: a policy is the agent’s own (it would let an agent
+file opt out, and replacing it would drop &lt;code&gt;defer&lt;/code&gt; rules), and a
+&lt;code&gt;RunIsolated&lt;/code&gt; disposition without a runner runs in-process.
+&lt;/li&gt;
+&lt;li&gt;Still open (owner decisions): isolation is opt-in, not the default, as
+there is no worker image to default to; it covers bash and MCP tool
+calls only; MCP servers still start on the host; no worker ships with
+the repository; unlisted owners use the shared keys.
+&lt;/li&gt;
+&lt;/ul&gt;
 &lt;/li&gt;
 &lt;li&gt;~~&lt;strong&gt;Several server processes on one Postgres database&lt;/strong&gt;: live-run ownership
 through a lease column (&lt;code&gt;run_owner&lt;/code&gt;, &lt;code&gt;run_lease_until&lt;/code&gt;).~~ Done:
@@ -3827,7 +3853,7 @@ It is plain HTML and JavaScript in one document, with no build step.
 &lt;li&gt;&lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;, &lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;, &lt;code&gt;documentation/sessions.md&lt;/code&gt;
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html" rel="alternate"/><summary type="text">Status: proposed (2026-09-18)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html</id><title type="text">Asynchronous / Interruptible Tool Calls</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls.md"&gt;&lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html" rel="alternate"/><summary type="text">Status: proposed (2026-09-18)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html</id><title type="text">Asynchronous / Interruptible Tool Calls</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls.md"&gt;&lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="asynchronous--interruptible-tool-calls"&gt;Asynchronous / Interruptible Tool Calls&lt;/h2&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;Make tool calls in a TUI/oneshot session truly interruptible and inspectable:&lt;/p&gt;
@@ -4253,7 +4279,287 @@ It is plain HTML and JavaScript in one document, with no build step.
 &lt;li&gt;[ ] &lt;code&gt;get_tool_call_status&lt;/code&gt; returns &lt;code&gt;orphaned&lt;/code&gt; for calls referenced in history that no longer exist.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html</id><title type="text">Durable Workflows — Implementation Progress</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.progress.md"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html</id><title type="text">Spec: a salmon-driven preview deployment of agents-server</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/salmon-preview-deployment.md"&gt;&lt;code&gt;todos/salmon-preview-deployment.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;h2 id="spec-a-salmon-driven-preview-deployment-of-agents-server"&gt;Spec: a salmon-driven preview deployment of agents-server&lt;/h2&gt;
+&lt;p&gt;Status: proposal, 2026-10-03. Nothing implemented. A design pass with a
+recommendation; the points marked &lt;strong&gt;Decide&lt;/strong&gt; need the owner before any
+phase starts.&lt;/p&gt;
+&lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
+&lt;p&gt;Run the &lt;em&gt;built&lt;/em&gt; &lt;code&gt;agents-server&lt;/code&gt; as it would run in production (its own
+process, its files on disk, a real database, later a real init system),
+check it over the network, and tear it down. The same recipe, left up
+instead of torn down, is a preview of a branch.&lt;/p&gt;
+&lt;p&gt;&lt;a href="https://github.com/lucasdicioccio/salmon"&gt;salmon&lt;/a&gt; is the tool that brings
+the deployment up and down: it expresses the deployment as a graph of
+idempotent ops with &lt;code&gt;up&lt;/code&gt;/&lt;code&gt;down&lt;/code&gt;/&lt;code&gt;check&lt;/code&gt;, and it already has the pieces this
+needs (podman containers, systemd units, postgres, qemu VMs, files).&lt;/p&gt;
+&lt;h3 id="where-things-stand"&gt;Where things stand&lt;/h3&gt;
+&lt;p&gt;What is tested today, and how:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;What&lt;/th&gt;&lt;th&gt;Where&lt;/th&gt;&lt;th&gt;How real&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Runtime, sessions, tools&lt;/td&gt;&lt;td&gt;&lt;code&gt;agents-tests&lt;/code&gt; (&lt;code&gt;test/&lt;/code&gt;)&lt;/td&gt;&lt;td&gt;in-process, in-memory persistence&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;HTTP API, auth, events, mail&lt;/td&gt;&lt;td&gt;&lt;code&gt;agents-server-tests&lt;/code&gt; (&lt;code&gt;examples/agents-server/test&lt;/code&gt;)&lt;/td&gt;&lt;td&gt;in-process WAI application on a free port, the LLM replaced by a Haskell function, a temporary SQLite file&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Postgres store, leases, takeover&lt;/td&gt;&lt;td&gt;&lt;code&gt;agents-postgres-tests&lt;/code&gt; (&lt;code&gt;postgres/test&lt;/code&gt;)&lt;/td&gt;&lt;td&gt;a real cluster from &lt;code&gt;initdb&lt;/code&gt;/&lt;code&gt;pg_ctl&lt;/code&gt; (or &lt;code&gt;AGENTS_TEST_POSTGRES_URL&lt;/code&gt;); skipped when neither is there&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;TUI against a real binary&lt;/td&gt;&lt;td&gt;&lt;code&gt;checks/*-e2e&lt;/code&gt;&lt;/td&gt;&lt;td&gt;the built &lt;code&gt;agents-exe&lt;/code&gt; under a pty, with &lt;code&gt;checks/lib/fake_llm.py&lt;/code&gt; as an OpenAI-compatible LLM&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;What none of them runs:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;the &lt;code&gt;agents-server&lt;/code&gt; executable itself: its option parser, its startup
+order, its exit codes, its JSON log lines;
+&lt;/li&gt;
+&lt;li&gt;the units in &lt;code&gt;bundling/systemd/&lt;/code&gt; (&lt;code&gt;User=&lt;/code&gt;, &lt;code&gt;StateDirectory=&lt;/code&gt;,
+&lt;code&gt;TimeoutStopSec&lt;/code&gt; against &lt;code&gt;--shutdown-grace&lt;/code&gt;, &lt;code&gt;Restart=on-failure&lt;/code&gt;);
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;SIGTERM&lt;/code&gt; and &lt;code&gt;SIGKILL&lt;/code&gt; on a real process, and what a restart finds;
+&lt;/li&gt;
+&lt;li&gt;a database written by one version and opened by the next;
+&lt;/li&gt;
+&lt;li&gt;two server processes on one Postgres, one of them killed;
+&lt;/li&gt;
+&lt;li&gt;a client on another machine: &lt;code&gt;--bind&lt;/code&gt;, &lt;code&gt;--auth-tokens&lt;/code&gt;, &lt;code&gt;--cors-origin&lt;/code&gt;,
+&lt;code&gt;agents-exe tui --attach URL&lt;/code&gt;;
+&lt;/li&gt;
+&lt;li&gt;the binary on a machine other than the one that built it.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;salmon is not used by this repository. The two mentions are incidental
+(&lt;code&gt;dbs/README.md&lt;/code&gt;, &lt;code&gt;website/README.md&lt;/code&gt;).&lt;/p&gt;
+&lt;h3 id="what-salmon-provides"&gt;What salmon provides&lt;/h3&gt;
+&lt;p&gt;Read from salmon’s README and &lt;code&gt;resources/howto-ops.md&lt;/code&gt; (section 10); none of
+it has been run for this spec.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Builtin nodes for &lt;code&gt;Podman&lt;/code&gt; (and quadlets), &lt;code&gt;Systemd&lt;/code&gt;, &lt;code&gt;Postgres&lt;/code&gt;, &lt;code&gt;Qemu&lt;/code&gt;,
+&lt;code&gt;Filesystem&lt;/code&gt;, &lt;code&gt;Cabal&lt;/code&gt;, &lt;code&gt;Daemon&lt;/code&gt; (a process salmon keeps running where
+there is no systemd), &lt;code&gt;Certificates&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;A binary built on salmon speaks &lt;code&gt;config &amp;lt;seed&amp;gt; | run up&lt;/code&gt;, &lt;code&gt;run down&lt;/code&gt;,
+&lt;code&gt;run tree&lt;/code&gt;. Teardown is the graph walked backwards.
+&lt;/li&gt;
+&lt;li&gt;Its own tests are in four layers by cost: graph shape only (0), temporary
+directories (1), disposable podman containers (2), a qemu VM for systemd
+as PID 1 and real interfaces (3). Layers 2 and 3 skip loudly when podman
+or the VM privileges are missing.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;SreBox.Gcp.PreviewEnvironment&lt;/code&gt; groups several Cloud Run deploys into one
+node per branch. It is the precedent for “one thing to point &lt;code&gt;run up&lt;/code&gt; and
+&lt;code&gt;run down&lt;/code&gt; at”, on a host this spec does not propose.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;salmon-core&lt;/code&gt;, &lt;code&gt;salmon-ops&lt;/code&gt; and &lt;code&gt;salmon-ops-recipes&lt;/code&gt; are on Hackage. The
+test harness (&lt;code&gt;Test.Harness&lt;/code&gt;: &lt;code&gt;withContainer&lt;/code&gt;, &lt;code&gt;withVm&lt;/code&gt;, &lt;code&gt;sshToVm&lt;/code&gt;, …)
+is in salmon’s test tree, not in a library, so it cannot be imported from
+here as it is.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="recommendation"&gt;Recommendation&lt;/h3&gt;
+&lt;p&gt;Build one salmon recipe, in this repository, that describes an
+agents-server deployment, and use it two ways: a test driver runs &lt;code&gt;up&lt;/code&gt;,
+checks, &lt;code&gt;down&lt;/code&gt;; an operator runs &lt;code&gt;up&lt;/code&gt; and keeps it. Start with a container
+and SQLite, and add Postgres and a VM as later phases. Do not make it a
+tier of &lt;code&gt;cabal test&lt;/code&gt;.&lt;/p&gt;
+&lt;h4 id="one-graph-two-uses"&gt;One graph, two uses&lt;/h4&gt;
+&lt;pre&gt;&lt;code&gt;agents-preview config --name NAME --host container|vm --db sqlite|postgres ...
+    | agents-preview run up        # or: run down, run tree
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The graph, from the leaves:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;the &lt;code&gt;agents-server&lt;/code&gt; binary for the target (see “The binary” below);
+&lt;/li&gt;
+&lt;li&gt;the host: a podman container, or a qemu VM;
+&lt;/li&gt;
+&lt;li&gt;files on the host: agent file, keys file, token file, and for the VM the
+unit from &lt;code&gt;bundling/systemd/&lt;/code&gt;, copied as it is shipped;
+&lt;/li&gt;
+&lt;li&gt;the LLM: &lt;code&gt;checks/lib/fake_llm.py&lt;/code&gt; with a script, listening next to the
+server; the agent file’s &lt;code&gt;modelUrl&lt;/code&gt; points at it, as &lt;code&gt;checks/lib/e2e.py&lt;/code&gt;
+already does. No API key, so no secret is involved;
+&lt;/li&gt;
+&lt;li&gt;optionally Postgres and its database;
+&lt;/li&gt;
+&lt;li&gt;the server process (container command or &lt;code&gt;Daemon&lt;/code&gt; in the container,
+the systemd unit in the VM);
+&lt;/li&gt;
+&lt;li&gt;a last node whose &lt;code&gt;check&lt;/code&gt; is &lt;code&gt;GET /healthz&lt;/code&gt; answering &lt;code&gt;200&lt;/code&gt;.
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;&lt;code&gt;run up&lt;/code&gt; prints where the server listens and a token. A preview is this,
+left standing; &lt;code&gt;run down&lt;/code&gt; removes it.&lt;/p&gt;
+&lt;h4 id="where-it-lives"&gt;Where it lives&lt;/h4&gt;
+&lt;p&gt;A separate cabal package, &lt;code&gt;preview/&lt;/code&gt;, with its own project file
+(&lt;code&gt;cabal.preview.project&lt;/code&gt;), depending on &lt;code&gt;salmon-ops&lt;/code&gt; and
+&lt;code&gt;salmon-ops-recipes&lt;/code&gt; from Hackage and on &lt;code&gt;agents-lib&lt;/code&gt; for the HTTP client.
+The repository has no &lt;code&gt;cabal.project&lt;/code&gt; today, only a freeze file, so the
+default build and &lt;code&gt;cabal test&lt;/code&gt; are untouched and nobody needs salmon, podman
+or qemu to work on agents-exe. This is what salmon does for its own
+experimental packages (&lt;code&gt;cabal.perso.project&lt;/code&gt;).&lt;/p&gt;
+&lt;p&gt;Not recommended:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;em&gt;A new test-suite in &lt;code&gt;agents.cabal&lt;/code&gt;&lt;/em&gt;. It would put salmon and all its
+dependencies in the freeze file of every build, for tests that most
+machines skip.
+&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;The recipe in the salmon repository&lt;/em&gt;. agents-server’s flags and files
+change here; the recipe must change in the same commit.
+&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;A shell script around &lt;code&gt;podman&lt;/code&gt;&lt;/em&gt;. It would work for phase 1. It gives no
+&lt;code&gt;down&lt;/code&gt; that matches &lt;code&gt;up&lt;/code&gt;, no &lt;code&gt;check&lt;/code&gt;, and nothing to reuse for the VM.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h4 id="the-checks"&gt;The checks&lt;/h4&gt;
+&lt;p&gt;Written in Haskell in the same package, against the address &lt;code&gt;run up&lt;/code&gt;
+printed, with &lt;code&gt;System.Agents.Host.Client.Http&lt;/code&gt; (the client the TUI attaches
+with). They take a URL and a token and nothing else, so they also run
+against a server deployed by other means.&lt;/p&gt;
+&lt;p&gt;Phase 1, container and SQLite:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;code&gt;/healthz&lt;/code&gt; answers; the &lt;code&gt;server.started&lt;/code&gt; log line says
+&lt;code&gt;authentication: bearer&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;A request without a token is refused; one owner cannot read another’s
+session.
+&lt;/li&gt;
+&lt;li&gt;A scripted run: create a session with a prompt, wait, read the answer
+the fake LLM was scripted to give, with one tool call on the way.
+&lt;/li&gt;
+&lt;li&gt;The events stream of that run carries &lt;code&gt;run.started&lt;/code&gt; … &lt;code&gt;run.stopped&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;SIGTERM&lt;/code&gt; during a run: the process exits within &lt;code&gt;--shutdown-grace&lt;/code&gt;, the
+session is stored.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;SIGKILL&lt;/code&gt; during a run, then start: &lt;code&gt;sessions.recovered&lt;/code&gt; names the
+session, its status is the one its turns imply, &lt;code&gt;resume&lt;/code&gt; continues it.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;agents-exe tui --attach URL&lt;/code&gt; from outside the container (the existing
+&lt;code&gt;checks/phase4-attach-e2e&lt;/code&gt;, given a URL).
+&lt;/li&gt;
+&lt;li&gt;Upgrade: bring up the binary built from &lt;code&gt;main&lt;/code&gt;, run check 3, replace the
+binary with the branch’s, start on the same database, read the old
+session and run check 3 again.
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Phase 2, Postgres:&lt;/p&gt;
+&lt;ol start="9"&gt;
+&lt;li&gt;The server creates its tables in an empty database.
+&lt;/li&gt;
+&lt;li&gt;Two servers on one database: a message sent to one reaches a run on the
+other; kill the owner, and the other logs &lt;code&gt;sessions.taken_over&lt;/code&gt; after
+the lease expires.
+&lt;/li&gt;
+&lt;li&gt;Check 8 with Postgres.
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Phase 3, a VM with systemd:&lt;/p&gt;
+&lt;ol start="12"&gt;
+&lt;li&gt;&lt;code&gt;bundling/systemd/agents-server.service&lt;/code&gt;, installed as the
+documentation says, starts as the &lt;code&gt;agents-server&lt;/code&gt; user and creates its
+state directory.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;systemctl stop&lt;/code&gt; during a run ends cleanly, before &lt;code&gt;TimeoutStopSec&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;A killed server is restarted by systemd and recovers its sessions.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;journalctl -u agents-server -o cat&lt;/code&gt; is one JSON object per line.
+&lt;/li&gt;
+&lt;li&gt;The VM reboots; the service comes back with its sessions.
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h4 id="the-binary"&gt;The binary&lt;/h4&gt;
+&lt;p&gt;A binary built on the developer’s machine is linked against that machine’s
+glibc and libraries, and may not start in a &lt;code&gt;debian:bookworm&lt;/code&gt; container.
+Two ways:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;build inside a container of the target’s distribution and copy the binary
+out (&lt;code&gt;bundling/Containerfile.build&lt;/code&gt; does this for &lt;code&gt;agents-exe&lt;/code&gt;, from a
+clone of GitHub rather than the working tree, and on &lt;code&gt;haskell:9.8.4&lt;/code&gt;
+while &lt;code&gt;agents.cabal&lt;/code&gt; asks for &lt;code&gt;base &amp;gt;=4.20&lt;/code&gt;: it looks out of date, and
+was not built for this spec);
+&lt;/li&gt;
+&lt;li&gt;choose the container image to match the host that builds.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The first is right for a preview that must be like production and slow
+(a full build, once per image, cached after). The second is enough for
+phase 1 on the owner’s machine. Phase 1 takes the path of a binary as a
+seed argument, so the choice can be made later.&lt;/p&gt;
+&lt;h4 id="phases"&gt;Phases&lt;/h4&gt;
+&lt;p&gt;Each is useful alone and can stop there.&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Phase&lt;/th&gt;&lt;th&gt;Adds&lt;/th&gt;&lt;th&gt;Needs on the machine&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;the &lt;code&gt;preview/&lt;/code&gt; package, the graph with a container and no server (&lt;code&gt;run tree&lt;/code&gt;, &lt;code&gt;up&lt;/code&gt;, &lt;code&gt;down&lt;/code&gt;), a graph-shape test&lt;/td&gt;&lt;td&gt;podman&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;server, fake LLM, SQLite, checks 1 to 8&lt;/td&gt;&lt;td&gt;podman, python3&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;Postgres, a second server, checks 9 to 11&lt;/td&gt;&lt;td&gt;podman&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;VM host, the shipped unit, checks 12 to 16&lt;/td&gt;&lt;td&gt;qemu, root or the &lt;code&gt;setcap&lt;/code&gt; grants salmon's harness documents&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;a preview on a host other than this machine&lt;/td&gt;&lt;td&gt;&lt;strong&gt;Decide&lt;/strong&gt;: see below&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;Phase 3 depends on salmon’s VM harness being usable from outside salmon’s
+test tree. That is a change in salmon and is not part of this work: ask for
+it there, or copy the few functions needed here until it exists.&lt;/p&gt;
+&lt;h3 id="the-other-reading-salmon-as-a-feature"&gt;The other reading: salmon as a feature&lt;/h3&gt;
+&lt;p&gt;The request also said “or integrate as a new feature”. Two candidates were
+considered, and neither is recommended now.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;em&gt;Agents that operate salmon&lt;/em&gt;. &lt;code&gt;salmon run serve --http&lt;/code&gt; has an HTTP API
+with an OpenAPI description (&lt;code&gt;salmon-ops/openapi/serve-api.openapi.json&lt;/code&gt;),
+and agents-exe has an OpenAPI toolbox. An agent that lists, converges and
+inspects a salmon world may need no code at all, only an agent file and a
+page of documentation. Worth one experiment after phase 1, when there is
+a salmon graph in this repository to point it at.
+&lt;/li&gt;
+&lt;li&gt;&lt;em&gt;salmon as the way to install agents-server&lt;/em&gt;. The units in
+&lt;code&gt;bundling/systemd/&lt;/code&gt; and a page of documentation do this today. A salmon
+recipe for production installs is the phase 1 graph with a real host, and
+should wait until the preview has shown the graph is right.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="not-in-scope"&gt;Not in scope&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Deploying anywhere but the machine that runs the recipe (until phase 4 is
+decided).
+&lt;/li&gt;
+&lt;li&gt;TLS, a reverse proxy, DNS. The server binds a plain port; the
+documentation puts a proxy in front. A later check, not a first one.
+&lt;/li&gt;
+&lt;li&gt;A real LLM. Every check uses the fake one. A preview an operator keeps
+may be given real keys by hand; the recipe does not handle them.
+&lt;/li&gt;
+&lt;li&gt;CI. The repository has no CI configuration; this spec adds none.
+&lt;/li&gt;
+&lt;li&gt;Changes to the salmon repository.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="decide"&gt;Decide&lt;/h3&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Scope of the first step.&lt;/strong&gt; Recommended: phases 0 and 1 (container,
+SQLite), then stop and look. The alternative is to go straight to
+Postgres and systemd, which is closer to production and much more
+work before the first result.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Host.&lt;/strong&gt; Recommended: podman container first, qemu VM in phase 3 for
+systemd. The alternative is the VM from the start (one host kind, but
+every run needs VM privileges and a rootfs).
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Package location.&lt;/strong&gt; Recommended: &lt;code&gt;preview/&lt;/code&gt; with its own project
+file. Is a second cabal project in this repository acceptable?
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;The checks’ language.&lt;/strong&gt; Recommended: Haskell with the existing HTTP
+client. The alternative is Python next to &lt;code&gt;checks/lib&lt;/code&gt;, which reuses
+&lt;code&gt;fake_llm.py&lt;/code&gt;’s conventions and adds no Haskell dependency, but
+duplicates the client.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Phase 4.&lt;/strong&gt; Is a preview on another host wanted at all (a URL to open
+per branch), and if so on what: a machine of the owner’s over ssh, or
+Cloud Run as salmon’s &lt;code&gt;PreviewEnvironment&lt;/code&gt; does? This one involves real
+hosts, credentials and cost, and nothing is proposed until it is
+answered.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;The salmon harness.&lt;/strong&gt; May the VM helpers move from salmon’s test tree
+to a library, or should phase 3 copy them?
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;bundling/Containerfile.build&lt;/code&gt;.&lt;/strong&gt; Fix it as part of phase 1 (build
+from the working tree, a GHC that satisfies &lt;code&gt;base &amp;gt;=4.20&lt;/code&gt;, also produce
+&lt;code&gt;agents-server&lt;/code&gt;), or leave it?
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html" rel="alternate"/><summary type="text">Status: proposal, 2026-10-03. Nothing implemented. A design pass with a</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html</id><title type="text">Durable Workflows — Implementation Progress</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.progress.md"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="durable-workflows--implementation-progress"&gt;Durable Workflows — Implementation Progress&lt;/h2&gt;
 &lt;p&gt;Progress tracker for &lt;code&gt;todos/durable-workflows.md&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="phase-1--core-primitives-types--interfaces-white_check_mark-complete"&gt;Phase 1 — Core primitives (types &amp;amp; interfaces) ✅ COMPLETE&lt;/h3&gt;
@@ -5100,7 +5406,7 @@ resolving name clashes with the session-layer &lt;code&gt;ToolCallState&lt;/code
 &lt;li&gt;Test suite &lt;code&gt;agents-tests&lt;/code&gt; passes, including all durable-workflow tests.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html</id><title type="text">Spec: partial application of tool arguments</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"&gt;&lt;code&gt;todos/tool-partial-application.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html</id><title type="text">Spec: partial application of tool arguments</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"&gt;&lt;code&gt;todos/tool-partial-application.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-partial-application-of-tool-arguments"&gt;Spec: partial application of tool arguments&lt;/h2&gt;
 &lt;p&gt;Status: Phases 1-7 and §8.4 (&lt;code&gt;derive_agent&lt;/code&gt;) done as of 2026-09-21. Phase 1 done
 (&lt;code&gt;97961e0&lt;/code&gt;). Phase 2 done
@@ -6199,7 +6505,7 @@ and for the model.&lt;/p&gt;
 &lt;li&gt;&lt;code&gt;todo&lt;/code&gt;: “partial-application of tool values”.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html" rel="alternate"/><summary type="text">Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html</id><title type="text">Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/session-mailbox.md"&gt;&lt;code&gt;todos/session-mailbox.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html" rel="alternate"/><summary type="text">Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html</id><title type="text">Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/session-mailbox.md"&gt;&lt;code&gt;todos/session-mailbox.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-the-session-mailbox-agent-to-agent-mail-suspended-tool-calls-interrupts-tool-call-wrappers"&gt;Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)&lt;/h2&gt;
 &lt;p&gt;Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
 issues #563 and #564, and most of #507 (see “What happens to the issues”).&lt;/p&gt;
@@ -6687,7 +6993,7 @@ only thing the server adds.&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;, &lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;,
 &lt;code&gt;documentation/agents-server.md&lt;/code&gt;, &lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;,
 &lt;code&gt;todos/tool-partial-application.md&lt;/code&gt; (bindings, §5.2 fork).&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html</id><title type="text">Spec: bash tools v2, long-running tool processes</title><updated>2026-10-03T10:37:53Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/bash-tools-v2.md"&gt;&lt;code&gt;todos/bash-tools-v2.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html</id><title type="text">Spec: bash tools v2, long-running tool processes</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/bash-tools-v2.md"&gt;&lt;code&gt;todos/bash-tools-v2.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-bash-tools-v2-long-running-tool-processes"&gt;Spec: bash tools v2, long-running tool processes&lt;/h2&gt;
 &lt;p&gt;Status: proposal, 2026-09-25, from issue #539 and a robot-chat conversation
 the same day. Nothing implemented. The v1 protocol (&lt;code&gt;documentation/binary-tool.md&lt;/code&gt;)

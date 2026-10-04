@@ -85,6 +85,16 @@ reproduce it. [**How agents-exe compares**](/comparison.html) places it
 next to LangGraph, AutoGen, the OpenAI Agents SDK, the Claude Agent SDK and
 CrewAI.
 
+## The terminal UI
+
+![The terminal UI on its Chats tab: the agents and their conversations on the left, the message editor and the session on the right, with a tool call waiting for an answer in the Pending panel](/images/tui-pending-panel.png)
+
+`agents-exe tui` is the interactive mode: pick an agent, hold several
+conversations at once, read each session turn by turn, and answer the tool
+calls a run is waiting on. The screenshot is produced by the end-to-end
+tests, which drive the real binary in a pseudo-terminal against a scripted
+model. [**The TUI guide**](/docs-tui.html) has the keys and the other views.
+
 ## How it fits together
 
 ![The layers of agents-exe: the CLI, TUI, MCP server and HTTP server on top of the session runner and agent tree, over sessions, tools and LLM endpoints](/gen/images/architecture-layers.dot.png)

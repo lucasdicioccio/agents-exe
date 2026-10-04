@@ -39,12 +39,13 @@ import System.Directory (
     setPermissions,
  )
 import System.Environment (lookupEnv)
-import System.FilePath (dropExtensions, (<.>), (</>))
+import System.Exit (ExitCode (..))
+import System.FilePath (dropExtensions, takeDirectory, (<.>), (</>))
 import System.IO.Temp (withSystemTempDirectory)
+import System.Process (readProcessWithExitCode)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure)
 import TuiSpec
-import TuiSpec.Render (renderAnsiSnapshotFileWithFont)
 import TuiSpec.Runner (serializeAnsiSnapshot)
 import TuiSpec.Types (Tui (..))
 
@@ -192,13 +193,28 @@ snapshot tui name = do
                     )
     wantPng <- isJust <$> lookupEnv "AGENTS_TUI_E2E_PNG"
     when wantPng $
-        renderAnsiSnapshotFileWithFont
-            Nothing
-            Nothing
-            Nothing
-            (Just (snapshotTheme options))
-            baselinePath
-            (artifactsDir options </> "png" </> name <.> "png")
+        renderPng (cells <$> Text.readFile baselinePath) (artifactsDir options </> "png" </> name <.> "png")
+
+{- | Draw a screen, as tuispec serialises its cells (characters and colours),
+with @test/tui-e2e/render_png.py@ rather than tuispec's own renderer: that one
+spaces the cells by the width of a @W@, wider than the font's advance, which
+leaves gaps in every box-drawing line, and has no fallback for a glyph the
+font lacks (the status icons of the conversation list).
+-}
+renderPng :: IO String -> FilePath -> IO ()
+renderPng getCells outPath = do
+    payload <- getCells
+    createDirectoryIfMissing True (takeDirectory outPath)
+    withSystemTempDirectory "agents-tui-e2e-png" $ \dir -> do
+        let payloadPath = dir </> "cells.json"
+        writeFile payloadPath payload
+        (code, _, err) <- readProcessWithExitCode "python3" [pngRenderer, payloadPath, outPath] ""
+        when (code /= ExitSuccess) $
+            assertFailure ("Rendering " <> outPath <> " failed (python3 with Pillow is needed): " <> err)
+
+-- | The renderer, relative to the package root, where cabal runs the suite.
+pngRenderer :: FilePath
+pngRenderer = "test/tui-e2e/render_png.py"
 
 -- | Zero the digits of every session id the TUI printed (@SessionId \<uuid\>@, possibly cut by a border).
 maskSessionIds :: Text -> Text

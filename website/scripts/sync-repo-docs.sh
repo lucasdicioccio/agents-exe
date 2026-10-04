@@ -5,6 +5,8 @@
 #   todos/<name>.md             -> website/src/specs-<name>.cmark
 #   README.md's command reference -> website/src/commands.cmark
 #   the specs' Status: lines    -> website/src/specs.cmark  (one line per spec)
+#   test/tui-snapshots/png/<name>.png -> website/src/tui-<name>.png
+#     (the screenshots of the agents-tui-e2e suite, published as /images/tui-<name>.png)
 #
 # so the site never needs hand-copying when a doc changes. Everything this
 # writes is mechanical output, not a source of truth: gitignored (see
@@ -61,6 +63,14 @@ for src in todos/*.md; do
   $MIRROR --kind specs --source "$src" --title "$(title_of "$src")" --topic specs \
     --keywords "spec, design" --summary "Status: $(status_of "$src")" \
     --github "$GITHUB/$src" --date "$DATE" > "$OUT/specs-$name.cmark"
+done
+
+# The TUI screenshots: the PNGs the agents-tui-e2e suite renders, which
+# documentation/tui.md shows (mirror.py points those links at /images/tui-*)
+# and the landing page too. Copies, so that the site serves its own images.
+rm -f "$OUT"/tui-*.png
+for src in test/tui-snapshots/png/*.png; do
+  cp "$src" "$OUT/tui-$(basename "$src")"
 done
 
 # README's command reference, as one page
@@ -146,4 +156,4 @@ EOF
 EOF
 } > "$OUT/specs.cmark"
 
-echo "synced $(ls $OUT/docs-*.cmark | wc -l) docs, $(ls $OUT/specs-*.cmark | wc -l) specs, commands.cmark, specs.cmark"
+echo "synced $(ls $OUT/docs-*.cmark | wc -l) docs, $(ls $OUT/specs-*.cmark | wc -l) specs, $(ls $OUT/tui-*.png | wc -l) TUI screenshots, commands.cmark, specs.cmark"
