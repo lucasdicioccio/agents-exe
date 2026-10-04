@@ -1,5 +1,30 @@
 # Async Tool Calls Implementation Progress
 
+Status: all phases done (`7850f2e`); tracing for async calls was left out.
+The notes below are a log, each section true when it was written. Re-read on
+2026-10-04, what has changed since:
+
+* The TUI no longer runs sessions with `Loop.run` or `Loop.runUntilBlocked`.
+  It is a client of the session runner (`RunnerClient` over
+  `System.Agents.Host.Runner`, `todos/os-as-standalone-server.md` Phase 3),
+  so the notes below about which loop the TUI uses are history.
+  `runUntilBlocked` is still what one-shot runs and the MCP server use.
+* `OSEvent`, `ctxEventQueue` and the TUI's event bridge are gone (`c5f017f`);
+  activity and progress reach clients through `ctxEmit` and the runner's
+  event stream (`tool.progressed`).
+* Attached and detached calls, `wait` and interrupts came with the session
+  mailbox (`todos/session-mailbox.md`, PR #570), which reworks parts of what
+  is described here.
+* MCP tools report progress (PR #595), as the "MCP / OpenAPI streaming"
+  section already says.
+
+Not re-checked: whether a result read with `get-tool-call-status` is still
+repeated once by the delivery notice. The mailbox spec set out to fix it
+(its G6), and `documentation/async-tool-calls.md` still lists it as a limit;
+one of the two is out of date. Tracing through `Prod.Tracer` and rate
+limiting beyond a concurrency cap were not re-checked either. Open items
+are tracked in the backlog, not in this file.
+
 ## Plan
 See `todos/async-tool-calls.md`.
 
@@ -373,6 +398,8 @@ Example agent JSON:
   survive (Phase 5: process groups).
 - `run` itself still spins on deferred-only partial turns; only
   `runUntilBlocked` users (OneShot) avoid it. The TUI still uses `run`.
+  (Obsolete: fixed in Phase 5 below, and the TUI has since moved to the
+  session runner, see the status at the top.)
 - Earlier gaps (engine not returned by `runAsync`, repeated result after
   `get-tool-call-status`) remain.
 
@@ -389,7 +416,8 @@ Example agent JSON:
 - The TUI kills conversation threads when quitting (bounded to 2s), which runs
   the same cleanup.
 - The TUI uses `runUntilBlocked`, so a conversation waiting only on deferred
-  calls stops with a status message instead of spinning.
+  calls stops with a status message instead of spinning. (True then; the TUI
+  is now a runner client, see the status at the top.)
 
 ### Stale calls
 - `asyncCallTimeoutSeconds` (agent JSON) → `ctxAsyncCallTimeout` →
@@ -434,6 +462,7 @@ Example agent JSON:
   closures), so `Prod.Tracer` support would mean threading one through the
   agent and the engine. The activity events (`OSEvent_ToolCallActivity`) and
   the progress entries on the entity are the observability path for now.
+  (`OSEvent` was retired later, see the status at the top.)
 - Rate limiting beyond a concurrency cap.
 - A pre-existing docs bug found on the way, now fixed: JSON examples used key
   spellings the parsers reject. Every builtin toolbox (`Name`, `Description`,

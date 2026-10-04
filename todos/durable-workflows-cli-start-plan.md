@@ -1,5 +1,13 @@
 # Plan: Durable execution from the CLI
 
+Status: implemented. `agents-exe session start` and `session step` exist next
+to `pause`, `resume`, `pending`, `complete` and `run-isolated`, and
+`executionMode` / `toolCallPolicyConfig` are agent JSON fields. This file is
+the plan as written before the work; "Current state and gaps" is the starting
+point, not today's code. Checked on 2026-10-04 by looking up the commands and
+names in the code; the steps were not compared line by line, and the test of
+Step 7 was not looked for. Current usage: `documentation/durable-workflows-howto.md`.
+
 ## Goal
 
 Make the durable-workflow execution mode accessible from the CLI in one-shot

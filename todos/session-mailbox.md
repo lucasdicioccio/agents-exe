@@ -1,7 +1,19 @@
 # Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)
 
-Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
-issues #563 and #564, and most of #507 (see "What happens to the issues").
+Status: implemented. Phases 0 to 6 landed on 2026-09-22 in PR #570
+(`02301b0`..`5eb02e9`); see "Phases" for the commit of each. Supersedes the
+designs in issues #563 and #564, and most of #507 (see "What happens to the
+issues").
+
+Status checked on 2026-10-04 against the git history and by looking up the
+names each phase introduces in the code; the behaviour of each bullet was not
+re-tested for this note. Everything below is the design as it was written
+before the work started: "Current state" and "Gaps" describe the code before
+PR #570, and line numbers in them are from that time. Work that followed and
+is recorded elsewhere: `todos/os-as-standalone-server.md` (the runner
+protocol, the TUI as a runner client, sub-agents as sessions,
+`mailInToolResult`, watch recovery after a restart). Anything still open is
+tracked in the backlog, not in this file.
 
 ## Goal
 
@@ -487,6 +499,21 @@ list is already covered by `SessionUpdated` carrying the head turn.
 | #507 suspend | suspended = no run, mail accumulates, cursor committed; `Pause`/`Resume` | - | `ManagedResource` tracking: engine shutdown, process groups and `evictIdle` already release what a run holds. Reopen if a toolbox leaks. |
 
 ## Phases
+
+All landed, in PR #570 unless noted:
+
+| Phase | Commits |
+|-------|---------|
+| 0 | `02301b0` |
+| 1 | `1fadcf2` |
+| 2 | `e9c01cf` |
+| 3 | `4d10b6d`, then `02e8666` (retires `lsInbox`) |
+| 4 | `2b232f4`, `e24f25a`, `999b834`, `09d8e0c`, `5eb02e9` |
+| 5 | `3f64374` |
+| 6 | `9c878c6` (Pause, Resume, CancelCalls), `3a581e3` (`watch-session`), `3bc3de9` (R4, `interruptCompletions`); `b62e2a6` wired Pause/Resume into the TUI and `agents-server` the day after; PR #600 made watch registrations survive a restart |
+
+The interrupt and hard-cancel actions of the TUI and the chat page came with
+the same PR (`0948704`, `98b8a33`, fixed in `4645ece`).
 
 Each phase ships alone and leaves `ctxMailbox = Nothing` agents untouched.
 Phases 0, 3 and 5 depend on nothing but Phase 1 (Phase 0 not even on that);

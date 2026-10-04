@@ -2,6 +2,12 @@
 
 Progress tracker for `todos/web-server-embedding.md`.
 
+Status: Phases 1 to 12 complete, and this log stops there. Phase 13
+(self-description and a chat page), database agents with tools and helpers,
+and the later work are recorded in the spec itself, not here. The "Not done
+here" notes of each phase are as written at the time and were not re-checked
+on 2026-10-04.
+
 ## Phase 1 — Storage wiring fix ✅ COMPLETE
 
 - `Combinators.StoreSessionProgress`:
