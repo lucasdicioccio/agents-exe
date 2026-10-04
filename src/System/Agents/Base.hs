@@ -7,6 +7,7 @@ module System.Agents.Base where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), (.!=), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Char (toLower)
 import Data.Map.Strict (Map)
@@ -983,6 +984,9 @@ data SystemToolCapability
     | -- | Send agent-to-agent mail to another session by id
       -- (@todos/session-mailbox.md@ §5, Phase 4)
       SystemToolSendMessage
+    | -- | Send mail to the child session of a running sub-agent call,
+      -- addressed by the call's id (@todos/session-mailbox.md@ §3)
+      SystemToolSendToToolCall
     | -- | Start one of this agent's own helpers running as a detached
       -- child session (@todos/session-mailbox.md@ §5, Phase 4)
       SystemToolSpawnSession
@@ -1015,6 +1019,7 @@ instance ToJSON SystemToolCapability where
     toJSON SystemToolCancelToolCall = Aeson.String "cancel-tool-call"
     toJSON SystemToolWait = Aeson.String "wait"
     toJSON SystemToolSendMessage = Aeson.String "send-message"
+    toJSON SystemToolSendToToolCall = Aeson.String "send-to-tool-call"
     toJSON SystemToolSpawnSession = Aeson.String "spawn-session"
     toJSON SystemToolWatchSession = Aeson.String "watch-session"
     toJSON SystemToolUnwatchSession = Aeson.String "unwatch-session"
@@ -1043,10 +1048,11 @@ instance FromJSON SystemToolCapability where
             "cancel-tool-call" -> return SystemToolCancelToolCall
             "wait" -> return SystemToolWait
             "send-message" -> return SystemToolSendMessage
+            "send-to-tool-call" -> return SystemToolSendToToolCall
             "spawn-session" -> return SystemToolSpawnSession
             "watch-session" -> return SystemToolWatchSession
             "unwatch-session" -> return SystemToolUnwatchSession
-            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait, send-message, spawn-session, watch-session, unwatch-session."
+            other -> fail $ "Invalid SystemToolCapability: " ++ Text.unpack other ++ ". Expected one of: date, operating-system, env-vars, running-user, hostname, working-directory, process-info, uptime, attach-file, list-sessions, search-sessions, read-session, get-session-stats, list-directory, execute-command, get-tool-call-status, list-running-tool-calls, cancel-tool-call, wait, send-message, send-to-tool-call, spawn-session, watch-session, unwatch-session."
 
 {- | Scope of accessible sessions for session introspection capabilities.
 
@@ -1773,23 +1779,90 @@ instance FromJSON ToolCallWrapperRule where
 
 {- | Predicate selecting which tool calls a 'ToolCallWrapperRule' applies to.
 
-Only 'wmTool' (a glob on the LLM-visible tool name, e.g. @"http_*"@) is
-matched today. A toolbox-name predicate is part of the spec but has no
-runtime source to match against yet; add 'wmToolbox' matching once a
+'wmTool' is a glob on the LLM-visible tool name (e.g. @"http_*"@); 'wmArgs'
+is a predicate on the arguments of the call. Both must hold; an absent one
+holds for every call. A toolbox-name predicate is part of the spec but has
+no runtime source to match against yet; add 'wmToolbox' matching once a
 call's toolbox identity is threaded through 'ToolExecutionContext'.
 -}
-newtype WrapperMatch = WrapperMatch
+data WrapperMatch = WrapperMatch
     { wmTool :: Maybe Text
     -- ^ Glob on the LLM-visible tool name; 'Nothing' matches every tool
+    , wmArgs :: Maybe ArgPredicate
+    -- ^ Predicate on the call's arguments; 'Nothing' matches every call
     }
     deriving (Show, Eq, Generic)
 
 instance ToJSON WrapperMatch where
-    toJSON m = Aeson.object $ catMaybes [("tool" .=) <$> wmTool m]
+    toJSON m = Aeson.object $ catMaybes [("tool" .=) <$> wmTool m, ("args" .=) <$> wmArgs m]
 
 instance FromJSON WrapperMatch where
     parseJSON = Aeson.withObject "WrapperMatch" $ \v ->
-        WrapperMatch <$> v .:? "tool"
+        WrapperMatch <$> v .:? "tool" <*> v .:? "args"
+
+{- | A predicate on the arguments of a tool call, as the LLM sent them:
+values a binding adds are not seen, the same rule as for hooks.
+
+A path is a dot-separated list of object keys and array indices
+(@"options.targets.0"@); the empty path is the whole arguments object.
+
+@
+{"path": "command", "glob": "rm *"}
+{"path": "env", "equals": "production"}
+{"path": "force", "exists": true}
+{"all": [p1, p2]}   {"any": [p1, p2]}   {"not": p}
+@
+
+See 'System.Agents.Session.AgentConfig.argPredicateHolds' for how each form
+is evaluated.
+-}
+data ArgPredicate
+    = -- | The value at the path equals this JSON value
+      ArgEquals Text Aeson.Value
+    | -- | The value at the path is a string matching this glob (@*@ only)
+      ArgGlob Text Text
+    | -- | Whether there is a value at the path (@null@ counts as a value)
+      ArgExists Text Bool
+    | -- | Every predicate holds (true when empty)
+      ArgAll [ArgPredicate]
+    | -- | At least one predicate holds (false when empty)
+      ArgAny [ArgPredicate]
+    | -- | The predicate does not hold
+      ArgNot ArgPredicate
+    deriving (Show, Eq, Generic)
+
+instance ToJSON ArgPredicate where
+    toJSON predicate = case predicate of
+        ArgEquals path val -> Aeson.object ["path" .= path, "equals" .= val]
+        ArgGlob path glob -> Aeson.object ["path" .= path, "glob" .= glob]
+        ArgExists path wanted -> Aeson.object ["path" .= path, "exists" .= wanted]
+        ArgAll ps -> Aeson.object ["all" .= ps]
+        ArgAny ps -> Aeson.object ["any" .= ps]
+        ArgNot p -> Aeson.object ["not" .= p]
+
+{- | Exactly one of @equals@, @glob@, @exists@ (each with a @path@), @all@,
+@any@, @not@. Anything else is a loading error rather than a predicate that
+silently never matches: a rule guarding a tool must not be dropped by a typo.
+-}
+instance FromJSON ArgPredicate where
+    parseJSON = Aeson.withObject "ArgPredicate" $ \v -> do
+        let operators = ["equals", "glob", "exists", "all", "any", "not"] :: [Text]
+            keys = map AesonKey.toText (KeyMap.keys v)
+            present = filter (`elem` keys) operators
+            unknown = filter (`notElem` ("path" : operators)) keys
+            noPath
+                | "path" `elem` keys = fail "ArgPredicate: path is only used with equals, glob and exists"
+                | otherwise = pure ()
+        case (unknown, present) of
+            (k : _, _) -> fail $ "ArgPredicate: unknown key " ++ Text.unpack k
+            ([], ["equals"]) -> ArgEquals <$> v .: "path" <*> v .: "equals"
+            ([], ["glob"]) -> ArgGlob <$> v .: "path" <*> v .: "glob"
+            ([], ["exists"]) -> ArgExists <$> v .: "path" <*> v .: "exists"
+            ([], ["all"]) -> noPath >> ArgAll <$> v .: "all"
+            ([], ["any"]) -> noPath >> ArgAny <$> v .: "any"
+            ([], ["not"]) -> noPath >> ArgNot <$> v .: "not"
+            ([], []) -> fail "ArgPredicate: expected one of equals, glob, exists, all, any, not"
+            ([], _) -> fail $ "ArgPredicate: more than one of " ++ Text.unpack (Text.intercalate ", " present)
 
 
 -------------------------------------------------------------------------------

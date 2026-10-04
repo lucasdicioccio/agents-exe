@@ -20,12 +20,15 @@ import System.Timeout (timeout)
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Data.Aeson (decode, encode)
+import Data.Aeson (Value (..), decode, encode, object, (.=))
+import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import Database.SQLite.Simple (open)
 
 import System.Agents.Session.Base
 import System.Agents.Session.MailStore (mkSqliteMailStore)
+import System.Agents.Session.Step (mailQuery)
 import System.Agents.Session.Types (ToolCallId (..))
 
 tests :: TestTree
@@ -40,6 +43,10 @@ tests =
         , awaitMailFiltersByPredicateTest
         , mailboxFullRejectsNormalMailTest
         , mailboxFullExemptsControlAndToolCallFinishedTest
+        , mailboxFullRefusesNoticesTest
+        , toolCallNoticeJsonRoundTripTest
+        , toolCallNoticeRenderingTest
+        , notifyProgressLevelTest
         , trimRemovesAtOrBelowCursorTest
         , durableMailboxHydratesFromStoreTest
         , durableMailboxWritesThroughTest
@@ -223,6 +230,59 @@ mailboxFullExemptsControlAndToolCallFinishedTest =
         _ <- expectRight =<< mb.mbSend finishedOutgoing
         unread <- atomically (mb.mbUnread 0)
         length unread @?= mailboxMaxUnread + 2
+
+-- | A notice is not exempt: a tool that notifies in a loop meets the bound.
+mailboxFullRefusesNoticesTest :: TestTree
+mailboxFullRefusesNoticesTest =
+    testCase "ToolCallNotice mail counts against the backpressure bound" $ do
+        mb <- newInMemoryMailbox
+        forM_ [1 .. mailboxMaxUnread] $ \_ -> do
+            _ <- expectRight =<< mb.mbSend userOutgoing
+            pure ()
+        overflow <- mb.mbSend (noticeOutgoing (notifyProgress "look"))
+        overflow @?= Left MailboxFull
+
+noticeOutgoing :: Value -> Outgoing
+noticeOutgoing payload =
+    Outgoing
+        { outId = Nothing
+        , outFrom = FromToolCall (ToolCallId nil)
+        , outPriority = Normal
+        , outHops = 0
+        , outBody = ToolCallNotice (ToolCallId nil) (Just "call_abc") "run_tests" payload
+        }
+
+toolCallNoticeJsonRoundTripTest :: TestTree
+toolCallNoticeJsonRoundTripTest =
+    testCase "ToolCallNotice round-trips through JSON, with or without a provider id" $ do
+        let withId = ToolCallNotice (ToolCallId nil) (Just "call_abc") "run_tests" (notifyProgress "look")
+            withoutId = ToolCallNotice (ToolCallId nil) Nothing "run_tests" (object ["level" .= ("notify" :: Text), "failed" .= (3 :: Int)])
+        decode (encode withId) @?= Just withId
+        decode (encode withoutId) @?= Just withoutId
+
+toolCallNoticeRenderingTest :: TestTree
+toolCallNoticeRenderingTest =
+    testCase "a ToolCallNotice is rendered with the id the model knows" $ do
+        mb <- newInMemoryMailbox
+        _ <- expectRight =<< mb.mbSend (noticeOutgoing (notifyProgress "3 tests are red"))
+        _ <- expectRight =<< mb.mbSend (noticeOutgoing (object ["level" .= ("notify" :: Text), "failed" .= (3 :: Int)]))
+        unread <- atomically (mb.mbUnread 0)
+        case mailQuery unread of
+            Nothing -> assertFailure "expected the notices to be rendered"
+            Just q -> do
+                assertBool "names the call and the tool" ("tool call call_abc (run_tests) notifies:\n3 tests are red" `Text.isInfixOf` q.queryText)
+                -- Without a message, the payload itself.
+                assertBool "falls back on the payload" ("\"failed\":3" `Text.isInfixOf` q.queryText)
+
+notifyProgressLevelTest :: TestTree
+notifyProgressLevelTest =
+    testCase "only an object whose level is notify is at the notify level" $ do
+        isNotifyProgress (notifyProgress "look") @?= True
+        isNotifyProgress (object ["level" .= ("notify" :: Text)]) @?= True
+        isNotifyProgress (object ["level" .= ("info" :: Text), "message" .= ("look" :: Text)]) @?= False
+        isNotifyProgress (object ["message" .= ("notify" :: Text)]) @?= False
+        isNotifyProgress (String "notify") @?= False
+        notifyProgressText (notifyProgress "look") @?= "look"
 
 -------------------------------------------------------------------------------
 -- Consumption commits with its effect (mbTrim is the GC half of that)

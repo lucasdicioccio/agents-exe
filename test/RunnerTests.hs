@@ -32,14 +32,14 @@ import Control.Concurrent.Async (concurrently)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (bracket)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Data.List (group, sortOn)
 import qualified Data.List as List
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Char8 as CByteString
 import qualified Data.ByteString.Lazy.Char8 as LBS8
-import Data.IORef (atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -73,7 +73,8 @@ import System.Agents.Session.Mailbox (Mailbox (..), MailboxInfo (..), MailRouter
 import System.Agents.Session.MailStore (mkSqliteMailStore)
 import System.Agents.Session.WatchStore (mkSqliteWatchStore)
 import System.Agents.SessionStore hiding (listSessions)
-import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM)
+import System.Agents.ToolRegistration (ToolRegistration, registerIOScriptInLLM, registerSystemTools)
+import qualified System.Agents.Tools.SystemToolbox as SystemTools
 import qualified System.Agents.Tools.IO as IOTools
 import System.Agents.Tools.Context (ToolExecutionContext (..), ToolPortal, ToolResult (..), mkMinimalContext)
 import qualified System.Agents.Tools.Context as Ctx
@@ -125,6 +126,7 @@ tests =
         , testCase "a background call reports tool.progressed events through ctxEmit" toolCallProgressedEventsTest
         , testCase "a sub-agent call reports subcall.started and subcall.completed on the parent's stream" subcallEventsTest
         , testCase "a sub-agent call to a declared helper runs it as a real session (smParent, tool result)" subcallAsSessionTest
+        , testCase "send-to-tool-call reaches a helper that still works on its call" sendToToolCallTest
         , testCase "cancelling the parent's run cancels the child session it started" subcallCancelChildTest
         , testCase "a narrowed sub-agent call ('with') runs as a real session and binds the value" subcallNarrowedAsSessionTest
         , testCase "watch-session forwards a matching tool.completed event as mail" watchSessionTest
@@ -1733,6 +1735,99 @@ subcallAsSessionTest = do
             other -> assertFailure ("expected an LLM turn over a user turn, got " <> show other)
   where
     childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+
+{- | @send-to-tool-call@, the way the TUI and the server run it: the parent's
+@prompt_agent_child@ call is detached, the child being a session of its own
+under the runner. The parent's model then calls @send-to-tool-call@ with the
+id of that call. The runner path has to record the child session on the
+call for that to resolve, and the child reads the mail before its next
+completion.
+
+The child's first completion is held until the mail was sent, then asks for
+a tool, so that it has a later receive point: mail that arrives during the
+last completion of a call\/return helper is not read.
+-}
+sendToToolCallTest :: Assertion
+sendToToolCallTest = do
+    childAsked <- newEmptyMVar
+    mailSent <- newEmptyMVar
+    openGate <- newEmptyMVar
+    putMVar openGate ()
+    parentCompletions <- newIORef (0 :: Int)
+    sendResults <- newIORef []
+    childSaw <- newIORef []
+    child0 <- testNode "{\"slug\": \"child\"}"
+    atomically $ writeTVar child0.osNodeTools [gatedTool openGate]
+    parent0 <- testNode ("{\"slug\": \"parent\", " <> drop 1 backgroundAll)
+    let parent = parent0{osNodeChildren = [child0]}
+        told :: LlmCompletion -> Text
+        told c = Text.pack (show (c.completeQuery, map snd c.completeToolResponses))
+        childCompletion c
+            | null c.completeToolResponses = do
+                putMVar childAsked ()
+                readMVar mailSent
+                pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [slowCall])
+            | otherwise = modifyIORef' childSaw (told c :) >> mockCompletion c
+        parentCompletion c = do
+            n <- atomicModifyIORef' parentCompletions (\k -> (k + 1, k + 1))
+            case n of
+                1 -> pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [childCall])
+                2 -> do
+                    -- The child session exists and asks its model.
+                    readMVar childAsked
+                    pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [sendCall])
+                _ -> do
+                    when (n == 3) $ modifyIORef' sendResults (told c :)
+                    mockCompletion c
+    host <-
+        testHost [parent] $ \node c ->
+            if Base.slug node.osNodeConfig == "child" then childCompletion c else parentCompletion c
+    agentId <- AgentId <$> nextRandom
+    box <-
+        either fail pure
+            =<< SystemTools.initializeToolbox
+                silent
+                Base.SystemToolboxDescription
+                    { Base.systemToolboxName = "sys"
+                    , Base.systemToolboxDescription = "mail"
+                    , Base.systemToolboxCapabilities = [Base.SystemToolSendToToolCall]
+                    , Base.systemToolboxEnvVarFilter = Nothing
+                    , Base.systemToolboxActivation = Nothing
+                    , Base.systemToolboxSessionIntrospectionScope = Nothing
+                    , Base.systemToolboxSessionIntrospectionMaxResults = Nothing
+                    , Base.systemToolboxSessionIntrospectionIncludeToolOutputs = Nothing
+                    , Base.systemToolboxFileSandbox = Nothing
+                    , Base.systemToolboxCommandFilter = Nothing
+                    }
+    systemTools <- either fail pure =<< registerSystemTools box
+    atomically $
+        writeTVar parent.osNodeTools $
+            OneShotTool.turnAgentRuntimeIntoIOTool silent host.hostSubAgentDeps child0 "parent" agentId Nothing True : systemTools
+    withSessionRunner host $ \runner -> do
+        meta <- expectRight =<< createSession runner "parent" (message "delegate") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        waitUntil $ not . null <$> readIORef sendResults
+        [sent] <- readIORef sendResults
+        [childMeta] <- listSessions runner allSessionsQuery{sqParent = Just sid}
+        let childText = case childMeta.smSessionId of SessionId uuid -> UUID.toText uuid
+        assertBool ("the call resolved to the child session, got " <> show sent) (childText `Text.isInfixOf` sent)
+        assertBool ("the mail was accepted, got " <> show sent) ("recipient_status" `Text.isInfixOf` sent)
+        putMVar mailSent ()
+        (final, _) <- expectRight =<< awaitRun runner sid 10
+        final.smStatus @?= StatusIdle
+        saw <- readIORef childSaw
+        case saw of
+            [text] -> do
+                assertBool ("the child was told, got " <> show text) ("also check staging" `Text.isInfixOf` text)
+                assertBool ("as mail from its caller, got " <> show text) ("from session" `Text.isInfixOf` text)
+            other -> assertFailure ("expected one later completion of the child, got " <> show (length other))
+  where
+    childCall = openAICall "call_1" "io_prompt_agent_child" "{\"what\": \"help\"}"
+    sendCall =
+        openAICall
+            "call_2"
+            "system_sys_system_info"
+            "{\"capability\": \"send-to-tool-call\", \"tool_call_id\": \"call_1\", \"text\": \"also check staging\"}"
 
 {- | A @prompt_agent_child@ call carrying @with@ (narrowing) used to fall back
 to running in-tool, with no child session. The child here requires a

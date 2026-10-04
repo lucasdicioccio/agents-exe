@@ -40,6 +40,7 @@ import System.Agents.CLI.SessionDurable (
     parseContinuationToken,
     parseResultFile,
  )
+import System.Agents.Session.AgentConfig (argAtPath, argPredicateHolds, llmToolCallArguments, wrapperMatchHolds)
 import System.Agents.Session.Base
 import System.Agents.Session.Step (applyContinuationMail, getPartialTurn, naiveTilNoToolCallStep, partialTurnForLlm, receiveMailForTurn, runStepM, runStepMAsync)
 import System.Agents.Session.Types
@@ -72,6 +73,16 @@ mkCall name =
         Aeson.object
             [ "function" Aeson..= Aeson.object ["name" Aeson..= name]
             , "arguments" Aeson..= Aeson.object []
+            ]
+
+-- | An OpenAI-style tool call with the given @function.arguments@.
+mkCallWithArgs :: Text -> Aeson.Value -> LlmToolCall
+mkCallWithArgs name args =
+    LlmToolCall $
+        Aeson.object
+            [ "id" Aeson..= ("call_1" :: Text)
+            , "type" Aeson..= ("function" :: Text)
+            , "function" Aeson..= Aeson.object ["name" Aeson..= name, "arguments" Aeson..= args]
             ]
 
 -- | Extract the function name from a tool call.
@@ -783,7 +794,7 @@ policyConfigTests =
                         RunSync
                         []
                         [ Base.ToolCallWrapperRule
-                            (Base.WrapperMatch (Just "http_*"))
+                            (Base.WrapperMatch (Just "http_*") Nothing)
                             [WithTimeout 30, WithRetries 2]
                         ]
             let json = Aeson.encode cfg
@@ -794,7 +805,7 @@ policyConfigTests =
                         RunSync
                         []
                         [ Base.ToolCallWrapperRule
-                            (Base.WrapperMatch (Just "deploy_*"))
+                            (Base.WrapperMatch (Just "deploy_*") Nothing)
                             [ WithBeforeHook (HookCommand "hooks/approve-deploy")
                             , WithAfterHook (HookTool "audit_log")
                             ]
@@ -839,6 +850,47 @@ policyConfigTests =
                 Just cfg -> do
                     map (Base.wmTool . Base.twrMatch) (Base.tpcWrappers cfg) @?= [Just "http_*"]
                     map Base.twrDecorators (Base.tpcWrappers cfg) @?= [[WithRetries 2, WithTimeout 30]]
+        , testCase "round-trips a wrapper matching on arguments" $ do
+            let predicate =
+                    Base.ArgAll
+                        [ Base.ArgGlob "command" "rm *"
+                        , Base.ArgAny [Base.ArgEquals "env" (Aeson.String "production"), Base.ArgExists "force" True]
+                        , Base.ArgNot (Base.ArgEquals "options.dry_run" (Aeson.Bool True))
+                        ]
+                cfg =
+                    Base.ToolCallPolicyConfig
+                        RunSync
+                        []
+                        [Base.ToolCallWrapperRule (Base.WrapperMatch (Just "bash_*") (Just predicate)) [WithTimeout 30]]
+            Aeson.decode (Aeson.encode cfg) @?= Just cfg
+        , testCase "parses an args predicate from JSON" $ do
+            let json = "{\"tool\":\"deploy_*\",\"args\":{\"all\":[{\"path\":\"env\",\"equals\":\"production\"},{\"not\":{\"path\":\"dry_run\",\"equals\":true}}]}}"
+            Aeson.decode json
+                @?= Just
+                    ( Base.WrapperMatch
+                        (Just "deploy_*")
+                        ( Just
+                            ( Base.ArgAll
+                                [ Base.ArgEquals "env" (Aeson.String "production")
+                                , Base.ArgNot (Base.ArgEquals "dry_run" (Aeson.Bool True))
+                                ]
+                            )
+                        )
+                    )
+        , testCase "a match without args still parses" $
+            Aeson.decode "{\"tool\":\"http_*\"}" @?= Just (Base.WrapperMatch (Just "http_*") Nothing)
+        , testCase "refuses an args predicate it cannot read rather than dropping it" $ do
+            let parses :: LBS.ByteString -> Bool
+                parses json = isJust (Aeson.decode json :: Maybe Base.ArgPredicate)
+            parses "{\"path\":\"env\",\"equals\":\"production\"}" @?= True
+            -- A misspelt operator, two operators, none, a path where none is used, a missing path.
+            parses "{\"path\":\"env\",\"equal\":\"production\"}" @?= False
+            parses "{\"path\":\"env\",\"equals\":\"production\",\"glob\":\"prod*\"}" @?= False
+            parses "{\"path\":\"env\"}" @?= False
+            parses "{\"path\":\"env\",\"all\":[]}" @?= False
+            parses "{\"glob\":\"prod*\"}" @?= False
+            -- And the rule that carries it fails with it.
+            isJust (Aeson.decode "{\"tool\":\"x\",\"args\":{\"matches\":\"y\"}}" :: Maybe Base.WrapperMatch) @?= False
         ]
 
 -- | 'buildToolCallPolicy' tests.
@@ -859,12 +911,68 @@ buildPolicyTests =
                     Base.ToolCallPolicyConfig
                         RunSync
                         []
-                        [ Base.ToolCallWrapperRule (Base.WrapperMatch (Just "http_*")) [WithTimeout 30]
-                        , Base.ToolCallWrapperRule (Base.WrapperMatch (Just "*")) [WithLabel "traced"]
+                        [ Base.ToolCallWrapperRule (Base.WrapperMatch (Just "http_*") Nothing) [WithTimeout 30]
+                        , Base.ToolCallWrapperRule (Base.WrapperMatch (Just "*") Nothing) [WithLabel "traced"]
                         ]
             let policy = buildToolCallPolicy cfg
             policy undefined (mkCall "http_get") @?= Decorate [WithTimeout 30, WithLabel "traced"] RunSync
             policy undefined (mkCall "bash_command") @?= Decorate [WithLabel "traced"] RunSync
+        , testCase "a wrapper applies only to calls whose arguments match" $ do
+            let guard = WithBeforeHook (HookCommand "hooks/approve")
+                cfg =
+                    Base.ToolCallPolicyConfig
+                        RunSync
+                        []
+                        [ Base.ToolCallWrapperRule (Base.WrapperMatch (Just "bash_*") (Just (Base.ArgGlob "command" "rm *"))) [guard]
+                        , Base.ToolCallWrapperRule (Base.WrapperMatch Nothing (Just (Base.ArgEquals "env" (Aeson.String "production")))) [WithLabel "prod"]
+                        ]
+                policy = buildToolCallPolicy cfg
+            -- Arguments as providers send them: a JSON-encoded string.
+            policy undefined (mkCallWithArgs "bash_run" (Aeson.String "{\"command\":\"rm -rf build\"}")) @?= Decorate [guard] RunSync
+            policy undefined (mkCallWithArgs "bash_run" (Aeson.String "{\"command\":\"ls build\"}")) @?= RunSync
+            -- The tool glob and the predicate must both hold.
+            policy undefined (mkCallWithArgs "http_get" (Aeson.String "{\"command\":\"rm -rf build\"}")) @?= RunSync
+            -- Every matching rule applies, in file order; a rule without a tool glob matches on arguments alone.
+            policy undefined (mkCallWithArgs "bash_run" (Aeson.String "{\"command\":\"rm x\",\"env\":\"production\"}"))
+                @?= Decorate [guard, WithLabel "prod"] RunSync
+            policy undefined (mkCallWithArgs "http_get" (Aeson.object ["env" Aeson..= ("production" :: Text)])) @?= Decorate [WithLabel "prod"] RunSync
+        , testCase "argument predicates: paths, missing values and connectives" $ do
+            let args =
+                    Aeson.object
+                        [ "command" Aeson..= ("rm -rf build" :: Text)
+                        , "count" Aeson..= (3 :: Int)
+                        , "nothing" Aeson..= Aeson.Null
+                        , "options" Aeson..= Aeson.object ["targets" Aeson..= ["staging" :: Text, "production"]]
+                        ]
+                holds p = argPredicateHolds p args
+            argAtPath "" args @?= Just args
+            argAtPath "options.targets.1" args @?= Just (Aeson.String "production")
+            argAtPath "options.targets.2" args @?= Nothing
+            argAtPath "options.targets.first" args @?= Nothing
+            argAtPath "command.length" args @?= Nothing
+            holds (Base.ArgGlob "options.targets.1" "prod*") @?= True
+            holds (Base.ArgEquals "count" (Aeson.Number 3)) @?= True
+            -- A glob only ever matches a string.
+            holds (Base.ArgGlob "count" "*") @?= False
+            -- A missing value fails equals and glob; null is a value.
+            holds (Base.ArgEquals "missing" Aeson.Null) @?= False
+            holds (Base.ArgGlob "missing" "*") @?= False
+            holds (Base.ArgExists "missing" False) @?= True
+            holds (Base.ArgExists "nothing" True) @?= True
+            holds (Base.ArgEquals "nothing" Aeson.Null) @?= True
+            -- "Unless dry_run is true" also covers calls that leave dry_run out.
+            holds (Base.ArgNot (Base.ArgEquals "dry_run" (Aeson.Bool True))) @?= True
+            holds (Base.ArgAll []) @?= True
+            holds (Base.ArgAny []) @?= False
+            holds (Base.ArgAll [Base.ArgExists "command" True, Base.ArgExists "missing" True]) @?= False
+            holds (Base.ArgAny [Base.ArgExists "command" True, Base.ArgExists "missing" True]) @?= True
+        , testCase "arguments that are absent or do not decode are null to a predicate" $ do
+            llmToolCallArguments (mkCallWithArgs "t" (Aeson.String "{\"a\":1}")) @?= Aeson.object ["a" Aeson..= (1 :: Int)]
+            llmToolCallArguments (mkCallWithArgs "t" (Aeson.String "not json")) @?= Aeson.Null
+            llmToolCallArguments (LlmToolCall (Aeson.object ["function" Aeson..= Aeson.object ["name" Aeson..= ("t" :: Text)]])) @?= Aeson.Null
+            let unlessDryRun = Base.WrapperMatch Nothing (Just (Base.ArgNot (Base.ArgEquals "dry_run" (Aeson.Bool True))))
+            wrapperMatchHolds unlessDryRun (mkCallWithArgs "t" (Aeson.String "not json")) @?= True
+            wrapperMatchHolds (Base.WrapperMatch Nothing (Just (Base.ArgExists "a" True))) (mkCallWithArgs "t" (Aeson.String "not json")) @?= False
         ]
 
 -- | 'applyAgentDurableConfig' tests.

@@ -66,11 +66,14 @@ module System.Agents.Session.Async.Engine (
     cancelToolCall,
     cancelToolCallAnyEngine,
     shutdownAsyncEngine,
+
+    -- * Notices
+    maxNoticesPerCall,
 ) where
 
 import Control.Concurrent (QSem, newQSem, signalQSem, waitQSem)
 import Control.Concurrent.Async (Async, async, cancel, poll, waitAnyCatch)
-import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO, writeTVar)
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Exception (SomeAsyncException, SomeException, bracket_, catch, displayException, finally, fromException, throwIO)
 import Control.Monad (forM, forM_, void, when)
@@ -505,6 +508,7 @@ startCall ::
     TrackedToolCall ->
     IO AsyncCallHandle
 startCall engine _batch baseCtx tc = do
+    noticesSent <- newTVarIO (0 :: Int)
     let world = aeWorld engine
     eid <- requireEntityId tc
     let emit = emitActivity baseCtx tc
@@ -515,7 +519,7 @@ startCall engine _batch baseCtx tc = do
             trace (AsyncCallProgressed payload)
     let ctx =
             baseCtx
-                { ctxProgressCallback = Just onProgress
+                { ctxProgressCallback = Just (\payload -> onProgress payload >> postNotice engine tc noticesSent payload)
                 , ctxRecordChildSession = Just (TCT.recordChildSession world eid)
                 }
     queuedAt <- getCurrentTime
@@ -669,6 +673,49 @@ emitStartedProgress world eid = do
     let payload = object ["started" .= True]
         progress = ToolCallProgress now ProgressStarted payload
     TCT.addToolCallProgress world eid progress
+
+{- | Most notify-level progress payloads of one call that are posted as mail.
+Later ones are still recorded as progress, like any other payload.
+-}
+maxNoticesPerCall :: Int
+maxNoticesPerCall = 16
+
+{- | Post a notify-level progress payload ('ST.isNotifyProgress') as
+'ST.ToolCallNotice' mail, if the engine has a mailbox: the way a running
+tool gets the model's attention without finishing
+(@todos/session-mailbox.md@, D9).
+
+Sent at 'ST.Normal' priority, so it wakes an idle session and a @wait@ but
+does not detach attached calls. Unlike 'notifyMailbox', it counts against
+the mailbox bound, and a call posts at most 'maxNoticesPerCall' of them: a
+tool that notifies in a loop fills neither the mailbox nor the context
+window. A payload that is not posted is still in the call's progress.
+-}
+postNotice :: AsyncEngine -> TrackedToolCall -> TVar Int -> Value -> IO ()
+postNotice engine tc sentVar payload =
+    case engine.aeMailbox of
+        Just mb | ST.isNotifyProgress payload -> do
+            allowed <- atomically $ do
+                sent <- readTVar sentVar
+                if sent >= maxNoticesPerCall
+                    then pure False
+                    else True <$ writeTVar sentVar (sent + 1)
+            when allowed $
+                void $
+                    mb.mbSend
+                        ST.Outgoing
+                            { ST.outId = Nothing
+                            , ST.outFrom = ST.FromToolCall (tcId tc)
+                            , ST.outPriority = ST.Normal
+                            , ST.outHops = 0
+                            , ST.outBody =
+                                ST.ToolCallNotice
+                                    (tcId tc)
+                                    (providerToolCallId (tcCall tc))
+                                    (llmToolCallName (tcCall tc))
+                                    payload
+                            }
+        _ -> pure ()
 
 -- | Require that a tracked call has an associated OS entity.
 requireEntityId :: TrackedToolCall -> IO EntityId

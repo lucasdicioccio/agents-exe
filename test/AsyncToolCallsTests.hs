@@ -13,7 +13,7 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (atomically, flushTQueue)
 import Control.Exception (IOException, onException, throwIO, try)
-import Control.Monad (void)
+import Control.Monad (forM_, void)
 import Data.Aeson (Value (..), object, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
@@ -37,7 +37,7 @@ import System.Agents.OS.Events (OSEmission (..), ToolCallActivity (..), ToolCall
 import System.Agents.Session.Base
 import System.Agents.SessionStore (readSessionFromFile, storeSessionToFile)
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
-import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
+import System.Agents.Session.Async.Engine (maxNoticesPerCall, shutdownAsyncEngine)
 import System.Agents.Session.Loop (BlockedOnDeferredCalls (..), isBlockedOnDeferredCalls, run, runAsyncKeepingAgent, runUntilBlocked)
 import System.Agents.Session.Step (buildContext, naiveTilNoToolCallStep, pollRunningCall, runStepMAsync, runStepMSync)
 import System.Directory (doesFileExist)
@@ -47,6 +47,7 @@ import System.IO.Temp (withSystemTempDirectory)
 import System.Process (proc)
 import System.Timeout (timeout)
 import System.Agents.Tools.Bash (runProcessReportingOutput)
+import System.Agents.Tools.SystemToolbox.Mail (sendToToolCall)
 import System.Agents.TUI.ToolCallActivity (
     ToolCallView (..),
     applyToolCallActivity,
@@ -69,7 +70,11 @@ import System.Agents.Tools.SystemToolbox.Types (
     CancelToolCallResult (..),
     GetToolCallStatusParams (..),
     ListRunningToolCallsResult (..),
+    QueryError (..),
     RunningToolCallInfo (..),
+    SendMessageResult (..),
+    SendToToolCallParams (..),
+    SendToToolCallResult (..),
     ToolCallStatusResult (..),
     WaitParams (..),
     WaitResult (..),
@@ -114,6 +119,9 @@ tests =
             , testCase "a synchronous step does not repeat a result read with get-tool-call-status" statusReadNotRepeatedSyncStep
             , testCase "mail about a call this process has no entity for is still rendered" foreignToolCallMailRendered
             , testCase "runAsyncKeepingAgent hands back the engine that owns the running calls" runAsyncHandsBackEngine
+            , testCase "mail reaches a session that idles on a background call" mailEndsIdleWait
+            , testCase "the mail of a finished call does not end a wait for all calls" finishedMailKeepsWaitingForAll
+            , testCase "Control mail does not end the idle wait with an empty turn" controlMailKeepsIdleWait
             ]
         , testGroup
             "Phase 2: attach / detach"
@@ -132,6 +140,23 @@ tests =
             , testCase "pollRunningCall leaves tcChildSessionId absent for an ordinary call" pollRunningCallLeavesChildSessionIdAbsent
             , testCase "a running placeholder includes childSessionId when known" placeholderIncludesChildSessionId
             , testCase "a running placeholder omits childSessionId for an ordinary call" placeholderOmitsChildSessionIdByDefault
+            ]
+        , testGroup
+            "notify progress level"
+            [ testCase "a notify-level payload is posted as mail while the call runs" noticePostsMail
+            , testCase "ordinary progress posts no mail" plainProgressPostsNoMail
+            , testCase "a call posts at most maxNoticesPerCall notices" noticesAreCapped
+            , testCase "a notice wakes an idle session and reaches the model, the call still running" noticeReachesModel
+            , testCase "a notice wakes wait" noticeWakesWait
+            , testCase "a ::notify:: line on stderr is reported at the notify level" stderrNotifyLine
+            ]
+        , testGroup
+            "send-to-tool-call"
+            [ testCase "mails the child session of a running sub-agent call" sendToToolCallReachesChild
+            , testCase "refuses a call that has no child session" sendToToolCallNeedsChild
+            , testCase "refuses a call that already finished" sendToToolCallNeedsRunningCall
+            , testCase "refuses an unknown call" sendToToolCallUnknownCall
+            , testCase "keeps the sender's mail scope" sendToToolCallKeepsScope
             ]
         , testGroup
             "subprocess output"
@@ -1176,6 +1201,353 @@ markdownPartialTurn = do
     assertBool "running call listed" ("`run` (`call_run`): running" `Text.isInfixOf` md)
     assertBool "completed call listed" ("`done` (`call_done`): completed" `Text.isInfixOf` md)
     assertBool "finished result shown" ("done-output" `Text.isInfixOf` md)
+
+{- | The LLM ended its turn while @slow@ runs in the background. A message
+posted to the mailbox is delivered at once, the call still running, rather
+than when the call ends.
+-}
+mailEndsIdleWait :: Assertion
+mailEndsIdleWait = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gate <- newEmptyMVar
+    script <- newIORef [[mkCall "call_slow" "slow"], [], []]
+    completions <- newIORef []
+    let agent =
+            (mkAgent world (YieldOnTimeout 20) (gatedToolCall gate))
+                { complete = scriptedComplete script completions
+                , ctxMailbox = Just mb
+                }
+    (a1, s1) <- stepOk agent initialSession
+    (a2, s2) <- stepOk a1 s1
+    (a3, s3) <- stepOk a2 s2
+    void $ forkIO $ do
+        threadDelay 50000
+        void $ mb.mbSend (Outgoing Nothing (FromUser Nothing) Normal 0 (UserMessage (UserQuery "any news?" [])))
+    mStep <- timeout 5000000 (stepOk a3 s3)
+    (a4, s4) <- maybe (assertFailure "the message did not end the idle wait" >> fail "unreachable") pure mStep
+    case s4.turns of
+        (UserTurn content _ : _) -> length content.userMail @?= 1
+        _ -> assertFailure "expected a user turn carrying the message"
+    occurrencesInUserTurns "any news?" s4 @?= 1
+    hasBackgroundCalls s4 @?= True
+    putMVar gate ()
+    mapM_ shutdownAsyncEngine a4.ctxAsyncEngine
+
+{- | 'Control' mail renders nothing and is acted on by the driver of the loop,
+between steps. Arriving during the idle wait, it must not make the step ask
+the LLM with an empty turn.
+-}
+controlMailKeepsIdleWait :: Assertion
+controlMailKeepsIdleWait = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gate <- newEmptyMVar
+    script <- newIORef [[mkCall "call_slow" "slow"], [], []]
+    completions <- newIORef []
+    let agent =
+            (mkAgent world (YieldOnTimeout 20) (gatedToolCall gate))
+                { complete = scriptedComplete script completions
+                , ctxMailbox = Just mb
+                }
+    (a1, s1) <- stepOk agent initialSession
+    (a2, s2) <- stepOk a1 s1
+    (a3, s3) <- stepOk a2 s2
+    done <- newEmptyMVar
+    void $ forkIO $ stepOk a3 s3 >>= putMVar done
+    void $ mb.mbSend (Outgoing Nothing (FromSystem "test") Normal 0 (Control (CancelCalls [])))
+    early <- timeout 300000 (readMVar done)
+    assertBool "the wait went on" (not (isJust early))
+    putMVar gate ()
+    mLate <- timeout 5000000 (readMVar done)
+    (a4, s4) <- maybe (assertFailure "the wait did not end with the call" >> fail "unreachable") pure mLate
+    occurrencesInUserTurns "slow-result" s4 @?= 1
+    mapM_ shutdownAsyncEngine a4.ctxAsyncEngine
+
+{- | Under 'YieldWhenAllDone' the idle wait is for every background call. The
+engine posts mail when the first one ends; that mail must not end the wait.
+-}
+finishedMailKeepsWaitingForAll :: Assertion
+finishedMailKeepsWaitingForAll = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gateA <- newEmptyMVar
+    gateB <- newEmptyMVar
+    script <- newIORef [[mkCall "call_a" "a", mkCall "call_b" "b"], [], []]
+    completions <- newIORef []
+    let tool _ call = case callName call of
+            "a" -> readMVar gateA >> pure (TextResponse "a-result")
+            _ -> readMVar gateB >> pure (TextResponse "b-result")
+        agent =
+            (mkAgent world (YieldOnTimeout 20) tool)
+                { complete = scriptedComplete script completions
+                , ctxMailbox = Just mb
+                }
+    (a1, s1) <- stepOk agent initialSession
+    (a2, s2) <- stepOk a1 s1
+    (a3, s3) <- stepOk a2 s2
+    done <- newEmptyMVar
+    void $ forkIO $ stepOk a3{ctxAsyncYieldStrategy = YieldWhenAllDone} s3 >>= putMVar done
+    putMVar gateA ()
+    _ <- timeout 5000000 $ atomically $ awaitMail mb s3.mailCursor (const True)
+    early <- timeout 300000 (readMVar done)
+    assertBool "the wait went on after the first call ended" (not (isJust early))
+    putMVar gateB ()
+    mLate <- timeout 5000000 (readMVar done)
+    (a4, s4) <- maybe (assertFailure "the wait did not end with the last call" >> fail "unreachable") pure mLate
+    occurrencesInUserTurns "a-result" s4 @?= 1
+    occurrencesInUserTurns "b-result" s4 @?= 1
+    mapM_ shutdownAsyncEngine a4.ctxAsyncEngine
+
+-------------------------------------------------------------------------------
+-- Notify progress level (todos/session-mailbox.md, D9)
+-------------------------------------------------------------------------------
+
+{- | A tool whose @slow@ call reports the given payloads once 'say' is
+filled, then blocks until 'gate' is.
+-}
+reportingToolCall :: MVar () -> MVar () -> [Value] -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
+reportingToolCall say gate payloads ctx call =
+    case callName call of
+        "slow" -> do
+            readMVar say
+            forM_ payloads $ \payload -> mapM_ ($ payload) (Ctx.ctxProgressCallback ctx)
+            readMVar gate
+            pure (TextResponse "slow-result")
+        name -> pure $ TextResponse (name <> "-result")
+
+-- | A session with a mailbox whose @slow@ call was started and still runs.
+startReportingCall :: [Value] -> IO (Mailbox, MVar (), MVar (), Agent (LlmTurnContent, Session), Session)
+startReportingCall payloads = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    say <- newEmptyMVar
+    gate <- newEmptyMVar
+    let agent = (mkAgent world (YieldOnTimeout 20) (reportingToolCall say gate payloads)){ctxMailbox = Just mb}
+    (a1, s1) <- stepOk agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case s1.turns of
+        (PartialUserTurn partial _ : _) -> map tcState partial.pTrackedToolCalls @?= [Running]
+        _ -> assertFailure "expected a partial user turn"
+    pure (mb, say, gate, a1, s1)
+
+noticePostsMail :: Assertion
+noticePostsMail = do
+    (mb, say, gate, a1, _) <- startReportingCall [notifyProgress "tests are red"]
+    putMVar say ()
+    mEnvelopes <- timeout 5000000 $ atomically $ awaitMail mb 0 (const True)
+    case mEnvelopes of
+        Just [e] -> do
+            e.envPriority @?= Normal
+            case (e.envFrom, e.envBody) of
+                (FromToolCall from, ToolCallNotice tcid providerId toolName payload) -> do
+                    from @?= tcid
+                    providerId @?= Just "call_slow"
+                    toolName @?= "slow"
+                    payload @?= notifyProgress "tests are red"
+                other -> assertFailure $ "expected a ToolCallNotice from the call, got " <> show other
+        other -> assertFailure $ "expected exactly one envelope, got " <> show other
+    putMVar gate ()
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
+
+plainProgressPostsNoMail :: Assertion
+plainProgressPostsNoMail = do
+    (mb, say, gate, a1, _) <- startReportingCall [String "halfway", object ["level" .= ("info" :: Text), "message" .= ("fyi" :: Text)]]
+    putMVar say ()
+    putMVar gate ()
+    -- The only mail is the one announcing the end of the call.
+    mEnvelopes <- timeout 5000000 $ atomically $ awaitMail mb 0 (const True)
+    case mEnvelopes of
+        Just [e] -> case e.envBody of
+            ToolCallFinished{} -> pure ()
+            other -> assertFailure $ "expected only ToolCallFinished, got " <> show other
+        other -> assertFailure $ "expected exactly one envelope, got " <> show other
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
+
+noticesAreCapped :: Assertion
+noticesAreCapped = do
+    let payloads = [notifyProgress (Text.pack (show n)) | n <- [1 .. maxNoticesPerCall + 5]]
+    (mb, say, gate, a1, s1) <- startReportingCall payloads
+    putMVar say ()
+    putMVar gate ()
+    _ <- timeout 5000000 $ atomically $ awaitMail mb 0 isFinished
+    unread <- atomically (mbUnread mb 0)
+    length [() | ToolCallNotice{} <- map (.envBody) unread] @?= maxNoticesPerCall
+    -- What was not posted is still in the progress of the call.
+    Right status <- getToolCallStatus (buildContext a1 s1 convId) (GetToolCallStatusParams "call_slow" True False 0)
+    assertBool "every payload is recorded as progress" (length (tcsrProgress status) > maxNoticesPerCall)
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
+  where
+    isFinished :: Envelope -> Bool
+    isFinished e = case e.envBody of
+        ToolCallFinished{} -> True
+        _ -> False
+
+{- | The LLM ended its turn while @slow@ runs in the background. The session
+is idle, the notice wakes it, and the model is asked with the notice while
+the call still runs.
+-}
+noticeReachesModel :: Assertion
+noticeReachesModel = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    say <- newEmptyMVar
+    gate <- newEmptyMVar
+    script <- newIORef [[mkCall "call_slow" "slow"], [], []]
+    completions <- newIORef []
+    let agent =
+            (mkAgent world (YieldOnTimeout 20) (reportingToolCall say gate [notifyProgress "tests are red"]))
+                { complete = scriptedComplete script completions
+                , ctxMailbox = Just mb
+                }
+    (a1, s1) <- stepOk agent initialSession
+    (a2, s2) <- stepOk a1 s1
+    (a3, s3) <- stepOk a2 s2
+    void $ forkIO $ threadDelay 50000 >> putMVar say ()
+    mStep <- timeout 5000000 (stepOk a3 s3)
+    (a4, s4) <- maybe (assertFailure "the notice did not wake the idle session" >> fail "unreachable") pure mStep
+    case s4.turns of
+        (UserTurn content _ : _) -> do
+            case content.userQuery of
+                Just q -> do
+                    assertBool "names the call by the id the model knows" ("tool call call_slow (slow) notifies:" `Text.isInfixOf` q.queryText)
+                    assertBool "carries the message" ("tests are red" `Text.isInfixOf` q.queryText)
+                Nothing -> assertFailure "expected the notice as a user query"
+            length [() | ToolCallNotice{} <- map (.envBody) content.userMail] @?= 1
+        _ -> assertFailure "expected a user turn carrying the notice"
+    hasBackgroundCalls s4 @?= True
+    (a5, _) <- stepOk a4 s4
+    completion <- lastCompletion completions
+    case completion.completeQuery of
+        Just q -> assertBool "the model is asked with the notice" ("tests are red" `Text.isInfixOf` q.queryText)
+        Nothing -> assertFailure "expected the notice in the completion"
+    putMVar gate ()
+    mapM_ shutdownAsyncEngine a5.ctxAsyncEngine
+
+noticeWakesWait :: Assertion
+noticeWakesWait = do
+    (_, say, gate, a1, s1) <- startReportingCall [notifyProgress "look"]
+    let ctx = buildContext a1 s1 convId
+    resultVar <- newEmptyMVar
+    _ <- forkIO $ waitForCallsOrMail ctx (WaitParams "mail" 5) >>= putMVar resultVar
+    threadDelay 50000
+    putMVar say ()
+    result <- timeout 3000000 (readMVar resultVar)
+    result @?= Just (Right (WaitResult "mail" Nothing))
+    putMVar gate ()
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
+
+stderrNotifyLine :: Assertion
+stderrNotifyLine = do
+    reports <- newIORef []
+    let report v = modifyIORef' reports (v :)
+    (code, out, err) <-
+        runProcessReportingOutput
+            report
+            (proc "sh" ["-c", "echo result; echo '::notify:: tests are red' >&2; echo '::notify:: on stdout'; echo plain >&2"])
+            ""
+    code @?= ExitSuccess
+    out @?= "result\n::notify:: on stdout\n"
+    err @?= "::notify:: tests are red\nplain\n"
+    payloads <- readIORef reports
+    [notifyProgressText p | p <- payloads, isNotifyProgress p] @?= ["tests are red"]
+    case filter isNotifyProgress payloads of
+        [Object obj] -> KeyMap.lookup "stream" obj @?= Just (String "stderr")
+        other -> assertFailure $ "expected one notify payload, got " <> show other
+
+-------------------------------------------------------------------------------
+-- send-to-tool-call (todos/session-mailbox.md, §3)
+-------------------------------------------------------------------------------
+
+{- | A tool whose @prompt_agent_helper@ call records the given child session,
+the way a sub-agent call does once its child exists, then blocks on the gate.
+-}
+subAgentLikeToolCall :: SessionId -> MVar () -> ToolExecutionContext -> LlmToolCall -> IO UserToolResponse
+subAgentLikeToolCall childSid gate ctx call =
+    case callName call of
+        "prompt_agent_helper" -> do
+            mapM_ ($ childSid) (Ctx.ctxRecordChildSession ctx)
+            readMVar gate
+            pure (TextResponse "helper-result")
+        "slow" -> readMVar gate >> pure (TextResponse "slow-result")
+        name -> pure $ TextResponse (name <> "-result")
+
+{- | A session with two running calls, a sub-agent-like one whose child
+session has a mailbox on the router, and an ordinary one. The child is
+registered under the given parent.
+-}
+sendToToolCallFixture :: (SessionId -> Maybe SessionId) -> IO (Mailbox, SessionId, MVar (), Agent (LlmTurnContent, Session), ToolExecutionContext)
+sendToToolCallFixture childParent = do
+    world <- mkWorld
+    router <- newMailRouter
+    gate <- newEmptyMVar
+    childMb <- newInMemoryMailbox
+    ownMb <- newInMemoryMailbox
+    let childSid = SessionId (UUID.fromWords 0 0 0 7)
+        s0 = sessionWithCalls [mkCall "call_helper" "prompt_agent_helper", mkCall "call_slow" "slow"]
+        info parent = MailboxInfo (Just "helper") parent "running" MailScopeSubtree MailScopeChildren
+    _ <- router.mrRegister s0.sessionId (MailboxInfo (Just "caller") Nothing "running" MailScopeSubtree MailScopeChildren) ownMb
+    _ <- router.mrRegister childSid (info (childParent s0.sessionId)) childMb
+    let agent = (mkAgent world (YieldOnTimeout 20) (subAgentLikeToolCall childSid gate)){ctxMailRouter = Just router}
+    (a1, s1) <- stepOk agent s0
+    pure (childMb, childSid, gate, a1, buildContext a1 s1 convId)
+
+sendToToolCallReachesChild :: Assertion
+sendToToolCallReachesChild = do
+    (childMb, childSid, gate, a1, ctx) <- sendToToolCallFixture Just
+    Right sent <- sendToToolCall ctx (SendToToolCallParams "call_helper" "look at the staging logs too" True False)
+    strToolCallId sent @?= "call_helper"
+    strChildSessionId sent @?= (case childSid of SessionId uuid -> UUID.toText uuid)
+    smrRecipientStatus (strSent sent) @?= "running"
+    unread <- atomically (mbUnread childMb 0)
+    case unread of
+        [e] -> do
+            e.envFrom @?= FromSession (SessionId nil) (Just "caller")
+            e.envBody @?= AgentMessage "look at the staging logs too" Nothing True
+        other -> assertFailure $ "expected one envelope in the child's mailbox, got " <> show other
+    putMVar gate ()
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
+
+sendToToolCallNeedsChild :: Assertion
+sendToToolCallNeedsChild = do
+    (childMb, _, gate, a1, ctx) <- sendToToolCallFixture Just
+    result <- sendToToolCall ctx (SendToToolCallParams "call_slow" "hello" False False)
+    result @?= Left (SystemInfoError "tool call call_slow (slow) has no child session: only a running sub-agent call can receive a message")
+    unread <- atomically (mbUnread childMb 0)
+    length unread @?= 0
+    putMVar gate ()
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
+
+sendToToolCallNeedsRunningCall :: Assertion
+sendToToolCallNeedsRunningCall = do
+    (childMb, _, gate, a1, ctx) <- sendToToolCallFixture Just
+    putMVar gate ()
+    Right status <- getToolCallStatus ctx (waitForCompletionParams "call_helper")
+    tcsrIsFinal status @?= True
+    result <- sendToToolCall ctx (SendToToolCallParams "call_helper" "too late" False False)
+    result @?= Left (SystemInfoError "tool call is already completed: nothing is running to receive a message")
+    unread <- atomically (mbUnread childMb 0)
+    length unread @?= 0
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
+
+sendToToolCallUnknownCall :: Assertion
+sendToToolCallUnknownCall = do
+    (_, _, gate, a1, ctx) <- sendToToolCallFixture Just
+    result <- sendToToolCall ctx (SendToToolCallParams "call_nope" "hello" False False)
+    result @?= Left (SystemInfoError "tool call not found")
+    putMVar gate ()
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
+
+-- | The child is not registered as a descendant of the caller: the default
+-- @subtree@ mail scope refuses it, exactly as @send-message@ would.
+sendToToolCallKeepsScope :: Assertion
+sendToToolCallKeepsScope = do
+    (childMb, _, gate, a1, ctx) <- sendToToolCallFixture (const Nothing)
+    result <- sendToToolCall ctx (SendToToolCallParams "call_helper" "hello" False False)
+    result @?= Left (SystemInfoError "not permitted to send to this session")
+    unread <- atomically (mbUnread childMb 0)
+    length unread @?= 0
+    putMVar gate ()
+    mapM_ shutdownAsyncEngine a1.ctxAsyncEngine
 
 -------------------------------------------------------------------------------
 -- Helpers

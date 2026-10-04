@@ -21,6 +21,10 @@ module System.Agents.Tools.SystemToolbox.ToolCallStatus (
     cancelToolCallById,
     waitForCallsOrMail,
     clampWaitSeconds,
+
+    -- * Addressing a call
+    resolveEntity,
+    statusText,
 ) where
 
 import Control.Concurrent.STM (STM, TVar, atomically, orElse, readTVar, registerDelay, retry)

@@ -55,6 +55,53 @@ the machinery, the policy decides which calls actually go to the background.
 The settings apply everywhere an agent runs: `run` (one-shot), the TUI, the
 `session` commands, and agents called as tools by other agents.
 
+## Wrappers
+
+`rules` pick how a call runs. `wrappers` add decorators around it: a timeout,
+retries, a cap on the result, a hook that may deny or defer the call. Every
+wrapper whose `match` holds applies, in file order, the first one outermost.
+
+```json
+"toolCallPolicyConfig": {
+  "default": {"tag": "runSync"},
+  "rules": [],
+  "wrappers": [
+    {"match": {"tool": "http_*"},
+     "decorators": [{"tag": "retries", "count": 2}, {"tag": "timeout", "seconds": 30}]},
+    {"match": {"tool": "bash_*", "args": {"path": "command", "glob": "rm *"}},
+     "decorators": [{"tag": "before", "hook": {"command": "hooks/approve"}}]},
+    {"match": {"args": {"all": [{"path": "env", "equals": "production"},
+                                {"not": {"path": "dry_run", "equals": true}}]}},
+     "decorators": [{"tag": "before", "hook": {"command": "hooks/approve"}}]}
+  ]
+}
+```
+
+`match` has two optional parts, and both must hold:
+
+* `tool`: a glob (`*` only) on the name of the tool as the model calls it.
+* `args`: a predicate on the arguments of the call.
+
+| Predicate | Holds when |
+|-----------|-----------|
+| `{"path": p, "equals": v}` | there is a value at `p` and it is the JSON value `v` |
+| `{"path": p, "glob": g}` | there is a string at `p` and it matches the glob `g` |
+| `{"path": p, "exists": true}` | there is a value at `p` (`null` counts); `false` for the opposite |
+| `{"all": [...]}`, `{"any": [...]}`, `{"not": {...}}` | every, at least one, or not |
+
+A path is a dot-separated list of object keys and array indices
+(`options.targets.0`); the empty path is the whole arguments object.
+
+Three things to know when a wrapper guards a tool:
+
+* A missing value fails `equals` and `glob`. Write "unless `dry_run` is true"
+  with `not`, as above: it then also covers calls that leave `dry_run` out.
+* The predicate sees the arguments as the model sent them. A value added by a
+  binding is not seen, the same rule as for hooks. Arguments that are not
+  valid JSON are `null` to the predicate.
+* A predicate that cannot be read (a misspelt operator, two operators in one
+  object) is a loading error for the agent, not a rule that never matches.
+
 ## What the LLM sees
 
 A call that has not finished when the LLM is asked for its next completion
@@ -108,7 +155,7 @@ calls:
    "contents": {
      "Name": "system",
      "Description": "System context and background tool calls",
-     "Capabilities": ["get-tool-call-status", "list-running-tool-calls", "cancel-tool-call"]
+     "Capabilities": ["get-tool-call-status", "list-running-tool-calls", "cancel-tool-call", "send-to-tool-call"]
    }}
 ]}
 ```
@@ -118,9 +165,19 @@ calls:
 | `list-running-tool-calls` | The calls still running in this session |
 | `get-tool-call-status` | Status, progress and (once final) result of a call; can block until it finishes with `wait_for_completion` |
 | `cancel-tool-call` | Interrupt a running call |
+| `send-to-tool-call` | Write to the sub-agent a running `prompt_agent_<slug>` call started |
 
 Calls are addressed by the `tool_call_id` the model itself used (e.g.
 `call_abc`); the internal UUID also works.
+
+`send-to-tool-call` takes `tool_call_id`, `text`, and optionally
+`expects_reply` and `interrupt`. It is `send-message` to the session of the
+helper, found from the call instead of from a session id, with the same mail
+scopes. The helper reads the message before its next completion, so a
+message that arrives while the helper writes its final answer is not read.
+The call must still be running and must be a sub-agent call: there is nothing
+to write to in a bash or MCP call. It works under the runner (the TUI and
+`agents-server`, where the helper is a session of its own) and in `run`.
 
 `get-tool-call-status` reports `orphaned` for a call that was running when its
 process went away (e.g. the session was saved and reloaded elsewhere). Such a
@@ -144,6 +201,36 @@ through `get-tool-call-status` and the TUI shows next to the running call.
   per-step callback.
 * **Your own tools** can report anything JSON through `ctxProgressCallback` in
   the `ToolExecutionContext`.
+
+### Asking for the model's attention
+
+Progress is read by the model when it asks. A tool that should not wait for
+that reports a payload at the **notify** level: any JSON object whose `level`
+is `"notify"`, with the text in `message`.
+
+* **Bash tools** write a line starting with `::notify::` on standard error:
+  `echo "::notify:: 3 tests are red, still running" >&2`.
+* **Your own tools** call `ctxProgressCallback` with `notifyProgress "…"`.
+
+Such a payload is kept as progress like any other, and is also sent to the
+session as mail:
+
+```
+[mail 6f1c… from tool call 0d5e…]
+tool call call_abc (run_tests) notifies:
+3 tests are red, still running
+```
+
+The model gets it with its next completion. If the session was idle, waiting
+for its background calls, or in `wait`, the mail wakes it, and the call goes
+on running. A call the step is still attached to is not interrupted: the mail
+is delivered when the step hands control back. A call sends at most 16 such
+mails, and they count against the mailbox bound; what is over is progress
+only.
+
+This needs `executionMode: asynchronous` (always on under the runner: the TUI
+and `agents-server`), because only a call run by the async engine has
+somewhere to report to.
 
 MCP and OpenAPI tools do not report progress yet. An OpenAPI call waits for
 one complete HTTP response, so there is nothing to stream. MCP *does* define

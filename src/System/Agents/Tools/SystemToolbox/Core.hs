@@ -272,6 +272,7 @@ capabilityFromName name = case name of
     "cancel-tool-call" -> Just SystemToolCancelToolCall
     "wait" -> Just SystemToolWait
     "send-message" -> Just SystemToolSendMessage
+    "send-to-tool-call" -> Just SystemToolSendToToolCall
     "spawn-session" -> Just SystemToolSpawnSession
     "watch-session" -> Just SystemToolWatchSession
     "unwatch-session" -> Just SystemToolUnwatchSession
@@ -299,6 +300,7 @@ capabilityToName SystemToolListRunningToolCalls = "list-running-tool-calls"
 capabilityToName SystemToolCancelToolCall = "cancel-tool-call"
 capabilityToName SystemToolWait = "wait"
 capabilityToName SystemToolSendMessage = "send-message"
+capabilityToName SystemToolSendToToolCall = "send-to-tool-call"
 capabilityToName SystemToolSpawnSession = "spawn-session"
 capabilityToName SystemToolWatchSession = "watch-session"
 capabilityToName SystemToolUnwatchSession = "unwatch-session"
@@ -365,6 +367,7 @@ getCapabilityInfoInternal capability toolbox mSessionId mQuery mReadParams = do
             SystemToolCancelToolCall -> error "Use cancelToolCallById"
             SystemToolWait -> error "Use waitForCallsOrMail"
             SystemToolSendMessage -> error "Use sendMessageToSession"
+            SystemToolSendToToolCall -> error "Use sendToToolCall"
             SystemToolSpawnSession -> error "Use spawnSession"
             SystemToolWatchSession -> error "Use watchSession"
             SystemToolUnwatchSession -> error "Use unwatchSession"

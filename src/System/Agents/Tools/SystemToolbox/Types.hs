@@ -40,6 +40,8 @@ module System.Agents.Tools.SystemToolbox.Types (
     maxWaitSeconds,
     SendMessageParams (..),
     SendMessageResult (..),
+    SendToToolCallParams (..),
+    SendToToolCallResult (..),
     SpawnSessionParams (..),
     SpawnSessionResult (..),
     WatchSessionParams (..),
@@ -565,6 +567,60 @@ instance FromJSON SendMessageResult where
             <*> v .: "seq"
             <*> v .: "duplicate"
             <*> v .: "recipient_status"
+
+-------------------------------------------------------------------------------
+-- send-to-tool-call (todos/session-mailbox.md, §3)
+-------------------------------------------------------------------------------
+
+{- | Parameters for a @send-to-tool-call@ call: mail to the child session of
+one of the caller's own running sub-agent calls, addressed by the call's id.
+-}
+data SendToToolCallParams = SendToToolCallParams
+    { stpToolCallId :: Text
+    -- ^ The id of the call, as for @get-tool-call-status@
+    , stpText :: Text
+    , stpExpectsReply :: Bool
+    , stpInterrupt :: Bool
+    }
+    deriving (Show, Eq, Generic)
+
+instance FromJSON SendToToolCallParams where
+    parseJSON = Aeson.withObject "SendToToolCallParams" $ \v ->
+        SendToToolCallParams
+            <$> v .: "tool_call_id"
+            <*> v .: "text"
+            <*> v .:? "expects_reply" .!= False
+            <*> v .:? "interrupt" .!= False
+
+instance ToJSON SendToToolCallParams where
+    toJSON p =
+        Aeson.object
+            [ "tool_call_id" .= stpToolCallId p
+            , "text" .= stpText p
+            , "expects_reply" .= stpExpectsReply p
+            , "interrupt" .= stpInterrupt p
+            ]
+
+{- | Result of a @send-to-tool-call@ call: the call, the session the mail
+went to, and what @send-message@ reports.
+-}
+data SendToToolCallResult = SendToToolCallResult
+    { strToolCallId :: Text
+    , strChildSessionId :: Text
+    , strSent :: SendMessageResult
+    }
+    deriving (Show, Eq, Generic)
+
+instance ToJSON SendToToolCallResult where
+    toJSON r =
+        Aeson.object
+            [ "tool_call_id" .= strToolCallId r
+            , "child_session_id" .= strChildSessionId r
+            , "message_id" .= smrMessageId (strSent r)
+            , "seq" .= smrSeq (strSent r)
+            , "duplicate" .= smrDuplicate (strSent r)
+            , "recipient_status" .= smrRecipientStatus (strSent r)
+            ]
 
 -------------------------------------------------------------------------------
 -- spawn-session (todos/session-mailbox.md, Phase 4, §5)

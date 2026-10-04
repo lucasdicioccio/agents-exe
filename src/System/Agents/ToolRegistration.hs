@@ -1120,7 +1120,7 @@ buildSystemToolParams box =
             ParamProperty
                 { propertyKey = "tool_call_id"
                 , propertyType = StringParamType
-                , propertyDescription = "For get-tool-call-status and cancel-tool-call: The id of the tool call to inspect or cancel (the tool_call_id of one of your earlier calls, as shown in running placeholders or list-running-tool-calls)"
+                , propertyDescription = "For get-tool-call-status, cancel-tool-call and send-to-tool-call: The id of the tool call to inspect, cancel or write to (the tool_call_id of one of your earlier calls, as shown in running placeholders or list-running-tool-calls)"
                 , propertyRequired = False
                 }
 
@@ -1170,7 +1170,7 @@ buildSystemToolParams box =
             ParamProperty
                 { propertyKey = "text"
                 , propertyType = StringParamType
-                , propertyDescription = "For send-message: The message text"
+                , propertyDescription = "For send-message and send-to-tool-call: The message text"
                 , propertyRequired = False
                 }
         sendMessageInReplyToParam =
@@ -1184,14 +1184,14 @@ buildSystemToolParams box =
             ParamProperty
                 { propertyKey = "expects_reply"
                 , propertyType = BoolParamType
-                , propertyDescription = "For send-message: Hint that the recipient is expected to reply (default: false)"
+                , propertyDescription = "For send-message and send-to-tool-call: Hint that the recipient is expected to reply (default: false)"
                 , propertyRequired = False
                 }
         sendMessageInterruptParam =
             ParamProperty
                 { propertyKey = "interrupt"
                 , propertyType = BoolParamType
-                , propertyDescription = "For send-message: Send as Interrupt priority (default: false)"
+                , propertyDescription = "For send-message and send-to-tool-call: Send as Interrupt priority (default: false)"
                 , propertyRequired = False
                 }
 
@@ -1312,6 +1312,7 @@ buildSystemToolParams box =
                 ++ (if hasCapability SystemToolExecuteCommand then [commandParam] else [])
                 ++ ( if hasCapability SystemToolGetToolCallStatus
                         || hasCapability SystemToolCancelToolCall
+                        || hasCapability SystemToolSendToToolCall
                         then [toolCallIdParam]
                         else []
                    )
@@ -1328,14 +1329,14 @@ buildSystemToolParams box =
                    )
                 ++ (if hasCapability SystemToolCancelToolCall then [cancelReasonParam] else [])
                 ++ (if hasCapability SystemToolWait then [waitForTargetParam] else [])
-                ++ ( if hasCapability SystemToolSendMessage
-                        then
-                            [ sendMessageToParam
-                            , sendMessageTextParam
-                            , sendMessageInReplyToParam
-                            , sendMessageExpectsReplyParam
-                            , sendMessageInterruptParam
-                            ]
+                ++ (if hasCapability SystemToolSendMessage then [sendMessageToParam] else [])
+                ++ ( if hasCapability SystemToolSendMessage || hasCapability SystemToolSendToToolCall
+                        then [sendMessageTextParam]
+                        else []
+                   )
+                ++ (if hasCapability SystemToolSendMessage then [sendMessageInReplyToParam] else [])
+                ++ ( if hasCapability SystemToolSendMessage || hasCapability SystemToolSendToToolCall
+                        then [sendMessageExpectsReplyParam, sendMessageInterruptParam]
                         else []
                    )
                 ++ ( if hasCapability SystemToolSpawnSession
@@ -1372,6 +1373,7 @@ capabilityToText SystemToolListRunningToolCalls = "list-running-tool-calls"
 capabilityToText SystemToolCancelToolCall = "cancel-tool-call"
 capabilityToText SystemToolWait = "wait"
 capabilityToText SystemToolSendMessage = "send-message"
+capabilityToText SystemToolSendToToolCall = "send-to-tool-call"
 capabilityToText SystemToolSpawnSession = "spawn-session"
 capabilityToText SystemToolWatchSession = "watch-session"
 capabilityToText SystemToolUnwatchSession = "unwatch-session"
@@ -1989,7 +1991,9 @@ systemTool box =
                                             then handleWait ctx v
                                             else if cap == "send-message"
                                                 then handleSendMessage ctx v
-                                                else if cap == "spawn-session"
+                                                else if cap == "send-to-tool-call"
+                                                  then handleSendToToolCall ctx v
+                                                  else if cap == "spawn-session"
                                                     then handleSpawnSession ctx v
                                                     else if cap == "watch-session"
                                                         then handleWatchSession ctx v
@@ -2067,6 +2071,19 @@ systemTool box =
                     Left err -> pure $ SystemToolError call err
                     Right sendResult ->
                         pure $ SystemToolResult call $ SystemTools.QueryResult "send-message" (Aeson.toJSON sendResult) 0
+
+    -- Handle the send-to-tool-call capability (todos/session-mailbox.md, §3)
+    handleSendToToolCall :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())
+    handleSendToToolCall ctx params =
+        case Aeson.fromJSON (Aeson.Object params) :: Aeson.Result SystemTools.SendToToolCallParams of
+            Aeson.Error err ->
+                pure $ SystemToolError call (SystemTools.SystemInfoError $ Text.pack err)
+            Aeson.Success sendParams -> do
+                result <- Mail.sendToToolCall ctx sendParams
+                case result of
+                    Left err -> pure $ SystemToolError call err
+                    Right sendResult ->
+                        pure $ SystemToolResult call $ SystemTools.QueryResult "send-to-tool-call" (Aeson.toJSON sendResult) 0
 
     -- Handle the spawn-session capability (todos/session-mailbox.md, Phase 4)
     handleSpawnSession :: ToolExecutionContext -> Aeson.Object -> IO (CallResult ())

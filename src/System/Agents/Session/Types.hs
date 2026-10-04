@@ -78,6 +78,9 @@ module System.Agents.Session.Types (
     WakeOnKind (..),
     defaultWakeOn,
     senderWakeKind,
+    notifyProgress,
+    isNotifyProgress,
+    notifyProgressText,
     MailBody (..),
     Envelope (..),
     Outgoing (..),
@@ -131,8 +134,10 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types ((.!=))
 import qualified Data.Aeson.Types as Aeson.Types
+import qualified Data.ByteString.Lazy as LByteString
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import Data.Time (UTCTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
@@ -1021,6 +1026,11 @@ data MailBody
     | ToolCallFinished ToolCallId ToolCallState UserToolResponse
     | ContinuationResult ContinuationToken UserToolResponse
     | WatchedEvent SessionId Text Aeson.Value
+    | ToolCallNotice ToolCallId (Maybe Text) Text Aeson.Value
+    {- ^ A running tool call asks for the model's attention (a progress
+    payload at the notify level, see 'notifyProgress'): the call, the id the
+    provider gave it (the one the model knows), the tool name, the payload.
+    -}
     | Control ControlMsg
     deriving (Show, Eq, Ord, Generic)
 
@@ -1046,6 +1056,14 @@ instance ToJSON MailBody where
         WatchedEvent sid eventName payload ->
             Aeson.object
                 ["tag" .= ("watchedEvent" :: Text), "sessionId" .= sid, "name" .= eventName, "payload" .= payload]
+        ToolCallNotice tcid providerCallId toolName payload ->
+            Aeson.object
+                [ "tag" .= ("toolCallNotice" :: Text)
+                , "toolCallId" .= tcid
+                , "providerCallId" .= providerCallId
+                , "tool" .= toolName
+                , "payload" .= payload
+                ]
         Control msg -> Aeson.object ["tag" .= ("control" :: Text), "message" .= msg]
 
 instance FromJSON MailBody where
@@ -1057,8 +1075,34 @@ instance FromJSON MailBody where
             "toolCallFinished" -> ToolCallFinished <$> v .: "toolCallId" <*> v .: "state" <*> v .: "result"
             "continuationResult" -> ContinuationResult <$> v .: "token" <*> v .: "result"
             "watchedEvent" -> WatchedEvent <$> v .: "sessionId" <*> v .: "name" <*> v .: "payload"
+            "toolCallNotice" -> ToolCallNotice <$> v .: "toolCallId" <*> v .:? "providerCallId" <*> v .: "tool" <*> v .: "payload"
             "control" -> Control <$> v .: "message"
             _ -> fail $ "Unknown MailBody tag: " ++ Text.unpack tag
+
+{- | A progress payload at the notify level. Ordinary progress is state the
+model reads when it asks; a notify-level payload is recorded the same way
+and is also posted by the async engine as 'ToolCallNotice' mail, so the
+model is told at its next receive point (and woken if it is idle or in
+@wait@).
+
+A tool reports it through its progress callback. Any JSON object whose
+@level@ is @"notify"@ counts; this builds the plain-text one.
+-}
+notifyProgress :: Text -> Aeson.Value
+notifyProgress message = Aeson.object ["level" .= ("notify" :: Text), "message" .= message]
+
+-- | Whether a progress payload is at the notify level (see 'notifyProgress').
+isNotifyProgress :: Aeson.Value -> Bool
+isNotifyProgress (Aeson.Object obj) = KeyMap.lookup "level" obj == Just (Aeson.String "notify")
+isNotifyProgress _ = False
+
+{- | The text of a notify-level payload: its @message@ when that is a string,
+else the payload itself, encoded.
+-}
+notifyProgressText :: Aeson.Value -> Text
+notifyProgressText payload = case payload of
+    Aeson.Object obj | Just (Aeson.String message) <- KeyMap.lookup "message" obj -> message
+    _ -> Text.decodeUtf8 (LByteString.toStrict (Aeson.encode payload))
 
 {- | A single piece of mail, accepted into a mailbox with a total order
 ('envSeq') per session.

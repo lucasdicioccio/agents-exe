@@ -4,6 +4,14 @@
 
 ### New Features
 
+#### Mailbox extensions
+- `send-to-tool-call`, a System Toolbox capability: the model writes to the sub-agent that one of its running `prompt_agent_<slug>` calls started, naming the call (`tool_call_id`) instead of a session. Under the runner (TUI, `agents-server`) a sub-agent call now records its child session, so its placeholder shows `childSessionId` there too; in `run`, an in-tool sub-agent is addressable by mail while it runs
+- Notify progress level: a tool that reports `{"level": "notify", "message": "…"}` (a bash tool: a `::notify:: …` line on standard error) is also delivered to the session as mail, at most 16 times per call. It wakes a session that idles on its background calls, or `wait`, while the call goes on running
+- A session that idles on background calls now reads its mail when it arrives (a message from the user or another session), instead of when a call ends
+- Wrappers match on arguments: `"match": {"tool": "bash_*", "args": {"path": "command", "glob": "rm *"}}`, with `equals`, `glob`, `exists`, `all`, `any`, `not`. A predicate that cannot be read is a loading error
+- Library: `WrapperMatch` is a record with a second field `wmArgs`; `MailBody` has a `ToolCallNotice` constructor (JSON tag `toolCallNotice`); `SystemToolCapability` has `SystemToolSendToToolCall`
+- See `documentation/async-tool-calls.md` (Wrappers, Tool-call capabilities, Progress)
+
 #### Tunable `spectate` display
 - `agents-exe spectate --panels SPEC` chooses the panels shown, their places and sizes (`tree:60+tools:40/45,text/55` is the default screen; `tree,tools,text` is three columns); `--refresh SECONDS` sets the time between two refreshes
 - Keys change the same things while running, as in `top`: `1` `2` `3` show or hide a panel, `Tab` picks one, `<` `>` move it, `[` `]` and `-` `+` resize it, `s` restacks it, `d` `D` change the refresh interval, `0` goes back to the layout at start, `?` lists the keys and the flags that reproduce the screen
