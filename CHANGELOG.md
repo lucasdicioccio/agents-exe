@@ -11,6 +11,11 @@
 - The screen is now redrawn once per refresh interval rather than on every event
 - See `documentation/cli-commands.md` (spectate)
 
+#### Terminal UI screenshots and end-to-end tests
+- `agents-tui-e2e`, an opt-in test-suite (`cabal test agents-tui-e2e -ftui-e2e`), drives the real `agents-exe tui` in a pseudo-terminal with [tuispec](https://github.com/Tritlo/tuispec) against a scripted OpenAI-compatible endpoint: launch, send a message and read the reply, answer a deferred call from the Pending panel
+- Each step is compared with a baseline under `test/tui-snapshots/`; `AGENTS_TUI_E2E_PNG=1` renders the screenshots `documentation/tui.md` now shows
+- See `documentation/tui.md` (Screenshots and end-to-end tests)
+
 #### `agents-exe new agent` bootstrap defaults
 - A new agent can read, edit and list files under `./` (a `workspace` file sandbox shared by its developer and system toolboxes) and has a read-write SQLite memory (`./{slug}-memory.sqlite`); before, its file sandbox denied everything
 - After creating the agent, reports whether `agents-exe.cfg.json` loads it and offers to add it to `agentsFiles` (`--add-to-config`, `--no-add-to-config`)
