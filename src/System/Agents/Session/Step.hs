@@ -86,16 +86,20 @@ runStepMSync convId agent sess =
                 -- Construct ToolExecutionContext for each tool call
                 let ctx = buildContext agent0' sess0 convId
                 (uQuery0, blockForLate) <- askUserQuery ctx agent0' missing sess0
-                (sessLate, late) <- collectLateResults ctx agent0'.ctxAsyncYieldStrategy blockForLate sess0
-                let shouldBlockForMail = blockForLate && null late && null missing.missingToolCalls
-                (sessMail, mailEnvelopes) <- receiveMailForTurn agent0' shouldBlockForMail sessLate
-                let uQueryBase = mergeUserQueries uQuery0 (lateResultsQuery late)
+                (sessLate0, lateBefore) <- collectLateResultsBefore ctx agent0'.ctxAsyncYieldStrategy blockForLate missing.missingToolCalls sess0
+                let shouldBlockForMail = blockForLate && null lateBefore && null missing.missingToolCalls
+                (sessMail0, mailEnvelopes) <- receiveMailForTurn agent0' shouldBlockForMail sessLate0
                 let mMailBlock = mailQuery mailEnvelopes
                 -- Execute tool calls with optional OS entity tracking
                 tracked <- traverse (mkReadyTrackedCall ctx agent0') missing.missingToolCalls
                 trackedWithEntities <- ensureTrackedCallEntities ctx tracked
                 resultsWithTracked <- traverse (executeTrackedCallWithEntity agent0' ctx) trackedWithEntities
                 let toolResponses0 = map fst resultsWithTracked
+                -- Late results are collected once this round's calls ran, so a
+                -- result the model just read with get-tool-call-status is
+                -- known to be read (see 'collectLateResultsBefore').
+                (sessMail, lateAfter) <- collectLateResults ctx agent0'.ctxAsyncYieldStrategy False sessMail0
+                let uQueryBase = mergeUserQueries uQuery0 (lateResultsQuery (lateBefore ++ lateAfter))
                 -- Design §5 "What the LLM sees" (@todos/os-as-standalone-
                 -- server.md@): a provider that rejects a user message right
                 -- after tool results opts in with 'ctxMailInToolResult'; R1
@@ -234,7 +238,7 @@ startNewAsyncTurn ::
     IO (Agent r, Either r Session)
 startNewAsyncTurn convId agent sess sPrompt sTools uQuery blockForLate calls = do
     let ctx = buildContext agent sess convId
-    (sessLate, late) <- collectLateResults ctx agent.ctxAsyncYieldStrategy blockForLate sess
+    (sessLate, late) <- collectLateResultsBefore ctx agent.ctxAsyncYieldStrategy blockForLate calls sess
     let shouldBlockForMail = blockForLate && null late && null calls
     (sessMail, mailEnvelopes) <- receiveMailForTurn agent shouldBlockForMail sessLate
     tracked <- traverse (mkReadyTrackedCall ctx agent) calls
@@ -348,12 +352,20 @@ executeTrackedCalls ctx agent sess replaceHead sPrompt sTools uQuery mailEnvelop
     -- so the LLM sees both the placeholders and why they appeared ("^Z then
     -- talk"). A non-interrupt outcome (a deadline, or the yield strategy)
     -- leaves mail for the next ordinary receive point.
-    (sess', uQuery', mailEnvelopes') <-
+    (sessMailed, uQueryMailed, mailEnvelopes') <-
         if attachOutcome.awoInterrupted
             then do
                 (sessMail, moreMail) <- receiveMailForTurn agent False sess
                 pure (sessMail, mergeUserQueries uQuery (mailQuery moreMail), mailEnvelopes ++ moreMail)
             else pure (sess, uQuery, mailEnvelopes)
+
+    -- Background calls from earlier turns that finished by now are delivered
+    -- with this turn. Collected after this round's calls ran, so a result the
+    -- model just read with get-tool-call-status is known to be read (see
+    -- 'collectLateResultsBefore').
+    (sess', uQuery') <- do
+        (sessLate, late) <- collectLateResults ctx agent.ctxAsyncYieldStrategy False sessMailed
+        pure (sessLate, mergeUserQueries uQueryMailed (lateResultsQuery late))
 
     -- Decide whether we can emit a full user turn or need a partial one.
     let content = PartialUserTurnContent sPrompt sTools uQuery' processedOrdered mailEnvelopes' False
@@ -649,12 +661,13 @@ runningToolCallIds :: Session -> [ToolCallId]
 runningToolCallIds sess =
     [tc.tcId | PartialUserTurn partial _ <- sess.turns, tc <- partial.pTrackedToolCalls, tc.tcState == Running]
 
--- | Cancel one attached call through the agent's async engine, if any. A
--- no-op (per 'Engine.cancelToolCall') for an unknown or already-final call
--- id, so it is safe to call again for a 'Control' envelope a caller has
--- already reacted to on an earlier iteration.
+-- | Cancel one attached call through the agent's async engine, or through
+-- the engine of this process that started it when the agent was rebuilt
+-- since (see 'Engine.cancelToolCallAnyEngine'). A no-op for an unknown or
+-- already-final call id, so it is safe to call again for a 'Control'
+-- envelope a caller has already reacted to on an earlier iteration.
 cancelAttachedCall :: Agent r -> ToolCallId -> IO ()
-cancelAttachedCall agent callId = forM_ agent.ctxAsyncEngine $ \engine -> void $ Engine.cancelToolCall engine callId
+cancelAttachedCall agent callId = void $ Engine.cancelToolCallAnyEngine agent.ctxAsyncEngine callId
 
 {- | Read unread 'Control' mail (e.g. 'Pause', 'CancelAllAttached'); when
 the whole unread batch is 'Control', commit the cursor past it
@@ -864,7 +877,7 @@ When @block@ is set (the step has no new tool calls to run) and background
 calls exist, the function first waits for them: until all are done under
 'YieldWhenAllDone', otherwise until at least one is done.
 -}
-collectLateResults :: ToolExecutionContext -> AsyncYieldStrategy -> Bool -> Session -> IO (Session, [TrackedToolCall])
+collectLateResults :: ToolExecutionContext -> AsyncYieldStrategy -> Bool -> Session -> IO (Session, [LateResult])
 collectLateResults ctx strategy block sess =
     case backgroundCalls sess of
         [] -> pure (sess, [])
@@ -879,7 +892,47 @@ collectLateResults ctx strategy block sess =
                 updateTurn t = t
             if null delivered
                 then pure (sess, [])
-                else pure (sess{turns = map updateTurn sess.turns}, delivered)
+                else do
+                    late <- mapM (\tc -> LateResult tc <$> resultAlreadyRead ctx tc) delivered
+                    pure (sess{turns = map updateTurn sess.turns}, late)
+
+{- | 'collectLateResults' at the start of a turn, before its tool calls run.
+
+Only a turn without tool calls collects here, because that is where the step
+may have to wait for the results. A turn with tool calls collects after they
+ran (see 'executeTrackedCalls' and 'runStepMSync'): one of them may be a
+@get-tool-call-status@ on the very call whose result is ready, and collecting
+first would put the result in the user message and in that tool message.
+-}
+collectLateResultsBefore ::
+    ToolExecutionContext ->
+    AsyncYieldStrategy ->
+    Bool ->
+    [LlmToolCall] ->
+    Session ->
+    IO (Session, [LateResult])
+collectLateResultsBefore ctx strategy block calls sess
+    | null calls = collectLateResults ctx strategy block sess
+    | otherwise = pure (sess, [])
+
+-- | A background call's final result, on its way to the next user turn.
+data LateResult = LateResult
+    { lrCall :: TrackedToolCall
+    , lrAlreadyRead :: Bool
+    {- ^ The model already holds the result: it read it with
+    @get-tool-call-status@ once the call was final. The notice then only
+    says that the call ended.
+    -}
+    }
+
+-- | Whether the call's OS entity records a read of its final result.
+resultAlreadyRead :: ToolExecutionContext -> TrackedToolCall -> IO Bool
+resultAlreadyRead ctx tc =
+    case (Ctx.ctxWorld ctx, tcEntityId tc) of
+        (Just world, Just eid) ->
+            maybe False (isJust . OSConv.tcResultReadAt)
+                <$> atomically (getComponent @OSConv.ToolCallState world eid)
+        _ -> pure False
 
 {- | How long to wait for background calls before delivering their results:
 all of them under 'YieldWhenAllDone', otherwise the first one to finish.
@@ -916,21 +969,28 @@ askUserQuery ctx agent missing sess
 {- | Render late results as a user message.
 
 Each finished call is listed with its provider id, tool name, status, and
-result. Media from the results is attached to the query.
+result. Media from the results is attached to the query. A result the model
+already read with @get-tool-call-status@ is not repeated: its call gets one
+line saying so.
 -}
-lateResultsQuery :: [TrackedToolCall] -> Maybe UserQuery
+lateResultsQuery :: [LateResult] -> Maybe UserQuery
 lateResultsQuery [] = Nothing
-lateResultsQuery calls =
+lateResultsQuery late =
     Just $
         UserQuery
-            (Text.intercalate "\n\n" ("Background tool calls finished since their placeholder responses:" : map describe calls))
-            (concatMap media calls)
+            (Text.intercalate "\n\n" ("Background tool calls finished since their placeholder responses:" : map describe late))
+            (concatMap media [lr.lrCall | lr <- late, not lr.lrAlreadyRead])
   where
-    describe tc =
-        let callId = maybe "(unknown id)" id (providerToolCallId tc.tcCall)
+    describe :: LateResult -> Text.Text
+    describe lr =
+        let tc = lr.lrCall
+            callId = maybe "(unknown id)" id (providerToolCallId tc.tcCall)
             toolName = maybe "unknown tool" (\(ToolCall n _) -> n) (parseToolCallFromLlmToolCall tc.tcCall)
             status = if tcState tc == Completed then "completed" else "failed"
-         in "tool_call_id " <> callId <> " (" <> toolName <> ") " <> status <> ":\n" <> maybe "" renderResult (tcResult tc)
+            header = "tool_call_id " <> callId <> " (" <> toolName <> ") " <> status
+         in if lr.lrAlreadyRead
+                then header <> ": result already read with get-tool-call-status"
+                else header <> ":\n" <> maybe "" renderResult (tcResult tc)
 
     renderResult (TextResponse txt) = txt
     renderResult (JsonResponse val) = Text.decodeUtf8 (LByteString.toStrict (Aeson.encode val))
@@ -972,18 +1032,46 @@ receiveMailForTurn :: Agent r -> Bool -> Session -> IO (Session, [Envelope])
 receiveMailForTurn agent shouldBlock sess =
     case agent.ctxMailbox of
         Nothing -> pure (sess, [])
-        Just mb -> do
-            let cur = sess.mailCursor
-            unread <- atomically (mbUnread mb cur)
-            envelopes <-
-                if null unread && shouldBlock
-                    then atomically (awaitMail mb cur (const True))
-                    else pure unread
-            case envelopes of
-                [] -> pure (sess, [])
-                _ -> do
-                    sess' <- applyContinuationMail agent envelopes sess
-                    pure (sess'{mailCursor = maximum (map envSeq envelopes)}, envelopes)
+        Just mb -> go mb sess
+  where
+    go mb sess0 = do
+        let cur = sess0.mailCursor
+        unread <- atomically (mbUnread mb cur)
+        received <-
+            if null unread && shouldBlock
+                then atomically (awaitMail mb cur (const True))
+                else pure unread
+        case received of
+            [] -> pure (sess0, [])
+            _ -> do
+                -- A finished call the stepper delivers itself is read past,
+                -- not rendered (see 'deliveredByStepper').
+                envelopes <- filterM (fmap not . deliveredByStepper agent) received
+                let sess1 = sess0{mailCursor = maximum (map envSeq received)}
+                case envelopes of
+                    [] | shouldBlock -> go mb sess1
+                    [] -> pure (sess1, [])
+                    _ -> do
+                        sess' <- applyContinuationMail agent envelopes sess1
+                        pure (sess', envelopes)
+
+{- | Whether an envelope only announces a tool call whose result the stepper
+delivers by itself.
+
+The engine posts 'ToolCallFinished' for every call it ran, so that a waiting
+session wakes up. The result of such a call already reaches the LLM once, as
+the call's tool message or in the late-results notice ('lateResultsQuery'),
+both read from the call's OS entity. Rendering the mail too would send the
+result a second time, under an id the model was never shown.
+
+The mail is kept when this process has no entity for the call (a durable
+mailbox read after a restart): the stepper then reports the call as
+orphaned, and the mail is the only place its real result survives.
+-}
+deliveredByStepper :: Agent r -> Envelope -> IO Bool
+deliveredByStepper agent e = case (e.envBody, agent.ctxWorld) of
+    (ToolCallFinished tcid _ _, Just world) -> isJust <$> TCT.findToolCallEntityByToolCallId world tcid
+    _ -> pure False
 
 {- | Apply unread 'ContinuationResult' mail to the session's deferred calls.
 
@@ -1438,7 +1526,9 @@ buildContext agent sess convId =
      in baseCtx
             { Ctx.ctxWorld = agent.ctxWorld
             , Ctx.ctxEmit = agent.ctxEmit
-            , Ctx.ctxCancelToolCall = fmap Engine.cancelToolCall agent.ctxAsyncEngine
+            , -- Always present: a call started by an earlier agent of this
+              -- process is still found through the engine that owns it.
+              Ctx.ctxCancelToolCall = Just (Engine.cancelToolCallAnyEngine agent.ctxAsyncEngine)
             , -- Phase 2 (@todos/session-mailbox.md@ §3): built once per turn
               -- from this session's current cursor, so every tool call in
               -- the turn shares the same view of "what mail is new".

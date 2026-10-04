@@ -16,6 +16,8 @@ The `todos/` directory holds the design documents behind the larger features (du
 
 - [**Spec: the OS as a standalone server (TUI and web UI as clients)**](/specs-os-as-standalone-server.html ), _Status:_ proposal, 2026-09-23, revised the same day after checking service
 
+- [**Spec: a salmon-driven preview deployment of agents-server**](/specs-salmon-preview-deployment.html ), _Status:_ proposal, 2026-10-03. Nothing implemented. A design pass with a
+
 - [**Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)**](/specs-session-mailbox.html ), _Status:_ proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
 
 - [**Spec: partial application of tool arguments**](/specs-tool-partial-application.html ), _Status:_ Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done

@@ -301,6 +301,7 @@ toolCallTests =
                         , tcCompletedAt = Nothing
                         , tcResult = Nothing
                         , tcProgress = []
+                        , tcResultReadAt = Nothing
                         }
             assertBool "Should not be completed" (not $ isToolCallCompleted state)
         , testCase "Tool call executing" $ do
@@ -312,6 +313,7 @@ toolCallTests =
                         , tcCompletedAt = Nothing
                         , tcResult = Nothing
                         , tcProgress = []
+                        , tcResultReadAt = Nothing
                         }
             assertBool "Should not be completed while executing" (not $ isToolCallCompleted state)
         , testCase "Tool call completed" $ do
@@ -324,6 +326,7 @@ toolCallTests =
                         , tcCompletedAt = Just now
                         , tcResult = Just result
                         , tcProgress = []
+                        , tcResultReadAt = Nothing
                         }
             assertBool "Should be completed" (isToolCallCompleted state)
             getToolCallResult state @?= Just result
@@ -336,6 +339,7 @@ toolCallTests =
                         , tcCompletedAt = Just now
                         , tcResult = Nothing
                         , tcProgress = []
+                        , tcResultReadAt = Nothing
                         }
             assertBool "Should be completed (with failure)" (isToolCallCompleted state)
         , testCase "Tool call cancelled" $ do
@@ -347,6 +351,7 @@ toolCallTests =
                         , tcCompletedAt = Just now
                         , tcResult = Nothing
                         , tcProgress = []
+                        , tcResultReadAt = Nothing
                         }
             assertBool "Should be completed (cancelled)" (isToolCallCompleted state)
         , testCase "ToolCallStatus values" $ do
@@ -653,6 +658,7 @@ jsonRoundTripTests =
                         , tcCompletedAt = Just now
                         , tcResult = Just result
                         , tcProgress = [progress]
+                        , tcResultReadAt = Nothing
                         }
             let json = encode state
             let mDecoded = decode json
@@ -747,11 +753,11 @@ utilityFunctionTests =
         , testCase "isToolCallCompleted for all statuses" $ do
             now <- getCurrentTime
             let result = toJSON ("output" :: Text)
-            let pending = ToolCallState{tcStatus = TcPending, tcStartedAt = Nothing, tcCompletedAt = Nothing, tcResult = Nothing, tcProgress = []}
-            let executing = ToolCallState{tcStatus = TcExecuting, tcStartedAt = Just now, tcCompletedAt = Nothing, tcResult = Nothing, tcProgress = []}
-            let completed = ToolCallState{tcStatus = TcCompleted result, tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Just result, tcProgress = []}
-            let failed = ToolCallState{tcStatus = TcFailed "error", tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Nothing, tcProgress = []}
-            let cancelled = ToolCallState{tcStatus = TcCancelled, tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Nothing, tcProgress = []}
+            let pending = ToolCallState{tcStatus = TcPending, tcStartedAt = Nothing, tcCompletedAt = Nothing, tcResult = Nothing, tcProgress = [], tcResultReadAt = Nothing}
+            let executing = ToolCallState{tcStatus = TcExecuting, tcStartedAt = Just now, tcCompletedAt = Nothing, tcResult = Nothing, tcProgress = [], tcResultReadAt = Nothing}
+            let completed = ToolCallState{tcStatus = TcCompleted result, tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Just result, tcProgress = [], tcResultReadAt = Nothing}
+            let failed = ToolCallState{tcStatus = TcFailed "error", tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Nothing, tcProgress = [], tcResultReadAt = Nothing}
+            let cancelled = ToolCallState{tcStatus = TcCancelled, tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Nothing, tcProgress = [], tcResultReadAt = Nothing}
             assertBool "Pending should not be completed" (not $ isToolCallCompleted pending)
             assertBool "Executing should not be completed" (not $ isToolCallCompleted executing)
             assertBool "Completed should be completed" (isToolCallCompleted completed)
@@ -760,9 +766,9 @@ utilityFunctionTests =
         , testCase "getToolCallResult" $ do
             now <- getCurrentTime
             let result = toJSON ("output" :: Text)
-            let completed = ToolCallState{tcStatus = TcCompleted result, tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Just result, tcProgress = []}
-            let failed = ToolCallState{tcStatus = TcFailed "error", tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Nothing, tcProgress = []}
-            let pending = ToolCallState{tcStatus = TcPending, tcStartedAt = Nothing, tcCompletedAt = Nothing, tcResult = Nothing, tcProgress = []}
+            let completed = ToolCallState{tcStatus = TcCompleted result, tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Just result, tcProgress = [], tcResultReadAt = Nothing}
+            let failed = ToolCallState{tcStatus = TcFailed "error", tcStartedAt = Just now, tcCompletedAt = Just now, tcResult = Nothing, tcProgress = [], tcResultReadAt = Nothing}
+            let pending = ToolCallState{tcStatus = TcPending, tcStartedAt = Nothing, tcCompletedAt = Nothing, tcResult = Nothing, tcProgress = [], tcResultReadAt = Nothing}
             getToolCallResult completed @?= Just result
             getToolCallResult failed @?= Nothing
             getToolCallResult pending @?= Nothing

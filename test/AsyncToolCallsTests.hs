@@ -37,8 +37,9 @@ import System.Agents.OS.Events (OSEmission (..), ToolCallActivity (..), ToolCall
 import System.Agents.Session.Base
 import System.Agents.SessionStore (readSessionFromFile, storeSessionToFile)
 import System.Agents.SessionPrint (OrderPreference (..), PrintVisibility (..), SessionPrintOptions (..), formatSessionAsMarkdown)
-import System.Agents.Session.Loop (isBlockedOnDeferredCalls, runUntilBlocked)
-import System.Agents.Session.Step (buildContext, naiveTilNoToolCallStep, pollRunningCall, runStepMAsync)
+import System.Agents.Session.Async.Engine (shutdownAsyncEngine)
+import System.Agents.Session.Loop (BlockedOnDeferredCalls (..), isBlockedOnDeferredCalls, run, runAsyncKeepingAgent, runUntilBlocked)
+import System.Agents.Session.Step (buildContext, naiveTilNoToolCallStep, pollRunningCall, runStepMAsync, runStepMSync)
 import System.Directory (doesFileExist)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
@@ -101,6 +102,19 @@ tests =
         , testCase "runUntilBlocked stops on a Control Pause sent mid-wait" runUntilBlockedStopsOnPauseMidWait
         , testCase "a failing run cancels background calls" runFailureCancelsBackgroundCalls
         , testCase "a call that outlives ctxAsyncCallTimeout fails" callTimesOut
+        , testGroup
+            "residual gaps"
+            [ testCase "a result read with get-tool-call-status is not repeated by the late notice" statusReadNotRepeated
+            , testCase "a result read in the turn that delivers it is not repeated" statusReadInSameTurnNotRepeated
+            , testCase "with a mailbox, a late result reaches the LLM once" lateResultOnceWithMailbox
+            , testCase "with a mailbox, a result read with get-tool-call-status is not repeated" statusReadNotRepeatedWithMailbox
+            , testCase "with a mailbox, an attached call's result is not repeated as mail" attachedResultNotRepeatedAsMail
+            , testCase "cancel-tool-call kills a call owned by another agent's engine" cancelReachesForeignEngine
+            , testCase "run stops on a turn that only waits on deferred calls" runStopsOnDeferredOnly
+            , testCase "a synchronous step does not repeat a result read with get-tool-call-status" statusReadNotRepeatedSyncStep
+            , testCase "mail about a call this process has no entity for is still rendered" foreignToolCallMailRendered
+            , testCase "runAsyncKeepingAgent hands back the engine that owns the running calls" runAsyncHandsBackEngine
+            ]
         , testGroup
             "Phase 2: attach / detach"
             [ testCase "attachSeconds detaches a call after its deadline" attachSecondsDetaches
@@ -495,6 +509,275 @@ runUntilBlockedOnDeferred = do
         Just (Right sess) -> do
             assertBool "blocked on deferred calls" (isBlockedOnDeferredCalls sess)
             [map tcState p.pTrackedToolCalls | p <- take 1 (partialTurns sess)] @?= [[Deferred, Completed]]
+
+-------------------------------------------------------------------------------
+-- Residual gaps (todos/async-tool-calls-progress.md, "Known gaps")
+-------------------------------------------------------------------------------
+
+-- | Occurrences of the needle in what a completion sends the LLM for the
+-- current turn: the user query and the tool messages.
+occurrencesInCompletion :: Text -> LlmCompletion -> Int
+occurrencesInCompletion needle completion =
+    Text.count needle $
+        maybe "" (.queryText) completion.completeQuery
+            <> Text.pack (show (map snd completion.completeToolResponses))
+
+-- | Occurrences over every user turn of a session, as the LLM was sent them.
+occurrencesInUserTurns :: Text -> Session -> Int
+occurrencesInUserTurns needle sess =
+    sum
+        [ Text.count needle (maybe "" (.queryText) q <> Text.pack (show (map snd rs)))
+        | turn <- sess.turns
+        , (q, rs) <- case turn of
+            UserTurn c _ -> [(c.userQuery, c.userToolResponses)]
+            PartialUserTurn c _ -> [(c.pUserQuery, partialToolMessages c)]
+            LlmTurn _ _ -> []
+        ]
+
+waitForCompletionParams :: Text -> GetToolCallStatusParams
+waitForCompletionParams tid = GetToolCallStatusParams tid True True 5
+
+{- | The model fetched the final result with @get-tool-call-status@ before the
+stepper delivered it: the late notice names the call but does not carry the
+result a second time.
+-}
+statusReadNotRepeated :: Assertion
+statusReadNotRepeated = do
+    (_, gate, a1, s1) <- sessionWithBackgroundCall
+    putMVar gate ()
+    Right status <- getToolCallStatus (buildContext a1 s1 convId) (waitForCompletionParams "call_slow")
+    tcsrIsFinal status @?= True
+    (_, s2) <- stepOk a1 s1
+    case s2.turns of
+        (UserTurn content _ : _) -> case content.userQuery of
+            Just q -> do
+                assertBool "notice names the call" ("call_slow" `Text.isInfixOf` q.queryText)
+                assertBool "notice does not repeat the result" (not ("slow-result" `Text.isInfixOf` q.queryText))
+            Nothing -> assertFailure "expected a notice for the finished call"
+        _ -> assertFailure "expected a user turn"
+    -- Delivered: nothing is left in the background.
+    hasBackgroundCalls s2 @?= False
+
+{- | The model asks for the status in the very turn whose user message would
+deliver the late result: the result is in the tool message only.
+-}
+statusReadInSameTurnNotRepeated :: Assertion
+statusReadInSameTurnNotRepeated = do
+    world <- mkWorld
+    gate <- newEmptyMVar
+    script <- newIORef [[mkCall "call_slow" "slow"], [mkCall "call_check" "check"], []]
+    completions <- newIORef []
+    let tool ctx call = case callName call of
+            "check" ->
+                getToolCallStatus ctx (waitForCompletionParams "call_slow") >>= \case
+                    Right status -> pure $ JsonResponse (toJSON status)
+                    Left err -> pure $ TextResponse (Text.pack (show err))
+            _ -> gatedToolCall gate ctx call
+    let agent = (mkAgent world (YieldOnTimeout 20) tool){complete = scriptedComplete script completions}
+    (a1, s1) <- stepOk agent initialSession
+    (a2, s2) <- stepOk a1 s1 -- starts the slow call; partial turn
+    (a3, s3) <- stepOk a2 s2 -- LLM sees the placeholder, asks for the status
+    -- The call is final before the turn starts, so the stepper could deliver it.
+    putMVar gate ()
+    waitUntilNoneRunning (buildContext a3 s3 convId)
+    (a4, s4) <- stepOk a3 s3 -- runs the status call
+    (_, s5) <- stepOk a4 s4 -- LLM reads it and ends its turn
+    occurrencesInUserTurns "slow-result" s5 @?= 1
+    hasBackgroundCalls s5 @?= False
+    lastCompletion completions >>= \c -> occurrencesInCompletion "slow-result" c @?= 1
+
+-- | Poll 'listRunningToolCalls' until no call is running (bounded).
+waitUntilNoneRunning :: ToolExecutionContext -> IO ()
+waitUntilNoneRunning ctx = go (200 :: Int)
+  where
+    go n =
+        listRunningToolCalls ctx >>= \case
+            Right (ListRunningToolCallsResult []) -> pure ()
+            _ | n > 0 -> threadDelay 10000 >> go (n - 1)
+            _ -> assertFailure "calls are still running"
+
+{- | The engine also posts a finished call as mail. The stepper delivers the
+result itself, so the mail must not carry it a second time.
+-}
+lateResultOnceWithMailbox :: Assertion
+lateResultOnceWithMailbox = do
+    (sess, completion) <- lateDeliveryWithMailbox False
+    occurrencesInUserTurns "slow-result" sess @?= 1
+    occurrencesInCompletion "slow-result" completion @?= 1
+
+statusReadNotRepeatedWithMailbox :: Assertion
+statusReadNotRepeatedWithMailbox = do
+    (sess, completion) <- lateDeliveryWithMailbox True
+    occurrencesInUserTurns "slow-result" sess @?= 0
+    occurrencesInCompletion "slow-result" completion @?= 0
+    occurrencesInCompletion "call_slow" completion @?= 1
+
+{- | A background call finishes after the LLM ended its turn, in a session
+with a mailbox. Returns the session and the completion that delivers it.
+-}
+lateDeliveryWithMailbox :: Bool -> IO (Session, LlmCompletion)
+lateDeliveryWithMailbox readFirst = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    gate <- newEmptyMVar
+    script <- newIORef [[mkCall "call_slow" "slow"], [], []]
+    completions <- newIORef []
+    let agent =
+            (mkAgent world (YieldOnTimeout 20) (gatedToolCall gate))
+                { complete = scriptedComplete script completions
+                , ctxMailbox = Just mb
+                }
+    (a1, s1) <- stepOk agent initialSession
+    (a2, s2) <- stepOk a1 s1
+    (a3, s3) <- stepOk a2 s2
+    putMVar gate ()
+    if readFirst
+        then do
+            Right status <- getToolCallStatus (buildContext a3 s3 convId) (waitForCompletionParams "call_slow")
+            tcsrIsFinal status @?= True
+        else pure ()
+    -- The engine posts the mail right after the entity is final.
+    _ <- timeout 5000000 $ atomically $ awaitMail mb s3.mailCursor (const True)
+    (a4, s4) <- stepOk a3 s3
+    (_, s5) <- stepOk a4 s4
+    completion <- lastCompletion completions
+    hasBackgroundCalls s5 @?= False
+    pure (s5, completion)
+
+{- | An attached call that finishes within its turn answers through its tool
+message; the mail the engine posted for it adds nothing to the next turn.
+-}
+attachedResultNotRepeatedAsMail :: Assertion
+attachedResultNotRepeatedAsMail = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    script <- newIORef [[mkCall "call_a" "a"], [mkCall "call_b" "b"], []]
+    completions <- newIORef []
+    let tool _ call = pure $ TextResponse (callName call <> "-result")
+    let agent =
+            (mkAgent world YieldWhenAllDone tool)
+                { complete = scriptedComplete script completions
+                , ctxMailbox = Just mb
+                }
+    (a1, s1) <- stepOk agent initialSession
+    (a2, s2) <- stepOk a1 s1 -- runs a
+    _ <- timeout 5000000 $ atomically $ awaitMail mb s1.mailCursor (const True)
+    (a3, s3) <- stepOk a2 s2 -- LLM asks for b
+    (a4, s4) <- stepOk a3 s3 -- runs b: the mail about a is unread here
+    (_, s5) <- stepOk a4 s4
+    occurrencesInUserTurns "a-result" s5 @?= 1
+    occurrencesInUserTurns "b-result" s5 @?= 1
+
+{- | A call started by one agent's engine is cancelled through another agent
+that shares the world but not the engine (a session resumed in the same
+process with a freshly built agent): the thread is interrupted, not only the
+entity marked.
+-}
+cancelReachesForeignEngine :: Assertion
+cancelReachesForeignEngine = do
+    world <- mkWorld
+    interrupted <- newEmptyMVar
+    let slowCall _ _ = do
+            threadDelay 10000000 `onException` putMVar interrupted ()
+            pure $ TextResponse "should not happen"
+    let agent = mkAgent world (YieldOnTimeout 20) slowCall
+    (_, s1) <- stepOk agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    [Running] @=? [tc.tcState | p <- partialTurns s1, tc <- p.pTrackedToolCalls]
+
+    -- A fresh agent: same world, no engine.
+    let resumed = mkAgent world (YieldOnTimeout 20) slowCall
+    Right cancelled <- cancelToolCallById (buildContext resumed s1 convId) (CancelToolCallParams "call_slow" Nothing)
+    ccrCancelled cancelled @?= True
+    timeout 2000000 (readMVar interrupted) >>= \case
+        Just () -> pure ()
+        Nothing -> assertFailure "the call's thread kept running after cancel-tool-call"
+
+{- | 'run' cannot return a session, so on a turn that only waits on deferred
+calls it used to loop forever. It now stops with 'BlockedOnDeferredCalls'.
+-}
+runStopsOnDeferredOnly :: Assertion
+runStopsOnDeferredOnly = do
+    world <- mkWorld
+    let agent =
+            (mkAgent world YieldWhenAllDone (\_ _ -> pure $ TextResponse "unused"))
+                { ctxToolCallPolicy = \_ _ -> Defer (Reason "external")
+                }
+    res <- timeout 3000000 $ try $ run convId agent (sessionWithCalls [mkCall "call_defer" "defer_me"])
+    case res of
+        Nothing -> assertFailure "run kept spinning on a deferred-only partial turn"
+        Just (Right _) -> assertFailure "expected run to stop on the deferred calls"
+        Just (Left (BlockedOnDeferredCalls sess)) -> do
+            assertBool "the session is blocked on deferred calls" (isBlockedOnDeferredCalls sess)
+            [map tcState p.pTrackedToolCalls | p <- partialTurns sess] @?= [[Deferred]]
+
+{- | The synchronous stepper delivers late results too (a session that holds
+background calls from an asynchronous run): same rule.
+-}
+statusReadNotRepeatedSyncStep :: Assertion
+statusReadNotRepeatedSyncStep = do
+    (_, gate, a1, s1) <- sessionWithBackgroundCall
+    putMVar gate ()
+    Right _ <- getToolCallStatus (buildContext a1 s1 convId) (waitForCompletionParams "call_slow")
+    (_, res) <- runStepMSync convId a1{ctxExecutionMode = Synchronous} s1
+    case res of
+        Right s2 -> do
+            occurrencesInUserTurns "slow-result" s2 @?= 0
+            occurrencesInUserTurns "result already read" s2 @?= 1
+            hasBackgroundCalls s2 @?= False
+        Left _ -> assertFailure "expected the session to continue"
+
+{- | Mail announcing a call that has no entity in this process (a durable
+mailbox read after a restart) is the only carrier of that result, so it is
+rendered like any other mail.
+-}
+foreignToolCallMailRendered :: Assertion
+foreignToolCallMailRendered = do
+    world <- mkWorld
+    mb <- newInMemoryMailbox
+    script <- newIORef [[]]
+    completions <- newIORef []
+    let agent =
+            (mkAgent world YieldWhenAllDone (\_ _ -> pure $ TextResponse "unused"))
+                { complete = scriptedComplete script completions
+                , ctxMailbox = Just mb
+                , usrQuery = pure (Just (UserQuery "hello" []))
+                , step = askInputWhenIdle
+                }
+    _ <-
+        mb.mbSend
+            Outgoing
+                { outId = Nothing
+                , outFrom = FromToolCall (ToolCallId nil)
+                , outPriority = Normal
+                , outHops = 0
+                , outBody = ToolCallFinished (ToolCallId nil) Completed (TextResponse "survivor-result")
+                }
+    (_, s1) <- stepOk agent (sessionWithCalls []){turns = []}
+    occurrencesInUserTurns "survivor-result" s1 @?= 1
+
+{- | 'runAsync' pauses with a call still running and used to drop the agent
+that holds its engine. The agent handed back owns the call: shutting its
+engine down stops the call's thread.
+-}
+runAsyncHandsBackEngine :: Assertion
+runAsyncHandsBackEngine = do
+    world <- mkWorld
+    interrupted <- newEmptyMVar
+    let slowCall _ _ = do
+            threadDelay 10000000 `onException` putMVar interrupted ()
+            pure $ TextResponse "should not happen"
+    let agent = mkAgent world (YieldOnTimeout 20) slowCall
+    assertBool "the agent starts without an engine" (not (isJustEngine agent))
+    (agent', res) <- runAsyncKeepingAgent convId agent (sessionWithCalls [mkCall "call_slow" "slow"])
+    case res of
+        Right sess -> [Running] @=? [tc.tcState | p <- partialTurns sess, tc <- p.pTrackedToolCalls]
+        Left _ -> assertFailure "expected the run to pause"
+    case agent'.ctxAsyncEngine of
+        Nothing -> assertFailure "expected the returned agent to hold the engine"
+        Just engine -> shutdownAsyncEngine engine
+    timeout 2000000 (readMVar interrupted) >>= \case
+        Just () -> pure ()
+        Nothing -> assertFailure "the returned engine does not own the running call"
 
 {- | When a run fails, background calls do not keep running: the engine is
 shut down with the agent.

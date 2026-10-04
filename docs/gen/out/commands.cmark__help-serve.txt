@@ -2,7 +2,9 @@ Usage: agents-exe serve [--db FILE|URL] [--bind HOST] [--port PORT]
                         [--live-session-ttl SECONDS] [--shutdown-grace SECONDS] 
                         [--auth-tokens FILE] [--stream-tokens] 
                         [--admin-owners OWNER,…] [--no-ui] 
-                        [--cors-origin ORIGIN] [--socket PATH]
+                        [--cors-origin ORIGIN] [--socket PATH] 
+                        [--owner-api-keys OWNER=FILE] 
+                        [--isolate-tools docker:IMAGE|process:PATH]
 
   Run agents over HTTP (like agents-server), loading agents-exe.cfg.json like
   the TUI does
@@ -32,4 +34,14 @@ Available options:
                            start, the socket is created 0600. The socket is the
                            local trust boundary: requests over it carry no
                            Origin and need no bearer token beyond --auth-tokens
+  --owner-api-keys OWNER=FILE
+                           This owner's sessions call the LLM with the keys in
+                           FILE (same format as --api-keys) instead of the
+                           shared ones; repeat for several owners (needs
+                           --auth-tokens)
+  --isolate-tools docker:IMAGE|process:PATH
+                           Run bash and MCP tool calls outside the server: each
+                           call is handed, as a JSON envelope on stdin, to
+                           `docker run --rm -i IMAGE` or to the worker
+                           executable at PATH. Off by default
   -h,--help                Show this help text

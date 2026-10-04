@@ -24,7 +24,7 @@ module System.Agents.Tools.SystemToolbox.ToolCallStatus (
 ) where
 
 import Control.Concurrent.STM (STM, TVar, atomically, orElse, readTVar, registerDelay, retry)
-import Control.Monad (forM, unless)
+import Control.Monad (forM, unless, when)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (parseMaybe)
@@ -38,6 +38,7 @@ import System.Agents.OS.Conversation.ToolCalls (
     findToolCallEntityByProviderCallId,
     findToolCallEntityByToolCallId,
     listToolCallsBySessionAndConversation,
+    markToolCallResultRead,
  )
 import System.Agents.OS.Conversation.Types (
     ToolCallConfig,
@@ -83,6 +84,9 @@ a deferred call as @pending@.
 
 When 'waitForCompletion' is enabled, the function blocks until the entity
 becomes final or the timeout expires.
+
+Returning a final result marks the entity as read, so the result is not
+delivered a second time with the next user turn.
 -}
 getToolCallStatus ::
     ToolExecutionContext ->
@@ -138,7 +142,7 @@ listRunningToolCalls ctx =
 
 If the async engine owns the call, its background thread is interrupted
 and the entity is marked cancelled. Otherwise (e.g. the call is still
-pending, or its engine is gone) the entity is marked cancelled on a
+pending, or its process is gone) the entity is marked cancelled on a
 best-effort basis. Returns @cancelled: false@ with the previous status when
 the call was already final.
 -}
@@ -416,6 +420,9 @@ buildStatusResult params world eid = do
                 if waitForCompletion params && not (isToolCallCompleted st)
                     then waitForFinal world eid st (timeoutSeconds params)
                     else pure st
+            -- The model now holds the final result: the stepper delivers a
+            -- one-line notice for this call instead of repeating it.
+            when (isToolCallCompleted st') $ markToolCallResultRead world eid
             pure $ Right $ mkStatusResult params cfg st'
         _ -> pure $ Left $ SystemInfoError "tool call not found"
 

@@ -88,3 +88,9 @@ nav.articles-listing:first-of-type >.articles-listing-list {
 .topics-listing-list-topic a:hover {
   color: var(--accent);
 }
+
+/* images (diagrams, TUI screenshots) never wider than the text column */
+.main img {
+  max-width: 100%;
+  height: auto;
+}

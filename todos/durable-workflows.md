@@ -1,7 +1,11 @@
 # Plan: Durable Workflows for agents-exe
-See [`todos/durable-workflows.progress.md`](durable-workflows.progress.md) for implementation progress.
 
-## Goal
+Status: implemented, Phases 1 to 8 (2026-09-08), see
+[`todos/durable-workflows.progress.md`](durable-workflows.progress.md). This
+file is the plan as written before the work. The user-facing description is
+`documentation/durable-workflows-howto.md`; the server built on top of it is
+`todos/web-server-embedding.md`.
+
 ## Goal
 
 Turn agents-exe into a system suitable for:
