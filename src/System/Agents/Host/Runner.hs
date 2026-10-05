@@ -359,7 +359,16 @@ retireWhenUnused runner node = void $ async $ do
 reaperInterval :: NominalDiffTime -> Int
 reaperInterval ttl = max 50_000 (min 60_000_000 (round (realToFrac ttl * 500_000 :: Double)))
 
--- | Cancel active runs (storing their sessions), and stop every engine.
+{- | Cancel active runs (storing their sessions), and stop every engine.
+
+A run whose stored session holds background calls to run again after a
+restart (see 'rerunnableCalls') is stopped without storing anything
+instead: the session stays stored as running, exactly as a process that
+died would leave it, so the next process's 'recoverOnStartup' picks it up
+and starts those calls again. Cancelling such a run would report the calls
+of its current turn as cancelled, and leave the session waiting for a
+client to resume it.
+-}
 shutdownSessionRunner :: SessionRunner -> IO ()
 shutdownSessionRunner runner = do
     cancel runner.srReaper
@@ -370,9 +379,25 @@ shutdownSessionRunner runner = do
     lives <- Map.elems <$> readTVarIO runner.srLive
     forM_ lives $ \live -> do
         active <- readTVarIO live.lsRun
-        when (isJust active) $ void $ cancelRun runner live.lsSessionId
+        for_ active $ \handle -> do
+            reruns <- maybe False (not . null . rerunnableCalls . fst) <$> readTVarIO live.lsLatest
+            if reruns
+                then leaveRunning live handle
+                else void $ cancelRun runner live.lsSessionId
         mAgent <- readTVarIO live.lsAgent
         forM_ (mAgent >>= (.ctxAsyncEngine)) shutdownAsyncEngine
+  where
+    -- Not under the lock while cancelling: the run takes it to store its steps.
+    leaveRunning :: LiveSession -> Async () -> IO ()
+    leaveRunning live handle = do
+        cancel handle
+        withMVar live.lsLock $ \_ -> do
+            mAgent <- readTVarIO live.lsAgent
+            forM_ (mAgent >>= (.ctxAsyncEngine)) shutdownAsyncEngine
+            atomically $ do
+                writeTVar live.lsAgent (fmap (\a -> a{ctxAsyncEngine = Nothing}) mAgent)
+                writeTVar live.lsRun Nothing
+            releaseRun runner live.lsSessionId
 
 withSessionRunner :: Host -> (SessionRunner -> IO a) -> IO a
 withSessionRunner host = bracket (newSessionRunner host) shutdownSessionRunner
@@ -1850,9 +1875,12 @@ cancelRun runner sid = do
                 (sess1, meta1) <- case mAgent of
                     Just agent -> applyInbox runner agent live
                     Nothing -> pure (sess0, meta0)
-                sess2 <- case mAgent of
+                refreshed <- case mAgent of
                     Just agent -> refreshHeadPartialTurn (buildContext agent sess1 (sessionIdToConversationId sid)) sess1
                     Nothing -> pure sess1
+                -- The run's calls were cancelled on purpose: none of them is
+                -- to start again once this process is gone.
+                let sess2 = withoutReruns refreshed
                 atomically $ writeTVar live.lsRun Nothing
                 let status = sessionStatusOf sess2
                 result <- store runner live meta1 sess2 status Nothing
@@ -2270,7 +2298,12 @@ a restart loses them): those calls are failed right away with a
 @params_required@ message naming the parameters, and the session's status
 detail says the same, so a client resupplies them through @params@ on its
 next message or resume instead of retrying blind
-(@todos/tool-partial-application.md@ §5). Nothing is resumed.
+(@todos/tool-partial-application.md@ §5).
+
+Nothing is resumed, with one exception: a session whose running calls
+belong to tools marked as safe to run again
+('System.Agents.Session.Types.WithRerunOnRestart') gets a run, which starts
+those calls again instead of orphaning them ('resumeForReruns').
 
 Also re-registers every watch a previous process left active
 ('recoverWatches', G11); unlike the run handle and secret params above, a
@@ -2292,7 +2325,25 @@ recoverOnStartup runner = do
             else map (.smSessionId) <$> backend.sbQuery allSessionsQuery{sqStatuses = Just [StatusRunning]}
     sids <- catMaybes <$> mapM (recoverSession runner) stale
     unless (null sids) $ runTracer runner.srHost.hostTracer $ HostRecoveredSessions sids
+    rerun <- filterM (resumeForReruns runner) sids
+    unless (null rerun) $ runTracer runner.srHost.hostTracer $ HostResumedForReruns rerun
     pure sids
+
+{- | Start a run on a recovered session that holds background calls to run
+again (see 'rerunnableCalls'), so that they carry on without a client asking
+for it; the run's first step starts them
+('System.Agents.Session.Step.relaunchLostCalls'). 'False' when the session
+has no such call, or when the run could not start (e.g. a required parameter
+is missing): the session then stays as 'recoverSession' stored it, and the
+calls are started again by whichever run comes next.
+-}
+resumeForReruns :: SessionRunner -> SessionId -> IO Bool
+resumeForReruns runner sid =
+    getSession runner sid >>= \case
+        Just (sess, _)
+            | not (null (rerunnableCalls sess)) ->
+                either (const False) (const True) <$> resume runner sid UntilBlocked Map.empty
+        _ -> pure False
 
 {- | Store a session left running by a process that is gone with the status
 its turns imply, as 'recoverOnStartup' describes. 'Nothing' when there was

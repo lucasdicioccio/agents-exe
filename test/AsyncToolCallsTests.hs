@@ -15,6 +15,7 @@ import Control.Concurrent.STM (atomically, flushTQueue)
 import Control.Exception (IOException, onException, throwIO, try)
 import Control.Monad (forM_, void)
 import Data.Aeson (Value (..), object, toJSON, (.=))
+import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import System.IO.Error (ioeGetErrorString)
@@ -88,6 +89,11 @@ tests =
         , testCase "cancel-tool-call interrupts a running background call" cancelInterruptsCall
         , testCase "running call without an OS entity resolves as orphaned" orphanedCallResolves
         , testCase "a call running at shutdown is orphaned after a reload" orphanedAcrossRestart
+        , testCase "a rerunOnRestart call running at shutdown is run again after a reload" rerunAcrossRestart
+        , testCase "a rerunOnRestart call is run again at most as many times as its budget" rerunBudgetIsSpent
+        , testCase "a rerunOnRestart call whose thread still runs is not started twice" rerunSkipsLiveCall
+        , testCase "a rerunOnRestart call whose result is in unread mail is not run again" rerunSkipsAnsweredCall
+        , testCase "the rerunOnRestart decorator round-trips, with one re-run by default" rerunDecoratorJson
         , testCase "resuming a partial turn replaces it instead of stacking" resumeReplacesPartialTurn
         , testCase "RunAsync call that cannot be tracked runs inline" untrackableCallRunsInline
         , testCase "asynchronous agent without a World gets a private one" asyncWithoutWorld
@@ -339,6 +345,162 @@ orphanedAcrossRestart =
                 other -> assertFailure $ "unexpected responses: " <> show other
             _ -> assertFailure "expected a user turn"
         putMVar gate ()
+
+{- | A restart in the middle of a background call of a tool marked as safe to
+run twice. The session is written to disk with the call still running, the
+process goes away with the call's thread, and a new process (a fresh world,
+a new agent) reloads the session: the call is started again under the same
+id instead of being reported as orphaned, and its result is delivered late,
+saying that it was run again.
+-}
+rerunAcrossRestart :: Assertion
+rerunAcrossRestart =
+    withSystemTempDirectory "async-rerun" $ \dir -> do
+        gate <- newEmptyMVar
+        runs <- newIORef (0 :: Int)
+        (a1, detached) <- startedThenDetached runs gate
+        -- The LLM gets the placeholder and ends its turn: the call is now a
+        -- background call of an earlier turn.
+        (a2, waiting) <- stepOk a1 detached
+        [Running] @=? [tc.tcState | tc <- backgroundCalls waiting]
+        readIORef runs >>= (@?= 1)
+
+        storeSessionToFile waiting (dir </> "session.json")
+        processDies a2
+        Just reloaded <- readSessionFromFile (dir </> "session.json")
+        [1] @=? [rerunsLeft tc.tcPolicy.apDisposition | tc <- backgroundCalls reloaded]
+
+        freshWorld <- mkWorld
+        -- The step waits for the call it started again; let that one finish.
+        void $ forkIO $ waitForRuns runs 2 >> putMVar gate ()
+        (_, s3) <- stepOk (rerunAgent runs gate freshWorld) reloaded
+        readIORef runs >>= (@?= 2)
+        case s3.turns of
+            (UserTurn content _ : _) -> case content.userQuery of
+                Just q -> do
+                    assertBool ("the result of the second run: " <> show q.queryText) ("slow-result" `Text.isInfixOf` q.queryText)
+                    assertBool ("says it ran again: " <> show q.queryText) ("run again from the start after a restart" `Text.isInfixOf` q.queryText)
+                    assertBool ("not orphaned: " <> show q.queryText) (not ("orphaned" `Text.isInfixOf` q.queryText))
+                Nothing -> assertFailure "expected a notice with the late result"
+            _ -> assertFailure "expected a user turn with the late result"
+        -- The re-run is spent in the session, and the call is delivered.
+        [(0, True)] @=? [(rerunsLeft tc.tcPolicy.apDisposition, tc.tcDeliveredLate) | p <- partialTurns s3, tc <- p.pTrackedToolCalls]
+
+{- | The budget is what bounds a tool that takes its process down with it:
+after the one re-run it allows, a second restart reports the call as
+orphaned, like a call of any other tool.
+-}
+rerunBudgetIsSpent :: Assertion
+rerunBudgetIsSpent = do
+    gate <- newEmptyMVar
+    runs <- newIORef (0 :: Int)
+    (a1, detached) <- startedThenDetached runs gate
+    processDies a1
+
+    secondWorld <- mkWorld
+    (a2, again) <- stepOk (rerunAgent runs gate secondWorld) detached
+    waitForRuns runs 2
+    [(Running, 0)] @=? [(tc.tcState, rerunsLeft tc.tcPolicy.apDisposition) | p <- partialTurns again, tc <- p.pTrackedToolCalls]
+    Right status <- getToolCallStatus (buildContext a2 again convId) (statusParams "call_slow")
+    tcsrStatus status @?= "running"
+    processDies a2
+
+    thirdWorld <- mkWorld
+    -- The LLM had its placeholder, so the loss is told in the late notice.
+    (a3, s3) <- stepOk (rerunAgent runs gate thirdWorld) again
+    case s3.turns of
+        (UserTurn content _ : _) ->
+            assertBool ("notice explains the orphan: " <> show content.userQuery) (maybe False (("orphaned" `Text.isInfixOf`) . (.queryText)) content.userQuery)
+        _ -> assertFailure "expected a user turn"
+    threadDelay 50000
+    readIORef runs >>= (@?= 2)
+    processDies a3
+
+{- | A session reloaded by a new agent in the process that still runs the
+call (nothing died) must not start a second copy of it: the call is handled
+as before the re-run existed.
+-}
+rerunSkipsLiveCall :: Assertion
+rerunSkipsLiveCall = do
+    gate <- newEmptyMVar
+    runs <- newIORef (0 :: Int)
+    (a1, detached) <- startedThenDetached runs gate
+    freshWorld <- mkWorld
+    (_, s2) <- stepOk (rerunAgent runs gate freshWorld) detached
+    threadDelay 50000
+    readIORef runs >>= (@?= 1)
+    assertBool "resolved as before" (any ("orphaned" `Text.isInfixOf`) [txt | UserTurn c _ <- s2.turns, (_, TextResponse txt) <- c.userToolResponses])
+    processDies a1
+
+{- | A call that ended right before the restart left its result in the
+(durable) mailbox. It is not run again: that mail delivers the result.
+-}
+rerunSkipsAnsweredCall :: Assertion
+rerunSkipsAnsweredCall = do
+    gate <- newEmptyMVar
+    runs <- newIORef (0 :: Int)
+    (a1, detached) <- startedThenDetached runs gate
+    processDies a1
+    [callId] <- pure [tc.tcId | p <- partialTurns detached, tc <- p.pTrackedToolCalls]
+    mb <- newInMemoryMailbox
+    _ <-
+        mb.mbSend
+            Outgoing
+                { outId = Nothing
+                , outFrom = FromToolCall callId
+                , outPriority = Normal
+                , outHops = 0
+                , outBody = ToolCallFinished callId Completed (TextResponse "result-from-before")
+                }
+    freshWorld <- mkWorld
+    _ <- stepOk (rerunAgent runs gate freshWorld){ctxMailbox = Just mb} detached
+    threadDelay 50000
+    readIORef runs >>= (@?= 1)
+
+rerunDecoratorJson :: Assertion
+rerunDecoratorJson = do
+    Aeson.eitherDecode "{\"tag\": \"rerunOnRestart\"}" @?= Right (WithRerunOnRestart 1)
+    Aeson.eitherDecode (Aeson.encode (WithRerunOnRestart 3)) @?= Right (WithRerunOnRestart 3)
+    let disp = Decorate [WithTruncate 10, WithRerunOnRestart 2] (RunAsync Nothing)
+    rerunsLeft disp @?= 2
+    rerunsLeft (spendRerun disp) @?= 1
+    rerunsLeft (spendRerun (spendRerun (spendRerun disp))) @?= 0
+    rerunsLeft (RunAsync Nothing) @?= 0
+    spendRerun (RunAsync Nothing) @?= RunAsync Nothing
+
+-- | An agent whose @slow@ tool counts its runs, waits for the gate, and is
+-- marked as safe to run again after a restart (once).
+rerunAgent :: IORef Int -> MVar () -> World -> Agent (LlmTurnContent, Session)
+rerunAgent runs gate world =
+    (mkAgent world (YieldOnTimeout 20) tool)
+        { ctxToolCallPolicy = \_ _ -> Decorate [WithRerunOnRestart 1] (RunAsync Nothing)
+        }
+  where
+    tool ctx call = atomicModifyIORef' runs (\n -> (n + 1, ())) >> gatedToolCall gate ctx call
+
+-- | A first process starts the @slow@ call and its step detaches it: the
+-- session's head turn is partial, with the call running.
+startedThenDetached :: IORef Int -> MVar () -> IO (Agent (LlmTurnContent, Session), Session)
+startedThenDetached runs gate = do
+    world <- mkWorld
+    (agent, sess) <- stepOk (rerunAgent runs gate world) (sessionWithCalls [mkCall "call_slow" "slow"])
+    [Running] @=? [tc.tcState | p <- partialTurns sess, tc <- p.pTrackedToolCalls]
+    waitForRuns runs 1
+    pure (agent, sess)
+
+-- | What a process that goes away does to its background calls: their
+-- threads stop, and nothing is written anywhere.
+processDies :: Agent r -> IO ()
+processDies agent = mapM_ shutdownAsyncEngine agent.ctxAsyncEngine
+
+-- | Wait (up to 5 seconds) until the tool was started this many times.
+waitForRuns :: IORef Int -> Int -> IO ()
+waitForRuns runs n = go (250 :: Int)
+  where
+    go 0 = assertFailure ("the tool was not started " <> show n <> " times")
+    go k = do
+        started <- readIORef runs
+        if started >= n then pure () else threadDelay 20000 >> go (k - 1)
 
 {- | A partial turn holding a deferred call and a running call is resumed
 twice; each resume replaces the head turn.

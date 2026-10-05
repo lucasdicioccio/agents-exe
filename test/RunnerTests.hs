@@ -44,6 +44,7 @@ import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.IORef as IORef
 import Data.Time (getCurrentTime)
 import qualified Data.UUID as UUID
 import Data.UUID.V4 (nextRandom)
@@ -100,6 +101,9 @@ tests =
         , testCase "sessions left running are recovered, their calls orphaned" recoveryTest
         , testCase "recovery fails running calls that lost a secret parameter with params_required" recoveryParamsRequiredTest
         , testCase "recovery keeps persisted non-secret session parameters" recoveryKeepsPersistedParamsTest
+        , testCase "a background call marked rerunOnRestart is run again after a restart in the middle" restartRerunsCallTest
+        , testCase "recovery resumes a session left running with a rerunOnRestart call" recoveryRerunsCallTest
+        , testCase "a cancelled run's rerunOnRestart calls are not run again" cancelledRunNotRerunTest
         , testCase "awaitRun waits for the run or the timeout" awaitRunTest
         , testCase "deleting cascades to sub-sessions and continuations; sub-sessions have their root's owner" deleteTest
         , testCase "idle sessions are evicted and come back on demand" evictionTest
@@ -387,6 +391,102 @@ recoveryKeepsPersistedParamsTest = do
         _ <- expectRight =<< awaitRun runner sid 5
         Just (_, after) <- getSession runner sid
         after.smParams @?= tenant
+
+{- | A restart in the middle of a background call: the first runner stops
+while the call runs, and a second runner on the same store starts the call
+again by itself and delivers its result. The tool is marked as safe to run
+twice; 'recoveryTest' shows what happens to one that is not.
+-}
+restartRerunsCallTest :: Assertion
+restartRerunsCallTest = do
+    gate <- newEmptyMVar
+    runs <- newIORef (0 :: Int)
+    node <- testNode backgroundAllRerun
+    atomically $ writeTVar node.osNodeTools [countedGatedTool runs gate]
+    complete <- onceThen [slowCall]
+    host <- testHost [node] (const complete)
+    sid <- withSessionRunner host $ \runner1 -> do
+        meta <- expectRight =<< createSession runner1 "test-agent" (message "go") (Just UntilBlocked)
+        waitUntil $ hasBackgroundCall <$> currentSession runner1 meta.smSessionId
+        pure meta.smSessionId
+    -- The first process is gone, with the thread of the call: the store
+    -- holds a session that was running, and a call that never ended.
+    readIORef runs >>= (@?= 1)
+    Just (left, leftMeta) <- host.hostBackend.sbLoadMeta sid
+    leftMeta.smStatus @?= StatusRunning
+    assertBool "the call is stored as running" (hasBackgroundCall left)
+    withSessionRunner host $ \runner2 -> do
+        recovered <- recoverOnStartup runner2
+        recovered @?= [sid]
+        -- Nobody resumes the session: recovery itself starts the call again.
+        waitUntil $ (== 2) <$> readIORef runs
+        putMVar gate ()
+        waitUntil $ (== StatusIdle) . (.smStatus) . fst <$> (expectRight =<< awaitRun runner2 sid 5)
+        sess <- currentSession runner2 sid
+        let texts = sessionTexts sess
+        assertBool ("result of the second run: " <> show texts) (any ("slow result" `Text.isInfixOf`) texts)
+        assertBool ("not orphaned: " <> show texts) (not (any ("orphaned" `Text.isInfixOf`) texts))
+        assertBool ("not cancelled: " <> show texts) (not (any ("cancelled" `Text.isInfixOf`) texts))
+        readIORef runs >>= (@?= 2)
+
+{- | The same from a session a dead process left behind (nothing of that
+process is in memory here): one re-run is in the call's policy, so recovery
+starts a run that executes the call.
+-}
+recoveryRerunsCallTest :: Assertion
+recoveryRerunsCallTest = do
+    gate <- newEmptyMVar
+    putMVar gate ()
+    runs <- newIORef (0 :: Int)
+    node <- testNode backgroundAllRerun
+    atomically $ writeTVar node.osNodeTools [countedGatedTool runs gate]
+    host <- testHost [node] (\_ c -> mockCompletion c)
+    sid <- newSessionId
+    sess <- rerunnable <$> sessionLeftRunning sid
+    now <- getCurrentTime
+    _ <- expectRight =<< host.hostBackend.sbCompareAndStore (freshSessionMeta sid now){smAgent = Just "test-agent", smStatus = StatusRunning} sess
+    withSessionRunner host $ \runner -> do
+        recovered <- recoverOnStartup runner
+        recovered @?= [sid]
+        waitUntil $ (== StatusIdle) . (.smStatus) . fst <$> (expectRight =<< awaitRun runner sid 5)
+        readIORef runs >>= (@?= 1)
+        resumed <- currentSession runner sid
+        -- As the call's tool message, or late, depending on how fast it ran.
+        assertBool ("result delivered: " <> show (sessionTexts resumed)) (any ("slow result" `Text.isInfixOf`) (sessionTexts resumed))
+        assertBool ("not orphaned: " <> show (sessionTexts resumed)) (not (any ("orphaned" `Text.isInfixOf`) (sessionTexts resumed)))
+  where
+    rerunnable sess = sess{turns = map turn sess.turns}
+    turn (PartialUserTurn p u) = PartialUserTurn p{pTrackedToolCalls = map call p.pTrackedToolCalls} u
+    turn t = t
+    call tc = tc{tcPolicy = AppliedPolicy (Decorate [WithRerunOnRestart 1] (RunAsync Nothing)) Nothing}
+
+{- | Cancelling a run cancels its calls on purpose. A later process must not
+start them again: the next run reports them, as it does for any tool.
+-}
+cancelledRunNotRerunTest :: Assertion
+cancelledRunNotRerunTest = do
+    gate <- newEmptyMVar
+    runs <- newIORef (0 :: Int)
+    node <- testNode backgroundAllRerun
+    atomically $ writeTVar node.osNodeTools [countedGatedTool runs gate]
+    complete <- onceThen [slowCall]
+    host <- testHost [node] (const complete)
+    sid <- withSessionRunner host $ \runner1 -> do
+        meta <- expectRight =<< createSession runner1 "test-agent" (message "go") (Just UntilBlocked)
+        let sid = meta.smSessionId
+        -- The LLM got a placeholder; the run waits for the late result.
+        waitUntil $ (not . null . backgroundCalls) <$> currentSession runner1 sid
+        _ <- expectRight =<< cancelRun runner1 sid
+        pure sid
+    putMVar gate ()
+    withSessionRunner host $ \runner2 -> do
+        recovered <- recoverOnStartup runner2
+        recovered @?= []
+        _ <- expectRight =<< resume runner2 sid UntilBlocked Map.empty
+        waitUntil $ (== StatusIdle) . (.smStatus) . fst <$> (expectRight =<< awaitRun runner2 sid 5)
+        readIORef runs >>= (@?= 1)
+        sess <- currentSession runner2 sid
+        assertBool ("reported lost: " <> show (sessionTexts sess)) (any ("orphaned" `Text.isInfixOf`) (sessionTexts sess))
 
 awaitRunTest :: Assertion
 awaitRunTest = do
@@ -2159,6 +2259,14 @@ backgroundAll =
     "{\"executionMode\": \"asynchronous\", \"asyncYieldStrategy\": {\"tag\": \"yieldOnTimeout\", \"milliseconds\": 20}, "
         <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runAsync\"}, \"rules\": []}}"
 
+-- | Like 'backgroundAll', with @io_slow@ marked as safe to run again after a
+-- restart.
+backgroundAllRerun :: String
+backgroundAllRerun =
+    "{\"executionMode\": \"asynchronous\", \"asyncYieldStrategy\": {\"tag\": \"yieldOnTimeout\", \"milliseconds\": 20}, "
+        <> "\"toolCallPolicyConfig\": {\"default\": {\"tag\": \"runAsync\"}, \"rules\": [], "
+        <> "\"wrappers\": [{\"match\": {\"tool\": \"io_slow\"}, \"decorators\": [{\"tag\": \"rerunOnRestart\"}]}]}}"
+
 -- | Like 'backgroundAll', but every call attaches forever (only an
 -- interrupt or its own completion releases the wait) rather than yielding
 -- on a timeout -- for exercising the run loop while it is genuinely
@@ -2252,6 +2360,18 @@ gatedTool gate =
         []
   where
     run _ctx (_ :: Aeson.Value) = do
+        readMVar gate
+        pure (CByteString.pack "slow result")
+
+-- | 'gatedTool', counting how many times it was started.
+countedGatedTool :: IORef.IORef Int -> MVar () -> ToolRegistration
+countedGatedTool runs gate =
+    registerIOScriptInLLM
+        (IOTools.IOScript (IOTools.IOScriptDescription "slow" "waits for the test") run)
+        []
+  where
+    run _ctx (_ :: Aeson.Value) = do
+        atomicModifyIORef' runs (\n -> (n + 1, ()))
         readMVar gate
         pure (CByteString.pack "slow result")
 

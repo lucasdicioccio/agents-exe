@@ -56,6 +56,7 @@ module System.Agents.Session.Async.Engine (
     mkAsyncEngine,
     mkAsyncEngineSharing,
     newAsyncConcurrencyLimit,
+    runsInThisProcess,
 
     -- * Batch lifecycle
     startAsyncBatch,
@@ -186,6 +187,13 @@ are UUIDs, so engines never collide.
 runningCallOwners :: TVar (Map ToolCallId AsyncEngine)
 runningCallOwners = unsafePerformIO (newTVarIO Map.empty)
 {-# NOINLINE runningCallOwners #-}
+
+{- | Whether a thread of this process still runs the call, whichever engine
+started it. A call for which this is 'False' and that has no final state was
+running in a process that is gone.
+-}
+runsInThisProcess :: ToolCallId -> IO Bool
+runsInThisProcess callId = Map.member callId <$> readTVarIO runningCallOwners
 
 -- | Forget calls in both the engine's registry and the process-wide index.
 forgetCalls :: AsyncEngine -> [ToolCallId] -> STM ()

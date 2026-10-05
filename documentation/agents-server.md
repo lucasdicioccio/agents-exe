@@ -1070,7 +1070,15 @@ turns imply. Their interrupted step is lost, and background tool calls they
 were running are reported to the LLM as orphaned on the next run. Nothing is
 resumed automatically: `resume` them.
 
-One exception is decided at startup rather than on the next run: when such a
+A session whose running calls belong to tools marked `rerunOnRestart` is the
+exception: the server starts a run on it at startup, which starts those calls
+again, and logs `sessions.resumed_for_reruns`. So that this also holds for an
+ordinary restart, a graceful shutdown does not cancel the run of such a
+session: it stops it and leaves the session stored as `running`, as a crash
+would. See [async-tool-calls.md](async-tool-calls.md) (Across a restart).
+
+Another case is decided at startup rather than on the next run, and comes
+before the one above (no call is run again then): when a recovered
 session's agent has a required parameter with no value left (a secret
 `session`-scope value is memory-only, so the restart lost it), its running
 calls are failed right away with a message naming the parameters, the
@@ -1081,7 +1089,9 @@ goes on, and the LLM sees why the calls failed. Non-secret session values
 are stored with the session and need no resupply.
 
 Background tool calls (`runAsync`) live in the server process. They survive
-between runs of a session, but not a restart. A session is not dropped at
+between runs of a session, but not a restart: a call in flight is then lost,
+or run again from the start when its tool is marked `rerunOnRestart`. A
+session is not dropped at
 the TTL while one of its background calls is still running: it is kept until
 they finish. Deferred calls are the durable kind:
 their tokens stay valid across restarts.

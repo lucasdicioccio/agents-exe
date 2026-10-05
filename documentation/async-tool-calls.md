@@ -184,6 +184,63 @@ process went away (e.g. the session was saved and reloaded elsewhere). Such a
 call can never finish, so the stepper resolves it as failed rather than
 waiting for it.
 
+## Across a restart
+
+A background call lives in the process that started it. When that process
+goes away while the call runs, the call is lost, and what happens next depends
+on the tool.
+
+By default the call is reported as orphaned, as described above: the model is
+told the result is lost and decides what to do. Nothing is run twice.
+
+A tool that is safe to run twice can be marked so, with the `rerunOnRestart`
+decorator in a `wrappers` rule:
+
+```json
+{"toolCallPolicyConfig": {
+   "default": {"tag": "runSync"},
+   "rules": [{"tool": "bash_run_tests", "disposition": {"tag": "runAsync"}}],
+   "wrappers": [
+     {"match": {"tool": "bash_run_tests"},
+      "decorators": [{"tag": "rerunOnRestart", "times": 1}]}
+   ]}}
+```
+
+A call of such a tool that was running when its process went away is started
+again by the next process, from the beginning, with the same arguments and
+under the same `tool_call_id`. Its result is delivered like any late result,
+with a note that the call ran again:
+
+```
+tool_call_id call_abc (bash_run_tests) completed (run again from the start after a restart):
+42 tests passed
+```
+
+What this does and does not give:
+
+* It is a re-run, not a resume. Nothing of the first run is kept (output,
+  progress, a half-written file), and the tool is executed at least twice in
+  total. Only mark tools for which that is harmless: reads, builds, test runs,
+  idempotent requests.
+* `times` (default 1) is how many times one call may be started again. Once
+  it is used up, a further restart reports the call as orphaned. This bounds a
+  tool that takes its process down with it.
+* The session is the record: a call is known to be in flight because the
+  stored session says `running` for it. No other storage is involved, so it
+  works with every session store, in the TUI and on the server alike.
+* The call is started again when the session next runs. The server and the
+  TUI do that by themselves at startup for the sessions a previous process
+  left running (`recoverOnStartup`); elsewhere (`agents-exe session resume`),
+  it happens when you resume.
+* A call that ended just before the restart, and whose result is in the
+  session's mailbox, is not run again.
+* A call that was cancelled (`cancel-tool-call`, cancelling the run) is not
+  started again.
+* Not covered: the calls of a step that was interrupted before it was stored.
+  The session then still ends with the LLM's request for them, and the next
+  run executes that whole step again, whatever the tools are marked with.
+  This is how every interrupted step has always been handled.
+
 ## Progress
 
 Tools that run in the background can report progress, which the model reads
@@ -342,7 +399,9 @@ _(Some tool calls had not finished when this turn was sent)_
 ## Limits
 
 * Background calls live in the process that started them. A session reloaded
-  elsewhere reports them as orphaned.
+  elsewhere reports them as orphaned, or runs them again when their tool is
+  marked `rerunOnRestart` (see "Across a restart"). A call is never resumed
+  from where it stopped.
 * `runAsync` returns only the session. To pause and resume in the same
   process, use `runAsyncKeepingAgent` and resume with the agent it returns:
   that agent holds the engine that owns the running calls. A session resumed

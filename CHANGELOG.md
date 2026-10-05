@@ -19,6 +19,15 @@
 - The screen is now redrawn once per refresh interval rather than on every event
 - See `documentation/cli-commands.md` (spectate)
 
+#### Background tool calls run again after a restart (opt-in)
+- A new decorator, `{"tag": "rerunOnRestart", "times": 1}`, set in a `wrappers` rule of `toolCallPolicyConfig`, marks a tool as safe to run twice
+- A background call of such a tool that was running when its process went away is started again by the next process, from the beginning, with the same arguments and `tool_call_id`, at most `times` times; its late result says it ran again
+- Every other call is reported as orphaned, as before: nothing runs twice unless asked
+- `agents-server` and the TUI resume the sessions concerned at startup (log line `sessions.resumed_for_reruns`), and a graceful shutdown leaves them stored as `running` instead of cancelling their calls
+- A call is run again, never resumed where it stopped; a cancelled call is not started again
+- Library: `Decorator` has a `WithRerunOnRestart` constructor; `HostTrace` has `HostResumedForReruns`
+- See `documentation/async-tool-calls.md` (Across a restart)
+
 #### Terminal UI screenshots and end-to-end tests
 - `agents-tui-e2e`, an opt-in test-suite (`cabal test agents-tui-e2e -ftui-e2e`), drives the real `agents-exe tui` in a pseudo-terminal with [tuispec](https://github.com/Tritlo/tuispec) against a scripted OpenAI-compatible endpoint: launch, send a message and read the reply, answer a deferred call from the Pending panel
 - Each step is compared with a baseline under `test/tui-snapshots/`; `AGENTS_TUI_E2E_PNG=1` renders the screenshots `documentation/tui.md` now shows

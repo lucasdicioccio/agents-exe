@@ -183,6 +183,10 @@ data HostTrace
     | HostSubAgentTrace !OneShotTool.Trace
     | HostTreeTrace !TreeTrace
     | HostRecoveredSessions ![SessionId]
+    | -- | Recovered sessions that were given a run at boot, to start again
+      -- the background calls marked as safe to re-run (see
+      -- 'Runner.recoverOnStartup').
+      HostResumedForReruns ![SessionId]
     | -- | A recovered session whose running calls were failed because these
       -- required parameters are no longer bound (see 'Runner.recoverOnStartup').
       HostRecoveredParamsRequired !SessionId ![Text]
