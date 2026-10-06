@@ -87,6 +87,8 @@ The interfaces are thin: the terminal UI and the HTTP server are both clients of
 
 - [**The TUI**](/docs-tui.html ): the terminal UI, its keys and its views.
 
+- [**About**](/about.html ): the author ([dicioccio.fr](https://dicioccio.fr/ )) and the network of connected websites this site belongs to.
+
 - [**Docs**](/docs.html ) and [**Specs**](/specs.html ): every guide and reference, and the design documents with what of each has shipped.
 
 
