@@ -41,5 +41,6 @@ https://lucasdicioccio.github.io/agents-exe/docs-tools.html
 https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html
 https://lucasdicioccio.github.io/agents-exe/docs-tui.html
 https://lucasdicioccio.github.io/agents-exe/index.html
+https://lucasdicioccio.github.io/agents-exe/about.html
 https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html
 https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-GUIDE.html

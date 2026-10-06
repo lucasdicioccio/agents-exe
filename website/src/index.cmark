@@ -128,6 +128,8 @@ endpoints) is shared, so an agent behaves the same in each mode.
 - [**Sessions**](/docs-sessions.html) and [**asynchronous tool calls**](/docs-async-tool-calls.html):
   turns, deferred and background calls, resuming.
 - [**The TUI**](/docs-tui.html): the terminal UI, its keys and its views.
+- [**About**](/about.html): the author ([dicioccio.fr](https://dicioccio.fr/))
+  and the network of connected websites this site belongs to.
 - [**Docs**](/docs.html) and [**Specs**](/specs.html): every guide and
   reference, and the design documents with what of each has shipped.
 
