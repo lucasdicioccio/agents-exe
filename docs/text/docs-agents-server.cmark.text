@@ -232,7 +232,7 @@ The request body is `{body, priority?}`. `priority` is `"normal"` (the default) 
 {"tag": "control", "message": {"tag": "cancelCalls", "toolCallIds": ["017bb633-…"]}}
 ```
 
-`toolCallFinished`, `continuationResult` and `watchedEvent` are also valid `MailBody` tags (the async engine, `completeCall`, and `watch-session` produce them respectively), but there is no reason to post one by hand over this endpoint. `POST /v1/sessions/:id/mail` answers `202` with the mail's `Receipt`: `{"id": "<message id>", "seq": <int>, "duplicate": false}`.
+`toolCallFinished`, `continuationResult`, `watchedEvent` and `toolCallNotice` are also valid `MailBody` tags (the async engine, `completeCall`, `watch-session`, and a tool reporting notify-level progress produce them respectively), but there is no reason to post one by hand over this endpoint. `POST /v1/sessions/:id/mail` answers `202` with the mail's `Receipt`: `{"id": "<message id>", "seq": <int>, "duplicate": false}`.
 
 `GET /v1/sessions/:id/mail?unread=true|false` lists the session's mail, oldest first, as `{"mail": [Envelope, …]}`. `unread=true` (default `false`) limits it to what is still unread past the session's stored cursor -- what its next turn, or a run already going, has not folded in yet. An `Envelope` is:
 
@@ -439,7 +439,7 @@ Any endpoint that reads a body or a query parameter can answer `400 bad_request`
 
 **Messages** (`prompt`, `media`, `interrupt`). `media` is a list of `{"mime": "image/png", "base64": "…", "filename": "optional"}`. `interrupt` (default `false`) only matters against a busy session (`status: "running"`): instead of being refused with `409 not_accepting_messages`, the message is posted as interrupt-priority mail, which detaches the session's currently attached tool calls (and, with the agent's `interruptCompletions` on, cancels an in-flight LLM completion) and asks the model again with this message folded in. A detached call's result, if it still arrives, is reported on a later run rather than lost. On an idle session `interrupt` has no effect: there is nothing to interrupt.
 
-Mail (a message, or any other envelope R1 folds into a turn) normally becomes a separate user message after a round of attached tool results. For a provider that rejects a user message directly after tool results, set the agent's `mailInToolResult` (default `false`): R1 then appends the folded mail, with the same `[mail …]` header, as a trailing block of the _last_ tool result of that round instead. Only applies when the round actually had tool calls; a plain user turn (no tool results) is unaffected, and detached/deferred results already arrive as mail of their own.
+Mail (a message, or any other envelope R1 folds into a turn) normally becomes a separate user message after a round of attached tool results. For a provider that rejects a user message directly after tool results, set the agent's `mailInToolResult` (default `false`): R1 then appends the folded mail, with the same `[mail …]` header, as a trailing block of the _last_ tool result of that round instead. Only applies when the round actually had tool calls; a plain user turn (no tool results) is unaffected, and a detached call's result arrives in a notice of its own (see `documentation/async-tool-calls.md`).
 
 **Results** (`result`). A JSON string is a text result. Other forms are `{"type": "text", "content": "…"}`, `{"type": "json", "content": <any>}`, `{"type": "media", "mimeType": "…", "base64Data": "…"}`, and `{"type": "mixed", "parts": [...]}`.
 
@@ -728,9 +728,11 @@ On `SIGTERM` or `SIGINT`, the server:
 
 On start, sessions left `running` by a crash are stored with the status their turns imply. Their interrupted step is lost, and background tool calls they were running are reported to the LLM as orphaned on the next run. Nothing is resumed automatically: `resume` them.
 
-One exception is decided at startup rather than on the next run: when such a session's agent has a required parameter with no value left (a secret `session`-scope value is memory-only, so the restart lost it), its running calls are failed right away with a message naming the parameters, the session's `status_detail` reads `params_required: <names>`, and the log carries a `sessions.params_required` line. A `resume` or message without those `params` is refused with `422 params_required`; one that carries them goes on, and the LLM sees why the calls failed. Non-secret session values are stored with the session and need no resupply.
+A session whose running calls belong to tools marked `rerunOnRestart` is the exception: the server starts a run on it at startup, which starts those calls again, and logs `sessions.resumed_for_reruns`. So that this also holds for an ordinary restart, a graceful shutdown does not cancel the run of such a session: it stops it and leaves the session stored as `running`, as a crash would. See [async-tool-calls.md](/docs-async-tool-calls.html ) (Across a restart).
 
-Background tool calls (`runAsync`) live in the server process. They survive between runs of a session, but not a restart. A session is not dropped at the TTL while one of its background calls is still running: it is kept until they finish. Deferred calls are the durable kind: their tokens stay valid across restarts.
+Another case is decided at startup rather than on the next run, and comes before the one above (no call is run again then): when a recovered session's agent has a required parameter with no value left (a secret `session`-scope value is memory-only, so the restart lost it), its running calls are failed right away with a message naming the parameters, the session's `status_detail` reads `params_required: <names>`, and the log carries a `sessions.params_required` line. A `resume` or message without those `params` is refused with `422 params_required`; one that carries them goes on, and the LLM sees why the calls failed. Non-secret session values are stored with the session and need no resupply.
+
+Background tool calls (`runAsync`) live in the server process. They survive between runs of a session, but not a restart: a call in flight is then lost, or run again from the start when its tool is marked `rerunOnRestart`. A session is not dropped at the TTL while one of its background calls is still running: it is kept until they finish. Deferred calls are the durable kind: their tokens stay valid across restarts.
 
 -----------------------------
 
@@ -810,6 +812,7 @@ The server writes one JSON object per line on stderr, with `ts`, `kind`, and, wh
 <tr><td><code>agents.stored_skipped</code></td><td><code>slug</code>, <code>reason</code>: a stored agent hidden by an agent file</td></tr>
 <tr><td><code>agent_tree</code>, <code>tool</code>, <code>tool.portal</code></td><td><code>event</code>: what the agent loader and the tools reported</td></tr>
 <tr><td><code>llm.backoff</code></td><td><code>attempt</code>, <code>delay_seconds</code></td></tr>
+<tr><td><code>tool_call.queued</code>, <code>tool_call.started</code>, <code>tool_call.progressed</code>, <code>tool_call.completed</code>, <code>tool_call.failed</code>, <code>tool_call.timed_out</code>, <code>tool_call.cancelled</code></td><td><code>session_id</code>, <code>conversation_id</code>, <code>tool_call_id</code>, <code>tool</code>, <code>provider_call_id</code>, and per step <code>queued_ms</code>, <code>elapsed_ms</code>, <code>error</code>, <code>timeout_seconds</code>, <code>payload_bytes</code>; <code>sub_agent</code> for a sub-agent's call. The lifecycle of a background tool call, see [async-tool-calls.md](/docs-async-tool-calls.html) (Logs)</td></tr>
 <tr><td><code>server.signal</code>, <code>server.stopping</code>, <code>server.stopped</code>, <code>server.failed</code></td><td></td></tr>
 </table>
 ```

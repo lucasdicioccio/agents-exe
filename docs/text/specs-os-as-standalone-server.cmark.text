@@ -2,7 +2,9 @@ _Generated from [`todos/os-as-standalone-server.md`](https://github.com/lucasdic
 
 # Spec: the OS as a standalone server (TUI and web UI as clients)
 
-Status: proposal, 2026-09-23, revised the same day after checking service readiness. Phases 0 and 1 done on branch `feature/os-standalone-server` (commits 8de2a64..dc01dc8); All phases landed (8de2a64..771c988), with the open items listed under "Remaining after Phase 5". Builds on `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
+Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24 (`8de2a64`..`771c988`, PR &#35;571); what was left is listed, with what has closed since, under "Remaining after Phase 5". Builds on `todos/web-server-embedding.md` (done) and `todos/session-mailbox.md` (done).
+
+Status checked on 2026-10-04 against the git history and the code. "Current state", "Gaps" and "Integration modes, as of 2026-09-23" describe the code before this work.
 
 ## Goal
 
@@ -283,7 +285,7 @@ Original scope:
 
 Config loading into the library (§6); `serve` subcommand on `agents-exe`; `--socket`. The `agents-server` executable stays as the flags-only entry point over the same code. Docs: `documentation/agents-server.md` gains the config section; `documentation/cli-commands.md` gains `serve`.
 
-### Phase 2: the protocol, in the library
+### Phase 2: the protocol, in the library — done
 
 Split in three sequential steps: 2a the `Protocol` types with JSON, event sequence numbers, the ring and replay, the cross-session feed, and the server re-implemented on them; 2b the missing runner operations (`listSessions`, `sendMail`, create with no message, `forkSession`) and their routes; 2c `ctxEmit` replacing `ctxEventQueue` so subcall and tool-activity events reach the runner stream, and `mailInToolResult`.
 
@@ -295,7 +297,7 @@ Split in three sequential steps: 2a the `Protocol` types with JSON, event sequen
 
 `System.Agents.Protocol` with `Command`, `Event`, `EventBody`, JSON instances, and codecs for `NewMessage`, `RunMode`, `RunnerError`, `UserToolResponse` views. `AgentsServer.Api` re-implemented on top of it (no behaviour change; `eventFrame` goes away). Runner gains `EventSeq` stamping and the ring, `listSessions`, `sendMail`, `createSession` with no message, `forkSession`. `ctxEmit` replaces `ctxEventQueue`; `Engine` and `OneShotTool` emit through it. `mailInToolResult` folding at R1 (§5). Tests: JSON round trips, replay from the ring, fork, empty create, `mailInToolResult` folding.
 
-### Phase 3: the TUI on the in-process runner
+### Phase 3: the TUI on the in-process runner — done
 
 Split in three sequential steps: 3a `RunnerClient` and `inProcessClient` in the library plus a serializable agent descriptor (`ListAgents` / `GetAgent` with model, prompt and tool activation, which also fixes the `GET /v1/agents` gap); 3b the TUI's startup, Agents tab, History tab and conversation layer rewritten on `RunnerClient` (the large step); 3c subcall visibility and tool-call activity from runner events, the pending-calls view with `CompleteCall`, and retiring `OSEvent`, `ctxEventQueue` and the TUI's event bridge.
 
@@ -333,14 +335,16 @@ Original scope:
 
 - G11: secret params, watches and the run handle are volatile (D7 stands); since 2026-09-25 `recoverOnStartup` fails the running calls of a session whose required params were lost, with a `params_required` detail. Since 2026-09-27, watches are also recovered: a `session_watches` table (SQLite via `System.Agents.Session.WatchStore`, Postgres via `System.Agents.Postgres.mkPostgresWatchStore`, both modeled directly on `session_mail`/`MailStore`) persists each active `watch-session` registration (watcher, `WatchRequest`, absolute deadline) alongside the in-memory `WatchHandle`; `serverWatchSession` writes the row before starting to forward, `serverUnwatchSession` and the forwarding loop's own TTL expiry both delete it, and `recoverOnStartup` (via the new `recoverWatches`) re-registers every row whose deadline has not yet passed and drops the rest, exactly as an in-process TTL timeout would. A `WatchRequest` carries no secret, so unlike session parameters this needed no client resupply step -- D7's "durable storage" branch applies here, not its "resupplied by the client" one. Events raised while no process was watching are not replayed; a recovered watch only sees events from the moment it is re-registered, same as any other live subscriber. The run handle (`lsRun`/`Async`) turned out not to need new work: eviction already refuses to drop a `LiveSession` with an active run or a running background call (`evictIdle`'s `lsRun`/`hasRunningCalls` checks), so it is never actually lost to eviction; and a process restart was already covered by `recoverOnStartup`'s existing orphaned/`params_required` handling above. This is a deviation from the literal G11 wording ("the run `Async`... [is] lost on restart or eviction") only in that the eviction half of that claim no longer held by the time this phase started -- no behavior change was needed there, only watches. (`feat/g11-watch-recovery`, full `cabal test` suite green: 1248 tests in `agents-tests`, 32 in `agents-server-tests`, 7 in `agents-postgres-tests` including a migration-inventory test updated for the new table.)
 
-- TUI: selection among several pending calls (`select-pending`, Ctrl+O) and `fail-pending` (Ctrl+W) are done; a failed call completes with the text `Error: <reason>` rather than a new `UserToolResponse` variant. Still no view for `hook.failed`.
+- TUI: selection among several pending calls (`select-pending`, Ctrl+O) and `fail-pending` (Ctrl+W) are done; a failed call completes with the text `Error: <reason>` rather than a new `UserToolResponse` variant. `hook.failed` is shown in the status bar since 2026-09-26 (`8255f05`, PR &#35;594).
 
-- Service packaging: docs only, no unit file shipped, no `bundling/` entry.
+- Service packaging: done since 2026-09-26, `bundling/systemd/` ships a system unit and a user unit (`ea7c13f`, PR &#35;598).
 
 - `checks/lib/fake_llm.py` scripts multi-turn answers (text and tool calls, matched on request index, system prompt, last message or offered tools); pty end-to-end checks now cover a sub-agent call as a child session (`checks/phase5-subagent-e2e`) and deferred calls answered, failed or picked from the Pending panel (`checks/phase5-pending-e2e`). Not covered yet: interrupts, and the same flows with `tui --attach`.
 
-- D8's out-of-scope items: multi-server Postgres, mid-`RunAsync` durability, per-owner API keys.
+- D8's out-of-scope items: multi-server Postgres, mid-`RunAsync` durability, per-owner API keys. Two of the three were done later, outside this spec: several servers on one Postgres database through a run lease (`999666f`, PR &#35;603) and per-owner API keys with opt-in tool isolation (`1d8ee0c`, PR &#35;606); both are described under "Remaining later work" in `todos/web-server-embedding.md`. Mid-`RunAsync` durability: a first slice on `feat/durable-async-calls`. A detached call of a tool marked `rerunOnRestart` is run again by the next process, from the start; every other call is still reported as orphaned (`documentation/async-tool-calls.md`, "Across a restart"). Left open: a session another server takes over is not resumed by itself (`takeOverExpired`), a call is never resumed where it stopped, and the calls of a step interrupted before it was stored are still all run again, marked or not.
 
+
+As of 2026-10-04 the open items of this list are the pty checks for interrupts and for the same flows under `tui --attach` (not re-checked beyond the names of the directories in `checks/`), a narrowing that is lost when a narrowed child is resumed after a restart, and mid-`RunAsync` durability. They are tracked in the backlog, not in this file.
 
 ## Decisions (proposed)
 

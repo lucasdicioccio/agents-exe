@@ -1,8 +1,37 @@
-<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: partial application of tool arguments</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: partial application of tool arguments"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: partial application of tool arguments"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html"><meta property="og:description" content="Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done"><meta name="article:published_time" content="2026-10-04T15:53:54Z"><meta name="article:modified_time" content="2026-10-04T15:53:54Z"><meta name="ks:article_json" content="/agents-exe/json/specs-tool-partial-application.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-tool-partial-application.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-04T15:53:54Z","datePublished":"2026-10-04T15:53:54Z","description":"Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done","headline":"Spec: partial application of tool arguments","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: partial application of tool arguments</h1><p>On <span>Sun, 04 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 6639 words, 18 code snippets, 1 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.progress.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">11/13</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-session-mailbox.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"><code>todos/tool-partial-application.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: partial application of tool arguments</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: implemented. Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: partial application of tool arguments"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: implemented. Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: partial application of tool arguments"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html"><meta property="og:description" content="Status: implemented. Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21"><meta name="article:published_time" content="2026-10-06T21:45:28Z"><meta name="article:modified_time" content="2026-10-06T21:45:28Z"><meta name="ks:article_json" content="/agents-exe/json/specs-tool-partial-application.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-tool-partial-application.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-06T21:45:28Z","datePublished":"2026-10-06T21:45:28Z","description":"Status: implemented. Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21","headline":"Spec: partial application of tool arguments","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: partial application of tool arguments</h1><p>On <span>Tue, 06 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 6804 words, 18 code snippets, 1 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.progress.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">11/13</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-session-mailbox.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"><code>todos/tool-partial-application.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
 <h2 id="spec-partial-application-of-tool-arguments">Spec: partial application of tool arguments</h2>
-<p>Status: Phases 1-7 and §8.4 (<code>derive_agent</code>) done as of 2026-09-21. Phase 1 done
-(<code>97961e0</code>). Phase 2 done
-except MCP server <code>env</code> (G4); the tool-cache key (G8) is done too, see below (<code>03783fb</code>,
+<p>Status: implemented. Phases 1-7 and §8.4 (<code>derive_agent</code>) done as of 2026-09-21
+(PR #569), the Phase 2 and Phase 4 leftovers since. Open: <code>fork</code> on session
+creation and <code>session start --fork</code> (§5.2), and saved narrowings (D15).</p>
+<p>Checked on 2026-10-04 against the git history and the code. What was listed
+as missing here and has landed since:</p>
+<ul>
+<li>MCP server <code>env</code> (G4): <code>d4036d1</code>, PR #596.
+</li>
+<li>The tool-cache key (G8): <code>01d6823</code>, PR #588.
+</li>
+<li>The chat page’s parameter form: <code>d44645b</code>, PR #589.
+</li>
+<li><code>params</code>, <code>seal</code>, <code>session_token</code> and the params/token routes in
+<code>/openapi.json</code>: <code>77f0fba</code>, PR #597.
+</li>
+</ul>
+<p>What is still open, tracked in the backlog rather than here:</p>
+<ul>
+<li>§5.2’s <code>fork</code> field on <code>POST /v1/sessions</code> and the CLI’s
+<code>session start --fork</code>. Forking with new values exists only as
+<code>POST /v1/sessions/:id/fork</code> with <code>params</code>.
+</li>
+<li>Required parameters are not enforced at fork time (a fork starts no run;
+<code>forkSessionWithParams</code> says so).
+</li>
+<li>Saving a narrowed helper as a stored agent (D15), which was never planned.
+</li>
+</ul>
+<p>The paragraphs below are the per-phase notes as they were written when each
+phase landed; where one says “not done”, the list above is the current answer.</p>
+<p>Phase 1 done (<code>97961e0</code>). Phase 2 done, including MCP server <code>env</code> (G4) and
+the tool-cache key (G8) since 2026-09-26 (<code>03783fb</code>,
 <code>b0c53a5</code>): parameters, <code>ctxParams</code> (now actually wired at runtime, not
 just in tests), <code>--set</code>/<code>--set-json</code>/<code>--pin</code>/<code>--pin-json</code>/<code>--params-file</code>,
 process-scope resolution, secret-argv-mode load-time guard (G7).
@@ -18,12 +47,11 @@ in-memory <code>LiveSession</code> (<code>Host/Runner.hs</code>’s new <code>ls
 persisted; message-scope values applied for one run only, never stored;
 <code>agentView</code>’s <code>&quot;parameters&quot;</code> self-description (<code>bound</code>/<code>pinned</code>, never a
 value); <code>agents-server --set</code>/<code>--set-json</code>/<code>--pin</code>/<code>--pin-json</code> (mirroring
-<code>agents-exe</code>) so an operator can lock a container to one tenant. Not done
-from Phase 4: the chat page’s parameter form, and the generated OpenAPI
-document’s request/response schemas (<code>AgentsServer/Types.hs</code>/<code>Routes.hs</code>
-are a separate hand-maintained layer used only for <code>/openapi.json</code> and
-were not updated with the new fields — the real handlers in <code>Api.hs</code> are
-fully wired and correct; this is a documentation-only gap).
+<code>agents-exe</code>) so an operator can lock a container to one tenant. Left out
+of the first Phase 4 commit and done on 2026-09-26: the chat page’s
+parameter form (PR #589), and the generated OpenAPI document’s
+request/response schemas (PR #597; <code>AgentsServer/Types.hs</code>/<code>Routes.hs</code> are
+a separate hand-maintained layer used only for <code>/openapi.json</code>).
 <code>recoverOnStartup</code> marks the running calls of a session whose required
 parameters are no longer bound as failed with a <code>params_required</code> message
 (§5’s documented recovery behaviour; done 2026-09-25, which also made the
@@ -997,16 +1025,17 @@ per-call wrapping in <code>runSubAgent</code>; snapshot; cache keys (§8.3).
 agent narrows further; the middle agent cannot rebind; <code>describe_agent</code>
 from the middle does not show what the root bound; resume and fork.
 </li>
-<li>Later, if needed: <code>derive_agent</code> (§8.4).
+<li><code>derive_agent</code> (§8.4): done (<code>9e12c9b</code>).
 </li>
 </ul>
 <p>Depends on Phases 1, 2 and 5 (<code>with</code>).</p>
-<h4 id="phase-7-optional-expose">Phase 7 (optional): <code>Expose</code></h4>
+<h4 id="phase-7-optional-expose--done-b125648">Phase 7 (optional): <code>Expose</code> — done (<code>b125648</code>)</h4>
 <p><code>whenUnbound: &quot;expose&quot;</code> puts the argument back in the schema when the
 parameter is unbound for this session. It makes the tool list a function of
 the session, which the progressive-disclosure machinery
 (<code>Combinators/ProgressiveDisclosure.hs</code>) already does for activation, so the
-hook exists. Deferred until a real use shows up.</p>
+hook exists. Written as “deferred until a real use shows up”; implemented
+all the same, see the status at the top.</p>
 <hr />
 <h3 id="decisions">Decisions</h3>
 <p><strong>D1. Callers fill parameters, not tool arguments.</strong> The author decides what
@@ -1077,13 +1106,12 @@ identity of a session. It stays secondary to a good experience for the user
 and for the model.</p>
 <h3 id="nice-to-have-later">Nice to have, later</h3>
 <ul>
-<li>Saving a narrowed helper as a stored agent (D15).
-</li>
-<li><code>derive_agent</code>, naming a narrowing within a session (§8.4).
-</li>
-<li><code>whenUnbound: &quot;expose&quot;</code> (Phase 7).
+<li>Saving a narrowed helper as a stored agent (D15). Still not planned.
 </li>
 </ul>
+<p>Two items that used to be listed here are done: <code>derive_agent</code>, naming a
+narrowing within a session (§8.4, <code>9e12c9b</code>), and <code>whenUnbound: &quot;expose&quot;</code>
+(Phase 7, <code>b125648</code>).</p>
 <h3 id="related-docs">Related docs</h3>
 <ul>
 <li><code>documentation/binary-tool.md</code>: bash tool protocol, to be extended with <code>env</code> mode.

@@ -2,7 +2,9 @@ _Generated from [`todos/web-server-embedding.md`](https://github.com/lucasdicioc
 
 # Spec: embedding agents-exe in a web server
 
-Status: proposed (2026-09-18)
+Status: implemented. Phases 1 to 13 and database agents with tools and helpers are done (2026-09-19 to 2026-10-03); what is left is under "Remaining later work". Per-phase notes for Phases 1 to 12 are in `todos/web-server-embedding.progress.md`.
+
+Proposed on 2026-09-18; status checked on 2026-10-04 against the git history and the code. "Current state" and "Gaps" describe the code before this work. The work that followed is in `todos/session-mailbox.md` and `todos/os-as-standalone-server.md`.
 
 ## Goal
 
@@ -776,10 +778,12 @@ Lifts the two refusals of Phase 12 that decision 10 recorded.
 
 - ~~**Database agents with files or sub-agents**~~: done, see [Database agents with tools and helpers](#database-agents-with-tools-and-helpers ).
 
-- **Stopping a stored agent's MCP servers** when it is replaced or deleted.
+- ~~**Stopping a stored agent's MCP servers** when it is replaced or deleted.~~ Done (`f2d59a7`, PR &#35;592).
 
-- **Dispatching through servant**, replacing the wai router (see Phase 13).
+- **Dispatching through servant**, replacing the wai router (see Phase 13). Still open as of 2026-10-04: `AgentsServer/Api.hs` dispatches on `pathInfo`.
 
+
+Open items of this list (the owner decisions on isolation, the "Not done" lines of the multi-server work, servant dispatch) are tracked in the backlog, not in this file.
 
 ## Decisions
 

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-10-04T15:53:54Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html</id><title type="text">Iterative Development Workflow</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ITERATIVE-WORKFLOW.md"&gt;&lt;code&gt;documentation/ITERATIVE-WORKFLOW.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title type="text">agents-exe</title><id>https://lucasdicioccio.github.io/agents-exe/atom.xml</id><updated>2026-10-06T21:45:28Z</updated><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html</id><title type="text">Iterative Development Workflow</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ITERATIVE-WORKFLOW.md"&gt;&lt;code&gt;documentation/ITERATIVE-WORKFLOW.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="iterative-development-workflow"&gt;Iterative Development Workflow&lt;/h2&gt;
 &lt;blockquote&gt;
 &lt;p&gt;How to handle multi-step, recursive, or iterative invocations on this codebase.&lt;/p&gt;
@@ -358,7 +358,7 @@ HANDOFF:
 &lt;/code&gt;&lt;/pre&gt;
 &lt;hr /&gt;
 &lt;p&gt;Use this workflow for multi-step documentation tasks.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html" rel="alternate"/><summary type="text">&gt; How to handle multi-step, recursive, or iterative invocations on this codebase. ## Invocation Patterns ### Pattern 1: Fresh Start (No Previous State) **When:** First time working on this codebase, or no knowledge base. **Steps:** 1. Initi</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html</id><title type="text">Spec: bash tools v2, long-running tool processes</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/bash-tools-v2.md"&gt;&lt;code&gt;todos/bash-tools-v2.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-ITERATIVE-WORKFLOW.html" rel="alternate"/><summary type="text">&gt; How to handle multi-step, recursive, or iterative invocations on this codebase. ## Invocation Patterns ### Pattern 1: Fresh Start (No Previous State) **When:** First time working on this codebase, or no knowledge base. **Steps:** 1. Initi</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html</id><title type="text">Spec: bash tools v2, long-running tool processes</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/bash-tools-v2.md"&gt;&lt;code&gt;todos/bash-tools-v2.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-bash-tools-v2-long-running-tool-processes"&gt;Spec: bash tools v2, long-running tool processes&lt;/h2&gt;
 &lt;p&gt;Status: proposal, 2026-09-25, from issue #539 and a robot-chat conversation
 the same day. Nothing implemented. The v1 protocol (&lt;code&gt;documentation/binary-tool.md&lt;/code&gt;)
@@ -746,7 +746,7 @@ transient failures if the tool declares which exit codes mean “try
 another” (&lt;code&gt;fallback_on&lt;/code&gt;), or is the model seeing the failure enough?
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-25, from issue &amp;#35;539 and a robot-chat conversation</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html</id><title type="text">File Loader</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/file-loader.md"&gt;&lt;code&gt;documentation/file-loader.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-bash-tools-v2.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-25, from issue &amp;#35;539 and a robot-chat conversation</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html</id><title type="text">File Loader</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/file-loader.md"&gt;&lt;code&gt;documentation/file-loader.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="file-loader"&gt;File Loader&lt;/h2&gt;
 &lt;p&gt;The file loader utilities provide JSON file loading, section-based file parsing, and directory scanning for agent configurations and tools.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -1138,7 +1138,7 @@ another” (&lt;code&gt;fallback_on&lt;/code&gt;), or is the model seeing the fa
 &lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;        &lt;span class="fu"&gt;return&lt;/span&gt; &lt;span class="op"&gt;$&lt;/span&gt; &lt;span class="dt"&gt;ArgParserArgs&lt;/span&gt;&lt;/span&gt;
 &lt;span id="13"&gt;&lt;a href="#13" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            { defaultAgentFiles &lt;span class="ot"&gt;=&lt;/span&gt; agentsFiles config &lt;span class="op"&gt;&amp;lt;&amp;gt;&lt;/span&gt; &lt;span class="fu"&gt;concat&lt;/span&gt; jsonPaths&lt;/span&gt;
 &lt;span id="14"&gt;&lt;a href="#14" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            , &lt;span class="op"&gt;...&lt;/span&gt;&lt;/span&gt;
-&lt;span id="15"&gt;&lt;a href="#15" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            }&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html" rel="alternate"/><summary type="text">The file loader utilities provide JSON file loading, section-based file parsing, and directory scanning for agent configurations and tools. ## Overview ``` ┌───────────────────────────</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html</id><title type="text">Agent templates</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agent-templates.md"&gt;&lt;code&gt;documentation/agent-templates.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;span id="15"&gt;&lt;a href="#15" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;            }&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-file-loader.html" rel="alternate"/><summary type="text">The file loader utilities provide JSON file loading, section-based file parsing, and directory scanning for agent configurations and tools. ## Overview ``` ┌───────────────────────────</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html</id><title type="text">Agent templates</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agent-templates.md"&gt;&lt;code&gt;documentation/agent-templates.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="agent-templates"&gt;Agent templates&lt;/h2&gt;
 &lt;p&gt;An agent file can be a &lt;a href="https://github.com/lucasdicioccio/tramaj"&gt;tramaj&lt;/a&gt;
 program instead of JSON. The program is evaluated once, when the agent is
@@ -1336,7 +1336,7 @@ cannot be a template yet, and there are no stored libraries.
 adds the &lt;code&gt;tramajLibraries&lt;/code&gt; of &lt;code&gt;agents-exe.cfg.json&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html" rel="alternate"/><summary type="text">An agent file can be a [tramaj](https://github.com/lucasdicioccio/tramaj) program instead of JSON. The program is evaluated once, when the agent is loaded, and must produce the JSON an agent file holds. From there on nothing changes: the va</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html</id><title type="text">Advanced Configuration</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/advanced-configuration.md"&gt;&lt;code&gt;documentation/advanced-configuration.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-agent-templates.html" rel="alternate"/><summary type="text">An agent file can be a [tramaj](https://github.com/lucasdicioccio/tramaj) program instead of JSON. The program is evaluated once, when the agent is loaded, and must produce the JSON an agent file holds. From there on nothing changes: the va</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html</id><title type="text">Advanced Configuration</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/advanced-configuration.md"&gt;&lt;code&gt;documentation/advanced-configuration.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="advanced-configuration"&gt;Advanced Configuration&lt;/h2&gt;
 &lt;p&gt;This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls.&lt;/p&gt;
 &lt;h3 id="table-of-contents"&gt;Table of Contents&lt;/h3&gt;
@@ -1914,7 +1914,7 @@ the &lt;code&gt;extraAgents&lt;/code&gt; slug is &lt;code&gt;&amp;quot;task-plan
 &lt;li&gt;&lt;code&gt;System.Agents.Base&lt;/code&gt; - &lt;code&gt;ExtraAgentRef&lt;/code&gt; type
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html" rel="alternate"/><summary type="text">This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls. ## Table of Contents - [Recursive Agent References](#recursive-agent-references) - [Self-</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html</id><title type="text">Parameters, bindings, and narrowing sub-agents</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/parameters-and-bindings.md"&gt;&lt;code&gt;documentation/parameters-and-bindings.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-advanced-configuration.html" rel="alternate"/><summary type="text">This guide covers advanced configuration patterns for agents-exe, including recursive agent references, mutual recursion, and runtime safety controls. ## Table of Contents - [Recursive Agent References](#recursive-agent-references) - [Self-</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html</id><title type="text">Parameters, bindings, and narrowing sub-agents</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/parameters-and-bindings.md"&gt;&lt;code&gt;documentation/parameters-and-bindings.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="parameters-bindings-and-narrowing-sub-agents"&gt;Parameters, bindings, and narrowing sub-agents&lt;/h2&gt;
 &lt;p&gt;Most agent frameworks give a tool’s arguments to the model in full, or hide
 them entirely behind a wrapper script the author has to hand-maintain. This
@@ -2230,7 +2230,7 @@ server.
 &lt;p&gt;See &lt;code&gt;todos/tool-partial-application.md&lt;/code&gt; in the repository for the full
 design rationale and the phased implementation history, if you want the
 “why” behind any of the above in more depth.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html" rel="alternate"/><summary type="text">Most agent frameworks give a tool's arguments to the model in full, or hide them entirely behind a wrapper script the author has to hand-maintain. This feature gives you a middle ground with no code: an agent's author declares a handful of</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sessions.html</id><title type="text">Session Management</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sessions.md"&gt;&lt;code&gt;documentation/sessions.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-parameters-and-bindings.html" rel="alternate"/><summary type="text">Most agent frameworks give a tool's arguments to the model in full, or hide them entirely behind a wrapper script the author has to hand-maintain. This feature gives you a middle ground with no code: an agent's author declares a handful of</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sessions.html</id><title type="text">Session Management</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sessions.md"&gt;&lt;code&gt;documentation/sessions.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="session-management"&gt;Session Management&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/session-lifecycle.dot.png" alt="The statuses of a session and what moves it from one to the next." /&gt;&lt;/p&gt;
 &lt;p&gt;Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified read view.&lt;/p&gt;
@@ -3348,7 +3348,7 @@ Total: 58 KiB
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.SessionPrint&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Markdown printing and statistics&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.SessionPrint.Inject&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Session content injection&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sessions.html" rel="alternate"/><summary type="text">Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified re</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/commands.html</id><title type="text">Command reference</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/README.md"&gt;&lt;code&gt;README.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sessions.html" rel="alternate"/><summary type="text">Session management provides persistent storage and retrieval of agent conversations, enabling conversation resumption, history analysis, and multi-modal content support. Sessions can now be stored across multiple locations with a unified re</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/commands.html</id><title type="text">Command reference</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/README.md"&gt;&lt;code&gt;README.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="command-reference"&gt;Command reference&lt;/h2&gt;
 &lt;p&gt;The exact help text of each command, as printed by the binary this site was
 produced with: &lt;a href="/agents-exe/gen/out/commands.cmark__help-agents-exe.txt"&gt;agents-exe –help&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-check.txt"&gt;check&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-config.txt"&gt;config&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-init.txt"&gt;init&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-run.txt"&gt;run&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-tui.txt"&gt;tui&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-serve.txt"&gt;serve&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-mcp-server.txt"&gt;mcp-server&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-session.txt"&gt;session&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-describe.txt"&gt;describe&lt;/a&gt;, &lt;a href="/agents-exe/gen/out/commands.cmark__help-new.txt"&gt;new&lt;/a&gt;.&lt;/p&gt;
@@ -3442,7 +3442,7 @@ agents-exe session-print --show-tool-call-results my-session.json
 # Print last 10 turns only, newest first
 agents-exe session-print --n-turns 10 --antichronological my-session.json
 &lt;/code&gt;&lt;/pre&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/commands.html" rel="alternate"/><summary type="text">The global options and every agents-exe command, as the README lists them.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-architecture.html</id><title type="text">Architecture</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/architecture.md"&gt;&lt;code&gt;documentation/architecture.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/commands.html" rel="alternate"/><summary type="text">The global options and every agents-exe command, as the README lists them.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-architecture.html</id><title type="text">Architecture</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/architecture.md"&gt;&lt;code&gt;documentation/architecture.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="architecture"&gt;Architecture&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/architecture-layers.dot.png" alt="The layers: interfaces on top, the session runner and OS model, the agent tree, and the foundation they share." /&gt;&lt;/p&gt;
 &lt;p&gt;This document describes the runtime architecture and core components of the Agents framework.&lt;/p&gt;
@@ -3919,7 +3919,7 @@ OS Layer
 &lt;li&gt;&lt;strong&gt;Type Erasure&lt;/strong&gt;: Using &lt;code&gt;Any&lt;/code&gt; requires careful casting but enables heterogeneous storage
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-architecture.html" rel="alternate"/><summary type="text">This document describes the runtime architecture and core components of the Agents framework. ## Core Architecture The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html</id><title type="text">Changelog: OS Model Migration</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/CHANGELOG-OS-MIGRATION.md"&gt;&lt;code&gt;documentation/CHANGELOG-OS-MIGRATION.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-architecture.html" rel="alternate"/><summary type="text">This document describes the runtime architecture and core components of the Agents framework. ## Core Architecture The framework is built around a layered architecture that separates concerns between agent definition, runtime execution, and</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html</id><title type="text">Changelog: OS Model Migration</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/CHANGELOG-OS-MIGRATION.md"&gt;&lt;code&gt;documentation/CHANGELOG-OS-MIGRATION.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="changelog-os-model-migration"&gt;Changelog: OS Model Migration&lt;/h2&gt;
 &lt;p&gt;&lt;strong&gt;Date:&lt;/strong&gt; March 2026&lt;br /&gt;
 &lt;strong&gt;Commits:&lt;/strong&gt; &lt;code&gt;0eb5263&lt;/code&gt; to &lt;code&gt;cb52af7&lt;/code&gt;&lt;/p&gt;
@@ -4166,10 +4166,27 @@ OS Layer
 &lt;/ul&gt;
 &lt;hr /&gt;
 &lt;p&gt;For questions about the migration, see &lt;code&gt;documentation/MIGRATION-OS.md&lt;/code&gt; or file an issue with the “migration” label.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html" rel="alternate"/><summary type="text">**Date:** March 2026 **Commits:** `0eb5263` to `cb52af7` ## Summary This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html</id><title type="text">Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/session-mailbox.md"&gt;&lt;code&gt;todos/session-mailbox.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-CHANGELOG-OS-MIGRATION.html" rel="alternate"/><summary type="text">**Date:** March 2026 **Commits:** `0eb5263` to `cb52af7` ## Summary This release introduces a major architectural refactoring of the agents-exe core, migrating from a Runtime-per-agent model to a centralized **Entity-Component-System (ECS)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html</id><title type="text">Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/session-mailbox.md"&gt;&lt;code&gt;todos/session-mailbox.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-the-session-mailbox-agent-to-agent-mail-suspended-tool-calls-interrupts-tool-call-wrappers"&gt;Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)&lt;/h2&gt;
-&lt;p&gt;Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
-issues #563 and #564, and most of #507 (see “What happens to the issues”).&lt;/p&gt;
+&lt;p&gt;Status: implemented. Phases 0 to 6 landed on 2026-09-22 in PR #570
+(&lt;code&gt;02301b0&lt;/code&gt;..&lt;code&gt;5eb02e9&lt;/code&gt;); see “Phases” for the commit of each. Supersedes the
+designs in issues #563 and #564, and most of #507 (see “What happens to the
+issues”).&lt;/p&gt;
+&lt;p&gt;Status checked on 2026-10-04 against the git history and by looking up the
+names each phase introduces in the code; the behaviour of each bullet was not
+re-tested for this note. Everything below is the design as it was written
+before the work started: “Current state” and “Gaps” describe the code before
+PR #570, and line numbers in them are from that time. Work that followed and
+is recorded elsewhere: &lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt; (the runner
+protocol, the TUI as a runner client, sub-agents as sessions,
+&lt;code&gt;mailInToolResult&lt;/code&gt;, watch recovery after a restart). Anything still open is
+tracked in the backlog, not in this file.&lt;/p&gt;
+&lt;p&gt;The three items this design left for later were added afterwards:
+&lt;code&gt;send-to-tool-call&lt;/code&gt; (§3), a &lt;code&gt;notify&lt;/code&gt; progress level that posts mail (D9), and
+&lt;code&gt;args&lt;/code&gt; in a wrapper’s &lt;code&gt;match&lt;/code&gt; (§6). &lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;
+describes them as built. Two things differ from the text below: a notice is
+a &lt;code&gt;ToolCallNotice&lt;/code&gt; mail body rather than progress alone, and the idle wait on
+background calls now ends on unread mail, which is what R2 asks for.&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;One mechanism through which everything that happens &lt;em&gt;to&lt;/em&gt; a running session
 reaches it: a user message, a message from another agent’s session, the result
@@ -4581,6 +4598,19 @@ list is already covered by &lt;code&gt;SessionUpdated&lt;/code&gt; carrying the 
 &lt;tr&gt;&lt;td&gt;&amp;amp;#35;507 suspend&lt;/td&gt;&lt;td&gt;suspended = no run, mail accumulates, cursor committed; &lt;code&gt;Pause&lt;/code&gt;/&lt;code&gt;Resume&lt;/code&gt;&lt;/td&gt;&lt;td&gt;-&lt;/td&gt;&lt;td&gt;&lt;code&gt;ManagedResource&lt;/code&gt; tracking: engine shutdown, process groups and &lt;code&gt;evictIdle&lt;/code&gt; already release what a run holds. Reopen if a toolbox leaks.&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
 &lt;h3 id="phases"&gt;Phases&lt;/h3&gt;
+&lt;p&gt;All landed, in PR #570 unless noted:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Phase&lt;/th&gt;&lt;th&gt;Commits&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;0&lt;/td&gt;&lt;td&gt;&lt;code&gt;02301b0&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;1&lt;/td&gt;&lt;td&gt;&lt;code&gt;1fadcf2&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;&lt;code&gt;e9c01cf&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;3&lt;/td&gt;&lt;td&gt;&lt;code&gt;4d10b6d&lt;/code&gt;, then &lt;code&gt;02e8666&lt;/code&gt; (retires &lt;code&gt;lsInbox&lt;/code&gt;)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;4&lt;/td&gt;&lt;td&gt;&lt;code&gt;2b232f4&lt;/code&gt;, &lt;code&gt;e24f25a&lt;/code&gt;, &lt;code&gt;999b834&lt;/code&gt;, &lt;code&gt;09d8e0c&lt;/code&gt;, &lt;code&gt;5eb02e9&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;5&lt;/td&gt;&lt;td&gt;&lt;code&gt;3f64374&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;6&lt;/td&gt;&lt;td&gt;&lt;code&gt;9c878c6&lt;/code&gt; (Pause, Resume, CancelCalls), &lt;code&gt;3a581e3&lt;/code&gt; (&lt;code&gt;watch-session&lt;/code&gt;), &lt;code&gt;3bc3de9&lt;/code&gt; (R4, &lt;code&gt;interruptCompletions&lt;/code&gt;); &lt;code&gt;b62e2a6&lt;/code&gt; wired Pause/Resume into the TUI and &lt;code&gt;agents-server&lt;/code&gt; the day after; PR &amp;amp;#35;600 made watch registrations survive a restart&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;The interrupt and hard-cancel actions of the TUI and the chat page came with
+the same PR (&lt;code&gt;0948704&lt;/code&gt;, &lt;code&gt;98b8a33&lt;/code&gt;, fixed in &lt;code&gt;4645ece&lt;/code&gt;).&lt;/p&gt;
 &lt;p&gt;Each phase ships alone and leaves &lt;code&gt;ctxMailbox = Nothing&lt;/code&gt; agents untouched.
 Phases 0, 3 and 5 depend on nothing but Phase 1 (Phase 0 not even on that);
 Phase 4 needs Phases 1-2 and, for its server part only, Phase 3.&lt;/p&gt;
@@ -4654,11 +4684,40 @@ only thing the server adds.&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;, &lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;,
 &lt;code&gt;documentation/agents-server.md&lt;/code&gt;, &lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;,
 &lt;code&gt;todos/tool-partial-application.md&lt;/code&gt; (bindings, §5.2 fork).&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html</id><title type="text">Spec: partial application of tool arguments</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"&gt;&lt;code&gt;todos/tool-partial-application.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-session-mailbox.html" rel="alternate"/><summary type="text">Status: implemented. Phases 0 to 6 landed on 2026-09-22 in PR &amp;#35;570</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html</id><title type="text">Spec: partial application of tool arguments</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/tool-partial-application.md"&gt;&lt;code&gt;todos/tool-partial-application.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-partial-application-of-tool-arguments"&gt;Spec: partial application of tool arguments&lt;/h2&gt;
-&lt;p&gt;Status: Phases 1-7 and §8.4 (&lt;code&gt;derive_agent&lt;/code&gt;) done as of 2026-09-21. Phase 1 done
-(&lt;code&gt;97961e0&lt;/code&gt;). Phase 2 done
-except MCP server &lt;code&gt;env&lt;/code&gt; (G4); the tool-cache key (G8) is done too, see below (&lt;code&gt;03783fb&lt;/code&gt;,
+&lt;p&gt;Status: implemented. Phases 1-7 and §8.4 (&lt;code&gt;derive_agent&lt;/code&gt;) done as of 2026-09-21
+(PR #569), the Phase 2 and Phase 4 leftovers since. Open: &lt;code&gt;fork&lt;/code&gt; on session
+creation and &lt;code&gt;session start --fork&lt;/code&gt; (§5.2), and saved narrowings (D15).&lt;/p&gt;
+&lt;p&gt;Checked on 2026-10-04 against the git history and the code. What was listed
+as missing here and has landed since:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;MCP server &lt;code&gt;env&lt;/code&gt; (G4): &lt;code&gt;d4036d1&lt;/code&gt;, PR #596.
+&lt;/li&gt;
+&lt;li&gt;The tool-cache key (G8): &lt;code&gt;01d6823&lt;/code&gt;, PR #588.
+&lt;/li&gt;
+&lt;li&gt;The chat page’s parameter form: &lt;code&gt;d44645b&lt;/code&gt;, PR #589.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;params&lt;/code&gt;, &lt;code&gt;seal&lt;/code&gt;, &lt;code&gt;session_token&lt;/code&gt; and the params/token routes in
+&lt;code&gt;/openapi.json&lt;/code&gt;: &lt;code&gt;77f0fba&lt;/code&gt;, PR #597.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;What is still open, tracked in the backlog rather than here:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;§5.2’s &lt;code&gt;fork&lt;/code&gt; field on &lt;code&gt;POST /v1/sessions&lt;/code&gt; and the CLI’s
+&lt;code&gt;session start --fork&lt;/code&gt;. Forking with new values exists only as
+&lt;code&gt;POST /v1/sessions/:id/fork&lt;/code&gt; with &lt;code&gt;params&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;Required parameters are not enforced at fork time (a fork starts no run;
+&lt;code&gt;forkSessionWithParams&lt;/code&gt; says so).
+&lt;/li&gt;
+&lt;li&gt;Saving a narrowed helper as a stored agent (D15), which was never planned.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The paragraphs below are the per-phase notes as they were written when each
+phase landed; where one says “not done”, the list above is the current answer.&lt;/p&gt;
+&lt;p&gt;Phase 1 done (&lt;code&gt;97961e0&lt;/code&gt;). Phase 2 done, including MCP server &lt;code&gt;env&lt;/code&gt; (G4) and
+the tool-cache key (G8) since 2026-09-26 (&lt;code&gt;03783fb&lt;/code&gt;,
 &lt;code&gt;b0c53a5&lt;/code&gt;): parameters, &lt;code&gt;ctxParams&lt;/code&gt; (now actually wired at runtime, not
 just in tests), &lt;code&gt;--set&lt;/code&gt;/&lt;code&gt;--set-json&lt;/code&gt;/&lt;code&gt;--pin&lt;/code&gt;/&lt;code&gt;--pin-json&lt;/code&gt;/&lt;code&gt;--params-file&lt;/code&gt;,
 process-scope resolution, secret-argv-mode load-time guard (G7).
@@ -4674,12 +4733,11 @@ in-memory &lt;code&gt;LiveSession&lt;/code&gt; (&lt;code&gt;Host/Runner.hs&lt;/c
 persisted; message-scope values applied for one run only, never stored;
 &lt;code&gt;agentView&lt;/code&gt;’s &lt;code&gt;&amp;quot;parameters&amp;quot;&lt;/code&gt; self-description (&lt;code&gt;bound&lt;/code&gt;/&lt;code&gt;pinned&lt;/code&gt;, never a
 value); &lt;code&gt;agents-server --set&lt;/code&gt;/&lt;code&gt;--set-json&lt;/code&gt;/&lt;code&gt;--pin&lt;/code&gt;/&lt;code&gt;--pin-json&lt;/code&gt; (mirroring
-&lt;code&gt;agents-exe&lt;/code&gt;) so an operator can lock a container to one tenant. Not done
-from Phase 4: the chat page’s parameter form, and the generated OpenAPI
-document’s request/response schemas (&lt;code&gt;AgentsServer/Types.hs&lt;/code&gt;/&lt;code&gt;Routes.hs&lt;/code&gt;
-are a separate hand-maintained layer used only for &lt;code&gt;/openapi.json&lt;/code&gt; and
-were not updated with the new fields — the real handlers in &lt;code&gt;Api.hs&lt;/code&gt; are
-fully wired and correct; this is a documentation-only gap).
+&lt;code&gt;agents-exe&lt;/code&gt;) so an operator can lock a container to one tenant. Left out
+of the first Phase 4 commit and done on 2026-09-26: the chat page’s
+parameter form (PR #589), and the generated OpenAPI document’s
+request/response schemas (PR #597; &lt;code&gt;AgentsServer/Types.hs&lt;/code&gt;/&lt;code&gt;Routes.hs&lt;/code&gt; are
+a separate hand-maintained layer used only for &lt;code&gt;/openapi.json&lt;/code&gt;).
 &lt;code&gt;recoverOnStartup&lt;/code&gt; marks the running calls of a session whose required
 parameters are no longer bound as failed with a &lt;code&gt;params_required&lt;/code&gt; message
 (§5’s documented recovery behaviour; done 2026-09-25, which also made the
@@ -5653,16 +5711,17 @@ per-call wrapping in &lt;code&gt;runSubAgent&lt;/code&gt;; snapshot; cache keys 
 agent narrows further; the middle agent cannot rebind; &lt;code&gt;describe_agent&lt;/code&gt;
 from the middle does not show what the root bound; resume and fork.
 &lt;/li&gt;
-&lt;li&gt;Later, if needed: &lt;code&gt;derive_agent&lt;/code&gt; (§8.4).
+&lt;li&gt;&lt;code&gt;derive_agent&lt;/code&gt; (§8.4): done (&lt;code&gt;9e12c9b&lt;/code&gt;).
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;Depends on Phases 1, 2 and 5 (&lt;code&gt;with&lt;/code&gt;).&lt;/p&gt;
-&lt;h4 id="phase-7-optional-expose"&gt;Phase 7 (optional): &lt;code&gt;Expose&lt;/code&gt;&lt;/h4&gt;
+&lt;h4 id="phase-7-optional-expose--done-b125648"&gt;Phase 7 (optional): &lt;code&gt;Expose&lt;/code&gt; — done (&lt;code&gt;b125648&lt;/code&gt;)&lt;/h4&gt;
 &lt;p&gt;&lt;code&gt;whenUnbound: &amp;quot;expose&amp;quot;&lt;/code&gt; puts the argument back in the schema when the
 parameter is unbound for this session. It makes the tool list a function of
 the session, which the progressive-disclosure machinery
 (&lt;code&gt;Combinators/ProgressiveDisclosure.hs&lt;/code&gt;) already does for activation, so the
-hook exists. Deferred until a real use shows up.&lt;/p&gt;
+hook exists. Written as “deferred until a real use shows up”; implemented
+all the same, see the status at the top.&lt;/p&gt;
 &lt;hr /&gt;
 &lt;h3 id="decisions"&gt;Decisions&lt;/h3&gt;
 &lt;p&gt;&lt;strong&gt;D1. Callers fill parameters, not tool arguments.&lt;/strong&gt; The author decides what
@@ -5733,13 +5792,12 @@ identity of a session. It stays secondary to a good experience for the user
 and for the model.&lt;/p&gt;
 &lt;h3 id="nice-to-have-later"&gt;Nice to have, later&lt;/h3&gt;
 &lt;ul&gt;
-&lt;li&gt;Saving a narrowed helper as a stored agent (D15).
-&lt;/li&gt;
-&lt;li&gt;&lt;code&gt;derive_agent&lt;/code&gt;, naming a narrowing within a session (§8.4).
-&lt;/li&gt;
-&lt;li&gt;&lt;code&gt;whenUnbound: &amp;quot;expose&amp;quot;&lt;/code&gt; (Phase 7).
+&lt;li&gt;Saving a narrowed helper as a stored agent (D15). Still not planned.
 &lt;/li&gt;
 &lt;/ul&gt;
+&lt;p&gt;Two items that used to be listed here are done: &lt;code&gt;derive_agent&lt;/code&gt;, naming a
+narrowing within a session (§8.4, &lt;code&gt;9e12c9b&lt;/code&gt;), and &lt;code&gt;whenUnbound: &amp;quot;expose&amp;quot;&lt;/code&gt;
+(Phase 7, &lt;code&gt;b125648&lt;/code&gt;).&lt;/p&gt;
 &lt;h3 id="related-docs"&gt;Related docs&lt;/h3&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;code&gt;documentation/binary-tool.md&lt;/code&gt;: bash tool protocol, to be extended with &lt;code&gt;env&lt;/code&gt; mode.
@@ -5753,9 +5811,13 @@ and for the model.&lt;/p&gt;
 &lt;li&gt;&lt;code&gt;todo&lt;/code&gt;: “partial-application of tool values”.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html" rel="alternate"/><summary type="text">Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html</id><title type="text">Durable Workflows — Implementation Progress</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.progress.md"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-tool-partial-application.html" rel="alternate"/><summary type="text">Status: implemented. Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html</id><title type="text">Durable Workflows — Implementation Progress</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.progress.md"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="durable-workflows--implementation-progress"&gt;Durable Workflows — Implementation Progress&lt;/h2&gt;
 &lt;p&gt;Progress tracker for &lt;code&gt;todos/durable-workflows.md&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;Status: Phases 1 to 8 and the how-to addendum complete (2026-09-08). A log:
+each section was true when written and has not been revised since. Module
+names and &lt;code&gt;session&lt;/code&gt; subcommands were spot-checked on 2026-10-04, the rest was
+not.&lt;/p&gt;
 &lt;h3 id="phase-1--core-primitives-types--interfaces-white_check_mark-complete"&gt;Phase 1 — Core primitives (types &amp;amp; interfaces) ✅ COMPLETE&lt;/h3&gt;
 &lt;h4 id="11-rich-tool-call-state-inside-a-turn"&gt;1.1 Rich tool-call state inside a turn&lt;/h4&gt;
 &lt;ul&gt;
@@ -6600,7 +6662,7 @@ resolving name clashes with the session-layer &lt;code&gt;ToolCallState&lt;/code
 &lt;li&gt;Test suite &lt;code&gt;agents-tests&lt;/code&gt; passes, including all durable-workflow tests.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html</id><title type="text">AI Context - Working on the Agents Framework</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/AI-CONTEXT.md"&gt;&lt;code&gt;documentation/AI-CONTEXT.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.progress.html" rel="alternate"/><summary type="text">Status: Phases 1 to 8 and the how-to addendum complete (2026-09-08). A log:</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html</id><title type="text">AI Context - Working on the Agents Framework</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/AI-CONTEXT.md"&gt;&lt;code&gt;documentation/AI-CONTEXT.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="ai-context---working-on-the-agents-framework"&gt;AI Context - Working on the Agents Framework&lt;/h2&gt;
 &lt;blockquote&gt;
 &lt;p&gt;&lt;strong&gt;READ THIS FIRST&lt;/strong&gt; when invoked on this codebase.&lt;/p&gt;
@@ -7095,7 +7157,7 @@ cabal bench
 &lt;li&gt;&lt;strong&gt;New tests&lt;/strong&gt;: Integration, Compatibility, benchmarks
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html" rel="alternate"/><summary type="text">&gt; **READ THIS FIRST** when invoked on this codebase. ## Immediate First Steps When you're invoked on this project, run these queries immediately: ```sql -- 1. What is this project? SELECT * FROM project_overview; -- 2. What docs exist? SELE</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html</id><title type="text">Spec: a salmon-driven preview deployment of agents-server</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/salmon-preview-deployment.md"&gt;&lt;code&gt;todos/salmon-preview-deployment.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-AI-CONTEXT.html" rel="alternate"/><summary type="text">&gt; **READ THIS FIRST** when invoked on this codebase. ## Immediate First Steps When you're invoked on this project, run these queries immediately: ```sql -- 1. What is this project? SELECT * FROM project_overview; -- 2. What docs exist? SELE</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html</id><title type="text">Spec: a salmon-driven preview deployment of agents-server</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/salmon-preview-deployment.md"&gt;&lt;code&gt;todos/salmon-preview-deployment.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-a-salmon-driven-preview-deployment-of-agents-server"&gt;Spec: a salmon-driven preview deployment of agents-server&lt;/h2&gt;
 &lt;p&gt;Status: proposal, 2026-10-03. Nothing implemented. A design pass with a
 recommendation; the points marked &lt;strong&gt;Decide&lt;/strong&gt; need the owner before any
@@ -7375,8 +7437,15 @@ from the working tree, a GHC that satisfies &lt;code&gt;base &amp;gt;=4.20&lt;/c
 &lt;code&gt;agents-server&lt;/code&gt;), or leave it?
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html" rel="alternate"/><summary type="text">Status: proposal, 2026-10-03. Nothing implemented. A design pass with a</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html</id><title type="text">Asynchronous / Interruptible Tool Calls</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls.md"&gt;&lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-salmon-preview-deployment.html" rel="alternate"/><summary type="text">Status: proposal, 2026-10-03. Nothing implemented. A design pass with a</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html</id><title type="text">Asynchronous / Interruptible Tool Calls</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls.md"&gt;&lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="asynchronous--interruptible-tool-calls"&gt;Asynchronous / Interruptible Tool Calls&lt;/h2&gt;
+&lt;p&gt;Status: implemented (&lt;code&gt;7850f2e&lt;/code&gt;), all phases; see
+&lt;code&gt;todos/async-tool-calls-progress.md&lt;/code&gt; for what was built and what was left
+out. The user-facing description is &lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;.
+This file is the plan as written before the work: “Today the flow is” and
+the unchecked boxes under “Success Criteria” are the starting point, not the
+current state. Later work on the same ground is in
+&lt;code&gt;todos/session-mailbox.md&lt;/code&gt; (attach/detach, &lt;code&gt;wait&lt;/code&gt;, interrupts).&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;Make tool calls in a TUI/oneshot session truly interruptible and inspectable:&lt;/p&gt;
 &lt;ul&gt;
@@ -7785,6 +7854,9 @@ from the working tree, a GHC that satisfies &lt;code&gt;base &amp;gt;=4.20&lt;/c
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;h3 id="success-criteria"&gt;Success Criteria&lt;/h3&gt;
+&lt;p&gt;The boxes are left as written in the plan. Whether each is met is recorded in
+the table under “Success Criteria Status” of
+&lt;code&gt;todos/async-tool-calls-progress.md&lt;/code&gt; (all met in the library and tests).&lt;/p&gt;
 &lt;ul&gt;
 &lt;li&gt;[ ] Two long-running tool calls issued in one LLM turn execute concurrently.
 &lt;/li&gt;
@@ -7801,9 +7873,16 @@ from the working tree, a GHC that satisfies &lt;code&gt;base &amp;gt;=4.20&lt;/c
 &lt;li&gt;[ ] &lt;code&gt;get_tool_call_status&lt;/code&gt; returns &lt;code&gt;orphaned&lt;/code&gt; for calls referenced in history that no longer exist.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html</id><title type="text">Spec: embedding agents-exe in a web server</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.md"&gt;&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls.html" rel="alternate"/><summary type="text">Status: implemented (`7850f2e`), all phases; see</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html</id><title type="text">Spec: embedding agents-exe in a web server</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.md"&gt;&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-embedding-agents-exe-in-a-web-server"&gt;Spec: embedding agents-exe in a web server&lt;/h2&gt;
-&lt;p&gt;Status: proposed (2026-09-18)&lt;/p&gt;
+&lt;p&gt;Status: implemented. Phases 1 to 13 and database agents with tools and
+helpers are done (2026-09-19 to 2026-10-03); what is left is under
+“Remaining later work”. Per-phase notes for Phases 1 to 12 are in
+&lt;code&gt;todos/web-server-embedding.progress.md&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;Proposed on 2026-09-18; status checked on 2026-10-04 against the git history
+and the code. “Current state” and “Gaps” describe the code before this work.
+The work that followed is in &lt;code&gt;todos/session-mailbox.md&lt;/code&gt; and
+&lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;Run agents from a long-lived HTTP server, with no TUI and no CLI, where:&lt;/p&gt;
 &lt;ul&gt;
@@ -8937,11 +9016,17 @@ edits and &lt;code&gt;watch-session&lt;/code&gt; registrations between servers; 
 &lt;li&gt;~~&lt;strong&gt;Database agents with files or sub-agents&lt;/strong&gt;~~: done, see
 &lt;a href="#database-agents-with-tools-and-helpers"&gt;Database agents with tools and helpers&lt;/a&gt;.
 &lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Stopping a stored agent’s MCP servers&lt;/strong&gt; when it is replaced or deleted.
+&lt;li&gt;~~&lt;strong&gt;Stopping a stored agent’s MCP servers&lt;/strong&gt; when it is replaced or
+deleted.~~ Done (&lt;code&gt;f2d59a7&lt;/code&gt;, PR #592).
 &lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Dispatching through servant&lt;/strong&gt;, replacing the wai router (see Phase 13).
+Still open as of 2026-10-04: &lt;code&gt;AgentsServer/Api.hs&lt;/code&gt; dispatches on
+&lt;code&gt;pathInfo&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
+&lt;p&gt;Open items of this list (the owner decisions on isolation, the “Not done”
+lines of the multi-server work, servant dispatch) are tracked in the backlog,
+not in this file.&lt;/p&gt;
 &lt;h3 id="decisions"&gt;Decisions&lt;/h3&gt;
 &lt;p&gt;Recorded 2026-09-18.&lt;/p&gt;
 &lt;ol&gt;
@@ -9002,7 +9087,7 @@ It is plain HTML and JavaScript in one document, with no build step.
 &lt;li&gt;&lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;, &lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;, &lt;code&gt;documentation/sessions.md&lt;/code&gt;
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html" rel="alternate"/><summary type="text">Status: proposed (2026-09-18)</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html</id><title type="text">Internal Tool Mapping Documentation</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/internal-tool-mapping.md"&gt;&lt;code&gt;documentation/internal-tool-mapping.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.html" rel="alternate"/><summary type="text">Status: implemented. Phases 1 to 13 and database agents with tools and</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html</id><title type="text">Internal Tool Mapping Documentation</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/internal-tool-mapping.md"&gt;&lt;code&gt;documentation/internal-tool-mapping.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="internal-tool-mapping-documentation"&gt;Internal Tool Mapping Documentation&lt;/h2&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
 &lt;p&gt;This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints.&lt;/p&gt;
@@ -9353,7 +9438,7 @@ Execute HTTP request
 &lt;li&gt;&lt;strong&gt;Reporting&lt;/strong&gt;: Log warnings when names are normalized
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html" rel="alternate"/><summary type="text">## Overview This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints. ## The Problem LLM AP</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html</id><title type="text">CLI Reference</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/cli-commands.md"&gt;&lt;code&gt;documentation/cli-commands.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-internal-tool-mapping.html" rel="alternate"/><summary type="text">## Overview This document describes how tools from various sources (OpenAPI, MCP, Bash, IO) are mapped to LLM-compatible tool names. This mapping is critical because different systems have different naming constraints. ## The Problem LLM AP</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html</id><title type="text">CLI Reference</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/cli-commands.md"&gt;&lt;code&gt;documentation/cli-commands.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="cli-reference"&gt;CLI Reference&lt;/h2&gt;
 &lt;p&gt;Complete reference for the Agents CLI commands and options.&lt;/p&gt;
 &lt;h3 id="global-options"&gt;Global Options&lt;/h3&gt;
@@ -10801,7 +10886,7 @@ If no message is provided, reads from stdin.&lt;/p&gt;
 &lt;li&gt;&lt;a href="/agents-exe/docs-architecture.html"&gt;architecture.md&lt;/a&gt; - System architecture
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html" rel="alternate"/><summary type="text">Complete reference for the Agents CLI commands and options. ## Global Options These options apply to all commands: ```bash agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS] ``` | Option | Default | Description | |--------|---------|----------</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-mcp.html</id><title type="text">MCP Protocol</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/mcp.md"&gt;&lt;code&gt;documentation/mcp.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-cli-commands.html" rel="alternate"/><summary type="text">Complete reference for the Agents CLI commands and options. ## Global Options These options apply to all commands: ```bash agents-exe [GLOBAL_OPTS] COMMAND [COMMAND_OPTS] ``` | Option | Default | Description | |--------|---------|----------</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-mcp.html</id><title type="text">MCP Protocol</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/mcp.md"&gt;&lt;code&gt;documentation/mcp.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="mcp-protocol"&gt;MCP Protocol&lt;/h2&gt;
 &lt;p&gt;The Model Context Protocol (MCP) integration allows agents to connect to external servers that provide dynamic tool listings and execution capabilities.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -11212,7 +11297,7 @@ names only, so a secret parameter does not leak through &lt;code&gt;ps&lt;/code&
 &lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;server&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;filesystem&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
 &lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="dt"&gt;&amp;quot;val&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;x&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;tool-call-start&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;read_file&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
 &lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
-&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-mcp.html" rel="alternate"/><summary type="text">The Model Context Protocol (MCP) integration allows agents to connect to external servers that provide dynamic tool listings and execution capabilities. ## Overview MCP is a protocol for model context exchange that enables: - **Dynamic tool</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-export-import.html</id><title type="text">Export/Import</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/export-import.md"&gt;&lt;code&gt;documentation/export-import.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-mcp.html" rel="alternate"/><summary type="text">The Model Context Protocol (MCP) integration allows agents to connect to external servers that provide dynamic tool listings and execution capabilities. ## Overview MCP is a protocol for model context exchange that enables: - **Dynamic tool</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-export-import.html</id><title type="text">Export/Import</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/export-import.md"&gt;&lt;code&gt;documentation/export-import.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="exportimport"&gt;Export/Import&lt;/h2&gt;
 &lt;p&gt;&lt;strong&gt;Status: Removed&lt;/strong&gt;&lt;/p&gt;
 &lt;p&gt;The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we’re taking another approach (see issue #339).&lt;/p&gt;
@@ -11286,9 +11371,14 @@ names only, so a secret parameter does not leak through &lt;code&gt;ps&lt;/code&
 &lt;p&gt;&lt;strong&gt;Configuration management&lt;/strong&gt;: Use tools like Ansible, Chef, or simple shell scripts&lt;/p&gt;
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-export-import.html" rel="alternate"/><summary type="text">**Status: Removed** The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we're taking another approach (see issue &amp;#35;339). ## Alternatives For sharing agents and tools, consider these alternati</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html</id><title type="text">Web server embedding — Implementation Progress</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.progress.md"&gt;&lt;code&gt;todos/web-server-embedding.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-export-import.html" rel="alternate"/><summary type="text">**Status: Removed** The export and import commands have been removed from agents-exe. They were wonky and hard to use, so we're taking another approach (see issue &amp;#35;339). ## Alternatives For sharing agents and tools, consider these alternati</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html</id><title type="text">Web server embedding — Implementation Progress</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/web-server-embedding.progress.md"&gt;&lt;code&gt;todos/web-server-embedding.progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="web-server-embedding--implementation-progress"&gt;Web server embedding — Implementation Progress&lt;/h2&gt;
 &lt;p&gt;Progress tracker for &lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;Status: Phases 1 to 12 complete, and this log stops there. Phase 13
+(self-description and a chat page), database agents with tools and helpers,
+and the later work are recorded in the spec itself, not here. The “Not done
+here” notes of each phase are as written at the time and were not re-checked
+on 2026-10-04.&lt;/p&gt;
 &lt;h3 id="phase-1--storage-wiring-fix-white_check_mark-complete"&gt;Phase 1 — Storage wiring fix ✅ COMPLETE&lt;/h3&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;code&gt;Combinators.StoreSessionProgress&lt;/code&gt;:
@@ -11801,8 +11891,36 @@ server is &lt;code&gt;agents-exe mcp-server&lt;/code&gt;, and its tool
 &lt;/ul&gt;
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html</id><title type="text">Async Tool Calls Implementation Progress</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls-progress.md"&gt;&lt;code&gt;todos/async-tool-calls-progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-web-server-embedding.progress.html" rel="alternate"/><summary type="text">Status: Phases 1 to 12 complete, and this log stops there. Phase 13</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html</id><title type="text">Async Tool Calls Implementation Progress</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/async-tool-calls-progress.md"&gt;&lt;code&gt;todos/async-tool-calls-progress.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="async-tool-calls-implementation-progress"&gt;Async Tool Calls Implementation Progress&lt;/h2&gt;
+&lt;p&gt;Status: all phases done (&lt;code&gt;7850f2e&lt;/code&gt;); tracing for async calls was left out.
+The notes below are a log, each section true when it was written. Re-read on
+2026-10-04, what has changed since:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;The TUI no longer runs sessions with &lt;code&gt;Loop.run&lt;/code&gt; or &lt;code&gt;Loop.runUntilBlocked&lt;/code&gt;.
+It is a client of the session runner (&lt;code&gt;RunnerClient&lt;/code&gt; over
+&lt;code&gt;System.Agents.Host.Runner&lt;/code&gt;, &lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt; Phase 3),
+so the notes below about which loop the TUI uses are history.
+&lt;code&gt;runUntilBlocked&lt;/code&gt; is still what one-shot runs and the MCP server use.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;OSEvent&lt;/code&gt;, &lt;code&gt;ctxEventQueue&lt;/code&gt; and the TUI’s event bridge are gone (&lt;code&gt;c5f017f&lt;/code&gt;);
+activity and progress reach clients through &lt;code&gt;ctxEmit&lt;/code&gt; and the runner’s
+event stream (&lt;code&gt;tool.progressed&lt;/code&gt;).
+&lt;/li&gt;
+&lt;li&gt;Attached and detached calls, &lt;code&gt;wait&lt;/code&gt; and interrupts came with the session
+mailbox (&lt;code&gt;todos/session-mailbox.md&lt;/code&gt;, PR #570), which reworks parts of what
+is described here.
+&lt;/li&gt;
+&lt;li&gt;MCP tools report progress (PR #595), as the “MCP / OpenAPI streaming”
+section already says.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Not re-checked: whether a result read with &lt;code&gt;get-tool-call-status&lt;/code&gt; is still
+repeated once by the delivery notice. The mailbox spec set out to fix it
+(its G6), and &lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt; still lists it as a limit;
+one of the two is out of date. Tracing through &lt;code&gt;Prod.Tracer&lt;/code&gt; and rate
+limiting beyond a concurrency cap were not re-checked either. Open items
+are tracked in the backlog, not in this file.&lt;/p&gt;
 &lt;h3 id="plan"&gt;Plan&lt;/h3&gt;
 &lt;p&gt;See &lt;code&gt;todos/async-tool-calls.md&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="phase-status"&gt;Phase Status&lt;/h3&gt;
@@ -12337,6 +12455,8 @@ survive (Phase 5: process groups).
 &lt;/li&gt;
 &lt;li&gt;&lt;code&gt;run&lt;/code&gt; itself still spins on deferred-only partial turns; only
 &lt;code&gt;runUntilBlocked&lt;/code&gt; users (OneShot) avoid it. The TUI still uses &lt;code&gt;run&lt;/code&gt;.
+(Obsolete: fixed in Phase 5 below, and the TUI has since moved to the
+session runner, see the status at the top.)
 &lt;/li&gt;
 &lt;li&gt;Earlier gaps (engine not returned by &lt;code&gt;runAsync&lt;/code&gt;, repeated result after
 &lt;code&gt;get-tool-call-status&lt;/code&gt;) remain.
@@ -12358,7 +12478,8 @@ started. Verified: the test fails without the group kill.
 the same cleanup.
 &lt;/li&gt;
 &lt;li&gt;The TUI uses &lt;code&gt;runUntilBlocked&lt;/code&gt;, so a conversation waiting only on deferred
-calls stops with a status message instead of spinning.
+calls stops with a status message instead of spinning. (True then; the TUI
+is now a runner client, see the status at the top.)
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;h4 id="stale-calls"&gt;Stale calls&lt;/h4&gt;
@@ -12415,10 +12536,11 @@ tools (&lt;code&gt;tool.progressed&lt;/code&gt; events, &lt;code&gt;get_tool_cal
 &lt;/ul&gt;
 &lt;h4 id="not-done"&gt;Not done&lt;/h4&gt;
 &lt;ul&gt;
-&lt;li&gt;&lt;strong&gt;Tracing.&lt;/strong&gt; &lt;code&gt;Agent&lt;/code&gt; carries no tracer (tracers live in the builders’
-closures), so &lt;code&gt;Prod.Tracer&lt;/code&gt; support would mean threading one through the
-agent and the engine. The activity events (&lt;code&gt;OSEvent_ToolCallActivity&lt;/code&gt;) and
-the progress entries on the entity are the observability path for now.
+&lt;li&gt;&lt;strong&gt;Tracing.&lt;/strong&gt; Done since: &lt;code&gt;Agent&lt;/code&gt; has &lt;code&gt;ctxAsyncTracer&lt;/code&gt;, which
+&lt;code&gt;buildAgent&lt;/code&gt; sets from its tracer and the agent hands to the engine it
+creates; the engine traces queued / started / progressed / completed /
+failed / timed out / cancelled as &lt;code&gt;AsyncTrace&lt;/code&gt;, with the session and call
+ids (&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;, Logs).
 &lt;/li&gt;
 &lt;li&gt;Rate limiting beyond a concurrency cap.
 &lt;/li&gt;
@@ -12442,6 +12564,67 @@ this is in the session scratchpad.
 save/reload; subprocess killed on cancel; process group killed on cancel.
 &lt;/li&gt;
 &lt;li&gt;Full suite: 894 tests, async group stable over repeated runs.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3 id="residual-gaps-2026-10-04"&gt;Residual gaps (2026-10-04)&lt;/h3&gt;
+&lt;p&gt;The gaps carried forward above, each checked against the code first. All five
+still held. Tests: the &lt;code&gt;residual gaps&lt;/code&gt; group of &lt;code&gt;test/AsyncToolCallsTests.hs&lt;/code&gt;
+(10 tests; the seven that compile against the old code failed on it).&lt;/p&gt;
+&lt;h4 id="closed"&gt;Closed&lt;/h4&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Result repeated after &lt;code&gt;get-tool-call-status&lt;/code&gt;.&lt;/strong&gt; The capability records
+the read on the call’s entity (&lt;code&gt;ToolCallState.tcResultReadAt&lt;/code&gt;,
+&lt;code&gt;markToolCallResultRead&lt;/code&gt;); &lt;code&gt;collectLateResults&lt;/code&gt; returns &lt;code&gt;LateResult&lt;/code&gt;s and
+&lt;code&gt;lateResultsQuery&lt;/code&gt; writes one line (&lt;code&gt;result already read with get-tool-call-status&lt;/code&gt;) for a read call instead of its payload. A turn with
+tool calls now collects late results after they ran
+(&lt;code&gt;collectLateResultsBefore&lt;/code&gt;), so a status call and the notice in the same
+turn do not both carry the result. Same in the synchronous stepper.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Found on the way, same symptom, larger:&lt;/strong&gt; with a mailbox (TUI, one-shot,
+server) every finished call was also rendered as &lt;code&gt;ToolCallFinished&lt;/code&gt; mail at
+the next receive point, so every result reached the LLM twice (tool message
+or notice, plus mail, the mail under the internal UUID). &lt;code&gt;receiveMailForTurn&lt;/code&gt;
+now reads past such mail when the process has the call’s entity
+(&lt;code&gt;deliveredByStepper&lt;/code&gt;); the cursor still advances and the mail still wakes
+a waiting session. Mail about a call with no entity here (durable mailbox
+after a restart) is still rendered: it is the only carrier of that result.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Cancel with the engine gone.&lt;/strong&gt; A process-wide index records the engine
+that owns each running call (&lt;code&gt;Engine.cancelToolCallAnyEngine&lt;/code&gt;).
+&lt;code&gt;ctxCancelToolCall&lt;/code&gt; and &lt;code&gt;cancelAttachedCall&lt;/code&gt; (so &lt;code&gt;cancel-tool-call&lt;/code&gt; and
+&lt;code&gt;CancelCalls&lt;/code&gt; / &lt;code&gt;CancelAllAttached&lt;/code&gt; mail) reach the thread of a call
+started by an agent that was rebuilt since. A call whose process is gone
+has no thread; it stays orphaned.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;Loop.run&lt;/code&gt; spinning on a deferred-only head turn.&lt;/strong&gt; &lt;code&gt;run&lt;/code&gt; and
+&lt;code&gt;runWithProgress&lt;/code&gt; throw &lt;code&gt;BlockedOnDeferredCalls&lt;/code&gt; (carrying the session)
+instead of stepping forever. They cannot return the session; callers that
+expect deferred calls use &lt;code&gt;runUntilBlocked&lt;/code&gt; or &lt;code&gt;runAsync&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;runAsync&lt;/code&gt; not returning the engine.&lt;/strong&gt; &lt;code&gt;runAsyncKeepingAgent&lt;/code&gt; and
+&lt;code&gt;runAsyncWithProgressKeepingAgent&lt;/code&gt; return the agent, which holds the
+engine. &lt;code&gt;runAsync&lt;/code&gt; keeps its type.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h4 id="still-open"&gt;Still open&lt;/h4&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Rate limiting beyond the concurrency cap.&lt;/strong&gt; Not started. It is a new
+setting, not a fix: it needs a decision on what is limited (call starts per
+window, per agent or shared like &lt;code&gt;newAsyncConcurrencyLimit&lt;/code&gt;, per tool?) and
+a new field on the agent JSON. The engine side is small (wait before
+&lt;code&gt;startCall&lt;/code&gt; takes the semaphore).
+&lt;/li&gt;
+&lt;li&gt;Placeholders still carry no progress; tracing is still not done (both as
+above).
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h4 id="seen-not-touched"&gt;Seen, not touched&lt;/h4&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;executeTrackedCalls&lt;/code&gt; merges the turn’s mail into the query when it stores
+a partial turn (unless &lt;code&gt;mailInToolResult&lt;/code&gt;), and again when a continued
+partial turn finalizes (&lt;code&gt;continuePartialTurn&lt;/code&gt; passes &lt;code&gt;pUserQuery&lt;/code&gt; and
+&lt;code&gt;pUserMail&lt;/code&gt; back in). Mail folded into a turn that then waits on a deferred
+call looks like it is rendered twice. Not verified with a test.
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;h3 id="completion-plan"&gt;Completion Plan&lt;/h3&gt;
@@ -12539,7 +12722,7 @@ the agent JSON schema for async.
 &lt;li&gt;Clarify whether MCP / OpenAPI tools can stream into the progress callback.
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-README.html</id><title type="text">Agents - AI Agent Framework</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/README.md"&gt;&lt;code&gt;documentation/README.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-async-tool-calls-progress.html" rel="alternate"/><summary type="text">Status: all phases done (`7850f2e`); tracing for async calls was left out.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-README.html</id><title type="text">Agents - AI Agent Framework</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/README.md"&gt;&lt;code&gt;documentation/README.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="agents---ai-agent-framework"&gt;Agents - AI Agent Framework&lt;/h2&gt;
 &lt;p&gt;A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -12736,7 +12919,7 @@ including a runnable mock-LLM demonstrator.&lt;/p&gt;
 &lt;/ol&gt;
 &lt;h3 id="license"&gt;License&lt;/h3&gt;
 &lt;p&gt;See the project LICENSE file for details.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-README.html" rel="alternate"/><summary type="text">A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations. ## Overview The Agents framework provides a complete infrastructure for: - **Agent Definition**</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html</id><title type="text">Adding New Executable-Program Tools</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/binary-tool.md"&gt;&lt;code&gt;documentation/binary-tool.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-README.html" rel="alternate"/><summary type="text">A Haskell-based framework for building and orchestrating AI agents with support for multi-agent hierarchies, tool systems, and LLM integrations. ## Overview The Agents framework provides a complete infrastructure for: - **Agent Definition**</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html</id><title type="text">Adding New Executable-Program Tools</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/binary-tool.md"&gt;&lt;code&gt;documentation/binary-tool.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="adding-new-executable-program-tools"&gt;Adding New Executable-Program Tools&lt;/h2&gt;
 &lt;p&gt;Executable-program tools (also called “bash tools”) are external programs that &lt;code&gt;agents-exe&lt;/code&gt; can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, probing the network, or interacting with external APIs.&lt;/p&gt;
 &lt;h3 id="tool-protocol-overview"&gt;Tool Protocol Overview&lt;/h3&gt;
@@ -13021,7 +13204,7 @@ including a runnable mock-LLM demonstrator.&lt;/p&gt;
 &lt;li&gt;Comparing internal vs. LLM-facing representations
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html" rel="alternate"/><summary type="text">Executable-program tools (also called \"bash tools\") are external programs that `agents-exe` can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, pro</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sqq-flow.html</id><title type="text">SQQ Agent Flow Documentation</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-flow.md"&gt;&lt;code&gt;documentation/sqq-flow.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-binary-tool.html" rel="alternate"/><summary type="text">Executable-program tools (also called \"bash tools\") are external programs that `agents-exe` can invoke as part of agent execution. These tools extend agent capabilities by performing side effects like reading files, installing packages, pro</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sqq-flow.html</id><title type="text">SQQ Agent Flow Documentation</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-flow.md"&gt;&lt;code&gt;documentation/sqq-flow.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="sqq-agent-flow-documentation"&gt;SQQ Agent Flow Documentation&lt;/h2&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
 &lt;p&gt;The &lt;code&gt;sqq-agent.sh&lt;/code&gt; is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests with the results.&lt;/p&gt;
@@ -13226,7 +13409,7 @@ including a runnable mock-LLM demonstrator.&lt;/p&gt;
 &lt;li&gt;&lt;strong&gt;Critical:&lt;/strong&gt; &lt;code&gt;GITHUB_USERNAME&lt;/code&gt; environment variable filters GitHub issues by author to prevent processing malicious issues from third parties on public repositories. Default is &lt;code&gt;lucasdicioccio&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-flow.html" rel="alternate"/><summary type="text">## Overview The `sqq-agent.sh` is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-ai-assistant-guidelines.html</id><title type="text">AI Assistant Guidelines - Agents Framework</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ai-assistant-guidelines.md"&gt;&lt;code&gt;documentation/ai-assistant-guidelines.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-flow.html" rel="alternate"/><summary type="text">## Overview The `sqq-agent.sh` is a task queue automation system that manages AI agent execution on Git repositories. It integrates with GitHub issues, uses git worktrees for isolated task execution, and automatically creates pull requests</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-ai-assistant-guidelines.html</id><title type="text">AI Assistant Guidelines - Agents Framework</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/ai-assistant-guidelines.md"&gt;&lt;code&gt;documentation/ai-assistant-guidelines.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="ai-assistant-guidelines---agents-framework"&gt;AI Assistant Guidelines - Agents Framework&lt;/h2&gt;
 &lt;p&gt;This document provides guidance for AI assistants (including future instances of myself) working on the Agents framework codebase.&lt;/p&gt;
 &lt;h3 id="quick-start-for-ai-assistants"&gt;Quick Start for AI Assistants&lt;/h3&gt;
@@ -13540,7 +13723,7 @@ including a runnable mock-LLM demonstrator.&lt;/p&gt;
 &lt;/table&gt;
 &lt;hr /&gt;
 &lt;p&gt;Remember: This documentation is for AI assistants. Keep it practical, specific to this codebase, and actionable.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-ai-assistant-guidelines.html" rel="alternate"/><summary type="text">This document provides guidance for AI assistants (including future instances of myself) working on the Agents framework codebase. ## Quick Start for AI Assistants ### First Steps When invoked on this codebase, always: 1. **Check the knowle</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html</id><title type="text">Asynchronous Tool Calls</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/async-tool-calls.md"&gt;&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-ai-assistant-guidelines.html" rel="alternate"/><summary type="text">This document provides guidance for AI assistants (including future instances of myself) working on the Agents framework codebase. ## Quick Start for AI Assistants ### First Steps When invoked on this codebase, always: 1. **Check the knowle</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html</id><title type="text">Asynchronous Tool Calls</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/async-tool-calls.md"&gt;&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="asynchronous-tool-calls"&gt;Asynchronous Tool Calls&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/async-tool-call.dot.png" alt="One tool call in asynchronous mode: a placeholder while it runs, a notice when it finishes." /&gt;&lt;/p&gt;
 &lt;p&gt;By default an agent runs every tool call of a turn one after another and only
@@ -13586,6 +13769,51 @@ process), see &lt;a href="/agents-exe/docs-durable-workflows-howto.html"&gt;dura
 the machinery, the policy decides which calls actually go to the background.&lt;/p&gt;
 &lt;p&gt;The settings apply everywhere an agent runs: &lt;code&gt;run&lt;/code&gt; (one-shot), the TUI, the
 &lt;code&gt;session&lt;/code&gt; commands, and agents called as tools by other agents.&lt;/p&gt;
+&lt;h3 id="wrappers"&gt;Wrappers&lt;/h3&gt;
+&lt;p&gt;&lt;code&gt;rules&lt;/code&gt; pick how a call runs. &lt;code&gt;wrappers&lt;/code&gt; add decorators around it: a timeout,
+retries, a cap on the result, a hook that may deny or defer the call. Every
+wrapper whose &lt;code&gt;match&lt;/code&gt; holds applies, in file order, the first one outermost.&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="st"&gt;&amp;quot;toolCallPolicyConfig&amp;quot;&lt;/span&gt;&lt;span class="er"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;runSync&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;rules&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="dt"&gt;&amp;quot;wrappers&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;match&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;http_*&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;     &lt;span class="dt"&gt;&amp;quot;decorators&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;retries&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;count&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;2&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;timeout&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;seconds&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;30&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;match&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;bash_*&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;args&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;path&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;command&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;glob&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;rm *&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;     &lt;span class="dt"&gt;&amp;quot;decorators&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;before&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;hook&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;command&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;hooks/approve&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="9"&gt;&lt;a href="#9" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;    &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;match&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;args&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;all&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;path&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;env&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;equals&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;production&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="10"&gt;&lt;a href="#10" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;                                &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;not&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;path&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;dry_run&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;equals&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="kw"&gt;true&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="11"&gt;&lt;a href="#11" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;     &lt;span class="dt"&gt;&amp;quot;decorators&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;before&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;hook&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;command&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;hooks/approve&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="12"&gt;&lt;a href="#12" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;  &lt;span class="ot"&gt;]&lt;/span&gt;&lt;/span&gt;
+&lt;span id="13"&gt;&lt;a href="#13" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;match&lt;/code&gt; has two optional parts, and both must hold:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;tool&lt;/code&gt;: a glob (&lt;code&gt;*&lt;/code&gt; only) on the name of the tool as the model calls it.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;args&lt;/code&gt;: a predicate on the arguments of the call.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;Predicate&lt;/th&gt;&lt;th&gt;Holds when&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;{"path": p, "equals": v}&lt;/code&gt;&lt;/td&gt;&lt;td&gt;there is a value at &lt;code&gt;p&lt;/code&gt; and it is the JSON value &lt;code&gt;v&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;{"path": p, "glob": g}&lt;/code&gt;&lt;/td&gt;&lt;td&gt;there is a string at &lt;code&gt;p&lt;/code&gt; and it matches the glob &lt;code&gt;g&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;{"path": p, "exists": true}&lt;/code&gt;&lt;/td&gt;&lt;td&gt;there is a value at &lt;code&gt;p&lt;/code&gt; (&lt;code&gt;null&lt;/code&gt; counts); &lt;code&gt;false&lt;/code&gt; for the opposite&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;{"all": [...]}&lt;/code&gt;, &lt;code&gt;{"any": [...]}&lt;/code&gt;, &lt;code&gt;{"not": {...}}&lt;/code&gt;&lt;/td&gt;&lt;td&gt;every, at least one, or not&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;A path is a dot-separated list of object keys and array indices
+(&lt;code&gt;options.targets.0&lt;/code&gt;); the empty path is the whole arguments object.&lt;/p&gt;
+&lt;p&gt;Three things to know when a wrapper guards a tool:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;A missing value fails &lt;code&gt;equals&lt;/code&gt; and &lt;code&gt;glob&lt;/code&gt;. Write “unless &lt;code&gt;dry_run&lt;/code&gt; is true”
+with &lt;code&gt;not&lt;/code&gt;, as above: it then also covers calls that leave &lt;code&gt;dry_run&lt;/code&gt; out.
+&lt;/li&gt;
+&lt;li&gt;The predicate sees the arguments as the model sent them. A value added by a
+binding is not seen, the same rule as for hooks. Arguments that are not
+valid JSON are &lt;code&gt;null&lt;/code&gt; to the predicate.
+&lt;/li&gt;
+&lt;li&gt;A predicate that cannot be read (a misspelt operator, two operators in one
+object) is a loading error for the agent, not a rule that never matches.
+&lt;/li&gt;
+&lt;/ul&gt;
 &lt;h3 id="what-the-llm-sees"&gt;What the LLM sees&lt;/h3&gt;
 &lt;p&gt;A call that has not finished when the LLM is asked for its next completion
 gets a placeholder tool message instead of a result:&lt;/p&gt;
@@ -13600,6 +13828,17 @@ once, as a notice:&lt;/p&gt;
 tool_call_id call_abc (run_tests) completed:
 42 tests passed
 &lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;If the model already read the result with &lt;code&gt;get-tool-call-status&lt;/code&gt;, the notice
+does not repeat it:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;tool_call_id call_abc (run_tests) completed: result already read with get-tool-call-status
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;A session with a mailbox (the TUI, one-shot runs, the server) also gets a
+&lt;code&gt;ToolCallFinished&lt;/code&gt; mail for each finished call, which is what wakes a waiting
+session. That mail is not shown to the model: the result reaches it once, as
+the call’s tool message or in the notice above. The one exception is mail
+about a call the current process does not know (a durable mailbox read after a
+restart), which is shown like any other mail, since the call itself is then
+reported as orphaned.&lt;/p&gt;
 &lt;p&gt;If the LLM ends its turn while calls are still running, the session does not
 stop: it waits for the results and sends them.&lt;/p&gt;
 &lt;h3 id="tool-call-capabilities"&gt;Tool-call capabilities&lt;/h3&gt;
@@ -13610,20 +13849,82 @@ calls:&lt;/p&gt;
 &lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;   &lt;span class="dt"&gt;&amp;quot;contents&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
 &lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;     &lt;span class="dt"&gt;&amp;quot;Name&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;system&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
 &lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;     &lt;span class="dt"&gt;&amp;quot;Description&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;System context and background tool calls&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
-&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;     &lt;span class="dt"&gt;&amp;quot;Capabilities&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;get-tool-call-status&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;list-running-tool-calls&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;cancel-tool-call&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;     &lt;span class="dt"&gt;&amp;quot;Capabilities&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;get-tool-call-status&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;list-running-tool-calls&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;cancel-tool-call&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;,&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;send-to-tool-call&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;/span&gt;
 &lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;   &lt;span class="fu"&gt;}}&lt;/span&gt;&lt;/span&gt;
 &lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;table&gt;
 &lt;tr&gt;&lt;th&gt;Capability&lt;/th&gt;&lt;th&gt;Use&lt;/th&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;list-running-tool-calls&lt;/code&gt;&lt;/td&gt;&lt;td&gt;The calls still running in this session&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;get-tool-call-status&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Status, progress and (once final) result of a call; can block until it finishes with &lt;code&gt;wait_for_completion&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;cancel-tool-call&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Interrupt a running call&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;send-to-tool-call&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Write to the sub-agent a running &lt;code&gt;prompt_agent_&amp;lt;slug&amp;gt;&lt;/code&gt; call started&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
 &lt;p&gt;Calls are addressed by the &lt;code&gt;tool_call_id&lt;/code&gt; the model itself used (e.g.
 &lt;code&gt;call_abc&lt;/code&gt;); the internal UUID also works.&lt;/p&gt;
+&lt;p&gt;&lt;code&gt;send-to-tool-call&lt;/code&gt; takes &lt;code&gt;tool_call_id&lt;/code&gt;, &lt;code&gt;text&lt;/code&gt;, and optionally
+&lt;code&gt;expects_reply&lt;/code&gt; and &lt;code&gt;interrupt&lt;/code&gt;. It is &lt;code&gt;send-message&lt;/code&gt; to the session of the
+helper, found from the call instead of from a session id, with the same mail
+scopes. The helper reads the message before its next completion, so a
+message that arrives while the helper writes its final answer is not read.
+The call must still be running and must be a sub-agent call: there is nothing
+to write to in a bash or MCP call. It works under the runner (the TUI and
+&lt;code&gt;agents-server&lt;/code&gt;, where the helper is a session of its own) and in &lt;code&gt;run&lt;/code&gt;.&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;get-tool-call-status&lt;/code&gt; reports &lt;code&gt;orphaned&lt;/code&gt; for a call that was running when its
 process went away (e.g. the session was saved and reloaded elsewhere). Such a
 call can never finish, so the stepper resolves it as failed rather than
 waiting for it.&lt;/p&gt;
+&lt;h3 id="across-a-restart"&gt;Across a restart&lt;/h3&gt;
+&lt;p&gt;A background call lives in the process that started it. When that process
+goes away while the call runs, the call is lost, and what happens next depends
+on the tool.&lt;/p&gt;
+&lt;p&gt;By default the call is reported as orphaned, as described above: the model is
+told the result is lost and decides what to do. Nothing is run twice.&lt;/p&gt;
+&lt;p&gt;A tool that is safe to run twice can be marked so, with the &lt;code&gt;rerunOnRestart&lt;/code&gt;
+decorator in a &lt;code&gt;wrappers&lt;/code&gt; rule:&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;toolCallPolicyConfig&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;   &lt;span class="dt"&gt;&amp;quot;default&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;runSync&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;   &lt;span class="dt"&gt;&amp;quot;rules&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;bash_run_tests&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;disposition&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;runAsync&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
+&lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;   &lt;span class="dt"&gt;&amp;quot;wrappers&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;/span&gt;
+&lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;     &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;match&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;bash_run_tests&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;},&lt;/span&gt;&lt;/span&gt;
+&lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;      &lt;span class="dt"&gt;&amp;quot;decorators&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;rerunOnRestart&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;times&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="dv"&gt;1&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;   &lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;A call of such a tool that was running when its process went away is started
+again by the next process, from the beginning, with the same arguments and
+under the same &lt;code&gt;tool_call_id&lt;/code&gt;. Its result is delivered like any late result,
+with a note that the call ran again:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;tool_call_id call_abc (bash_run_tests) completed (run again from the start after a restart):
+42 tests passed
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;What this does and does not give:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;It is a re-run, not a resume. Nothing of the first run is kept (output,
+progress, a half-written file), and the tool is executed at least twice in
+total. Only mark tools for which that is harmless: reads, builds, test runs,
+idempotent requests.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;times&lt;/code&gt; (default 1) is how many times one call may be started again. Once
+it is used up, a further restart reports the call as orphaned. This bounds a
+tool that takes its process down with it.
+&lt;/li&gt;
+&lt;li&gt;The session is the record: a call is known to be in flight because the
+stored session says &lt;code&gt;running&lt;/code&gt; for it. No other storage is involved, so it
+works with every session store, in the TUI and on the server alike.
+&lt;/li&gt;
+&lt;li&gt;The call is started again when the session next runs. The server and the
+TUI do that by themselves at startup for the sessions a previous process
+left running (&lt;code&gt;recoverOnStartup&lt;/code&gt;); elsewhere (&lt;code&gt;agents-exe session resume&lt;/code&gt;),
+it happens when you resume.
+&lt;/li&gt;
+&lt;li&gt;A call that ended just before the restart, and whose result is in the
+session’s mailbox, is not run again.
+&lt;/li&gt;
+&lt;li&gt;A call that was cancelled (&lt;code&gt;cancel-tool-call&lt;/code&gt;, cancelling the run) is not
+started again.
+&lt;/li&gt;
+&lt;li&gt;Not covered: the calls of a step that was interrupted before it was stored.
+The session then still ends with the LLM’s request for them, and the next
+run executes that whole step again, whatever the tools are marked with.
+This is how every interrupted step has always been handled.
+&lt;/li&gt;
+&lt;/ul&gt;
 &lt;h3 id="progress"&gt;Progress&lt;/h3&gt;
 &lt;p&gt;Tools that run in the background can report progress, which the model reads
 through &lt;code&gt;get-tool-call-status&lt;/code&gt; and the TUI shows next to the running call.&lt;/p&gt;
@@ -13644,6 +13945,32 @@ per-step callback.
 the &lt;code&gt;ToolExecutionContext&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
+&lt;h4 id="asking-for-the-models-attention"&gt;Asking for the model’s attention&lt;/h4&gt;
+&lt;p&gt;Progress is read by the model when it asks. A tool that should not wait for
+that reports a payload at the &lt;strong&gt;notify&lt;/strong&gt; level: any JSON object whose &lt;code&gt;level&lt;/code&gt;
+is &lt;code&gt;&amp;quot;notify&amp;quot;&lt;/code&gt;, with the text in &lt;code&gt;message&lt;/code&gt;.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Bash tools&lt;/strong&gt; write a line starting with &lt;code&gt;::notify::&lt;/code&gt; on standard error:
+&lt;code&gt;echo &amp;quot;::notify:: 3 tests are red, still running&amp;quot; &amp;gt;&amp;amp;2&lt;/code&gt;.
+&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Your own tools&lt;/strong&gt; call &lt;code&gt;ctxProgressCallback&lt;/code&gt; with &lt;code&gt;notifyProgress &amp;quot;…&amp;quot;&lt;/code&gt;.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Such a payload is kept as progress like any other, and is also sent to the
+session as mail:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;[mail 6f1c… from tool call 0d5e…]
+tool call call_abc (run_tests) notifies:
+3 tests are red, still running
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The model gets it with its next completion. If the session was idle, waiting
+for its background calls, or in &lt;code&gt;wait&lt;/code&gt;, the mail wakes it, and the call goes
+on running. A call the step is still attached to is not interrupted: the mail
+is delivered when the step hands control back. A call sends at most 16 such
+mails, and they count against the mailbox bound; what is over is progress
+only.&lt;/p&gt;
+&lt;p&gt;This needs &lt;code&gt;executionMode: asynchronous&lt;/code&gt; (always on under the runner: the TUI
+and &lt;code&gt;agents-server&lt;/code&gt;), because only a call run by the async engine has
+somewhere to report to.&lt;/p&gt;
 &lt;p&gt;MCP and OpenAPI tools do not report progress yet. An OpenAPI call waits for
 one complete HTTP response, so there is nothing to stream. MCP &lt;em&gt;does&lt;/em&gt; define
 progress notifications (&lt;code&gt;ProgressNotification&lt;/code&gt; in &lt;code&gt;System.Agents.MCP.Base&lt;/code&gt;),
@@ -13654,6 +13981,10 @@ but the client currently ignores them; forwarding them to
 &lt;p&gt;&lt;code&gt;cancel-tool-call&lt;/code&gt; interrupts the call’s thread. A bash tool runs its script
 in its own process group, so cancelling kills the script &lt;em&gt;and&lt;/em&gt; whatever it
 started. The same happens when a call exceeds &lt;code&gt;asyncCallTimeoutSeconds&lt;/code&gt;.&lt;/p&gt;
+&lt;p&gt;A call is cancelled through the engine that started it, wherever that engine
+is in the process: cancelling works the same after the session was paused and
+resumed with a newly built agent. Only a call whose process is gone cannot be
+interrupted; it is reported as orphaned.&lt;/p&gt;
 &lt;p&gt;Background calls are cancelled when the agent that owns them finishes or
 fails, so nothing keeps running (or keeps a subprocess alive) after a run.&lt;/p&gt;
 &lt;h3 id="in-the-tui"&gt;In the TUI&lt;/h3&gt;
@@ -13677,6 +14008,36 @@ it can be continued:&lt;/p&gt;
 &lt;span id="3"&gt;&lt;a href="#3" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt; &lt;span class="dt"&gt;&amp;quot;session_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;/span&gt;
 &lt;span id="4"&gt;&lt;a href="#4" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt; &lt;span class="dt"&gt;&amp;quot;deferred_calls&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;approve_deploy&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;tool_call_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;call_9&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;continuation_token&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;Continue it with &lt;code&gt;agents-exe session complete&lt;/code&gt; and &lt;code&gt;agents-exe session resume&lt;/code&gt;
 (see &lt;a href="/agents-exe/docs-durable-workflows-howto.html"&gt;durable-workflows-howto.md&lt;/a&gt;).&lt;/p&gt;
+&lt;h3 id="logs"&gt;Logs&lt;/h3&gt;
+&lt;p&gt;Each step of a background call is traced, with the ids needed to follow one
+call through a log:&lt;/p&gt;
+&lt;table&gt;
+&lt;tr&gt;&lt;th&gt;&lt;code&gt;kind&lt;/code&gt;&lt;/th&gt;&lt;th&gt;When&lt;/th&gt;&lt;th&gt;Extra fields&lt;/th&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tool_call.queued&lt;/code&gt;&lt;/td&gt;&lt;td&gt;the call is accepted and waits for a free slot (&lt;code&gt;maxConcurrency&lt;/code&gt;)&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tool_call.started&lt;/code&gt;&lt;/td&gt;&lt;td&gt;it got a slot and runs&lt;/td&gt;&lt;td&gt;&lt;code&gt;queued_ms&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tool_call.progressed&lt;/code&gt;&lt;/td&gt;&lt;td&gt;the tool reported progress&lt;/td&gt;&lt;td&gt;&lt;code&gt;payload_bytes&lt;/code&gt; (the payload itself is not logged)&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tool_call.completed&lt;/code&gt;&lt;/td&gt;&lt;td&gt;it returned a result&lt;/td&gt;&lt;td&gt;&lt;code&gt;elapsed_ms&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tool_call.failed&lt;/code&gt;&lt;/td&gt;&lt;td&gt;it threw&lt;/td&gt;&lt;td&gt;&lt;code&gt;elapsed_ms&lt;/code&gt;, &lt;code&gt;error&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tool_call.timed_out&lt;/code&gt;&lt;/td&gt;&lt;td&gt;it outlived &lt;code&gt;asyncCallTimeoutSeconds&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;timeout_seconds&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tool_call.cancelled&lt;/code&gt;&lt;/td&gt;&lt;td&gt;it was cancelled (&lt;code&gt;cancel-tool-call&lt;/code&gt;, a pause that cancels, the end of the run)&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;Every line has &lt;code&gt;session_id&lt;/code&gt;, &lt;code&gt;conversation_id&lt;/code&gt;, &lt;code&gt;tool_call_id&lt;/code&gt;, &lt;code&gt;tool&lt;/code&gt;, and
+&lt;code&gt;provider_call_id&lt;/code&gt; when the provider gave one; a call made by a sub-agent
+also has &lt;code&gt;sub_agent: true&lt;/code&gt;. A call ends with exactly one of the last four.&lt;/p&gt;
+&lt;div class="code code--highlighted"&gt;&lt;div class="sourceCode"&gt;&lt;pre class="sourceCode"&gt;&lt;code class="sourceCode"&gt;&lt;span id="1"&gt;&lt;a href="#1" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;ts&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;kind&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;tool_call.started&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;session_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;conversation_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool_call_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;bash_run_tests&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;provider_call_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;call_abc&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;queued_ms&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="dv"&gt;0&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;
+&lt;span id="2"&gt;&lt;a href="#2" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;ts&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;kind&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;tool_call.completed&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;session_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;conversation_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool_call_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;…&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tool&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;bash_run_tests&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;provider_call_id&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;call_abc&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;elapsed_ms&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt;&lt;span class="dv"&gt;8412&lt;/span&gt;&lt;span class="fu"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;Where they go:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;agents-server&lt;/code&gt; (and &lt;code&gt;agents-exe serve&lt;/code&gt;): its JSON log on stderr.
+&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;agents-exe tui&lt;/code&gt;, &lt;code&gt;run&lt;/code&gt; and &lt;code&gt;mcp-server&lt;/code&gt;: the file given with
+&lt;code&gt;--log-json-file&lt;/code&gt; (same fields, no &lt;code&gt;ts&lt;/code&gt;), and, in Haskell &lt;code&gt;show&lt;/code&gt; form, the
+&lt;code&gt;--log-file&lt;/code&gt;.
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;In Haskell, these are &lt;code&gt;AsyncTrace&lt;/code&gt; values
+(&lt;code&gt;System.Agents.Session.Async.Engine&lt;/code&gt;). An agent hands its &lt;code&gt;ctxAsyncTracer&lt;/code&gt;
+to the engine it creates; &lt;code&gt;AgentFactory.buildAgent&lt;/code&gt; sets it from its own
+tracer, as &lt;code&gt;AsyncToolCallTrace&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="session-files"&gt;Session files&lt;/h3&gt;
 &lt;p&gt;Partial turns are stored in the session, with each call’s state. &lt;code&gt;session-print&lt;/code&gt;
 shows them:&lt;/p&gt;
@@ -13691,23 +14052,37 @@ _(Some tool calls had not finished when this turn was sent)_
 &lt;h3 id="limits"&gt;Limits&lt;/h3&gt;
 &lt;ul&gt;
 &lt;li&gt;Background calls live in the process that started them. A session reloaded
-elsewhere reports them as orphaned.
+elsewhere reports them as orphaned, or runs them again when their tool is
+marked &lt;code&gt;rerunOnRestart&lt;/code&gt; (see “Across a restart”). A call is never resumed
+from where it stopped.
 &lt;/li&gt;
-&lt;li&gt;A pause/resume in the same process keeps the running calls only if the agent
-was built with &lt;code&gt;withAsyncEngine&lt;/code&gt;; &lt;code&gt;runAsync&lt;/code&gt; does not hand the engine back.
+&lt;li&gt;&lt;code&gt;runAsync&lt;/code&gt; returns only the session. To pause and resume in the same
+process, use &lt;code&gt;runAsyncKeepingAgent&lt;/code&gt; and resume with the agent it returns:
+that agent holds the engine that owns the running calls. A session resumed
+with a freshly built agent still gets their results and can still cancel
+them, but the new engine’s &lt;code&gt;maxConcurrency&lt;/code&gt; does not count them and they are
+not cancelled when the resumed run ends.
 &lt;/li&gt;
-&lt;li&gt;If the model reads a result with &lt;code&gt;get-tool-call-status&lt;/code&gt;, the delivery notice
-repeats it once.
+&lt;li&gt;&lt;code&gt;run&lt;/code&gt; and &lt;code&gt;runWithProgress&lt;/code&gt; return only a final result, so they cannot hand
+back a session that waits on deferred calls: they throw
+&lt;code&gt;BlockedOnDeferredCalls&lt;/code&gt;, which carries that session. Use &lt;code&gt;runUntilBlocked&lt;/code&gt;
+or &lt;code&gt;runAsync&lt;/code&gt; where deferred calls are expected.
 &lt;/li&gt;
 &lt;li&gt;&lt;code&gt;maxConcurrency&lt;/code&gt; is per agent. To cap several agents together, share one
 limit built with &lt;code&gt;newAsyncConcurrencyLimit&lt;/code&gt; between their engines.
 &lt;/li&gt;
+&lt;li&gt;The only limit on background calls is that number of calls running at once.
+There is no rate limit (calls started per second or minute).
+&lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html" rel="alternate"/><summary type="text">By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html</id><title type="text">Plan: Durable Workflows for agents-exe</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.md"&gt;&lt;code&gt;todos/durable-workflows.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html" rel="alternate"/><summary type="text">By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html</id><title type="text">Plan: Durable Workflows for agents-exe</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows.md"&gt;&lt;code&gt;todos/durable-workflows.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="plan-durable-workflows-for-agents-exe"&gt;Plan: Durable Workflows for agents-exe&lt;/h2&gt;
-&lt;p&gt;See &lt;a href="/agents-exe/specs-durable-workflows.progress.html"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt; for implementation progress.&lt;/p&gt;
+&lt;p&gt;Status: implemented, Phases 1 to 8 (2026-09-08), see
+&lt;a href="/agents-exe/specs-durable-workflows.progress.html"&gt;&lt;code&gt;todos/durable-workflows.progress.md&lt;/code&gt;&lt;/a&gt;. This
+file is the plan as written before the work. The user-facing description is
+&lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;; the server built on top of it is
+&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
-&lt;h3 id="goal-1"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;Turn agents-exe into a system suitable for:&lt;/p&gt;
 &lt;ul&gt;
 &lt;li&gt;&lt;strong&gt;Durable executions&lt;/strong&gt;: sessions can be stored in and resumed from databases.
@@ -14065,13 +14440,15 @@ A UUID is safer for external workers and database keys; an index is smaller and 
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;p&gt;This milestone delivers the requested primitives without yet building Docker runners or Postgres backends.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html</id><title type="text">Spec: the OS as a standalone server (TUI and web UI as clients)</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"&gt;&lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows.html" rel="alternate"/><summary type="text">Status: implemented, Phases 1 to 8 (2026-09-08), see</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html</id><title type="text">Spec: the OS as a standalone server (TUI and web UI as clients)</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"&gt;&lt;code&gt;todos/os-as-standalone-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="spec-the-os-as-a-standalone-server-tui-and-web-ui-as-clients"&gt;Spec: the OS as a standalone server (TUI and web UI as clients)&lt;/h2&gt;
-&lt;p&gt;Status: proposal, 2026-09-23, revised the same day after checking service
-readiness. Phases 0 and 1 done on branch &lt;code&gt;feature/os-standalone-server&lt;/code&gt;
-(commits 8de2a64..dc01dc8); All phases landed (8de2a64..771c988), with the open items listed
-under “Remaining after Phase 5”. Builds on
+&lt;p&gt;Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24
+(&lt;code&gt;8de2a64&lt;/code&gt;..&lt;code&gt;771c988&lt;/code&gt;, PR #571); what was left is listed, with what has
+closed since, under “Remaining after Phase 5”. Builds on
 &lt;code&gt;todos/web-server-embedding.md&lt;/code&gt; (done) and &lt;code&gt;todos/session-mailbox.md&lt;/code&gt; (done).&lt;/p&gt;
+&lt;p&gt;Status checked on 2026-10-04 against the git history and the code. “Current
+state”, “Gaps” and “Integration modes, as of 2026-09-23” describe the code
+before this work.&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;One long-running &lt;code&gt;agents-exe&lt;/code&gt; process hosts the agents and their sessions. It
 loads agents files the way the TUI does today (&lt;code&gt;agents-exe.cfg.json&lt;/code&gt;,
@@ -14453,7 +14830,7 @@ unlinks its file but does not drain in-flight requests through
 &lt;code&gt;--socket&lt;/code&gt;. The &lt;code&gt;agents-server&lt;/code&gt; executable stays as the flags-only entry
 point over the same code. Docs: &lt;code&gt;documentation/agents-server.md&lt;/code&gt; gains the config
 section; &lt;code&gt;documentation/cli-commands.md&lt;/code&gt; gains &lt;code&gt;serve&lt;/code&gt;.&lt;/p&gt;
-&lt;h4 id="phase-2-the-protocol-in-the-library"&gt;Phase 2: the protocol, in the library&lt;/h4&gt;
+&lt;h4 id="phase-2-the-protocol-in-the-library--done"&gt;Phase 2: the protocol, in the library — done&lt;/h4&gt;
 &lt;p&gt;Split in three sequential steps: 2a the &lt;code&gt;Protocol&lt;/code&gt; types with JSON, event
 sequence numbers, the ring and replay, the cross-session feed, and the
 server re-implemented on them; 2b the missing runner operations
@@ -14498,7 +14875,7 @@ and the ring, &lt;code&gt;listSessions&lt;/code&gt;, &lt;code&gt;sendMail&lt;/co
 &lt;code&gt;forkSession&lt;/code&gt;. &lt;code&gt;ctxEmit&lt;/code&gt; replaces &lt;code&gt;ctxEventQueue&lt;/code&gt;; &lt;code&gt;Engine&lt;/code&gt; and
 &lt;code&gt;OneShotTool&lt;/code&gt; emit through it. &lt;code&gt;mailInToolResult&lt;/code&gt; folding at R1 (§5). Tests: JSON round trips, replay from
 the ring, fork, empty create, &lt;code&gt;mailInToolResult&lt;/code&gt; folding.&lt;/p&gt;
-&lt;h4 id="phase-3-the-tui-on-the-in-process-runner"&gt;Phase 3: the TUI on the in-process runner&lt;/h4&gt;
+&lt;h4 id="phase-3-the-tui-on-the-in-process-runner--done"&gt;Phase 3: the TUI on the in-process runner — done&lt;/h4&gt;
 &lt;p&gt;Split in three sequential steps: 3a &lt;code&gt;RunnerClient&lt;/code&gt; and &lt;code&gt;inProcessClient&lt;/code&gt;
 in the library plus a serializable agent descriptor (&lt;code&gt;ListAgents&lt;/code&gt; /
 &lt;code&gt;GetAgent&lt;/code&gt; with model, prompt and tool activation, which also fixes the
@@ -14638,10 +15015,11 @@ including a migration-inventory test updated for the new table.)
 &lt;/li&gt;
 &lt;li&gt;TUI: selection among several pending calls (&lt;code&gt;select-pending&lt;/code&gt;, Ctrl+O) and
 &lt;code&gt;fail-pending&lt;/code&gt; (Ctrl+W) are done; a failed call completes with the text
-&lt;code&gt;Error: &amp;lt;reason&amp;gt;&lt;/code&gt; rather than a new &lt;code&gt;UserToolResponse&lt;/code&gt; variant. Still no view
-for &lt;code&gt;hook.failed&lt;/code&gt;.
+&lt;code&gt;Error: &amp;lt;reason&amp;gt;&lt;/code&gt; rather than a new &lt;code&gt;UserToolResponse&lt;/code&gt; variant. &lt;code&gt;hook.failed&lt;/code&gt;
+is shown in the status bar since 2026-09-26 (&lt;code&gt;8255f05&lt;/code&gt;, PR #594).
 &lt;/li&gt;
-&lt;li&gt;Service packaging: docs only, no unit file shipped, no &lt;code&gt;bundling/&lt;/code&gt; entry.
+&lt;li&gt;Service packaging: done since 2026-09-26, &lt;code&gt;bundling/systemd/&lt;/code&gt; ships a
+system unit and a user unit (&lt;code&gt;ea7c13f&lt;/code&gt;, PR #598).
 &lt;/li&gt;
 &lt;li&gt;&lt;code&gt;checks/lib/fake_llm.py&lt;/code&gt; scripts multi-turn answers (text and tool calls,
 matched on request index, system prompt, last message or offered tools);
@@ -14651,9 +15029,26 @@ from the Pending panel (&lt;code&gt;checks/phase5-pending-e2e&lt;/code&gt;). Not
 interrupts, and the same flows with &lt;code&gt;tui --attach&lt;/code&gt;.
 &lt;/li&gt;
 &lt;li&gt;D8’s out-of-scope items: multi-server Postgres, mid-&lt;code&gt;RunAsync&lt;/code&gt; durability,
-per-owner API keys.
+per-owner API keys. Two of the three were done later, outside this spec:
+several servers on one Postgres database through a run lease (&lt;code&gt;999666f&lt;/code&gt;,
+PR #603) and per-owner API keys with opt-in tool isolation (&lt;code&gt;1d8ee0c&lt;/code&gt;,
+PR #606); both are described under “Remaining later work” in
+&lt;code&gt;todos/web-server-embedding.md&lt;/code&gt;. Mid-&lt;code&gt;RunAsync&lt;/code&gt; durability: a first slice
+on &lt;code&gt;feat/durable-async-calls&lt;/code&gt;. A detached call of a tool marked
+&lt;code&gt;rerunOnRestart&lt;/code&gt; is run again by the next process, from the start; every
+other call is still reported as orphaned
+(&lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;, “Across a restart”). Left open: a
+session another server takes over is not resumed by itself
+(&lt;code&gt;takeOverExpired&lt;/code&gt;), a call is never resumed where it stopped, and the
+calls of a step interrupted before it was stored are still all run again,
+marked or not.
 &lt;/li&gt;
 &lt;/ul&gt;
+&lt;p&gt;As of 2026-10-04 the open items of this list are the pty checks for
+interrupts and for the same flows under &lt;code&gt;tui --attach&lt;/code&gt; (not re-checked beyond
+the names of the directories in &lt;code&gt;checks/&lt;/code&gt;), a narrowing that is lost when a
+narrowed child is resumed after a restart, and mid-&lt;code&gt;RunAsync&lt;/code&gt; durability.
+They are tracked in the backlog, not in this file.&lt;/p&gt;
 &lt;h3 id="decisions-proposed"&gt;Decisions (proposed)&lt;/h3&gt;
 &lt;p&gt;D1. &lt;strong&gt;The runner is the OS.&lt;/strong&gt; The ECS &lt;code&gt;World&lt;/code&gt; is an engine-internal detail
 for tool-call entities. &lt;code&gt;OS.Persistence&lt;/code&gt;, &lt;code&gt;OS.Interfaces&lt;/code&gt; remnants and the
@@ -14702,7 +15097,7 @@ Phases 0 and 1.
 goes with D1.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html" rel="alternate"/><summary type="text">Status: proposal, 2026-09-23, revised the same day after checking service</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html</id><title type="text">Durable Workflows How-To</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/durable-workflows-howto.md"&gt;&lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html" rel="alternate"/><summary type="text">Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html</id><title type="text">Durable Workflows How-To</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/durable-workflows-howto.md"&gt;&lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="durable-workflows-how-to"&gt;Durable Workflows How-To&lt;/h2&gt;
 &lt;p&gt;This guide shows how to exercise and extend the durable-workflow features in
 &lt;code&gt;agents-exe&lt;/code&gt;.  Durable workflows let an agent turn pause after some tool calls,
@@ -15002,7 +15397,7 @@ with progress, cancellation and partial answers.
 and live events.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html" rel="alternate"/><summary type="text">This guide shows how to exercise and extend the durable-workflow features in `agents-exe`. Durable workflows let an agent turn pause after some tool calls, persist its state, and resume later when external results arrive. The canonical exam</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs.html</id><title type="text">Specs</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="specs"&gt;Specs&lt;/h2&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-durable-workflows-howto.html" rel="alternate"/><summary type="text">This guide shows how to exercise and extend the durable-workflow features in `agents-exe`. Durable workflows let an agent turn pause after some tool calls, persist its state, and resume later when external results arrive. The canonical exam</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs.html</id><title type="text">Specs</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;h2 id="specs"&gt;Specs&lt;/h2&gt;
 &lt;p&gt;The &lt;code&gt;todos/&lt;/code&gt; directory holds the design documents behind the larger
 features (durable workflows, asynchronous tool calls, the session mailbox,
 partial application of tool arguments, the standalone server) and their
@@ -15011,32 +15406,32 @@ shipped, which is reproduced here. These pages are generated from the
 &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/../tree/main/todos"&gt;agents-exe repository&lt;/a&gt;: the repository is the
 canonical source, and may be ahead of what is published here.&lt;/p&gt;
 &lt;ul&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-async-tool-calls.html"&gt;&lt;strong&gt;Asynchronous / Interruptible Tool Calls&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
+&lt;li&gt;&lt;a href="/agents-exe/specs-async-tool-calls.html"&gt;&lt;strong&gt;Asynchronous / Interruptible Tool Calls&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; implemented (&lt;code&gt;7850f2e&lt;/code&gt;), all phases; see
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-async-tool-calls-progress.html"&gt;&lt;strong&gt;Async Tool Calls Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
+&lt;li&gt;&lt;a href="/agents-exe/specs-async-tool-calls-progress.html"&gt;&lt;strong&gt;Async Tool Calls Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; all phases done (&lt;code&gt;7850f2e&lt;/code&gt;); tracing for async calls was left out.
 &lt;/li&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-bash-tools-v2.html"&gt;&lt;strong&gt;Spec: bash tools v2, long-running tool processes&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposal, 2026-09-25, from issue &lt;a href="/agents-exe/hashtags/539.html"&gt;&lt;span class="hashtag" data-hashtag="539"&gt;#539&lt;/span&gt;&lt;/a&gt; and a robot-chat conversation
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-durable-workflows-cli-start-plan.html"&gt;&lt;strong&gt;Plan: Durable execution from the CLI&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
+&lt;li&gt;&lt;a href="/agents-exe/specs-durable-workflows-cli-start-plan.html"&gt;&lt;strong&gt;Plan: Durable execution from the CLI&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; implemented. &lt;code&gt;agents-exe session start&lt;/code&gt; and &lt;code&gt;session step&lt;/code&gt; exist next
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-durable-workflows.html"&gt;&lt;strong&gt;Plan: Durable Workflows for agents-exe&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
+&lt;li&gt;&lt;a href="/agents-exe/specs-durable-workflows.html"&gt;&lt;strong&gt;Plan: Durable Workflows for agents-exe&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; implemented, Phases 1 to 8 (2026-09-08), see
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-durable-workflows.progress.html"&gt;&lt;strong&gt;Durable Workflows — Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
+&lt;li&gt;&lt;a href="/agents-exe/specs-durable-workflows.progress.html"&gt;&lt;strong&gt;Durable Workflows — Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; Phases 1 to 8 and the how-to addendum complete (2026-09-08). A log:
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-os-as-standalone-server.html"&gt;&lt;strong&gt;Spec: the OS as a standalone server (TUI and web UI as clients)&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposal, 2026-09-23, revised the same day after checking service
+&lt;li&gt;&lt;a href="/agents-exe/specs-os-as-standalone-server.html"&gt;&lt;strong&gt;Spec: the OS as a standalone server (TUI and web UI as clients)&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24
 &lt;/li&gt;
 &lt;li&gt;&lt;a href="/agents-exe/specs-salmon-preview-deployment.html"&gt;&lt;strong&gt;Spec: a salmon-driven preview deployment of agents-server&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposal, 2026-10-03. Nothing implemented. A design pass with a
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-session-mailbox.html"&gt;&lt;strong&gt;Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposal, 2026-09-22. Nothing implemented. Supersedes the designs in
+&lt;li&gt;&lt;a href="/agents-exe/specs-session-mailbox.html"&gt;&lt;strong&gt;Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; implemented. Phases 0 to 6 landed on 2026-09-22 in PR &lt;a href="/agents-exe/hashtags/570.html"&gt;&lt;span class="hashtag" data-hashtag="570"&gt;#570&lt;/span&gt;&lt;/a&gt;
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-tool-partial-application.html"&gt;&lt;strong&gt;Spec: partial application of tool arguments&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; Phases 1-7 and §8.4 (&lt;code&gt;derive_agent&lt;/code&gt;) done as of 2026-09-21. Phase 1 done
+&lt;li&gt;&lt;a href="/agents-exe/specs-tool-partial-application.html"&gt;&lt;strong&gt;Spec: partial application of tool arguments&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; implemented. Phases 1-7 and §8.4 (&lt;code&gt;derive_agent&lt;/code&gt;) done as of 2026-09-21
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-web-server-embedding.html"&gt;&lt;strong&gt;Spec: embedding agents-exe in a web server&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; proposed (2026-09-18)
+&lt;li&gt;&lt;a href="/agents-exe/specs-web-server-embedding.html"&gt;&lt;strong&gt;Spec: embedding agents-exe in a web server&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; implemented. Phases 1 to 13 and database agents with tools and
 &lt;/li&gt;
-&lt;li&gt;&lt;a href="/agents-exe/specs-web-server-embedding.progress.html"&gt;&lt;strong&gt;Web server embedding — Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; no status line yet
+&lt;li&gt;&lt;a href="/agents-exe/specs-web-server-embedding.progress.html"&gt;&lt;strong&gt;Web server embedding — Implementation Progress&lt;/strong&gt;&lt;/a&gt;, &lt;em&gt;Status:&lt;/em&gt; Phases 1 to 12 complete, and this log stops there. Phase 13
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs.html" rel="alternate"/><summary type="text">The design documents under todos/, each headed by a Status line saying what of it has shipped.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html</id><title type="text">OS Model API Reference</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/OS-API.md"&gt;&lt;code&gt;documentation/OS-API.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs.html" rel="alternate"/><summary type="text">The design documents under todos/, each headed by a Status line saying what of it has shipped.</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html</id><title type="text">OS Model API Reference</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/OS-API.md"&gt;&lt;code&gt;documentation/OS-API.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="os-model-api-reference"&gt;OS Model API Reference&lt;/h2&gt;
 &lt;p&gt;Complete API reference for the Entity-Component-System (ECS) based OS architecture.&lt;/p&gt;
 &lt;h3 id="table-of-contents"&gt;Table of Contents&lt;/h3&gt;
@@ -15842,8 +16237,15 @@ failure, so it is not surfaced as one); see &lt;code&gt;documentation/tui.md&lt;
 &lt;li&gt;&lt;code&gt;EntityQuery&lt;/code&gt; - Query specification
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html" rel="alternate"/><summary type="text">Complete API reference for the Entity-Component-System (ECS) based OS architecture. ## Table of Contents 1. [Core ECS Types](#core-ecs-types) 2. [World Operations](#world-operations) 3. [Agent Operations](#agent-operations) 4. [Toolbox Oper</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html</id><title type="text">Plan: Durable execution from the CLI</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows-cli-start-plan.md"&gt;&lt;code&gt;todos/durable-workflows-cli-start-plan.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-OS-API.html" rel="alternate"/><summary type="text">Complete API reference for the Entity-Component-System (ECS) based OS architecture. ## Table of Contents 1. [Core ECS Types](#core-ecs-types) 2. [World Operations](#world-operations) 3. [Agent Operations](#agent-operations) 4. [Toolbox Oper</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html</id><title type="text">Plan: Durable execution from the CLI</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/durable-workflows-cli-start-plan.md"&gt;&lt;code&gt;todos/durable-workflows-cli-start-plan.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="plan-durable-execution-from-the-cli"&gt;Plan: Durable execution from the CLI&lt;/h2&gt;
+&lt;p&gt;Status: implemented. &lt;code&gt;agents-exe session start&lt;/code&gt; and &lt;code&gt;session step&lt;/code&gt; exist next
+to &lt;code&gt;pause&lt;/code&gt;, &lt;code&gt;resume&lt;/code&gt;, &lt;code&gt;pending&lt;/code&gt;, &lt;code&gt;complete&lt;/code&gt; and &lt;code&gt;run-isolated&lt;/code&gt;, and
+&lt;code&gt;executionMode&lt;/code&gt; / &lt;code&gt;toolCallPolicyConfig&lt;/code&gt; are agent JSON fields. This file is
+the plan as written before the work; “Current state and gaps” is the starting
+point, not today’s code. Checked on 2026-10-04 by looking up the commands and
+names in the code; the steps were not compared line by line, and the test of
+Step 7 was not looked for. Current usage: &lt;code&gt;documentation/durable-workflows-howto.md&lt;/code&gt;.&lt;/p&gt;
 &lt;h3 id="goal"&gt;Goal&lt;/h3&gt;
 &lt;p&gt;Make the durable-workflow execution mode accessible from the CLI in one-shot
 form, so a user can:&lt;/p&gt;
@@ -16210,7 +16612,7 @@ handlers.
 &lt;li&gt;&lt;code&gt;src/System/Agents/Session/Loop.hs&lt;/code&gt; — &lt;code&gt;runAsync&lt;/code&gt; and &lt;code&gt;runStepM&lt;/code&gt;.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html" rel="alternate"/><summary type="text">Status: no status line yet</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-OS.html</id><title type="text">OS Model Migration Guide</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/MIGRATION-OS.md"&gt;&lt;code&gt;documentation/MIGRATION-OS.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/specs-durable-workflows-cli-start-plan.html" rel="alternate"/><summary type="text">Status: implemented. `agents-exe session start` and `session step` exist next</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-OS.html</id><title type="text">OS Model Migration Guide</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/MIGRATION-OS.md"&gt;&lt;code&gt;documentation/MIGRATION-OS.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="os-model-migration-guide"&gt;OS Model Migration Guide&lt;/h2&gt;
 &lt;p&gt;Complete migration guide for transitioning from the legacy Runtime-based architecture to the new ECS-based OS Model.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -16638,7 +17040,7 @@ handlers.
 &lt;/li&gt;
 &lt;/ol&gt;
 &lt;p&gt;For new code, use the OS Model directly. For legacy code, use the compatibility layer during migration.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-OS.html" rel="alternate"/><summary type="text">Complete migration guide for transitioning from the legacy Runtime-based architecture to the new ECS-based OS Model. ## Overview The Agents framework has migrated from a **Runtime-per-agent** model to an **Entity-Component-System (ECS)** ar</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-tools.html</id><title type="text">Tool System</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tools.md"&gt;&lt;code&gt;documentation/tools.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-OS.html" rel="alternate"/><summary type="text">Complete migration guide for transitioning from the legacy Runtime-based architecture to the new ECS-based OS Model. ## Overview The Agents framework has migrated from a **Runtime-per-agent** model to an **Entity-Component-System (ECS)** ar</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-tools.html</id><title type="text">Tool System</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tools.md"&gt;&lt;code&gt;documentation/tools.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="tool-system"&gt;Tool System&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/agent-tree.dot.png" alt="What an agent can call: helper agents, executable tools, MCP servers and OpenAPI operations all reach the model as functions." /&gt;&lt;/p&gt;
 &lt;p&gt;The tool system provides agents with the ability to execute external commands, call APIs, and interact with other agents. Tools are dynamically registered and exposed to the LLM via the OpenAI function calling API.&lt;/p&gt;
@@ -17201,8 +17603,8 @@ toolbox or put it in the &lt;code&gt;fileSandboxes&lt;/code&gt; of each agent.&l
 &lt;/table&gt;
 &lt;h3 id="system-toolbox-builtin"&gt;System Toolbox (Builtin)&lt;/h3&gt;
 &lt;p&gt;The System Toolbox provides agents with contextual information about the running system through a configurable set of capabilities.&lt;/p&gt;
-&lt;p&gt;The &lt;code&gt;get-tool-call-status&lt;/code&gt;, &lt;code&gt;list-running-tool-calls&lt;/code&gt; and &lt;code&gt;cancel-tool-call&lt;/code&gt;
-capabilities only do something for agents that run tool calls in the
+&lt;p&gt;The &lt;code&gt;get-tool-call-status&lt;/code&gt;, &lt;code&gt;list-running-tool-calls&lt;/code&gt;, &lt;code&gt;cancel-tool-call&lt;/code&gt; and
+&lt;code&gt;send-to-tool-call&lt;/code&gt; capabilities only do something for agents that run tool calls in the
 background; see &lt;a href="/agents-exe/docs-async-tool-calls.html"&gt;async-tool-calls.md&lt;/a&gt;.&lt;/p&gt;
 &lt;h4 id="capabilities"&gt;Capabilities&lt;/h4&gt;
 &lt;table&gt;
@@ -17221,6 +17623,7 @@ background; see &lt;a href="/agents-exe/docs-async-tool-calls.html"&gt;async-too
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;get-tool-call-status&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Status, progress and result of one of the agent's own tool calls&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;list-running-tool-calls&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Tool calls still running in the background&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;cancel-tool-call&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Stop a running background tool call&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;send-to-tool-call&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Send a message to the sub-agent a running &lt;code&gt;prompt_agent_&amp;lt;slug&amp;gt;&lt;/code&gt; call started&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;list-sessions&lt;/code&gt;&lt;/td&gt;&lt;td&gt;List accessible sessions (requires session introspection config)&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;search-sessions&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Full-text search across sessions (requires session introspection config)&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;read-session&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Read session content (requires session introspection config)&lt;/td&gt;&lt;/tr&gt;
@@ -18816,7 +19219,7 @@ Simply use the module name directly (e.g., &lt;code&gt;json.encode()&lt;/code&gt
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.FileSandbox.Predicate&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Path predicate DSL&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.OS.Events&lt;/code&gt;&lt;/td&gt;&lt;td&gt;OS event types for subcall visibility&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-tools.html" rel="alternate"/><summary type="text">The tool system provides agents with the ability to execute external commands, call APIs, and interact with other agents. Tools are dynamically registered and exposed to the LLM via the OpenAI function calling API. ## Overview ``` ┌──</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html</id><title type="text">Analysis of Issue Dependencies and DAG-Aware Agent Processing</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-dag.md"&gt;&lt;code&gt;documentation/sqq-dag.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-tools.html" rel="alternate"/><summary type="text">The tool system provides agents with the ability to execute external commands, call APIs, and interact with other agents. Tools are dynamically registered and exposed to the LLM via the OpenAI function calling API. ## Overview ``` ┌──</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html</id><title type="text">Analysis of Issue Dependencies and DAG-Aware Agent Processing</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/sqq-dag.md"&gt;&lt;code&gt;documentation/sqq-dag.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="analysis-of-issue-dependencies-and-dag-aware-agent-processing"&gt;Analysis of Issue Dependencies and DAG-Aware Agent Processing&lt;/h2&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
 &lt;p&gt;This document analyzes the current interaction between &lt;code&gt;sqq-agent.sh&lt;/code&gt; and &lt;code&gt;create-issue.sh&lt;/code&gt;, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management.&lt;/p&gt;
@@ -18924,7 +19327,7 @@ Simply use the module name directly (e.g., &lt;code&gt;json.encode()&lt;/code&gt
 &lt;li&gt;&lt;strong&gt;Clean Main:&lt;/strong&gt; Prevents the “unfinished work” syndrome by ensuring a logical ordering of merges.
 &lt;/li&gt;
 &lt;/ul&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html" rel="alternate"/><summary type="text">## Overview This document analyzes the current interaction between `sqq-agent.sh` and `create-issue.sh`, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management. ## Current S</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-tui.html</id><title type="text">Terminal UI (TUI)</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tui.md"&gt;&lt;code&gt;documentation/tui.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-sqq-dag.html" rel="alternate"/><summary type="text">## Overview This document analyzes the current interaction between `sqq-agent.sh` and `create-issue.sh`, focusing on how issue dependencies are handled and the resulting impact on parallel development and git branch management. ## Current S</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-tui.html</id><title type="text">Terminal UI (TUI)</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/tui.md"&gt;&lt;code&gt;documentation/tui.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="terminal-ui-tui"&gt;Terminal UI (TUI)&lt;/h2&gt;
 &lt;p&gt;The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tabbed interface for organizing different views.&lt;/p&gt;
 &lt;h3 id="overview"&gt;Overview&lt;/h3&gt;
@@ -20230,7 +20633,7 @@ scenarios are in &lt;code&gt;test/tui-e2e/Main.hs&lt;/code&gt;; tuispec also has
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.OS.Events&lt;/code&gt;&lt;/td&gt;&lt;td&gt;OS event types for subcall visibility&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;System.Agents.AgentTree.OneShotTool&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Subcall execution&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-tui.html" rel="alternate"/><summary type="text">The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tab</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html</id><title type="text">agents-server: agents over HTTP</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"&gt;&lt;code&gt;documentation/agents-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-tui.html" rel="alternate"/><summary type="text">The Terminal UI provides an interactive, real-time interface for agent conversations with support for multiple agents, streaming responses, visual feedback, file attachments, clipboard integration, subcall conversation visibility, and a tab</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html</id><title type="text">agents-server: agents over HTTP</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/agents-server.md"&gt;&lt;code&gt;documentation/agents-server.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="agents-server-agents-over-http"&gt;agents-server: agents over HTTP&lt;/h2&gt;
 &lt;p&gt;&lt;img src="/agents-exe/gen/images/server-overview.dot.png" alt="The standalone server: clients reach one session runner through the HTTP API." /&gt;&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;agents-server&lt;/code&gt; runs agents as a long-lived HTTP service. Sessions live in a
@@ -20468,9 +20871,10 @@ default) or &lt;code&gt;&amp;quot;interrupt&amp;quot;&lt;/code&gt;. &lt;code&gt;
 &lt;span id="5"&gt;&lt;a href="#5" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;control&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;message&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;resume&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;/span&gt;
 &lt;span id="6"&gt;&lt;a href="#6" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;control&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;message&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;stopRun&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;/span&gt;
 &lt;span id="7"&gt;&lt;a href="#7" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;control&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;message&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;cancelAllAttached&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;/span&gt;
-&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;control&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;message&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;cancelCalls&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;toolCallIds&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;017bb633-…&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;toolCallFinished&lt;/code&gt;, &lt;code&gt;continuationResult&lt;/code&gt; and &lt;code&gt;watchedEvent&lt;/code&gt; are also valid
-&lt;code&gt;MailBody&lt;/code&gt; tags (the async engine, &lt;code&gt;completeCall&lt;/code&gt;, and &lt;code&gt;watch-session&lt;/code&gt;
-produce them respectively), but there is no reason to post one by hand over
+&lt;span id="8"&gt;&lt;a href="#8" aria-hidden="true" tabindex="-1"&gt;&lt;/a&gt;&lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;control&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;message&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="fu"&gt;{&lt;/span&gt;&lt;span class="dt"&gt;&amp;quot;tag&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="st"&gt;&amp;quot;cancelCalls&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;,&lt;/span&gt; &lt;span class="dt"&gt;&amp;quot;toolCallIds&amp;quot;&lt;/span&gt;&lt;span class="fu"&gt;:&lt;/span&gt; &lt;span class="ot"&gt;[&lt;/span&gt;&lt;span class="st"&gt;&amp;quot;017bb633-…&amp;quot;&lt;/span&gt;&lt;span class="ot"&gt;]&lt;/span&gt;&lt;span class="fu"&gt;}}&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;toolCallFinished&lt;/code&gt;, &lt;code&gt;continuationResult&lt;/code&gt;, &lt;code&gt;watchedEvent&lt;/code&gt; and &lt;code&gt;toolCallNotice&lt;/code&gt;
+are also valid &lt;code&gt;MailBody&lt;/code&gt; tags (the async engine, &lt;code&gt;completeCall&lt;/code&gt;,
+&lt;code&gt;watch-session&lt;/code&gt;, and a tool reporting notify-level progress produce them
+respectively), but there is no reason to post one by hand over
 this endpoint. &lt;code&gt;POST /v1/sessions/:id/mail&lt;/code&gt; answers &lt;code&gt;202&lt;/code&gt; with the mail’s
 &lt;code&gt;Receipt&lt;/code&gt;: &lt;code&gt;{&amp;quot;id&amp;quot;: &amp;quot;&amp;lt;message id&amp;gt;&amp;quot;, &amp;quot;seq&amp;quot;: &amp;lt;int&amp;gt;, &amp;quot;duplicate&amp;quot;: false}&lt;/code&gt;.&lt;/p&gt;
 &lt;p&gt;&lt;code&gt;GET /v1/sessions/:id/mail?unread=true|false&lt;/code&gt; lists the session’s mail,
@@ -20752,7 +21156,7 @@ agent’s &lt;code&gt;mailInToolResult&lt;/code&gt; (default &lt;code&gt;false&l
 mail, with the same &lt;code&gt;[mail …]&lt;/code&gt; header, as a trailing block of the &lt;em&gt;last&lt;/em&gt;
 tool result of that round instead. Only applies when the round actually had
 tool calls; a plain user turn (no tool results) is unaffected, and
-detached/deferred results already arrive as mail of their own.&lt;/p&gt;
+a detached call’s result arrives in a notice of its own (see &lt;code&gt;documentation/async-tool-calls.md&lt;/code&gt;).&lt;/p&gt;
 &lt;p&gt;&lt;strong&gt;Results&lt;/strong&gt; (&lt;code&gt;result&lt;/code&gt;). A JSON string is a text result. Other forms are
 &lt;code&gt;{&amp;quot;type&amp;quot;: &amp;quot;text&amp;quot;, &amp;quot;content&amp;quot;: &amp;quot;…&amp;quot;}&lt;/code&gt;, &lt;code&gt;{&amp;quot;type&amp;quot;: &amp;quot;json&amp;quot;, &amp;quot;content&amp;quot;: &amp;lt;any&amp;gt;}&lt;/code&gt;,
 &lt;code&gt;{&amp;quot;type&amp;quot;: &amp;quot;media&amp;quot;, &amp;quot;mimeType&amp;quot;: &amp;quot;…&amp;quot;, &amp;quot;base64Data&amp;quot;: &amp;quot;…&amp;quot;}&lt;/code&gt;, and
@@ -21163,7 +21567,14 @@ answers &lt;code&gt;405&lt;/code&gt;. MCP sessions (&lt;code&gt;Mcp-Session-Id&l
 turns imply. Their interrupted step is lost, and background tool calls they
 were running are reported to the LLM as orphaned on the next run. Nothing is
 resumed automatically: &lt;code&gt;resume&lt;/code&gt; them.&lt;/p&gt;
-&lt;p&gt;One exception is decided at startup rather than on the next run: when such a
+&lt;p&gt;A session whose running calls belong to tools marked &lt;code&gt;rerunOnRestart&lt;/code&gt; is the
+exception: the server starts a run on it at startup, which starts those calls
+again, and logs &lt;code&gt;sessions.resumed_for_reruns&lt;/code&gt;. So that this also holds for an
+ordinary restart, a graceful shutdown does not cancel the run of such a
+session: it stops it and leaves the session stored as &lt;code&gt;running&lt;/code&gt;, as a crash
+would. See &lt;a href="/agents-exe/docs-async-tool-calls.html"&gt;async-tool-calls.md&lt;/a&gt; (Across a restart).&lt;/p&gt;
+&lt;p&gt;Another case is decided at startup rather than on the next run, and comes
+before the one above (no call is run again then): when a recovered
 session’s agent has a required parameter with no value left (a secret
 &lt;code&gt;session&lt;/code&gt;-scope value is memory-only, so the restart lost it), its running
 calls are failed right away with a message naming the parameters, the
@@ -21173,7 +21584,9 @@ those &lt;code&gt;params&lt;/code&gt; is refused with &lt;code&gt;422 params_req
 goes on, and the LLM sees why the calls failed. Non-secret session values
 are stored with the session and need no resupply.&lt;/p&gt;
 &lt;p&gt;Background tool calls (&lt;code&gt;runAsync&lt;/code&gt;) live in the server process. They survive
-between runs of a session, but not a restart. A session is not dropped at
+between runs of a session, but not a restart: a call in flight is then lost,
+or run again from the start when its tool is marked &lt;code&gt;rerunOnRestart&lt;/code&gt;. A
+session is not dropped at
 the TTL while one of its background calls is still running: it is kept until
 they finish. Deferred calls are the durable kind:
 their tokens stay valid across restarts.&lt;/p&gt;
@@ -21277,6 +21690,7 @@ and, when known, &lt;code&gt;session_id&lt;/code&gt;:&lt;/p&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;agents.stored_skipped&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;slug&lt;/code&gt;, &lt;code&gt;reason&lt;/code&gt;: a stored agent hidden by an agent file&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;agent_tree&lt;/code&gt;, &lt;code&gt;tool&lt;/code&gt;, &lt;code&gt;tool.portal&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;event&lt;/code&gt;: what the agent loader and the tools reported&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;llm.backoff&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;attempt&lt;/code&gt;, &lt;code&gt;delay_seconds&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;&lt;code&gt;tool_call.queued&lt;/code&gt;, &lt;code&gt;tool_call.started&lt;/code&gt;, &lt;code&gt;tool_call.progressed&lt;/code&gt;, &lt;code&gt;tool_call.completed&lt;/code&gt;, &lt;code&gt;tool_call.failed&lt;/code&gt;, &lt;code&gt;tool_call.timed_out&lt;/code&gt;, &lt;code&gt;tool_call.cancelled&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;session_id&lt;/code&gt;, &lt;code&gt;conversation_id&lt;/code&gt;, &lt;code&gt;tool_call_id&lt;/code&gt;, &lt;code&gt;tool&lt;/code&gt;, &lt;code&gt;provider_call_id&lt;/code&gt;, and per step &lt;code&gt;queued_ms&lt;/code&gt;, &lt;code&gt;elapsed_ms&lt;/code&gt;, &lt;code&gt;error&lt;/code&gt;, &lt;code&gt;timeout_seconds&lt;/code&gt;, &lt;code&gt;payload_bytes&lt;/code&gt;; &lt;code&gt;sub_agent&lt;/code&gt; for a sub-agent's call. The lifecycle of a background tool call, see [async-tool-calls.md](/docs-async-tool-calls.html) (Logs)&lt;/td&gt;&lt;/tr&gt;
 &lt;tr&gt;&lt;td&gt;&lt;code&gt;server.signal&lt;/code&gt;, &lt;code&gt;server.stopping&lt;/code&gt;, &lt;code&gt;server.stopped&lt;/code&gt;, &lt;code&gt;server.failed&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;
 &lt;/table&gt;
 &lt;p&gt;Prompts, LLM payloads, HTTP headers, and API keys are never logged.&lt;/p&gt;
@@ -21377,7 +21791,7 @@ at startup.
 &lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;See &lt;code&gt;todos/web-server-embedding.md&lt;/code&gt; for the design and the planned work.&lt;/p&gt;
-&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html" rel="alternate"/><summary type="text">`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-GUIDE.html</id><title type="text">Migration Guide</title><updated>2026-10-04T15:53:54Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/MIGRATION-GUIDE.md"&gt;&lt;code&gt;documentation/MIGRATION-GUIDE.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
+&lt;/section&gt;&lt;/div&gt;</content><link href="https://lucasdicioccio.github.io/agents-exe/docs-agents-server.html" rel="alternate"/><summary type="text">`agents-server` runs agents as a long-lived HTTP service. Sessions live in a SQLite database rather than in files, so a web application can start conversations, follow them live, complete deferred tool calls from its own workers, and pick s</summary></entry><entry><id>https://lucasdicioccio.github.io/agents-exe/docs-MIGRATION-GUIDE.html</id><title type="text">Migration Guide</title><updated>2026-10-06T21:45:28Z</updated><author><name>Lucas DiCioccio</name></author><content type="html">&lt;div class="main-article"&gt;&lt;section class="main-section"&gt;&lt;p&gt;&lt;em&gt;Generated from &lt;a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/MIGRATION-GUIDE.md"&gt;&lt;code&gt;documentation/MIGRATION-GUIDE.md&lt;/code&gt;&lt;/a&gt;, the repository is the canonical source and may be ahead of this page.&lt;/em&gt;&lt;/p&gt;
 &lt;h2 id="migration-guide"&gt;Migration Guide&lt;/h2&gt;
 &lt;p&gt;The migration from Runtime-per-agent to OS-native ECS architecture is &lt;strong&gt;COMPLETE&lt;/strong&gt;.&lt;/p&gt;
 &lt;h3 id="status"&gt;Status&lt;/h3&gt;
