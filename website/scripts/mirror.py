@@ -110,9 +110,15 @@ def main():
     kw = ", ".join('"%s"' % k.replace('"', '\\"') for k in keywords)
     title = a.title.replace('"', '\\"')
     summary = summary_text.replace('"', '\\"')
+    # the guides and references are technical documentation; the specs and
+    # the command reference keep the article layout
+    is_doc = a.kind == "docs"
+    layout = "documentation" if is_doc else "article"
+    group = ',"group":"Guides and references"' if is_doc else ""
+    doc_css = '  , "@import \\"`$ctx.pathPrefix`/css/documentation.css\\";"\n' if is_doc else ""
     out = f'''=base:build-info.json
-{{"layout":"article"
-,"publicationStatus":"Public"
+{{"layout":"{layout}"
+,"publicationStatus":"Public"{group}
 }}
 
 =base:preamble.json
@@ -151,7 +157,7 @@ def main():
   , "@import \\"`$ctx.pathPrefix`/css/colors.css\\";"
   , "@import \\"`$ctx.pathPrefix`/css/article.css\\";"
   , "@import \\"`$ctx.pathPrefix`/css/navigation.css\\";"
-  ]
+{doc_css}  ]
 }}
 '''
     sys.stdout.write(out)
