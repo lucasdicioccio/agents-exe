@@ -2,7 +2,11 @@ _Generated from [`todos/session-mailbox.md`](https://github.com/lucasdicioccio/a
 
 # Spec: the session mailbox (agent-to-agent mail, suspended tool calls, interrupts, tool-call wrappers)
 
-Status: proposal, 2026-09-22. Nothing implemented. Supersedes the designs in issues &#35;563 and &#35;564, and most of &#35;507 (see "What happens to the issues").
+Status: implemented. Phases 0 to 6 landed on 2026-09-22 in PR &#35;570 (`02301b0`..`5eb02e9`); see "Phases" for the commit of each. Supersedes the designs in issues &#35;563 and &#35;564, and most of &#35;507 (see "What happens to the issues").
+
+Status checked on 2026-10-04 against the git history and by looking up the names each phase introduces in the code; the behaviour of each bullet was not re-tested for this note. Everything below is the design as it was written before the work started: "Current state" and "Gaps" describe the code before PR &#35;570, and line numbers in them are from that time. Work that followed and is recorded elsewhere: `todos/os-as-standalone-server.md` (the runner protocol, the TUI as a runner client, sub-agents as sessions, `mailInToolResult`, watch recovery after a restart). Anything still open is tracked in the backlog, not in this file.
+
+The three items this design left for later were added afterwards: `send-to-tool-call` (§3), a `notify` progress level that posts mail (D9), and `args` in a wrapper's `match` (§6). `documentation/async-tool-calls.md` describes them as built. Two things differ from the text below: a notice is a `ToolCallNotice` mail body rather than progress alone, and the idle wait on background calls now ends on unread mail, which is what R2 asks for.
 
 ## Goal
 
@@ -396,6 +400,23 @@ Two rules:
 ```
 
 ## Phases
+
+All landed, in PR &#35;570 unless noted:
+
+```html
+<table>
+<tr><th>Phase</th><th>Commits</th></tr>
+<tr><td>0</td><td><code>02301b0</code></td></tr>
+<tr><td>1</td><td><code>1fadcf2</code></td></tr>
+<tr><td>2</td><td><code>e9c01cf</code></td></tr>
+<tr><td>3</td><td><code>4d10b6d</code>, then <code>02e8666</code> (retires <code>lsInbox</code>)</td></tr>
+<tr><td>4</td><td><code>2b232f4</code>, <code>e24f25a</code>, <code>999b834</code>, <code>09d8e0c</code>, <code>5eb02e9</code></td></tr>
+<tr><td>5</td><td><code>3f64374</code></td></tr>
+<tr><td>6</td><td><code>9c878c6</code> (Pause, Resume, CancelCalls), <code>3a581e3</code> (<code>watch-session</code>), <code>3bc3de9</code> (R4, <code>interruptCompletions</code>); <code>b62e2a6</code> wired Pause/Resume into the TUI and <code>agents-server</code> the day after; PR &amp;#35;600 made watch registrations survive a restart</td></tr>
+</table>
+```
+
+The interrupt and hard-cancel actions of the TUI and the chat page came with the same PR (`0948704`, `98b8a33`, fixed in `4645ece`).
 
 Each phase ships alone and leaves `ctxMailbox = Nothing` agents untouched. Phases 0, 3 and 5 depend on nothing but Phase 1 (Phase 0 not even on that); Phase 4 needs Phases 1-2 and, for its server part only, Phase 3.
 

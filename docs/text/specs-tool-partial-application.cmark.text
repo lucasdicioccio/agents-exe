@@ -2,9 +2,33 @@ _Generated from [`todos/tool-partial-application.md`](https://github.com/lucasdi
 
 # Spec: partial application of tool arguments
 
-Status: Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21. Phase 1 done (`97961e0`). Phase 2 done except MCP server `env` (G4); the tool-cache key (G8) is done too, see below (`03783fb`, `b0c53a5`): parameters, `ctxParams` (now actually wired at runtime, not just in tests), `--set`/`--set-json`/`--pin`/`--pin-json`/`--params-file`, process-scope resolution, secret-argv-mode load-time guard (G7). Phase 3 done (`8a41cd8`): OpenAPI/PostgREST argument bindings via the generic combinator, `ParamSource` secrets resolved per request.
+Status: implemented. Phases 1-7 and §8.4 (`derive_agent`) done as of 2026-09-21 (PR &#35;569), the Phase 2 and Phase 4 leftovers since. Open: `fork` on session creation and `session start --fork` (§5.2), and saved narrowings (D15).
 
-Phase 4 (session-level parameters in `agents-server`) done for the core mechanics, live-verified end to end against a real LLM: `params` on `POST /v1/sessions`, `/messages`, `/resume` and `POST /v1/continuations/:token`; the validation table (`422 unknown_params`, `403 forbidden_params`, `422 invalid_params`, `422 params_required`); a `params` column and migration on both the SQLite and Postgres session backends (`SessionMeta. smParams`, non-secret only); secret session values kept only in the in-memory `LiveSession` (`Host/Runner.hs`'s new `lsParams`), never persisted; message-scope values applied for one run only, never stored; `agentView`'s `"parameters"` self-description (`bound`/`pinned`, never a value); `agents-server --set`/`--set-json`/`--pin`/`--pin-json` (mirroring `agents-exe`) so an operator can lock a container to one tenant. Not done from Phase 4: the chat page's parameter form, and the generated OpenAPI document's request/response schemas (`AgentsServer/Types.hs`/`Routes.hs` are a separate hand-maintained layer used only for `/openapi.json` and were not updated with the new fields — the real handlers in `Api.hs` are fully wired and correct; this is a documentation-only gap). `recoverOnStartup` marks the running calls of a session whose required parameters are no longer bound as failed with a `params_required` message (§5's documented recovery behaviour; done 2026-09-25, which also made the persisted non-secret session values seed the live session back after a restart or an eviction, as §5 always said they would). `seal` and session tokens (§5.1) are done: `seal`/`session_token` on `POST /v1/sessions`, a `security` column (sealed flag and token SHA-256 digest, never the token) on both backends, session-token routing limited to its own session's read, messages, events and cancel, and `DELETE /v1/sessions/:id/token`. Deviations: the token is only honoured on `/v1/sessions/:id/...` paths of its own session (anything else is a 401, so no probing); `seal` exempts the owner as §5.1 says, so today it only matters against session-token holders, who never may set parameters anyway; a fork or child does not inherit either. Since then: `PUT /v1/sessions/:id/params`, `409 params_required` on a message or resume to an existing session, and `params` on `POST /v1/sessions/:id/fork` (which lacks §5.2's `fork` on session creation and the CLI's `--fork`; required parameters are not enforced at fork time).
+Checked on 2026-10-04 against the git history and the code. What was listed as missing here and has landed since:
+
+- MCP server `env` (G4): `d4036d1`, PR &#35;596.
+
+- The tool-cache key (G8): `01d6823`, PR &#35;588.
+
+- The chat page's parameter form: `d44645b`, PR &#35;589.
+
+- `params`, `seal`, `session_token` and the params/token routes in `/openapi.json`: `77f0fba`, PR &#35;597.
+
+
+What is still open, tracked in the backlog rather than here:
+
+- §5.2's `fork` field on `POST /v1/sessions` and the CLI's `session start --fork`. Forking with new values exists only as `POST /v1/sessions/:id/fork` with `params`.
+
+- Required parameters are not enforced at fork time (a fork starts no run; `forkSessionWithParams` says so).
+
+- Saving a narrowed helper as a stored agent (D15), which was never planned.
+
+
+The paragraphs below are the per-phase notes as they were written when each phase landed; where one says "not done", the list above is the current answer.
+
+Phase 1 done (`97961e0`). Phase 2 done, including MCP server `env` (G4) and the tool-cache key (G8) since 2026-09-26 (`03783fb`, `b0c53a5`): parameters, `ctxParams` (now actually wired at runtime, not just in tests), `--set`/`--set-json`/`--pin`/`--pin-json`/`--params-file`, process-scope resolution, secret-argv-mode load-time guard (G7). Phase 3 done (`8a41cd8`): OpenAPI/PostgREST argument bindings via the generic combinator, `ParamSource` secrets resolved per request.
+
+Phase 4 (session-level parameters in `agents-server`) done for the core mechanics, live-verified end to end against a real LLM: `params` on `POST /v1/sessions`, `/messages`, `/resume` and `POST /v1/continuations/:token`; the validation table (`422 unknown_params`, `403 forbidden_params`, `422 invalid_params`, `422 params_required`); a `params` column and migration on both the SQLite and Postgres session backends (`SessionMeta. smParams`, non-secret only); secret session values kept only in the in-memory `LiveSession` (`Host/Runner.hs`'s new `lsParams`), never persisted; message-scope values applied for one run only, never stored; `agentView`'s `"parameters"` self-description (`bound`/`pinned`, never a value); `agents-server --set`/`--set-json`/`--pin`/`--pin-json` (mirroring `agents-exe`) so an operator can lock a container to one tenant. Left out of the first Phase 4 commit and done on 2026-09-26: the chat page's parameter form (PR &#35;589), and the generated OpenAPI document's request/response schemas (PR &#35;597; `AgentsServer/Types.hs`/`Routes.hs` are a separate hand-maintained layer used only for `/openapi.json`). `recoverOnStartup` marks the running calls of a session whose required parameters are no longer bound as failed with a `params_required` message (§5's documented recovery behaviour; done 2026-09-25, which also made the persisted non-secret session values seed the live session back after a restart or an eviction, as §5 always said they would). `seal` and session tokens (§5.1) are done: `seal`/`session_token` on `POST /v1/sessions`, a `security` column (sealed flag and token SHA-256 digest, never the token) on both backends, session-token routing limited to its own session's read, messages, events and cancel, and `DELETE /v1/sessions/:id/token`. Deviations: the token is only honoured on `/v1/sessions/:id/...` paths of its own session (anything else is a 401, so no probing); `seal` exempts the owner as §5.1 says, so today it only matters against session-token holders, who never may set parameters anyway; a fork or child does not inherit either. Since then: `PUT /v1/sessions/:id/params`, `409 params_required` on a message or resume to an existing session, and `params` on `POST /v1/sessions/:id/fork` (which lacks §5.2's `fork` on session creation and the CLI's `--fork`; required parameters are not enforced at fork time).
 
 Phase 5 (sub-agents and MCP over HTTP) done, checked live with `agents-exe check` against fixture agents and with an `agents-server` integration test: `ExtraAgentRef` gains `with` (§7), a map from the _child's_ parameter names to `BindingValue`s in the _parent's_ scope; `AgentConfigNode.nodeExtraWith` carries it from discovery through to `wireAgentTools`, which checks it at load time (every `with` key must be a declared parameter of the child; every required session-scope parameter of the child must be covered by `with` or by the child's own process value/default) and reports failures through the existing `LoadingError`/`OtherError` path. `Props.agentToTool` and `turnAgentRuntimeIntoIOTool` gained a `Maybe (Map ParamName BindingValue)` argument (`Nothing` for a child reached through a toolDirectory, which has no reference site to hang a `with` on); `runSubAgent` resolves it against the caller's `ctxParams` at call time (`OneShotTool.hs`'s new `resolveWith`) and overlays the result onto the child's own resolved params, so the child's own process values and defaults still apply underneath. A `Literal` in `with` is never secret; a `Param` inherits secrecy from the caller's value. MCP over HTTP (`AgentsServer/Mcp.hs`, `Api.hs`) gained `Agents-Param-<name>` request headers (always strings) and `_meta."agents-exe/params"` on a `tools/call` (any JSON, overrides the headers by name); each call is one run, so session and message scope coincide there, and both go through the same validation table as the REST API.
 
@@ -685,14 +709,14 @@ After this phase one container serves many tenants.
 
 - Tests on a three-level chain: root binds for the grandchild; the middle agent narrows further; the middle agent cannot rebind; `describe_agent` from the middle does not show what the root bound; resume and fork.
 
-- Later, if needed: `derive_agent` (§8.4).
+- `derive_agent` (§8.4): done (`9e12c9b`).
 
 
 Depends on Phases 1, 2 and 5 (`with`).
 
-### Phase 7 (optional): `Expose`
+### Phase 7 (optional): `Expose` — done (`b125648`)
 
-`whenUnbound: "expose"` puts the argument back in the schema when the parameter is unbound for this session. It makes the tool list a function of the session, which the progressive-disclosure machinery (`Combinators/ProgressiveDisclosure.hs`) already does for activation, so the hook exists. Deferred until a real use shows up.
+`whenUnbound: "expose"` puts the argument back in the schema when the parameter is unbound for this session. It makes the tool list a function of the session, which the progressive-disclosure machinery (`Combinators/ProgressiveDisclosure.hs`) already does for activation, so the hook exists. Written as "deferred until a real use shows up"; implemented all the same, see the status at the top.
 
 -----------------------------
 
@@ -730,12 +754,10 @@ Depends on Phases 1, 2 and 5 (`with`).
 
 ## Nice to have, later
 
-- Saving a narrowed helper as a stored agent (D15).
+- Saving a narrowed helper as a stored agent (D15). Still not planned.
 
-- `derive_agent`, naming a narrowing within a session (§8.4).
 
-- `whenUnbound: "expose"` (Phase 7).
-
+Two items that used to be listed here are done: `derive_agent`, naming a narrowing within a session (§8.4, `9e12c9b`), and `whenUnbound: "expose"` (Phase 7, `b125648`).
 
 ## Related docs
 

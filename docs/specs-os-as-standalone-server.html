@@ -1,10 +1,12 @@
-<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: proposal, 2026-09-23, revised the same day after checking service"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: proposal, 2026-09-23, revised the same day after checking service"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html"><meta property="og:description" content="Status: proposal, 2026-09-23, revised the same day after checking service"><meta name="article:published_time" content="2026-10-04T15:53:54Z"><meta name="article:modified_time" content="2026-10-04T15:53:54Z"><meta name="ks:article_json" content="/agents-exe/json/specs-os-as-standalone-server.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-os-as-standalone-server.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-04T15:53:54Z","datePublished":"2026-10-04T15:53:54Z","description":"Status: proposal, 2026-09-23, revised the same day after checking service","headline":"Spec: the OS as a standalone server (TUI and web UI as clients)","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: the OS as a standalone server (TUI and web UI as clients)</h1><p>On <span>Sun, 04 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 3885 words, 2 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">3/13</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"><code>todos/os-as-standalone-server.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="specs, spec, design"><meta name="description" content="Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Spec: the OS as a standalone server (TUI and web UI as clients)"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html"><meta property="og:description" content="Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24"><meta name="article:published_time" content="2026-10-06T21:45:28Z"><meta name="article:modified_time" content="2026-10-06T21:45:28Z"><meta name="ks:article_json" content="/agents-exe/json/specs-os-as-standalone-server.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/specs-os-as-standalone-server.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-06T21:45:28Z","datePublished":"2026-10-06T21:45:28Z","description":"Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24","headline":"Spec: the OS as a standalone server (TUI and web UI as clients)","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/specs-os-as-standalone-server.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="specs"><meta name="article:tag" content="spec"><meta name="article:tag" content="design"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Spec: the OS as a standalone server (TUI and web UI as clients)</h1><p>On <span>Tue, 06 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 4083 words, 2 code snippets, 0 links, 0images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/specs.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/specs.html"><span class="topic-name">specs</span><span class="topic-count">3/13</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/specs-durable-workflows.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/todos/os-as-standalone-server.md"><code>todos/os-as-standalone-server.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
 <h2 id="spec-the-os-as-a-standalone-server-tui-and-web-ui-as-clients">Spec: the OS as a standalone server (TUI and web UI as clients)</h2>
-<p>Status: proposal, 2026-09-23, revised the same day after checking service
-readiness. Phases 0 and 1 done on branch <code>feature/os-standalone-server</code>
-(commits 8de2a64..dc01dc8); All phases landed (8de2a64..771c988), with the open items listed
-under “Remaining after Phase 5”. Builds on
+<p>Status: implemented. Phases 0 to 5 landed on 2026-09-23 and 2026-09-24
+(<code>8de2a64</code>..<code>771c988</code>, PR #571); what was left is listed, with what has
+closed since, under “Remaining after Phase 5”. Builds on
 <code>todos/web-server-embedding.md</code> (done) and <code>todos/session-mailbox.md</code> (done).</p>
+<p>Status checked on 2026-10-04 against the git history and the code. “Current
+state”, “Gaps” and “Integration modes, as of 2026-09-23” describe the code
+before this work.</p>
 <h3 id="goal">Goal</h3>
 <p>One long-running <code>agents-exe</code> process hosts the agents and their sessions. It
 loads agents files the way the TUI does today (<code>agents-exe.cfg.json</code>,
@@ -386,7 +388,7 @@ unlinks its file but does not drain in-flight requests through
 <code>--socket</code>. The <code>agents-server</code> executable stays as the flags-only entry
 point over the same code. Docs: <code>documentation/agents-server.md</code> gains the config
 section; <code>documentation/cli-commands.md</code> gains <code>serve</code>.</p>
-<h4 id="phase-2-the-protocol-in-the-library">Phase 2: the protocol, in the library</h4>
+<h4 id="phase-2-the-protocol-in-the-library--done">Phase 2: the protocol, in the library — done</h4>
 <p>Split in three sequential steps: 2a the <code>Protocol</code> types with JSON, event
 sequence numbers, the ring and replay, the cross-session feed, and the
 server re-implemented on them; 2b the missing runner operations
@@ -431,7 +433,7 @@ and the ring, <code>listSessions</code>, <code>sendMail</code>, <code>createSess
 <code>forkSession</code>. <code>ctxEmit</code> replaces <code>ctxEventQueue</code>; <code>Engine</code> and
 <code>OneShotTool</code> emit through it. <code>mailInToolResult</code> folding at R1 (§5). Tests: JSON round trips, replay from
 the ring, fork, empty create, <code>mailInToolResult</code> folding.</p>
-<h4 id="phase-3-the-tui-on-the-in-process-runner">Phase 3: the TUI on the in-process runner</h4>
+<h4 id="phase-3-the-tui-on-the-in-process-runner--done">Phase 3: the TUI on the in-process runner — done</h4>
 <p>Split in three sequential steps: 3a <code>RunnerClient</code> and <code>inProcessClient</code>
 in the library plus a serializable agent descriptor (<code>ListAgents</code> /
 <code>GetAgent</code> with model, prompt and tool activation, which also fixes the
@@ -571,10 +573,11 @@ including a migration-inventory test updated for the new table.)
 </li>
 <li>TUI: selection among several pending calls (<code>select-pending</code>, Ctrl+O) and
 <code>fail-pending</code> (Ctrl+W) are done; a failed call completes with the text
-<code>Error: &lt;reason&gt;</code> rather than a new <code>UserToolResponse</code> variant. Still no view
-for <code>hook.failed</code>.
+<code>Error: &lt;reason&gt;</code> rather than a new <code>UserToolResponse</code> variant. <code>hook.failed</code>
+is shown in the status bar since 2026-09-26 (<code>8255f05</code>, PR #594).
 </li>
-<li>Service packaging: docs only, no unit file shipped, no <code>bundling/</code> entry.
+<li>Service packaging: done since 2026-09-26, <code>bundling/systemd/</code> ships a
+system unit and a user unit (<code>ea7c13f</code>, PR #598).
 </li>
 <li><code>checks/lib/fake_llm.py</code> scripts multi-turn answers (text and tool calls,
 matched on request index, system prompt, last message or offered tools);
@@ -584,9 +587,26 @@ from the Pending panel (<code>checks/phase5-pending-e2e</code>). Not covered yet
 interrupts, and the same flows with <code>tui --attach</code>.
 </li>
 <li>D8’s out-of-scope items: multi-server Postgres, mid-<code>RunAsync</code> durability,
-per-owner API keys.
+per-owner API keys. Two of the three were done later, outside this spec:
+several servers on one Postgres database through a run lease (<code>999666f</code>,
+PR #603) and per-owner API keys with opt-in tool isolation (<code>1d8ee0c</code>,
+PR #606); both are described under “Remaining later work” in
+<code>todos/web-server-embedding.md</code>. Mid-<code>RunAsync</code> durability: a first slice
+on <code>feat/durable-async-calls</code>. A detached call of a tool marked
+<code>rerunOnRestart</code> is run again by the next process, from the start; every
+other call is still reported as orphaned
+(<code>documentation/async-tool-calls.md</code>, “Across a restart”). Left open: a
+session another server takes over is not resumed by itself
+(<code>takeOverExpired</code>), a call is never resumed where it stopped, and the
+calls of a step interrupted before it was stored are still all run again,
+marked or not.
 </li>
 </ul>
+<p>As of 2026-10-04 the open items of this list are the pty checks for
+interrupts and for the same flows under <code>tui --attach</code> (not re-checked beyond
+the names of the directories in <code>checks/</code>), a narrowing that is lost when a
+narrowed child is resumed after a restart, and mid-<code>RunAsync</code> durability.
+They are tracked in the backlog, not in this file.</p>
 <h3 id="decisions-proposed">Decisions (proposed)</h3>
 <p>D1. <strong>The runner is the OS.</strong> The ECS <code>World</code> is an engine-internal detail
 for tool-call entities. <code>OS.Persistence</code>, <code>OS.Interfaces</code> remnants and the

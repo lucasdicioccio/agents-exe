@@ -1,4 +1,4 @@
-<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Asynchronous Tool Calls</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Asynchronous Tool Calls"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Asynchronous Tool Calls"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html"><meta property="og:description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="article:published_time" content="2026-10-04T15:53:54Z"><meta name="article:modified_time" content="2026-10-04T15:53:54Z"><meta name="ks:article_json" content="/agents-exe/json/docs-async-tool-calls.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-async-tool-calls.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-04T15:53:54Z","datePublished":"2026-10-04T15:53:54Z","description":"By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,","headline":"Asynchronous Tool Calls","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Asynchronous Tool Calls</h1><p>On <span>Sun, 04 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 782 words, 7 code snippets, 2 links, 1images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-durable-workflows-howto.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">9/27</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-ai-assistant-guidelines.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/async-tool-calls.md"><code>documentation/async-tool-calls.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
+<!DOCTYPE HTML><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="robots" content="index, follow"><title>agents-exe - Asynchronous Tool Calls</title><link rel="icon" type="image/x-icon" href="/agents-exe/images/favicon.png"><link rel="canonical" href="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html"><link rel="alternate" type="application/atom+xml" title="Atom Feed" href="https://lucasdicioccio.github.io/agents-exe/atom.xml"><meta name="author" content="Lucas DiCioccio"><meta name="keywords" content="docs, guide, documentation"><meta name="description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="agents-exe - Asynchronous Tool Calls"><meta name="twitter:site" content="@lucasdicioccio"><meta name="twitter:creator" content="@lucasdicioccio"><meta property="twitter:description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="type" property="og:type" content="article"><meta name="title" property="og:title" content="agents-exe - Asynchronous Tool Calls"><meta property="og:site_name" content="agents-exe"><meta name="url" property="og:url" content="https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html"><meta property="og:description" content="By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,"><meta name="article:published_time" content="2026-10-06T21:45:28Z"><meta name="article:modified_time" content="2026-10-06T21:45:28Z"><meta name="ks:article_json" content="/agents-exe/json/docs-async-tool-calls.cmark.json"><meta name="ks:article_text" content="/agents-exe/text/docs-async-tool-calls.cmark.text"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Lucas DiCioccio"},"dateModified":"2026-10-06T21:45:28Z","datePublished":"2026-10-06T21:45:28Z","description":"By default an agent runs every tool call of a turn one after another and only answers the LLM once all of them are done. In asynchronous mode, calls run concurrently in the background, the LLM can be handed a partial answer while they run,","headline":"Asynchronous Tool Calls","mainEntityOfPage":{"@id":"https://lucasdicioccio.github.io/agents-exe/docs-async-tool-calls.html","@type":"WebPage"},"publisher":{"@type":"Organization","name":"agents-exe"}}</script><meta name="article:tag" content="docs"><meta name="article:tag" content="guide"><meta name="article:tag" content="documentation"><style>@import "/agents-exe/css/dev.css";@import "/agents-exe/css/colors.css";@import "/agents-exe/css/article.css";@import "/agents-exe/css/navigation.css";</style></head><body><nav id="site-navigation" class="nav"><a href="/agents-exe/" class="home-link">Home</a><div id="search-box" data-base-path="/agents-exe"><script type="text/javascript" src="/agents-exe/js/search-box.js" async></script></div></nav><div class="main"><article><header class="heading"><h1>Asynchronous Tool Calls</h1><p>On <span>Tue, 06 Oct 2026</span>, by <a href="https://twitter.com/lucasdicioccio">@lucasdicioccio</a>, 1949 words, 13 code snippets, 2 links, 1images.</p><div class="topiclist"><div class="topic"><span class="topic-nav topic-prev-link"><a class="topic-nav-link" href="/agents-exe/docs-durable-workflows-howto.html">‹</a></span><a class="topic-link" href="/agents-exe/topics/docs.html"><span class="topic-name">docs</span><span class="topic-count">9/27</span></a><span class="topic-nav topic-next-link"><a class="topic-nav-link" href="/agents-exe/docs-ai-assistant-guidelines.html">›</a></span></div></div></header><div class="main-article"><section class="main-section"><p><em>Generated from <a href="https://github.com/lucasdicioccio/agents-exe/blob/main/documentation/async-tool-calls.md"><code>documentation/async-tool-calls.md</code></a>, the repository is the canonical source and may be ahead of this page.</em></p>
 <h2 id="asynchronous-tool-calls">Asynchronous Tool Calls</h2>
 <p><img src="/agents-exe/gen/images/async-tool-call.dot.png" alt="One tool call in asynchronous mode: a placeholder while it runs, a notice when it finishes." /></p>
 <p>By default an agent runs every tool call of a turn one after another and only
@@ -44,6 +44,51 @@ process), see <a href="/agents-exe/docs-durable-workflows-howto.html">durable-wo
 the machinery, the policy decides which calls actually go to the background.</p>
 <p>The settings apply everywhere an agent runs: <code>run</code> (one-shot), the TUI, the
 <code>session</code> commands, and agents called as tools by other agents.</p>
+<h3 id="wrappers">Wrappers</h3>
+<p><code>rules</code> pick how a call runs. <code>wrappers</code> add decorators around it: a timeout,
+retries, a cap on the result, a hook that may deny or defer the call. Every
+wrapper whose <code>match</code> holds applies, in file order, the first one outermost.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;toolCallPolicyConfig&quot;</span><span class="er">:</span> <span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runSync&quot;</span><span class="fu">},</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;wrappers&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;match&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;http_*&quot;</span><span class="fu">},</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;decorators&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;retries&quot;</span><span class="fu">,</span> <span class="dt">&quot;count&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">}</span><span class="ot">,</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;timeout&quot;</span><span class="fu">,</span> <span class="dt">&quot;seconds&quot;</span><span class="fu">:</span> <span class="dv">30</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;match&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_*&quot;</span><span class="fu">,</span> <span class="dt">&quot;args&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;command&quot;</span><span class="fu">,</span> <span class="dt">&quot;glob&quot;</span><span class="fu">:</span> <span class="st">&quot;rm *&quot;</span><span class="fu">}},</span></span>
+<span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;decorators&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;before&quot;</span><span class="fu">,</span> <span class="dt">&quot;hook&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;command&quot;</span><span class="fu">:</span> <span class="st">&quot;hooks/approve&quot;</span><span class="fu">}}</span><span class="ot">]</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="9"><a href="#9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;match&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;args&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;all&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;env&quot;</span><span class="fu">,</span> <span class="dt">&quot;equals&quot;</span><span class="fu">:</span> <span class="st">&quot;production&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="10"><a href="#10" aria-hidden="true" tabindex="-1"></a>                                <span class="fu">{</span><span class="dt">&quot;not&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;path&quot;</span><span class="fu">:</span> <span class="st">&quot;dry_run&quot;</span><span class="fu">,</span> <span class="dt">&quot;equals&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">}}</span><span class="ot">]</span><span class="fu">}},</span></span>
+<span id="11"><a href="#11" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;decorators&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;before&quot;</span><span class="fu">,</span> <span class="dt">&quot;hook&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;command&quot;</span><span class="fu">:</span> <span class="st">&quot;hooks/approve&quot;</span><span class="fu">}}</span><span class="ot">]</span><span class="fu">}</span></span>
+<span id="12"><a href="#12" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="13"><a href="#13" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div></div><p><code>match</code> has two optional parts, and both must hold:</p>
+<ul>
+<li><code>tool</code>: a glob (<code>*</code> only) on the name of the tool as the model calls it.
+</li>
+<li><code>args</code>: a predicate on the arguments of the call.
+</li>
+</ul>
+<table>
+<tr><th>Predicate</th><th>Holds when</th></tr>
+<tr><td><code>{"path": p, "equals": v}</code></td><td>there is a value at <code>p</code> and it is the JSON value <code>v</code></td></tr>
+<tr><td><code>{"path": p, "glob": g}</code></td><td>there is a string at <code>p</code> and it matches the glob <code>g</code></td></tr>
+<tr><td><code>{"path": p, "exists": true}</code></td><td>there is a value at <code>p</code> (<code>null</code> counts); <code>false</code> for the opposite</td></tr>
+<tr><td><code>{"all": [...]}</code>, <code>{"any": [...]}</code>, <code>{"not": {...}}</code></td><td>every, at least one, or not</td></tr>
+</table>
+<p>A path is a dot-separated list of object keys and array indices
+(<code>options.targets.0</code>); the empty path is the whole arguments object.</p>
+<p>Three things to know when a wrapper guards a tool:</p>
+<ul>
+<li>A missing value fails <code>equals</code> and <code>glob</code>. Write “unless <code>dry_run</code> is true”
+with <code>not</code>, as above: it then also covers calls that leave <code>dry_run</code> out.
+</li>
+<li>The predicate sees the arguments as the model sent them. A value added by a
+binding is not seen, the same rule as for hooks. Arguments that are not
+valid JSON are <code>null</code> to the predicate.
+</li>
+<li>A predicate that cannot be read (a misspelt operator, two operators in one
+object) is a loading error for the agent, not a rule that never matches.
+</li>
+</ul>
 <h3 id="what-the-llm-sees">What the LLM sees</h3>
 <p>A call that has not finished when the LLM is asked for its next completion
 gets a placeholder tool message instead of a result:</p>
@@ -58,6 +103,17 @@ once, as a notice:</p>
 tool_call_id call_abc (run_tests) completed:
 42 tests passed
 </code></pre>
+<p>If the model already read the result with <code>get-tool-call-status</code>, the notice
+does not repeat it:</p>
+<pre><code>tool_call_id call_abc (run_tests) completed: result already read with get-tool-call-status
+</code></pre>
+<p>A session with a mailbox (the TUI, one-shot runs, the server) also gets a
+<code>ToolCallFinished</code> mail for each finished call, which is what wakes a waiting
+session. That mail is not shown to the model: the result reaches it once, as
+the call’s tool message or in the notice above. The one exception is mail
+about a call the current process does not know (a durable mailbox read after a
+restart), which is shown like any other mail, since the call itself is then
+reported as orphaned.</p>
 <p>If the LLM ends its turn while calls are still running, the session does not
 stop: it waits for the results and sends them.</p>
 <h3 id="tool-call-capabilities">Tool-call capabilities</h3>
@@ -68,20 +124,82 @@ calls:</p>
 <span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>   <span class="dt">&quot;contents&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
 <span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;Name&quot;</span><span class="fu">:</span> <span class="st">&quot;system&quot;</span><span class="fu">,</span></span>
 <span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;Description&quot;</span><span class="fu">:</span> <span class="st">&quot;System context and background tool calls&quot;</span><span class="fu">,</span></span>
-<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;Capabilities&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;get-tool-call-status&quot;</span><span class="ot">,</span> <span class="st">&quot;list-running-tool-calls&quot;</span><span class="ot">,</span> <span class="st">&quot;cancel-tool-call&quot;</span><span class="ot">]</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>     <span class="dt">&quot;Capabilities&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;get-tool-call-status&quot;</span><span class="ot">,</span> <span class="st">&quot;list-running-tool-calls&quot;</span><span class="ot">,</span> <span class="st">&quot;cancel-tool-call&quot;</span><span class="ot">,</span> <span class="st">&quot;send-to-tool-call&quot;</span><span class="ot">]</span></span>
 <span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>   <span class="fu">}}</span></span>
 <span id="8"><a href="#8" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span><span class="fu">}</span></span></code></pre></div></div><table>
 <tr><th>Capability</th><th>Use</th></tr>
 <tr><td><code>list-running-tool-calls</code></td><td>The calls still running in this session</td></tr>
 <tr><td><code>get-tool-call-status</code></td><td>Status, progress and (once final) result of a call; can block until it finishes with <code>wait_for_completion</code></td></tr>
 <tr><td><code>cancel-tool-call</code></td><td>Interrupt a running call</td></tr>
+<tr><td><code>send-to-tool-call</code></td><td>Write to the sub-agent a running <code>prompt_agent_&lt;slug&gt;</code> call started</td></tr>
 </table>
 <p>Calls are addressed by the <code>tool_call_id</code> the model itself used (e.g.
 <code>call_abc</code>); the internal UUID also works.</p>
+<p><code>send-to-tool-call</code> takes <code>tool_call_id</code>, <code>text</code>, and optionally
+<code>expects_reply</code> and <code>interrupt</code>. It is <code>send-message</code> to the session of the
+helper, found from the call instead of from a session id, with the same mail
+scopes. The helper reads the message before its next completion, so a
+message that arrives while the helper writes its final answer is not read.
+The call must still be running and must be a sub-agent call: there is nothing
+to write to in a bash or MCP call. It works under the runner (the TUI and
+<code>agents-server</code>, where the helper is a session of its own) and in <code>run</code>.</p>
 <p><code>get-tool-call-status</code> reports <code>orphaned</code> for a call that was running when its
 process went away (e.g. the session was saved and reloaded elsewhere). Such a
 call can never finish, so the stepper resolves it as failed rather than
 waiting for it.</p>
+<h3 id="across-a-restart">Across a restart</h3>
+<p>A background call lives in the process that started it. When that process
+goes away while the call runs, the call is lost, and what happens next depends
+on the tool.</p>
+<p>By default the call is reported as orphaned, as described above: the model is
+told the result is lost and decides what to do. Nothing is run twice.</p>
+<p>A tool that is safe to run twice can be marked so, with the <code>rerunOnRestart</code>
+decorator in a <code>wrappers</code> rule:</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;toolCallPolicyConfig&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a>   <span class="dt">&quot;default&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runSync&quot;</span><span class="fu">},</span></span>
+<span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a>   <span class="dt">&quot;rules&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_run_tests&quot;</span><span class="fu">,</span> <span class="dt">&quot;disposition&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;runAsync&quot;</span><span class="fu">}}</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a>   <span class="dt">&quot;wrappers&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="5"><a href="#5" aria-hidden="true" tabindex="-1"></a>     <span class="fu">{</span><span class="dt">&quot;match&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;bash_run_tests&quot;</span><span class="fu">},</span></span>
+<span id="6"><a href="#6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;decorators&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tag&quot;</span><span class="fu">:</span> <span class="st">&quot;rerunOnRestart&quot;</span><span class="fu">,</span> <span class="dt">&quot;times&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}</span></span>
+<span id="7"><a href="#7" aria-hidden="true" tabindex="-1"></a>   <span class="ot">]</span><span class="fu">}}</span></span></code></pre></div></div><p>A call of such a tool that was running when its process went away is started
+again by the next process, from the beginning, with the same arguments and
+under the same <code>tool_call_id</code>. Its result is delivered like any late result,
+with a note that the call ran again:</p>
+<pre><code>tool_call_id call_abc (bash_run_tests) completed (run again from the start after a restart):
+42 tests passed
+</code></pre>
+<p>What this does and does not give:</p>
+<ul>
+<li>It is a re-run, not a resume. Nothing of the first run is kept (output,
+progress, a half-written file), and the tool is executed at least twice in
+total. Only mark tools for which that is harmless: reads, builds, test runs,
+idempotent requests.
+</li>
+<li><code>times</code> (default 1) is how many times one call may be started again. Once
+it is used up, a further restart reports the call as orphaned. This bounds a
+tool that takes its process down with it.
+</li>
+<li>The session is the record: a call is known to be in flight because the
+stored session says <code>running</code> for it. No other storage is involved, so it
+works with every session store, in the TUI and on the server alike.
+</li>
+<li>The call is started again when the session next runs. The server and the
+TUI do that by themselves at startup for the sessions a previous process
+left running (<code>recoverOnStartup</code>); elsewhere (<code>agents-exe session resume</code>),
+it happens when you resume.
+</li>
+<li>A call that ended just before the restart, and whose result is in the
+session’s mailbox, is not run again.
+</li>
+<li>A call that was cancelled (<code>cancel-tool-call</code>, cancelling the run) is not
+started again.
+</li>
+<li>Not covered: the calls of a step that was interrupted before it was stored.
+The session then still ends with the LLM’s request for them, and the next
+run executes that whole step again, whatever the tools are marked with.
+This is how every interrupted step has always been handled.
+</li>
+</ul>
 <h3 id="progress">Progress</h3>
 <p>Tools that run in the background can report progress, which the model reads
 through <code>get-tool-call-status</code> and the TUI shows next to the running call.</p>
@@ -102,6 +220,32 @@ per-step callback.
 the <code>ToolExecutionContext</code>.
 </li>
 </ul>
+<h4 id="asking-for-the-models-attention">Asking for the model’s attention</h4>
+<p>Progress is read by the model when it asks. A tool that should not wait for
+that reports a payload at the <strong>notify</strong> level: any JSON object whose <code>level</code>
+is <code>&quot;notify&quot;</code>, with the text in <code>message</code>.</p>
+<ul>
+<li><strong>Bash tools</strong> write a line starting with <code>::notify::</code> on standard error:
+<code>echo &quot;::notify:: 3 tests are red, still running&quot; &gt;&amp;2</code>.
+</li>
+<li><strong>Your own tools</strong> call <code>ctxProgressCallback</code> with <code>notifyProgress &quot;…&quot;</code>.
+</li>
+</ul>
+<p>Such a payload is kept as progress like any other, and is also sent to the
+session as mail:</p>
+<pre><code>[mail 6f1c… from tool call 0d5e…]
+tool call call_abc (run_tests) notifies:
+3 tests are red, still running
+</code></pre>
+<p>The model gets it with its next completion. If the session was idle, waiting
+for its background calls, or in <code>wait</code>, the mail wakes it, and the call goes
+on running. A call the step is still attached to is not interrupted: the mail
+is delivered when the step hands control back. A call sends at most 16 such
+mails, and they count against the mailbox bound; what is over is progress
+only.</p>
+<p>This needs <code>executionMode: asynchronous</code> (always on under the runner: the TUI
+and <code>agents-server</code>), because only a call run by the async engine has
+somewhere to report to.</p>
 <p>MCP and OpenAPI tools do not report progress yet. An OpenAPI call waits for
 one complete HTTP response, so there is nothing to stream. MCP <em>does</em> define
 progress notifications (<code>ProgressNotification</code> in <code>System.Agents.MCP.Base</code>),
@@ -112,6 +256,10 @@ but the client currently ignores them; forwarding them to
 <p><code>cancel-tool-call</code> interrupts the call’s thread. A bash tool runs its script
 in its own process group, so cancelling kills the script <em>and</em> whatever it
 started. The same happens when a call exceeds <code>asyncCallTimeoutSeconds</code>.</p>
+<p>A call is cancelled through the engine that started it, wherever that engine
+is in the process: cancelling works the same after the session was paused and
+resumed with a newly built agent. Only a call whose process is gone cannot be
+interrupted; it is reported as orphaned.</p>
 <p>Background calls are cancelled when the agent that owns them finishes or
 fails, so nothing keeps running (or keeps a subprocess alive) after a run.</p>
 <h3 id="in-the-tui">In the TUI</h3>
@@ -135,6 +283,36 @@ it can be continued:</p>
 <span id="3"><a href="#3" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;session_id&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">,</span></span>
 <span id="4"><a href="#4" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;deferred_calls&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span> <span class="st">&quot;approve_deploy&quot;</span><span class="fu">,</span> <span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span> <span class="st">&quot;call_9&quot;</span><span class="fu">,</span> <span class="dt">&quot;continuation_token&quot;</span><span class="fu">:</span> <span class="st">&quot;…&quot;</span><span class="fu">}</span><span class="ot">]</span><span class="fu">}</span></span></code></pre></div></div><p>Continue it with <code>agents-exe session complete</code> and <code>agents-exe session resume</code>
 (see <a href="/agents-exe/docs-durable-workflows-howto.html">durable-workflows-howto.md</a>).</p>
+<h3 id="logs">Logs</h3>
+<p>Each step of a background call is traced, with the ids needed to follow one
+call through a log:</p>
+<table>
+<tr><th><code>kind</code></th><th>When</th><th>Extra fields</th></tr>
+<tr><td><code>tool_call.queued</code></td><td>the call is accepted and waits for a free slot (<code>maxConcurrency</code>)</td><td></td></tr>
+<tr><td><code>tool_call.started</code></td><td>it got a slot and runs</td><td><code>queued_ms</code></td></tr>
+<tr><td><code>tool_call.progressed</code></td><td>the tool reported progress</td><td><code>payload_bytes</code> (the payload itself is not logged)</td></tr>
+<tr><td><code>tool_call.completed</code></td><td>it returned a result</td><td><code>elapsed_ms</code></td></tr>
+<tr><td><code>tool_call.failed</code></td><td>it threw</td><td><code>elapsed_ms</code>, <code>error</code></td></tr>
+<tr><td><code>tool_call.timed_out</code></td><td>it outlived <code>asyncCallTimeoutSeconds</code></td><td><code>timeout_seconds</code></td></tr>
+<tr><td><code>tool_call.cancelled</code></td><td>it was cancelled (<code>cancel-tool-call</code>, a pause that cancels, the end of the run)</td><td></td></tr>
+</table>
+<p>Every line has <code>session_id</code>, <code>conversation_id</code>, <code>tool_call_id</code>, <code>tool</code>, and
+<code>provider_call_id</code> when the provider gave one; a call made by a sub-agent
+also has <code>sub_agent: true</code>. A call ends with exactly one of the last four.</p>
+<div class="code code--highlighted"><div class="sourceCode"><pre class="sourceCode"><code class="sourceCode"><span id="1"><a href="#1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;ts&quot;</span><span class="fu">:</span><span class="st">&quot;…&quot;</span><span class="fu">,</span><span class="dt">&quot;kind&quot;</span><span class="fu">:</span><span class="st">&quot;tool_call.started&quot;</span><span class="fu">,</span><span class="dt">&quot;session_id&quot;</span><span class="fu">:</span><span class="st">&quot;…&quot;</span><span class="fu">,</span><span class="dt">&quot;conversation_id&quot;</span><span class="fu">:</span><span class="st">&quot;…&quot;</span><span class="fu">,</span><span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span><span class="st">&quot;…&quot;</span><span class="fu">,</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span><span class="st">&quot;bash_run_tests&quot;</span><span class="fu">,</span><span class="dt">&quot;provider_call_id&quot;</span><span class="fu">:</span><span class="st">&quot;call_abc&quot;</span><span class="fu">,</span><span class="dt">&quot;queued_ms&quot;</span><span class="fu">:</span><span class="dv">0</span><span class="fu">}</span></span>
+<span id="2"><a href="#2" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;ts&quot;</span><span class="fu">:</span><span class="st">&quot;…&quot;</span><span class="fu">,</span><span class="dt">&quot;kind&quot;</span><span class="fu">:</span><span class="st">&quot;tool_call.completed&quot;</span><span class="fu">,</span><span class="dt">&quot;session_id&quot;</span><span class="fu">:</span><span class="st">&quot;…&quot;</span><span class="fu">,</span><span class="dt">&quot;conversation_id&quot;</span><span class="fu">:</span><span class="st">&quot;…&quot;</span><span class="fu">,</span><span class="dt">&quot;tool_call_id&quot;</span><span class="fu">:</span><span class="st">&quot;…&quot;</span><span class="fu">,</span><span class="dt">&quot;tool&quot;</span><span class="fu">:</span><span class="st">&quot;bash_run_tests&quot;</span><span class="fu">,</span><span class="dt">&quot;provider_call_id&quot;</span><span class="fu">:</span><span class="st">&quot;call_abc&quot;</span><span class="fu">,</span><span class="dt">&quot;elapsed_ms&quot;</span><span class="fu">:</span><span class="dv">8412</span><span class="fu">}</span></span></code></pre></div></div><p>Where they go:</p>
+<ul>
+<li><code>agents-server</code> (and <code>agents-exe serve</code>): its JSON log on stderr.
+</li>
+<li><code>agents-exe tui</code>, <code>run</code> and <code>mcp-server</code>: the file given with
+<code>--log-json-file</code> (same fields, no <code>ts</code>), and, in Haskell <code>show</code> form, the
+<code>--log-file</code>.
+</li>
+</ul>
+<p>In Haskell, these are <code>AsyncTrace</code> values
+(<code>System.Agents.Session.Async.Engine</code>). An agent hands its <code>ctxAsyncTracer</code>
+to the engine it creates; <code>AgentFactory.buildAgent</code> sets it from its own
+tracer, as <code>AsyncToolCallTrace</code>.</p>
 <h3 id="session-files">Session files</h3>
 <p>Partial turns are stored in the session, with each call’s state. <code>session-print</code>
 shows them:</p>
@@ -149,16 +327,27 @@ _(Some tool calls had not finished when this turn was sent)_
 <h3 id="limits">Limits</h3>
 <ul>
 <li>Background calls live in the process that started them. A session reloaded
-elsewhere reports them as orphaned.
+elsewhere reports them as orphaned, or runs them again when their tool is
+marked <code>rerunOnRestart</code> (see “Across a restart”). A call is never resumed
+from where it stopped.
 </li>
-<li>A pause/resume in the same process keeps the running calls only if the agent
-was built with <code>withAsyncEngine</code>; <code>runAsync</code> does not hand the engine back.
+<li><code>runAsync</code> returns only the session. To pause and resume in the same
+process, use <code>runAsyncKeepingAgent</code> and resume with the agent it returns:
+that agent holds the engine that owns the running calls. A session resumed
+with a freshly built agent still gets their results and can still cancel
+them, but the new engine’s <code>maxConcurrency</code> does not count them and they are
+not cancelled when the resumed run ends.
 </li>
-<li>If the model reads a result with <code>get-tool-call-status</code>, the delivery notice
-repeats it once.
+<li><code>run</code> and <code>runWithProgress</code> return only a final result, so they cannot hand
+back a session that waits on deferred calls: they throw
+<code>BlockedOnDeferredCalls</code>, which carries that session. Use <code>runUntilBlocked</code>
+or <code>runAsync</code> where deferred calls are expected.
 </li>
 <li><code>maxConcurrency</code> is per agent. To cap several agents together, share one
 limit built with <code>newAsyncConcurrencyLimit</code> between their engines.
+</li>
+<li>The only limit on background calls is that number of calls running at once.
+There is no rate limit (calls started per second or minute).
 </li>
 </ul>
 </section></div><footer class="footing"><div class="social-links"><a href="https://twitter.com/lucasdicioccio">twitter</a><a rel="me" href="https://fosstodon.org/@lucasdicioccio">mastodon</a><a href="https://github.com/lucasdicioccio">github</a><a href="https://linkedin.com/in/lucasdicioccio">linkedin</a></div></footer></article></div></body></html>
