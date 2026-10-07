@@ -1,0 +1,22 @@
+# About
+
+agents-exe is written by Lucas DiCioccio, who also writes about software at [dicioccio.fr](https://dicioccio.fr/ ).
+
+## A network of connected websites
+
+This site is one of a family of small, related projects. They are built with the same static-site generator and link to each other:
+
+- [**dicioccio.fr**](https://dicioccio.fr/ ): the author's personal site and blog.
+
+- [**kitchen-sink**](https://kitchensink-tech.github.io/ ): the static-site generator that builds this site.
+
+- [**salmon**](https://lucasdicioccio.github.io/salmon/ ): a sibling project.
+
+- [**tramaj**](https://lucasdicioccio.github.io/tramaj/ ): a sibling project.
+
+- [**acme-not-a-joke**](https://lucasdicioccio.github.io/acme-not-a-joke/ ): another sibling project.
+
+
+The source of agents-exe is on [GitHub](https://github.com/lucasdicioccio/agents-exe ).
+
+

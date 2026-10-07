@@ -1,0 +1,275 @@
+/* Layout of the `documentation` article layout: the pages of the
+   documentation on one side, the table of contents of the page on the other,
+   previous/next links below the page, and a search box in the header. */
+
+.main.doc-layout {
+  max-width: 135ch;
+  display: grid;
+  grid-template-columns: 15em minmax(0, 1fr) 14em;
+  grid-template-areas: "nav page toc";
+  gap: 2.5em;
+  align-items: start;
+}
+
+.main.doc-layout > .doc-nav {
+  grid-area: nav;
+}
+
+.main.doc-layout > .doc-toc {
+  grid-area: toc;
+}
+
+.main.doc-layout > article {
+  grid-area: page;
+}
+
+.doc-nav,
+.doc-toc {
+  position: sticky;
+  top: 5em;
+  max-height: calc(100vh - 6em);
+  overflow-y: auto;
+  font-size: 0.85em;
+  line-height: 1.4;
+  font-family: var(--font-sans);
+}
+
+.doc-nav {
+  padding: 0.5em 1em 0.5em 0;
+  border-right: 1px solid var(--border);
+}
+
+.doc-toc {
+  padding: 0.5em 0 0.5em 1em;
+  border-left: 1px solid var(--border);
+}
+
+.doc-toc:empty {
+  border-left: none;
+}
+
+.doc-nav-title,
+.doc-toc-title {
+  margin: 0 0 0.6em;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.8em;
+}
+
+.doc-nav ul,
+.doc-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.doc-nav li,
+.doc-toc li {
+  margin: 0.35em 0;
+}
+
+.doc-toc-level-3 {
+  padding-left: 1em;
+}
+
+.doc-nav a,
+.doc-toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.doc-nav a:hover,
+.doc-toc a:hover {
+  color: var(--accent);
+}
+
+/* the title only matters when the list of pages can be folded (narrow screens) */
+.doc-nav-title {
+  list-style: none;
+  pointer-events: none;
+}
+
+.doc-nav-title::-webkit-details-marker {
+  display: none;
+}
+
+.doc-nav-group {
+  margin: 1.2em 0 0.4em;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.doc-nav a.doc-nav-current {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* the results are placed against the (sticky) site navigation rather than the
+   search box, so that they stay within the screen wherever the box stands */
+#doc-search {
+  margin-left: auto;
+  font-family: var(--font-sans);
+}
+
+.doc-search-input {
+  width: 22em;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.45em 0.8em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.doc-search-input:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.doc-search-results {
+  position: absolute;
+  right: 1.25rem;
+  top: calc(100% + 0.5em);
+  width: min(34em, calc(100vw - 2.5rem));
+  box-sizing: border-box;
+  max-height: 70vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.4em;
+  list-style: none;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.doc-search-results[hidden] {
+  display: none;
+}
+
+.doc-search-results a {
+  display: block;
+  padding: 0.5em 0.7em;
+  border-radius: calc(var(--radius) / 2);
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.doc-search-results a:hover,
+.doc-search-results a.doc-search-selected {
+  background-color: var(--accent-soft);
+}
+
+.doc-search-title {
+  display: block;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.doc-search-page {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.doc-search-snippet {
+  display: block;
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+
+.doc-search-snippet mark {
+  background-color: transparent;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.doc-search-empty {
+  padding: 0.5em 0.7em;
+  color: var(--muted);
+}
+
+.doc-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  margin-top: 3em;
+  padding-top: 1em;
+  border-top: 1px solid var(--border);
+  font-size: 0.9em;
+}
+
+.doc-pager .doc-next {
+  margin-left: auto;
+  text-align: right;
+}
+
+.doc-pager-label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+/* no room for three columns: the table of contents goes above the page */
+@media (max-width: 1150px) {
+  .main.doc-layout {
+    max-width: 105ch;
+    grid-template-columns: 15em minmax(0, 1fr);
+    grid-template-areas:
+      "nav toc"
+      "nav page";
+    row-gap: 1.5em;
+  }
+
+  .doc-toc {
+    position: static;
+    max-height: none;
+    padding: 0 0 1em;
+    border-left: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .doc-toc:empty {
+    display: none;
+  }
+}
+
+/* single column on narrow screens: the pages of the documentation (folded by
+   doc-search.js), the table of contents, then the page */
+@media (max-width: 800px) {
+  .main.doc-layout {
+    display: block;
+  }
+
+  .doc-nav,
+  .doc-toc {
+    position: static;
+    max-height: none;
+    margin-bottom: 1.5em;
+    padding: 0 0 1em;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .doc-nav-title {
+    list-style: revert;
+    pointer-events: auto;
+    cursor: pointer;
+    margin: 0;
+  }
+
+  .doc-nav-title::-webkit-details-marker {
+    display: revert;
+  }
+
+  .doc-search-input {
+    width: 12em;
+  }
+}

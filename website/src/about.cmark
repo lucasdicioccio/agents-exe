@@ -1,0 +1,60 @@
+=base:build-info.json
+{"layout":"article"
+,"publicationStatus":"Public"
+}
+
+=base:preamble.json
+{"author": "Lucas DiCioccio"
+,"date": "2026-10-06T12:00:00Z"
+,"title": "About"
+,"imageLink": "/gen/images/architecture-layers.dot.png"
+}
+
+=base:topic.json
+{"topics":["docs"]
+,"keywords":["about", "author", "network", "related projects"]
+}
+
+=base:social.json
+{"twitter": "lucasdicioccio"
+,"linkedin": "lucasdicioccio"
+,"github": "lucasdicioccio"
+,"mastodon": "https://fosstodon.org/@lucasdicioccio"
+}
+
+=base:summary.cmark
+Who writes agents-exe, and the network of connected websites it belongs to.
+
+=base:main-content.cmark
+
+# About
+
+agents-exe is written by Lucas DiCioccio, who also writes about software at
+[dicioccio.fr](https://dicioccio.fr/).
+
+## A network of connected websites
+
+This site is one of a family of small, related projects. They are built with
+the same static-site generator and link to each other:
+
+- [**dicioccio.fr**](https://dicioccio.fr/): the author's personal site and blog.
+- [**kitchen-sink**](https://kitchensink-tech.github.io/): the static-site
+  generator that builds this site.
+- [**salmon**](https://lucasdicioccio.github.io/salmon/): a sibling project.
+- [**tramaj**](https://lucasdicioccio.github.io/tramaj/): a sibling project.
+- [**acme-not-a-joke**](https://lucasdicioccio.github.io/acme-not-a-joke/):
+  another sibling project.
+
+The source of agents-exe is on
+[GitHub](https://github.com/lucasdicioccio/agents-exe).
+
+=base:main-css.tramaj-json
+{ "format": "css"
+, "contents":
+  [ ""
+  , "@import \"`$ctx.pathPrefix`/css/dev.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/colors.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/article.css\";"
+  , "@import \"`$ctx.pathPrefix`/css/navigation.css\";"
+  ]
+}
