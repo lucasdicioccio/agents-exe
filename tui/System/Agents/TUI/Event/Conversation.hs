@@ -32,6 +32,7 @@ module System.Agents.TUI.Event.Conversation (
 
     -- * Send Message
     handleSendMessage,
+    getFocusedConversation,
 
     -- * Subcall Management
     createSubcallConversationEntry,
@@ -121,6 +122,7 @@ import System.Agents.TUI.Types (
     coreConversations,
     coreOwnedSessions,
     coreParams,
+    currentConversation,
     draftToMessage,
     emptyDraft,
     eventChan,
@@ -146,11 +148,15 @@ showStatus severity text = do
     chan <- use eventChan
     liftIO $ writeBChan chan (AppEvent_ShowStatus severity text)
 
--- | Get the currently focused conversation, if any.
+{- | Get the currently focused conversation, if any: the one selected in the
+conversation list, with its content read from 'Core' ('currentConversation';
+the list is a copy that lags behind by up to a heartbeat).
+-}
 getFocusedConversation :: EventM N TuiState (Maybe Conversation)
 getFocusedConversation = do
     mConv <- use (tuiUI . conversationList . to listSelectedElement)
-    pure $ fmap snd mConv
+    core <- readCore
+    pure $ fmap (currentConversation (core ^. coreConversations) . snd) mConv
 
 -------------------------------------------------------------------------------
 -- Core / client helpers
@@ -578,10 +584,10 @@ mail-backed pause).
 -}
 handleTogglePauseConversation :: EventM N TuiState ()
 handleTogglePauseConversation = do
-    mSelectedConv <- use (tuiUI . conversationList . to listSelectedElement)
+    mSelectedConv <- getFocusedConversation
     case mSelectedConv of
         Nothing -> showStatus StatusWarning "No conversation selected"
-        Just (_, conv) -> do
+        Just conv -> do
             let convId = conversationId conv
             if conv.conversationStatus == ConversationStatus_Paused
                 then do
