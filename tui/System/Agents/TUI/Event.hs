@@ -46,7 +46,6 @@ module System.Agents.TUI.Event (
     handleShowStatus,
     handleClearStatus,
     getFocusedSession,
-    getFocusedConversation,
     getFocusedConversationId,
     handleAgentListEvent,
     handleSessionsListEvent,
@@ -837,12 +836,6 @@ getFocusedSession :: EventM N TuiState (Maybe Session)
 getFocusedSession = do
     mConv <- use (tuiUI . conversationList . to listSelectedElement)
     pure $ mConv >>= conversationSession . snd
-
--- | Get the currently focused conversation, if any.
-getFocusedConversation :: EventM N TuiState (Maybe Conversation)
-getFocusedConversation = do
-    mConv <- use (tuiUI . conversationList . to listSelectedElement)
-    pure $ fmap snd mConv
 
 -- | Get the conversation ID of the currently focused conversation.
 getFocusedConversationId :: EventM N TuiState (Maybe ConversationId)

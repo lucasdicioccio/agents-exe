@@ -8,15 +8,23 @@ never crosses it (D3) -- so it is exercised directly, without a fixture.
 -}
 module TuiDraftTests (tests) where
 
+import qualified Data.UUID as UUID
 import Test.Tasty
 import Test.Tasty.HUnit
+
+import System.Agents.Base (ConversationId (..))
+import System.Agents.SessionStore (conversationIdToSessionId)
+import System.Agents.TUI.Render (addThousandSeparators)
 
 import System.Agents.Media.Types (MediaAttachment (..))
 import System.Agents.Protocol (NewMessage (..))
 import System.Agents.Session.Base (SessionStatus (..))
 import System.Agents.TUI.Types (
+    Conversation (..),
+    ConversationStatus (..),
     Draft (..),
     appendDraft,
+    currentConversation,
     draftFirstLine,
     draftIsEmpty,
     draftParagraphCount,
@@ -69,4 +77,37 @@ tests =
             shouldShipDraft StatusPaused @?= False
             shouldShipDraft StatusWaitingExternal @?= False
             shouldShipDraft StatusFailed @?= False
+        , testCase "currentConversation prefers the stored conversation over a stale copy" $ do
+            let stale = mkConv 1
+                fresh = (mkConv 1){conversationDraft = appendDraft "kept" [] emptyDraft, conversationStatus = ConversationStatus_Active}
+                found = currentConversation [mkConv 2, fresh] stale
+            draftText (conversationDraft found) @?= "kept"
+            conversationStatus found @?= ConversationStatus_Active
+        , testCase "currentConversation keeps the given conversation when it is not stored" $
+            conversationId (currentConversation [mkConv 2] (mkConv 1)) @?= conversationId (mkConv 1)
+        , testCase "addThousandSeparators keeps the digits in order" $ do
+            addThousandSeparators "7" @?= "7"
+            addThousandSeparators "10" @?= "10"
+            addThousandSeparators "999" @?= "999"
+            addThousandSeparators "1234" @?= "1,234"
+            addThousandSeparators "1234567" @?= "1,234,567"
         ]
+
+mkConv :: Int -> Conversation
+mkConv n =
+    Conversation
+        { conversationId = cid
+        , conversationSessionId = conversationIdToSessionId cid
+        , conversationAgentSlug = "agent"
+        , conversationSession = Nothing
+        , conversationMeta = Nothing
+        , conversationName = "@agent"
+        , conversationStatus = ConversationStatus_WaitingForInput
+        , conversationIsSubcall = False
+        , conversationParentId = Nothing
+        , conversationSubcallDepth = 0
+        , conversationDraft = emptyDraft
+        , conversationPending = []
+        }
+  where
+    cid = ConversationId (UUID.fromWords 0 0 0 (fromIntegral n))

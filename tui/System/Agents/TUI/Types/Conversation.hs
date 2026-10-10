@@ -31,6 +31,7 @@ module System.Agents.TUI.Types.Conversation (
 
     -- * Conversation
     Conversation (..),
+    currentConversation,
 
     -- * Pending calls (Phase 3c)
     pendingSummaryLine,
@@ -189,6 +190,21 @@ data Conversation = Conversation
     -}
     }
     deriving (Show)
+
+{- | The up-to-date value of a conversation, looked up by id among the
+conversations 'System.Agents.TUI.Types.State.Core' holds; the given value
+when it is not there.
+
+The conversation list widget shows a copy of those conversations that is
+only refreshed on the heartbeat, so the element selected in it can be up to
+a second behind: its status, draft and pending calls must not be acted on.
+A handler takes the selection from the widget and its content from here.
+-}
+currentConversation :: [Conversation] -> Conversation -> Conversation
+currentConversation convs conv =
+    case [c | c <- convs, conversationId c == conversationId conv] of
+        (c : _) -> c
+        [] -> conv
 
 {- | The Pending panel's collapsed summary line: @"N pending calls: tool_a,
 tool_b"@, or @""@ for none (the panel is hidden then, like the Draft one).

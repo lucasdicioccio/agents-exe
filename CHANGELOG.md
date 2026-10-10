@@ -89,6 +89,9 @@
 - `Session.Loop.run` and `runWithProgress` no longer loop forever on a turn that only waits on deferred calls: they throw `BlockedOnDeferredCalls`, which carries the session
 - `runAsyncKeepingAgent` / `runAsyncWithProgressKeepingAgent` return the agent holding the engine that owns the calls still running at a pause
 - See `documentation/async-tool-calls.md`
+- TUI: text sent twice within a second while a session is busy is all kept in the draft; before, each send appended to the copy of the draft the conversation list had last drawn, so the earlier paragraph could be lost, `Ctrl+D` could answer "No draft to clear" for a draft just made, and a message sent right after a run stopped could stay in a draft that nothing posted
+- TUI: token counts of 10 and more are shown with their digits in order (`12 tokens`, `1,234`), not reversed within each group of three (`21`, `1,432`)
+- TUI: the Help tab says how a run paused with `Ctrl+B` is resumed (`Ctrl+B` again); it named `Ctrl+C`, which does not resume
 
 ### Improvements
 

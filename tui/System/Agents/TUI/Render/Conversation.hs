@@ -396,7 +396,7 @@ formatTokenCount n =
 addThousandSeparators :: Text -> Text
 addThousandSeparators numText =
     let digits = Text.unpack numText
-        grouped = reverse $ group3 (reverse digits)
+        grouped = reverse $ map reverse $ group3 (reverse digits)
      in Text.pack $ concat (intersperse "," grouped)
   where
     group3 :: String -> [String]

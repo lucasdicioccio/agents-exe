@@ -23,14 +23,13 @@ module System.Agents.TUI.Event.Draft (
 import Brick
 import Brick.BChan (writeBChan)
 import Brick.Widgets.Edit (editContentsL)
-import Control.Lens (to, use, (%=), (.=))
+import Control.Lens (use, (%=), (.=))
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import qualified Data.Text.Zipper as TextZipper
 
-import qualified Brick.Widgets.List as List
-import System.Agents.TUI.Event.Conversation (setConversationDraft, shipDraftIfAny)
+import System.Agents.TUI.Event.Conversation (getFocusedConversation, setConversationDraft, shipDraftIfAny)
 import System.Agents.TUI.Types (
     AppEvent (..),
     Conversation (..),
@@ -40,7 +39,6 @@ import System.Agents.TUI.Types (
     attachedFiles,
     conversationDraft,
     conversationId,
-    conversationList,
     draftIsEmpty,
     draftMedia,
     draftText,
@@ -56,11 +54,11 @@ showStatus severity text = do
     chan <- use eventChan
     liftIO $ writeBChan chan (AppEvent_ShowStatus severity text)
 
--- | Get the currently focused conversation in EventM context.
+{- | Get the currently focused conversation, with its draft as 'Core' has it
+('getFocusedConversation'), not as the conversation list last copied it.
+-}
 getCurrentConversation :: EventM N TuiState (Maybe Conversation)
-getCurrentConversation = do
-    mElem <- use (tuiUI . conversationList . to List.listSelectedElement)
-    pure $ fmap snd mElem
+getCurrentConversation = getFocusedConversation
 
 -------------------------------------------------------------------------------
 -- Draft Management

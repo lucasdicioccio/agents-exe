@@ -29,12 +29,12 @@ import Control.Monad.IO.Class (liftIO)
 import qualified Data.Text as Text
 import Control.Monad (forM_, when)
 
-import qualified Brick.Widgets.List as List
 import qualified System.Agents.Host.Client as Client
 import System.Agents.Base (ConversationId)
 import System.Agents.Session.Base (ContinuationToken, DeferredCallView (..), UserToolResponse (..))
 import System.Agents.TUI.Event.Conversation (
     clearEditorAndAttachments,
+    getFocusedConversation,
     handleSendMessage,
     reportRunnerResult,
     readCore,
@@ -48,7 +48,6 @@ import System.Agents.TUI.Types (
     TuiState,
     answeringPendingCall,
     conversationId,
-    conversationList,
     conversationName,
     coreClient,
     coreConversations,
@@ -69,11 +68,6 @@ showStatus severity text = do
     chan <- use eventChan
     liftIO $ writeBChan chan (AppEvent_ShowStatus severity text)
 
--- | Get the currently focused conversation, if any.
-getFocusedConversation :: EventM N TuiState (Maybe Conversation)
-getFocusedConversation = do
-    mConv <- use (tuiUI . conversationList . to List.listSelectedElement)
-    pure $ fmap snd mConv
 
 {- | Put the message editor into "answer mode" for the focused
 conversation's selected deferred call ('handleSelectPending'; the first one
