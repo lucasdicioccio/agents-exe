@@ -479,6 +479,29 @@ Each SQLite toolbox exposes a single `sqlite_{name}_query` tool:
 **Parameters:**
 - `sql` (string, required): SQL query to execute
 
+#### Versioned toolboxes: listing versions
+
+A `SqliteVersioned` toolbox also exposes `sqlite_{name}_promote` and
+`sqlite_{name}_versions`. The versions tool lists the stored snapshots, most
+recent first, so a handle can be found without having kept the result of the
+write that made it:
+
+```json
+{"all_sessions": false, "limit": 20}
+```
+
+- `all_sessions` (boolean, default `false`): list the snapshots of every
+  session, not only the calling one
+- `limit` (number, default 20): how many to return
+
+It answers `{"versions": [{"versionHandle": {...}, "is_head": true}, ...],
+"total": N}`. Pass a `versionHandle` as `restore_from` to the query or promote
+tool. The list is read from the snapshot directory, so snapshots written
+before a restart are listed too; `is_head` marks the current head of the
+caller's sharing scope, which is kept in memory and so is never set right
+after a restart. The `timestamp` of a listed handle is the snapshot file's
+modification time.
+
 **Security:**
 - Read-only queries are encouraged
 - Write operations are allowed but logged

@@ -111,6 +111,7 @@ import qualified TuiDraftTests
 import qualified TuiFileBrowserTests
 import qualified SpectateTests
 import qualified TuiPendingTests
+import qualified SqliteVersionsTests
 
 {- | Run sequentially unless asked otherwise: several tests change the
 process working directory, and tasty >=1.5.4 turns its default @-j@ into
@@ -189,6 +190,7 @@ tests =
         , TuiDraftTests.tests
         , TuiFileBrowserTests.tests
         , TuiPendingTests.tests
+        , SqliteVersionsTests.tests
         , SpectateTests.tests
         ]
 
