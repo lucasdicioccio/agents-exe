@@ -67,6 +67,7 @@ import qualified LuaToolboxTests
 -- Import official feature-test agent validation
 import qualified OfficialAgentsTests
 import qualified LuaToolboxJsonValueTests
+import qualified SqliteRestoreFromTests
 -- Import LuaToolbox HTTP module tests
 import qualified LuaToolboxHttpTests
 -- Import OS Core ECS tests
@@ -165,6 +166,7 @@ tests =
         , LuaToolboxSecurityTests.tests
         , LuaToolboxTests.luaToolboxTests
         , LuaToolboxJsonValueTests.luaToJsonValueTests
+        , SqliteRestoreFromTests.tests
         , LuaToolboxHttpTests.luaToolboxHttpTests
         , DeveloperToolboxTests.tests
         , DeveloperToolboxWriteRangeTests.tests

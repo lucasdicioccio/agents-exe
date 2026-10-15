@@ -92,6 +92,7 @@
 - TUI: text sent twice within a second while a session is busy is all kept in the draft; before, each send appended to the copy of the draft the conversation list had last drawn, so the earlier paragraph could be lost, `Ctrl+D` could answer "No draft to clear" for a draft just made, and a message sent right after a run stopped could stay in a draft that nothing posted
 - TUI: token counts of 10 and more are shown with their digits in order (`12 tokens`, `1,234`), not reversed within each group of three (`21`, `1,432`)
 - TUI: the Help tab says how a run paused with `Ctrl+B` is resumed (`Ctrl+B` again); it named `Ctrl+C`, which does not resume
+- Versioned SQLite toolboxes: a `restore_from` handle that names no snapshot (missing, malformed, or for another toolbox) is an error for both the query and the promote tool; before, the call quietly ran on, or promoted, the base database
 
 ### Improvements
 

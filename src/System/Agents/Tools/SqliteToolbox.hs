@@ -287,17 +287,27 @@ executeVersionedQuery tracer toolbox ctx sharing basePath input = do
     let config  = sqliteToolboxVersioning (toolboxConfig toolbox)
     let headKey = sharingToHeadKey sharing (ctxSessionId ctx) (ctxTurnId ctx)
 
-    -- Resolve source: restore_from > current head > basePath
-    sourcePath <- case inputRestoreFrom input of
-        Just handle -> do
-            result <- resolveVersionPath config (toolboxName toolbox) handle
-            pure $ case result of
-                Right path -> path
-                Left _     -> basePath
-        Nothing -> case headKey of
-            Nothing  -> pure basePath
-            Just key -> Map.findWithDefault basePath key <$> readTVarIO (toolboxVersionedHeads toolbox)
+    -- Resolve source: restore_from > current head > basePath.
+    -- An unresolvable restore_from handle is an error, never a silent
+    -- fallback to another database.
+    resolved <- resolveSourcePath toolbox config headKey basePath (inputRestoreFrom input)
+    case resolved of
+        Left err -> pure (Left err)
+        Right sourcePath -> executeVersionedOnSource tracer toolbox ctx config headKey sourcePath input startTime
 
+-- | Pick the database a versioned call reads from: the snapshot named by
+-- restore_from when given (failing if it cannot be resolved), else the
+-- current head for the sharing scope, else the base database.
+resolveSourcePath :: Toolbox -> SqliteVersioningConfig -> Maybe HeadKey -> FilePath -> Maybe SqliteVersionHandle -> IO (Either QueryError FilePath)
+resolveSourcePath toolbox config headKey basePath restoreFrom =
+    case restoreFrom of
+        Just handle -> resolveVersionPath config (toolboxName toolbox) handle
+        Nothing -> case headKey of
+            Nothing  -> pure (Right basePath)
+            Just key -> Right . Map.findWithDefault basePath key <$> readTVarIO (toolboxVersionedHeads toolbox)
+
+executeVersionedOnSource :: Tracer IO Trace -> Toolbox -> ToolExecutionContext -> SqliteVersioningConfig -> Maybe HeadKey -> FilePath -> SqliteQueryInput -> UTCTime -> IO (Either QueryError QueryResult)
+executeVersionedOnSource tracer toolbox ctx config headKey sourcePath input startTime = do
     let operation = classifyQuery (inputSql input)
 
     if isWriteOperation operation
@@ -409,19 +419,14 @@ promoteSnapshot toolbox ctx input =
             SqliteVersioned sharing _ basePath -> do
                 let config  = sqliteToolboxVersioning (toolboxConfig toolbox)
                 let headKey = sharingToHeadKey sharing (ctxSessionId ctx) (ctxTurnId ctx)
-                sourcePath <- case promoteRestoreFrom input of
-                    Just handle -> do
-                        result <- resolveVersionPath config (toolboxName toolbox) handle
+                resolved <- resolveSourcePath toolbox config headKey basePath (promoteRestoreFrom input)
+                case resolved of
+                    Left err -> pure (Left err)
+                    Right sourcePath -> do
+                        result <- try @SomeException $ copyDatabaseWithWAL sourcePath basePath
                         pure $ case result of
-                            Right path -> path
-                            Left _     -> basePath
-                    Nothing -> case headKey of
-                        Nothing  -> pure basePath
-                        Just key -> Map.findWithDefault basePath key <$> readTVarIO (toolboxVersionedHeads toolbox)
-                result <- try @SomeException $ copyDatabaseWithWAL sourcePath basePath
-                pure $ case result of
-                    Left e  -> Left $ SqlError $ Text.pack $ show e
-                    Right _ -> Right $ PromoteResult { promotedFrom = sourcePath, promotedTo = basePath }
+                            Left e  -> Left $ SqlError $ Text.pack $ show e
+                            Right _ -> Right $ PromoteResult { promotedFrom = sourcePath, promotedTo = basePath }
 
 makeToolDescription :: Toolbox -> ToolDescription
 makeToolDescription toolbox =
