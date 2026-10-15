@@ -15,7 +15,7 @@ import System.IO.Temp (withSystemTempDirectory)
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import System.Agents.Base (ConversationId (..), SqliteSharing (..), SqliteToolboxDescription (..), SqliteVersionHandle (..), SqliteVersioningConfig (..))
+import System.Agents.Base (ConversationId (..), SqliteSharing (..), SqliteToolboxDescription (..), SqliteVersionHandle (..), SqliteVersioningConfig (..), keepAllSnapshots)
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal, ToolResult (..), mkMinimalContext)
 import System.Agents.Tools.SqliteToolbox
@@ -67,7 +67,7 @@ withToolbox act =
                 SqliteToolboxDescription
                     { sqliteToolboxName = "mem"
                     , sqliteToolboxDescription = "test database"
-                    , sqliteToolboxVersioning = SqliteVersioned SharingConversation (Just (dir </> "versions")) (dir </> "base.sqlite")
+                    , sqliteToolboxVersioning = SqliteVersioned SharingConversation (Just (dir </> "versions")) (dir </> "base.sqlite") keepAllSnapshots
                     , sqliteToolboxActivation = Nothing
                     }
         r <- initializeToolbox silent desc

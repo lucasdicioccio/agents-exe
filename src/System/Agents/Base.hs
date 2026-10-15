@@ -912,16 +912,16 @@ Example configuration (versioned with conversation lifetime):
 {
   "tag": "SqliteToolbox",
   "contents": {
-    "name": "memory",
-    "description": "a set of memories",
-    "versioning": {
+    "Name": "memory",
+    "Description": "a set of memories",
+    "Versioning": {
       "tag": "SqliteVersioned",
-      "lifetime": "conversation",
+      "shared": "conversation",
       "storageRoot": null,
       "basePath": "/path/to/memories.sqlite",
       "retention": {"maxSnapshots": 100, "maxAgeDays": 30}
     },
-    "activation": "always"
+    "Activation": "always"
   }
 }
 @
@@ -932,13 +932,13 @@ Example configuration (read-only direct access):
 {
   "tag": "SqliteToolbox",
   "contents": {
-    "name": "analytics",
-    "description": "Analytics database",
-    "versioning": {
+    "Name": "analytics",
+    "Description": "Analytics database",
+    "Versioning": {
       "tag": "SqliteReadOnly",
       "path": "/path/to/analytics.sqlite"
     },
-    "activation": "always"
+    "Activation": "always"
   }
 }
 @

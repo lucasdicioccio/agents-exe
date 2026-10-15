@@ -4,6 +4,10 @@
 
 ### New Features
 
+#### Versioned SQLite: documentation and behavioural tests
+- `documentation/tools.md` (SQLite Tools) now describes `SqliteVersioned` in full: the access modes, the sharing scopes, where snapshots are stored, version handles and `restore_from`, and promotion
+- Tests cover write, handle, restore and branch, promotion, and what each sharing scope sees (`test/SqliteVersionedBehaviourTests.hs`)
+
 #### Versioned SQLite: snapshot retention policy
 - A `SqliteVersioned` config takes an optional `retention`: `{"maxSnapshots": N, "maxAgeDays": D}`. After each write the toolbox deletes the snapshots beyond the newest N, or older than D days, across all sessions; the snapshot just written and the live heads are kept
 - Default (no `retention`): every snapshot is kept, as before

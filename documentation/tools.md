@@ -466,9 +466,17 @@ SQLite tools provide SQL query capabilities against SQLite databases.
 }
 ```
 
+`Versioning` chooses how the database is accessed:
+
+| Tag | Fields | Behaviour |
+|-----|--------|-----------|
+| `SqliteReadOnly` | `path` | One connection to `path`; only reads (`SELECT`, `WITH`) are allowed |
+| `SqliteReadWrite` | `path` | One connection to `path`; every statement is allowed and writes go straight to the file |
+| `SqliteVersioned` | `shared`, `basePath`, `storageRoot`, `retention` | Every write goes to a new snapshot, never to `basePath`; see below |
+
 ### Tool Interface
 
-Each SQLite toolbox exposes a single `sqlite_{name}_query` tool:
+Each SQLite toolbox exposes a `sqlite_{name}_query` tool:
 
 ```json
 {
@@ -478,13 +486,118 @@ Each SQLite toolbox exposes a single `sqlite_{name}_query` tool:
 
 **Parameters:**
 - `sql` (string, required): SQL query to execute
+- `restore_from` (object, versioned toolboxes only): a `versionHandle`; the
+  query runs on that snapshot instead of the current head
 
-#### Versioned toolboxes: listing versions
+It answers `{"columns": [...], "rows": [[...]], "rowCount": N,
+"executionTime": ...}`; on a versioned toolbox a write also returns the
+`versionHandle` of the snapshot it made.
 
-A `SqliteVersioned` toolbox also exposes `sqlite_{name}_promote` and
-`sqlite_{name}_versions`. The versions tool lists the stored snapshots, most
-recent first, so a handle can be found without having kept the result of the
-write that made it:
+### Versioned toolboxes
+
+A `SqliteVersioned` toolbox never modifies its database in place. Each write
+(any statement other than `SELECT` or `WITH`) copies the database it starts
+from into a new snapshot file, runs on that copy, and returns a handle naming
+it. Reads run on the current database and make no snapshot. The original
+database, `basePath`, changes only when a snapshot is promoted.
+
+```json
+{
+  "tag": "SqliteToolbox",
+  "contents": {
+    "Name": "memory",
+    "Description": "a set of memories",
+    "Versioning": {
+      "tag": "SqliteVersioned",
+      "shared": "conversation",
+      "basePath": "/path/to/memories.sqlite",
+      "storageRoot": "/path/to/snapshots"
+    }
+  }
+}
+```
+
+- `shared` (required): the sharing scope, below
+- `basePath` (required): the original database; created empty if missing
+- `storageRoot` (optional): where snapshots are stored, below
+- `retention` (optional): which snapshots to keep, below
+
+The toolbox exposes three tools: `sqlite_{name}_query`,
+`sqlite_{name}_promote` and `sqlite_{name}_versions`.
+
+#### Sharing scopes
+
+The toolbox keeps a *head*, the latest snapshot written, per sharing scope.
+A query without `restore_from` runs on the head of the caller's scope, or on
+`basePath` when that scope has written nothing yet; a write moves the head to
+its new snapshot.
+
+| `shared` | One head per | A write is seen by |
+|----------|--------------|--------------------|
+| `global` | toolbox | every later call, in any conversation |
+| `conversation` | session | later calls of the same session; a new session starts from `basePath` |
+| `turn` | turn | later calls of the same turn; a new turn starts from `basePath` |
+| `tool-call` | (none) | no later call: every call starts from `basePath`, so writes are chained with `restore_from` |
+
+Heads are kept in memory: after a restart every scope starts again from
+`basePath`, and earlier snapshots are reached through their handles (the
+versions tool lists them).
+
+#### Storage location
+
+Snapshots are stored under the storage root as
+`{session}/{turn}/snap-{N}/{name}.sqlite`, where `N` counts the toolbox's
+writes since it started. The storage root is `storageRoot` when set, else
+`$XDG_DATA_HOME/agents/sqlite-versions`, else
+`~/.local/share/agents/sqlite-versions`, else
+`/tmp/agents-sqlite-versions`. Two toolboxes with the same name and storage
+root share their snapshots.
+
+#### Version handles and `restore_from`
+
+A write answers with a `versionHandle`:
+
+```json
+{
+  "session_id": "550e8400_e29b_41d4_a716_446655440001",
+  "turn_id": "550e8400_e29b_41d4_a716_446655440003",
+  "tool_call_index": 0,
+  "toolbox_name": "memory",
+  "timestamp": "2026-10-15T09:00:00Z"
+}
+```
+
+Passing it back as `restore_from` runs the query on that snapshot:
+
+- a read sees the snapshot as it was written; later writes never change it,
+  and the head stays where it was
+- a write copies the snapshot into a new one and makes that the head of the
+  caller's scope, so the scope continues from the restored state (a branch);
+  the restored snapshot itself is unchanged
+- a handle that does not resolve (another toolbox's, malformed, or a
+  snapshot that was deleted) is an error, never a fallback to another
+  database
+
+#### Promoting a snapshot
+
+`sqlite_{name}_promote` copies a snapshot over `basePath`, making it the
+baseline that new scopes start from:
+
+```json
+{"restore_from": {"session_id": "...", "turn_id": "...", "tool_call_index": 0, "toolbox_name": "memory"}}
+```
+
+Without `restore_from` it promotes the head of the caller's scope (or
+`basePath` itself, when the scope has not written yet). It answers
+`{"promoted_from": "...", "promoted_to": "..."}`. Heads already set are not
+moved: the promoting scope goes on from its own head, and sessions or turns
+that start afterwards read the promoted database. A promoted base outlives a
+restart. Read-only and read-write toolboxes have no promote.
+
+#### Listing versions
+
+`sqlite_{name}_versions` lists the stored snapshots, most recent first, so a
+handle can be found without having kept the result of the write that made it:
 
 ```json
 {"all_sessions": false, "limit": 20}
@@ -502,14 +615,14 @@ caller's sharing scope, which is kept in memory and so is never set right
 after a restart. The `timestamp` of a listed handle is the snapshot file's
 modification time.
 
-#### Versioned toolboxes: snapshot retention
+#### Snapshot retention
 
 Every write to a `SqliteVersioned` toolbox copies the whole database into a
 new snapshot, and by default none is ever deleted. An optional `retention`
 object in the versioning config bounds them:
 
 ```json
-"versioning": {
+"Versioning": {
   "tag": "SqliteVersioned",
   "shared": "conversation",
   "basePath": "/path/to/memories.sqlite",
@@ -531,9 +644,11 @@ snapshot's `versionHandle` no longer resolves, and the base database is never
 touched.
 
 **Security:**
-- Read-only queries are encouraged
-- Write operations are allowed but logged
-- No DDL by default (configurable)
+- A `SqliteReadOnly` toolbox refuses every statement but `SELECT` and `WITH`
+- A `SqliteVersioned` toolbox only writes to snapshots; `basePath` changes
+  only through the promote tool
+- Statements are classified by their first word, so this is a guard against
+  mistakes, not a sandbox: an agent that can write can run any SQL
 
 ## File Sandbox System
 
