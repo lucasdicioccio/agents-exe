@@ -22,22 +22,30 @@ import Data.Time (NominalDiffTime, UTCTime, defaultTimeLocale, diffUTCTime, form
 import qualified Data.UUID as UUID
 import qualified Database.SQLite3 as Direct
 import Prod.Tracer (Tracer (..), runTracer)
-import System.Directory (copyFile, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getModificationTime, listDirectory)
+import System.Directory (copyFile, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getModificationTime, listDirectory, removeDirectory, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory, (</>))
 import Text.Read (readMaybe)
 
 import System.Agents.Base (
+    SqliteRetention (..),
     SqliteSharing (..),
     SqliteToolboxDescription (..),
     SqliteVersionHandle (..),
     SqliteVersioningConfig (..),
+    keepAllSnapshots,
  )
 import System.Agents.Session.Types (SessionId (..), TurnId (..))
 import System.Agents.Tools.Context (ToolExecutionContext (..))
 
 -- Types
-data Trace = ConnectionOpenedTrace FilePath | QueryStartedTrace Text
+data Trace
+    = ConnectionOpenedTrace FilePath
+    | QueryStartedTrace Text
+    | -- | The retention policy deleted this many snapshots after a write
+      SnapshotsPrunedTrace Int
+    | -- | Applying the retention policy failed (the write itself succeeded)
+      SnapshotPruneFailedTrace Text
     deriving (Show)
 
 data SqlOperation = Select | Insert | Update | Delete | Create | Drop | Alter | Other
@@ -185,7 +193,7 @@ getDefaultStorageRoot = do
 getStorageRoot :: SqliteVersioningConfig -> IO FilePath
 getStorageRoot (SqliteReadOnly _)  = fail "Cannot get storage root for non-versioned toolbox"
 getStorageRoot (SqliteReadWrite _) = fail "Cannot get storage root for non-versioned toolbox"
-getStorageRoot (SqliteVersioned _ mRoot _) = case mRoot of
+getStorageRoot (SqliteVersioned _ mRoot _ _) = case mRoot of
     Just path -> pure path
     Nothing   -> getDefaultStorageRoot
 
@@ -285,7 +293,7 @@ initializeToolbox tracer desc = do
             pure $ case r of
                 Left e   -> Left $ "Failed to open read-write database: " ++ show e
                 Right db -> Right (Just db)
-        SqliteVersioned _ _ basePath -> do
+        SqliteVersioned _ _ basePath _ -> do
             exists <- doesFileExist basePath
             unless exists $ do
                 db <- Direct.open (Text.pack basePath)
@@ -313,7 +321,7 @@ executeQuery tracer toolbox ctx input =
         case sqliteToolboxVersioning (toolboxConfig toolbox) of
             SqliteReadOnly  _ -> executeDirectQuery tracer toolbox False input
             SqliteReadWrite _ -> executeDirectQuery tracer toolbox True  input
-            SqliteVersioned sharing _ basePath -> executeVersionedQuery tracer toolbox ctx sharing basePath input
+            SqliteVersioned sharing _ basePath _ -> executeVersionedQuery tracer toolbox ctx sharing basePath input
 
 executeDirectQuery :: Tracer IO Trace -> Toolbox -> Bool -> SqliteQueryInput -> IO (Either QueryError QueryResult)
 executeDirectQuery tracer toolbox allowWrites input = do
@@ -380,6 +388,18 @@ executeVersionedOnSource tracer toolbox ctx config headKey sourcePath input star
             case headKey of
                 Nothing  -> pure ()
                 Just key -> atomically $ modifyTVar' (toolboxVersionedHeads toolbox) (Map.insert key snapshotPath)
+
+            -- Apply the retention policy; a failure here does not fail the write
+            let retention = case config of
+                    SqliteVersioned _ _ _ r -> r
+                    _ -> keepAllSnapshots
+            unless (retention == keepAllSnapshots) $ do
+                heads <- Map.elems <$> readTVarIO (toolboxVersionedHeads toolbox)
+                now <- getCurrentTime
+                pruned <- try @SomeException $ pruneSnapshots retention root (toolboxName toolbox) now (snapshotPath : heads)
+                runTracer tracer $ case pruned of
+                    Left e -> SnapshotPruneFailedTrace (Text.pack (show e))
+                    Right paths -> SnapshotsPrunedTrace (length paths)
 
             -- Build version handle so the LLM can reference this snapshot
             timestamp <- formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" <$> getCurrentTime
@@ -467,7 +487,7 @@ promoteSnapshot toolbox ctx input =
         case sqliteToolboxVersioning (toolboxConfig toolbox) of
             SqliteReadOnly  _ -> pure $ Left $ SqlError "Cannot promote a read-only toolbox"
             SqliteReadWrite _ -> pure $ Left $ SqlError "Cannot promote a read-write toolbox (writes go directly to the file)"
-            SqliteVersioned sharing _ basePath -> do
+            SqliteVersioned sharing _ basePath _ -> do
                 let config  = sqliteToolboxVersioning (toolboxConfig toolbox)
                 let headKey = sharingToHeadKey sharing (ctxSessionId ctx) (ctxTurnId ctx)
                 resolved <- resolveSourcePath toolbox config headKey basePath (promoteRestoreFrom input)
@@ -490,7 +510,7 @@ listVersions toolbox ctx input =
     case sqliteToolboxVersioning (toolboxConfig toolbox) of
         SqliteReadOnly _ -> pure $ Left $ SqlError "Cannot list versions of a read-only toolbox"
         SqliteReadWrite _ -> pure $ Left $ SqlError "Cannot list versions of a read-write toolbox (it keeps no snapshots)"
-        config@(SqliteVersioned sharing _ _) -> do
+        config@(SqliteVersioned sharing _ _ _) -> do
             root <- getStorageRoot config
             let sessionFilter
                     | listAllSessions input = Nothing
@@ -514,15 +534,20 @@ listVersions toolbox ctx input =
 -}
 scanSnapshots :: FilePath -> Text -> Maybe SessionId -> IO [(SqliteVersionHandle, FilePath)]
 scanSnapshots root name sessionFilter = do
-    sessions <- case sessionFilter of
-        Just sid -> pure [sessionIdToPath sid]
-        Nothing -> subdirs root
-    found <- concat <$> mapM scanSession sessions
-    let ordered = sortBy (comparing (\(t, h, _) -> (Down t, Down (vhToolCallIndex h)))) found
+    ordered <- scanSnapshotsTimed root name sessionFilter
     pure
         [ (h{vhTimestamp = Text.pack (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" t)}, p)
         | (t, h, p) <- ordered
         ]
+
+-- | Like 'scanSnapshots', with each snapshot's modification time (handles have an empty timestamp).
+scanSnapshotsTimed :: FilePath -> Text -> Maybe SessionId -> IO [(UTCTime, SqliteVersionHandle, FilePath)]
+scanSnapshotsTimed root name sessionFilter = do
+    sessions <- case sessionFilter of
+        Just sid -> pure [sessionIdToPath sid]
+        Nothing -> subdirs root
+    found <- concat <$> mapM scanSession sessions
+    pure $ sortBy (comparing (\(t, h, _) -> (Down t, Down (vhToolCallIndex h)))) found
   where
     fileName = Text.unpack name ++ ".sqlite"
 
@@ -565,6 +590,48 @@ scanSnapshots root name sessionFilter = do
     snapIndex snap = case splitAt 5 snap of
         ("snap-", digits) -> readMaybe digits
         _ -> Nothing
+
+{- | Apply a retention policy to the snapshots of toolbox @name@ under @root@.
+
+Selects, among all sessions' snapshots, those beyond the newest
+'retentionMaxSnapshots' or older than 'retentionMaxAgeDays' at @now@, skips
+the @keep@ paths (live heads, the snapshot just written), deletes them with
+their @-wal@/@-shm@ files, and removes the directories left empty. Returns
+the deleted paths. 'keepAllSnapshots' deletes nothing.
+-}
+pruneSnapshots :: SqliteRetention -> FilePath -> Text -> UTCTime -> [FilePath] -> IO [FilePath]
+pruneSnapshots retention root name now keep
+    | retention == keepAllSnapshots = pure []
+    | otherwise = do
+        found <- scanSnapshotsTimed root name Nothing
+        let tooMany i = maybe False (i >=) (retentionMaxSnapshots retention)
+            tooOld t = maybe False (\days -> diffUTCTime now t > realToFrac (days * 86400)) (retentionMaxAgeDays retention)
+            doomed =
+                [ p
+                | (i, (t, _, p)) <- zip [0 :: Int ..] found
+                , tooMany i || tooOld t
+                , p `notElem` keep
+                ]
+        mapM_ deleteSnapshot doomed
+        pure doomed
+  where
+    deleteSnapshot path = do
+        mapM_ removeFileIfExists [path, path ++ "-wal", path ++ "-shm"]
+        -- snap-N, then the turn, then the session directory, when empty
+        let snapDir = takeDirectory path
+            turnDir = takeDirectory snapDir
+            sessionDir = takeDirectory turnDir
+        mapM_ removeDirIfEmpty [snapDir, turnDir, sessionDir]
+
+    removeFileIfExists p = do
+        exists <- doesFileExist p
+        when exists $ removeFile p
+
+    removeDirIfEmpty dir = do
+        exists <- doesDirectoryExist dir
+        when exists $ do
+            entries <- listDirectory dir
+            when (null entries) $ removeDirectory dir
 
 makeToolDescription :: Toolbox -> ToolDescription
 makeToolDescription toolbox =
