@@ -8,11 +8,13 @@ module System.Agents.Tools.SqliteToolbox where
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar, readTVarIO)
 import Control.Exception (SomeException, try)
-import Control.Monad (unless, when)
+import Control.Monad (filterM, unless, when)
 import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
+import Data.List (sortBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Ord (Down (..), comparing)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TextEnc
@@ -20,9 +22,10 @@ import Data.Time (NominalDiffTime, UTCTime, defaultTimeLocale, diffUTCTime, form
 import qualified Data.UUID as UUID
 import qualified Database.SQLite3 as Direct
 import Prod.Tracer (Tracer (..), runTracer)
-import System.Directory (copyFile, createDirectoryIfMissing, doesFileExist)
+import System.Directory (copyFile, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getModificationTime, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory, (</>))
+import Text.Read (readMaybe)
 
 import System.Agents.Base (
     SqliteSharing (..),
@@ -70,6 +73,54 @@ instance ToJSON PromoteResult where
         [ "promoted_from" .= promotedFrom r
         , "promoted_to"   .= promotedTo r
         ]
+
+-- | Input of the versions tool.
+data ListVersionsInput = ListVersionsInput
+    { listAllSessions :: Bool
+    -- ^ List snapshots of every session, not only the calling one
+    , listLimit :: Maybe Int
+    -- ^ Keep at most this many (most recent first); 'defaultListLimit' when absent
+    }
+    deriving (Show)
+
+instance FromJSON ListVersionsInput where
+    parseJSON = Aeson.withObject "ListVersionsInput" $ \v ->
+        ListVersionsInput
+            <$> (v .:? "all_sessions" Aeson..!= False)
+            <*> v .:? "limit"
+
+defaultListLimit :: Int
+defaultListLimit = 20
+
+-- | One snapshot found on disk.
+data VersionEntry = VersionEntry
+    { versionHandle :: SqliteVersionHandle
+    -- ^ Handle to pass as @restore_from@; its timestamp is the file's modification time
+    , versionIsHead :: Bool
+    -- ^ The snapshot is the current head of the caller's sharing scope
+    }
+    deriving (Show)
+
+instance ToJSON VersionEntry where
+    toJSON e =
+        Aeson.object
+            [ "versionHandle" .= versionHandle e
+            , "is_head" .= versionIsHead e
+            ]
+
+data ListVersionsResult = ListVersionsResult
+    { listedVersions :: [VersionEntry]
+    , listedTotal :: Int
+    -- ^ Number of snapshots found before the limit was applied
+    }
+    deriving (Show)
+
+instance ToJSON ListVersionsResult where
+    toJSON r =
+        Aeson.object
+            [ "versions" .= listedVersions r
+            , "total" .= listedTotal r
+            ]
 
 data QueryResult = QueryResult
     { resultColumns :: [Text]
@@ -422,6 +473,93 @@ promoteSnapshot toolbox ctx input =
                 pure $ case result of
                     Left e  -> Left $ SqlError $ Text.pack $ show e
                     Right _ -> Right $ PromoteResult { promotedFrom = sourcePath, promotedTo = basePath }
+
+{- | List the snapshots of a versioned toolbox, most recent first.
+
+Reads the snapshot directory rather than the in-memory heads, so snapshots
+written before a restart are listed too. Without 'listAllSessions', only
+the calling session's snapshots are listed.
+-}
+listVersions :: Toolbox -> ToolExecutionContext -> ListVersionsInput -> IO (Either QueryError ListVersionsResult)
+listVersions toolbox ctx input =
+    case sqliteToolboxVersioning (toolboxConfig toolbox) of
+        SqliteReadOnly _ -> pure $ Left $ SqlError "Cannot list versions of a read-only toolbox"
+        SqliteReadWrite _ -> pure $ Left $ SqlError "Cannot list versions of a read-write toolbox (it keeps no snapshots)"
+        config@(SqliteVersioned sharing _ _) -> do
+            root <- getStorageRoot config
+            let sessionFilter
+                    | listAllSessions input = Nothing
+                    | otherwise = Just (ctxSessionId ctx)
+            result <- try @SomeException $ scanSnapshots root (toolboxName toolbox) sessionFilter
+            case result of
+                Left e -> pure $ Left $ SqlError $ Text.pack $ show e
+                Right found -> do
+                    mHead <- case sharingToHeadKey sharing (ctxSessionId ctx) (ctxTurnId ctx) of
+                        Nothing -> pure Nothing
+                        Just key -> Map.lookup key <$> readTVarIO (toolboxVersionedHeads toolbox)
+                    let limit = max 0 (maybe defaultListLimit id (listLimit input))
+                        entries =
+                            [ VersionEntry{versionHandle = h, versionIsHead = Just path == mHead}
+                            | (h, path) <- found
+                            ]
+                    pure $ Right ListVersionsResult{listedVersions = take limit entries, listedTotal = length entries}
+
+{- | Find the snapshots of toolbox @name@ under @root@ (laid out as
+'buildSnapshotPath' writes them), most recent first, with their paths.
+-}
+scanSnapshots :: FilePath -> Text -> Maybe SessionId -> IO [(SqliteVersionHandle, FilePath)]
+scanSnapshots root name sessionFilter = do
+    sessions <- case sessionFilter of
+        Just sid -> pure [sessionIdToPath sid]
+        Nothing -> subdirs root
+    found <- concat <$> mapM scanSession sessions
+    let ordered = sortBy (comparing (\(t, h, _) -> (Down t, Down (vhToolCallIndex h)))) found
+    pure
+        [ (h{vhTimestamp = Text.pack (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" t)}, p)
+        | (t, h, p) <- ordered
+        ]
+  where
+    fileName = Text.unpack name ++ ".sqlite"
+
+    subdirs dir = do
+        exists <- doesDirectoryExist dir
+        if not exists
+            then pure []
+            else listDirectory dir >>= filterM (doesDirectoryExist . (dir </>))
+
+    scanSession session = do
+        turns <- subdirs (root </> session)
+        concat <$> mapM (scanTurn session) turns
+
+    scanTurn session turn = do
+        let turnDir = root </> session </> turn
+        snaps <- subdirs turnDir
+        concat <$> mapM (scanSnap session turn turnDir) snaps
+
+    scanSnap session turn turnDir snap =
+        case snapIndex snap of
+            Nothing -> pure []
+            Just idx -> do
+                let path = turnDir </> snap </> fileName
+                exists <- doesFileExist path
+                if not exists
+                    then pure []
+                    else do
+                        mtime <- getModificationTime path
+                        let handle =
+                                SqliteVersionHandle
+                                    { vhSessionId = Text.pack session
+                                    , vhTurnId = Text.pack turn
+                                    , vhToolCallIndex = idx
+                                    , vhToolboxName = name
+                                    , vhTimestamp = ""
+                                    }
+                        pure [(mtime, handle, path)]
+
+    snapIndex :: FilePath -> Maybe Int
+    snapIndex snap = case splitAt 5 snap of
+        ("snap-", digits) -> readMaybe digits
+        _ -> Nothing
 
 makeToolDescription :: Toolbox -> ToolDescription
 makeToolDescription toolbox =

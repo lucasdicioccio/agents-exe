@@ -862,7 +862,7 @@ registerSqliteTool box =
             _                 -> False
 
         versionedNote
-            | isVersioned = " Write operations return a versionHandle; pass it as restore_from to branch from that state."
+            | isVersioned = " Write operations return a versionHandle; pass it as restore_from to branch from that state. The versions tool lists earlier handles."
             | otherwise   = ""
 
         paramProps =
@@ -948,6 +948,50 @@ registerSqlitePromoteTool box =
             , toolActivation = mbActivation
             }
 
+-- | Register the versions tool for a versioned SQLite toolbox.
+registerSqliteVersionsTool ::
+    SqliteTools.Toolbox ->
+    Maybe ToolRegistration
+registerSqliteVersionsTool box =
+    case (SqliteTools.toolboxConfig box).sqliteToolboxVersioning of
+        SqliteVersioned{} -> Just reg
+        _                 -> Nothing
+  where
+    llmName = sqlite2LLMName box "versions"
+    paramProps =
+        [ ParamProperty
+            { propertyKey = "all_sessions"
+            , propertyType = BoolParamType
+            , propertyDescription = "List snapshots of every session, not only this one (default false)"
+            , propertyRequired = False
+            }
+        , ParamProperty
+            { propertyKey = "limit"
+            , propertyType = NumberParamType
+            , propertyDescription = "Maximum number of versions to return, most recent first (default 20)"
+            , propertyRequired = False
+            }
+        ]
+    toolDescription =
+        ToolDescription
+            { toolDescriptionName = llmName
+            , toolDescriptionText = "List the stored snapshots of " <> box.toolboxDescription <> ", most recent first. Each entry has a versionHandle to pass as restore_from (query or promote) and is_head for the current head."
+            , toolDescriptionParamProperties = paramProps
+            }
+    tool' = sqliteVersionsTool box
+    find :: ToolCall -> Maybe (Tool ToolCall)
+    find call =
+        if call.callToolName == getToolName llmName
+            then Just $ mapToolResult (const call) tool'
+            else Nothing
+    mbActivation = (SqliteTools.toolboxConfig box).sqliteToolboxActivation
+    reg = ToolRegistration
+            { innerTool = mapToolResult (const ()) tool'
+            , declareTool = toolDescription
+            , findTool = find
+            , toolActivation = mbActivation
+            }
+
 {- | Register all tools from a SQLite toolbox. -}
 registerSqliteTools ::
     SqliteTools.Toolbox ->
@@ -956,7 +1000,9 @@ registerSqliteTools box =
     pure $ case registerSqliteTool box of
         Left err  -> Left err
         Right reg ->
-            let extras = maybe [] (: []) (registerSqlitePromoteTool box)
+            let extras =
+                    maybe [] (: []) (registerSqlitePromoteTool box)
+                        ++ maybe [] (: []) (registerSqliteVersionsTool box)
             in Right (reg : extras)
 
 -------------------------------------------------------------------------------
@@ -1919,6 +1965,37 @@ sqlitePromoteTool box =
             Aeson.Error err -> pure $ SqliteToolError call (SqliteTools.SqlError $ Text.pack err)
             Aeson.Success input -> do
                 result <- SqliteTools.promoteSnapshot box ctx input
+                case result of
+                    Left err  -> pure $ SqliteToolError call err
+                    Right rsp ->
+                        let bs = toStrict $ Aeson.encode rsp
+                        in pure $ BlobToolSuccess call bs Nothing
+
+-- | Builder for the SQLite versions tool.
+sqliteVersionsTool ::
+    SqliteTools.Toolbox ->
+    Tool ()
+sqliteVersionsTool box =
+    ToolBase.Tool
+        { ToolBase.toolDef = SqliteTool toolDesc
+        , ToolBase.toolRun = run
+        }
+  where
+    call = ()
+
+    toolDesc =
+        SqliteTools.ToolDescription
+            { SqliteTools.toolDescriptionName = "versions"
+            , SqliteTools.toolDescriptionDescription = box.toolboxDescription
+            , SqliteTools.toolDescriptionToolboxName = box.toolboxName
+            }
+
+    run :: Tracer IO Trace -> ToolExecutionContext -> Aeson.Value -> IO (CallResult ())
+    run _tracer ctx v =
+        case Aeson.fromJSON v of
+            Aeson.Error err -> pure $ SqliteToolError call (SqliteTools.SqlError $ Text.pack err)
+            Aeson.Success input -> do
+                result <- SqliteTools.listVersions box ctx input
                 case result of
                     Left err  -> pure $ SqliteToolError call err
                     Right rsp ->

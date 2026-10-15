@@ -4,6 +4,12 @@
 
 ### New Features
 
+#### Versioned SQLite: list the stored versions
+- A `SqliteVersioned` toolbox exposes `sqlite_{name}_versions`: the stored snapshots, most recent first, each with a `versionHandle` to pass as `restore_from` and `is_head` for the current head of the caller's sharing scope. Options: `all_sessions` (default: the calling session only), `limit` (default 20)
+- Read from the snapshot directory, so snapshots written before a restart are listed too
+- Library: `listVersions`, `scanSnapshots`, `ListVersionsInput`, `ListVersionsResult` in `System.Agents.Tools.SqliteToolbox`
+- See `documentation/tools.md` (SQLite Tools)
+
 #### Mailbox extensions
 - `send-to-tool-call`, a System Toolbox capability: the model writes to the sub-agent that one of its running `prompt_agent_<slug>` calls started, naming the call (`tool_call_id`) instead of a session. Under the runner (TUI, `agents-server`) a sub-agent call now records its child session, so its placeholder shows `childSessionId` there too; in `run`, an in-tool sub-agent is addressable by mail while it runs
 - Notify progress level: a tool that reports `{"level": "notify", "message": "…"}` (a bash tool: a `::notify:: …` line on standard error) is also delivered to the session as mail, at most 16 times per call. It wakes a session that idles on its background calls, or `wait`, while the call goes on running
