@@ -502,6 +502,34 @@ caller's sharing scope, which is kept in memory and so is never set right
 after a restart. The `timestamp` of a listed handle is the snapshot file's
 modification time.
 
+#### Versioned toolboxes: snapshot retention
+
+Every write to a `SqliteVersioned` toolbox copies the whole database into a
+new snapshot, and by default none is ever deleted. An optional `retention`
+object in the versioning config bounds them:
+
+```json
+"versioning": {
+  "tag": "SqliteVersioned",
+  "shared": "conversation",
+  "basePath": "/path/to/memories.sqlite",
+  "retention": {"maxSnapshots": 100, "maxAgeDays": 30}
+}
+```
+
+- `maxSnapshots` (integer, at least 1): keep at most this many snapshots of
+  the toolbox, the most recent ones, counted across all sessions under the
+  storage root
+- `maxAgeDays` (number, positive): delete snapshots whose file is older than
+  this
+
+Both are optional; without `retention` (or with an empty object) every
+snapshot is kept. The policy is applied after each write. The snapshot just
+written and the current head of every sharing scope are never deleted, so
+the count can exceed `maxSnapshots` by the number of live heads. A deleted
+snapshot's `versionHandle` no longer resolves, and the base database is never
+touched.
+
 **Security:**
 - Read-only queries are encouraged
 - Write operations are allowed but logged

@@ -4,6 +4,12 @@
 
 ### New Features
 
+#### Versioned SQLite: snapshot retention policy
+- A `SqliteVersioned` config takes an optional `retention`: `{"maxSnapshots": N, "maxAgeDays": D}`. After each write the toolbox deletes the snapshots beyond the newest N, or older than D days, across all sessions; the snapshot just written and the live heads are kept
+- Default (no `retention`): every snapshot is kept, as before
+- Library: `SqliteVersioned` has a fourth field `vRetention :: SqliteRetention` (`keepAllSnapshots` for the old behavior); `pruneSnapshots`, `scanSnapshotsTimed` and two `Trace` constructors in `System.Agents.Tools.SqliteToolbox`
+- See `documentation/tools.md` (SQLite Tools)
+
 #### Versioned SQLite: list the stored versions
 - A `SqliteVersioned` toolbox exposes `sqlite_{name}_versions`: the stored snapshots, most recent first, each with a `versionHandle` to pass as `restore_from` and `is_head` for the current head of the caller's sharing scope. Options: `all_sessions` (default: the calling session only), `limit` (default 20)
 - Read from the snapshot directory, so snapshots written before a restart are listed too

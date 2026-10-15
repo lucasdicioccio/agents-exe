@@ -823,19 +823,67 @@ data SqliteVersioningConfig
         -- ^ Optional custom storage root. Default: ~/.agents/sqlite-versions (or XDG equivalent)
         , vBasePath :: !FilePath
         -- ^ Template/source database path - the original database to copy from
+        , vRetention :: !SqliteRetention
+        -- ^ Which snapshots to keep; 'keepAllSnapshots' (the default) never deletes any
         }
     deriving (Show, Eq, Ord, Generic)
+
+{- | Retention policy for the snapshots of a 'SqliteVersioned' toolbox.
+
+Every write of a versioned toolbox copies the whole database into a new
+snapshot. With a limit set, the toolbox deletes, after each write, the
+snapshots of this toolbox (across all sessions under the storage root) that
+fall outside it:
+
+* 'retentionMaxSnapshots': keep at most this many, the most recent ones
+* 'retentionMaxAgeDays': drop those whose file is older than this many days
+
+A snapshot that is the current head of a sharing scope, or the one just
+written, is never deleted, so the count can exceed the limit by the number of
+live heads. Both 'Nothing' ('keepAllSnapshots', the default) keeps every
+snapshot. A deleted snapshot's version handle no longer resolves.
+
+JSON: @{"maxSnapshots": 100, "maxAgeDays": 30}@, both optional.
+-}
+data SqliteRetention = SqliteRetention
+    { retentionMaxSnapshots :: !(Maybe Int)
+    , retentionMaxAgeDays :: !(Maybe Double)
+    }
+    deriving (Show, Eq, Ord, Generic)
+
+-- | Keep every snapshot (no pruning).
+keepAllSnapshots :: SqliteRetention
+keepAllSnapshots = SqliteRetention Nothing Nothing
+
+instance ToJSON SqliteRetention where
+    toJSON (SqliteRetention mCount mAge) =
+        Aeson.object $
+            ["maxSnapshots" .= n | Just n <- [mCount]]
+                ++ ["maxAgeDays" .= d | Just d <- [mAge]]
+
+instance FromJSON SqliteRetention where
+    parseJSON = Aeson.withObject "SqliteRetention" $ \v -> do
+        mCount <- v .:? "maxSnapshots"
+        mAge <- v .:? "maxAgeDays"
+        case mCount of
+            Just n | n < (1 :: Int) -> fail "SqliteRetention: maxSnapshots must be at least 1"
+            _ -> pure ()
+        case mAge of
+            Just d | not (d > (0 :: Double)) -> fail "SqliteRetention: maxAgeDays must be positive"
+            _ -> pure ()
+        pure (SqliteRetention mCount mAge)
 
 instance ToJSON SqliteVersioningConfig where
     toJSON (SqliteReadOnly path) = Aeson.object ["tag" .= ("SqliteReadOnly" :: Text), "path" .= path]
     toJSON (SqliteReadWrite path) = Aeson.object ["tag" .= ("SqliteReadWrite" :: Text), "path" .= path]
-    toJSON (SqliteVersioned sharing mRoot base) =
-        Aeson.object
+    toJSON (SqliteVersioned sharing mRoot base retention) =
+        Aeson.object $
             [ "tag" .= ("SqliteVersioned" :: Text)
             , "shared" .= sharing
             , "storageRoot" .= mRoot
             , "basePath" .= base
             ]
+                ++ ["retention" .= retention | retention /= keepAllSnapshots]
 
 instance FromJSON SqliteVersioningConfig where
     parseJSON = Aeson.withObject "SqliteVersioningConfig" $ \v -> do
@@ -849,6 +897,7 @@ instance FromJSON SqliteVersioningConfig where
                     <$> v .: "shared"
                     <*> v .:? "storageRoot"
                     <*> v .: "basePath"
+                    <*> (v .:? "retention" .!= keepAllSnapshots)
             other -> fail $ "Unknown SqliteVersioningConfig tag: " ++ Text.unpack other
 
 {- | Configuration for a SQLite builtin toolbox.
@@ -869,7 +918,8 @@ Example configuration (versioned with conversation lifetime):
       "tag": "SqliteVersioned",
       "lifetime": "conversation",
       "storageRoot": null,
-      "basePath": "/path/to/memories.sqlite"
+      "basePath": "/path/to/memories.sqlite",
+      "retention": {"maxSnapshots": 100, "maxAgeDays": 30}
     },
     "activation": "always"
   }

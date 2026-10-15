@@ -428,7 +428,7 @@ agentSerializationTests =
             let sqliteDesc = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "memory"
                     , Base.sqliteToolboxDescription = "a set of memories"
-                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/memories.sqlite"
+                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/memories.sqlite" Base.keepAllSnapshots
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let builtinToolbox = Base.SqliteToolbox sqliteDesc
@@ -471,7 +471,7 @@ agentSerializationTests =
             let sqliteDesc1 = Base.SqliteToolboxDescription
                     { Base.sqliteToolboxName = "memory"
                     , Base.sqliteToolboxDescription = "a set of memories"
-                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/memories.sqlite"
+                    , Base.sqliteToolboxVersioning = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/memories.sqlite" Base.keepAllSnapshots
                     , Base.sqliteToolboxActivation = Nothing
                     }
             let sqliteDesc2 = Base.SqliteToolboxDescription
@@ -589,10 +589,22 @@ agentSerializationTests =
             let mNoVer = decode jsonNoVer :: Maybe Base.SqliteVersioningConfig
             mNoVer @?= Just (Base.SqliteReadWrite "/path/to/db.sqlite")
             
-            let versioned = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/db.sqlite"
+            let versioned = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/db.sqlite" Base.keepAllSnapshots
             let jsonVer = encode versioned
             let mVer = decode jsonVer :: Maybe Base.SqliteVersioningConfig
-            mVer @?= Just (Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/db.sqlite")
+            mVer @?= Just (Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/db.sqlite" Base.keepAllSnapshots)
+
+            let limited = Base.SqliteVersioned Base.SharingConversation Nothing "/path/to/db.sqlite" (Base.SqliteRetention (Just 10) (Just 7))
+            (decode (encode limited) :: Maybe Base.SqliteVersioningConfig) @?= Just limited
+        , testCase "SqliteVersioned retention: absent keeps all, invalid limits are rejected" $ do
+            let parse :: LBS.ByteString -> Maybe Base.SqliteVersioningConfig
+                parse = decode
+            fmap Base.vRetention (parse "{\"tag\":\"SqliteVersioned\",\"shared\":\"conversation\",\"basePath\":\"/db\"}")
+                @?= Just Base.keepAllSnapshots
+            fmap Base.vRetention (parse "{\"tag\":\"SqliteVersioned\",\"shared\":\"conversation\",\"basePath\":\"/db\",\"retention\":{\"maxSnapshots\":5}}")
+                @?= Just (Base.SqliteRetention (Just 5) Nothing)
+            parse "{\"tag\":\"SqliteVersioned\",\"shared\":\"conversation\",\"basePath\":\"/db\",\"retention\":{\"maxSnapshots\":0}}" @?= Nothing
+            parse "{\"tag\":\"SqliteVersioned\",\"shared\":\"conversation\",\"basePath\":\"/db\",\"retention\":{\"maxAgeDays\":-1}}" @?= Nothing
         ]
   where
     encodeUtf8 = LBS.fromStrict . Text.encodeUtf8
