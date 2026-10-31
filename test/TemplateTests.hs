@@ -33,11 +33,17 @@ import System.Agents.Base (
     FileSandboxConfig (..), FileSandboxSpec (..),
     LuaToolboxDescription (..),
     McpServerDescription,
+    SqliteRetention (..),
+    SqliteSharing (..),
+    SqliteToolboxDescription (..),
+    SqliteVersioningConfig (..),
+    keepAllSnapshots,
  )
 import qualified System.Agents.CLI.ConfigLoader as ConfigLoader
 import qualified System.Agents.FileLoader as FileLoader
 import System.Agents.FileLoader.Template
 import System.Agents.FileSandbox.Predicate (PathPredicate (..))
+import System.Agents.Tools.Activation (Activation (..))
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 
 tests :: TestTree
@@ -240,6 +246,31 @@ standardLibraryTests =
                 evalWithLibrary
                     "[$a.developer-toolbox({name: \"dev\", capabilities: [\"read-file-range\"], buildCommand: [\"make\"]}), $a.system-toolbox({name: \"sys\", capabilities: [\"date\"], sandbox: $a.sandbox({allow: [$a.deny-all]})}), $a.lua-toolbox({name: \"lua\", allowedTools: [\"bash\"]})]"
             length (boxes :: [BuiltinToolboxDescription]) @?= 3
+        , testCase "sqlite toolboxes, one per access mode" $ do
+            boxes <-
+                evalWithLibrary $
+                    Text.unlines
+                        [ "[$a.sqlite-toolbox({name: \"ro\", versioning: $a.sqlite-read-only(\"ro.sqlite\")}),"
+                        , " $a.sqlite-toolbox({name: \"rw\", description: \"notes\", activation: \"always\", versioning: $a.sqlite-read-write(\"rw.sqlite\")}),"
+                        , " $a.sqlite-toolbox({name: \"v\", versioning: $a.sqlite-versioned({basePath: \"base.sqlite\", shared: \"turn\"})}),"
+                        , " $a.sqlite-toolbox({name: \"vr\", versioning: $a.sqlite-versioned({basePath: \"base.sqlite\", shared: \"global\", storageRoot: \"/var/snap\", retention: {maxSnapshots: 10, maxAgeDays: 7}})})]"
+                        ]
+            [ (d.sqliteToolboxName, d.sqliteToolboxDescription, d.sqliteToolboxVersioning, d.sqliteToolboxActivation)
+                | SqliteToolbox d <- (boxes :: [BuiltinToolboxDescription])
+                ]
+                @?= [ ("ro", "SQLite database", SqliteReadOnly "ro.sqlite", Nothing)
+                    , ("rw", "notes", SqliteReadWrite "rw.sqlite", Just AlwaysActivated)
+                    , ("v", "SQLite database", SqliteVersioned SharingTurn Nothing "base.sqlite" keepAllSnapshots, Nothing)
+                    , ("vr", "SQLite database", SqliteVersioned SharingGlobal (Just "/var/snap") "base.sqlite" (SqliteRetention (Just 10) (Just 7)), Nothing)
+                    ]
+        , testCase "sqlite-toolbox requires versioning, sqlite-versioned requires shared" $ do
+            let evalBox expr = snd <$> evalTemplate defaultTemplateEnv ("@a=import(\"agents\", {}).vals\n" <> expr)
+                isEvalError (Left (TemplateEvalError _)) = True
+                isEvalError _ = False
+            assertBool "versioning missing" $
+                isEvalError (evalBox "$a.sqlite-toolbox({name: \"x\"})")
+            assertBool "shared missing" $
+                isEvalError (evalBox "$a.sqlite-versioned({basePath: \"x.sqlite\"})")
         , testCase "bash toolboxes parse" $ do
             boxes <- evalWithLibrary "[$a.tools-dir({path: \"tools\", filter: \".sh\"}), $a.tool({path: \"tools/one.sh\"})]"
             length (boxes :: [BashToolboxDescription]) @?= 2

@@ -199,10 +199,33 @@ $a.agent({
 | `developer-toolbox` | `name`, `capabilities`; optional `description`, `sandbox`, `activation`, `buildCommand` |
 | `system-toolbox` | `name`, `capabilities`; optional `description`, `sandbox`, `activation`, `envVarFilter`, `commandFilter` |
 | `lua-toolbox` | `name`; optional `description`, `maxMemoryMB`, `maxExecutionTimeSeconds`, `allowedTools`, `allowedHosts`, `sandbox`, `activation` |
+| `sqlite-toolbox` | `name`, `versioning`; optional `description`, `activation` |
 | `tools-dir` | `path`; optional `filter`, `activation`, `bindings` (a `bashToolboxes` entry) |
 | `tool` | `path`; optional `activation`, `bindings` (a `bashToolboxes` entry) |
 | `mcp` | `name`, `executable`; optional `args`, `activation`, `env` (an `mcpServers` entry) |
 | `helper` | `slug`, `path`; optional `with`, `narrowable` (an `extraAgents` entry) |
+
+`sqlite-toolbox`'s `versioning` is one of:
+
+| function | access |
+|---|---|
+| `sqlite-read-only(path)` | the database at `path`, `SELECT` only |
+| `sqlite-read-write(path)` | the database at `path`, every query |
+| `sqlite-versioned({basePath, shared, storageRoot, retention})` | writes go to snapshots copied from `basePath`; `shared` (`global`, `conversation`, `turn` or `tool-call`) is required; `storageRoot` and `retention` (`{maxSnapshots, maxAgeDays}`) are optional |
+
+```
+$a.sqlite-toolbox({
+  name: "memory",
+  description: "a set of memories",
+  versioning: $a.sqlite-versioned({
+    basePath: "./memories.sqlite",
+    shared: "conversation",
+    retention: {maxSnapshots: 100}
+  })
+})
+```
+
+See [SQLite Tools](tools.md#sqlite-tools) for what each mode does.
 
 **Agent**
 
