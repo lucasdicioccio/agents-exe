@@ -15,14 +15,15 @@ import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import Prod.Tracer (Tracer (..))
-import System.Directory (createDirectory, doesDirectoryExist, findExecutable, getPermissions, setOwnerExecutable, setPermissions)
+import System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, doesDirectoryExist, findExecutable, getPermissions, setOwnerExecutable, setPermissions)
 import System.Exit (ExitCode (..))
-import System.IO.Temp (withSystemTempDirectory)
+import System.IO.Temp (withSystemTempDirectory, withTempDirectory)
 import System.Process (readProcessWithExitCode)
 import Test.Tasty
 import Test.Tasty.HUnit
 
 import qualified System.Agents.Tools.Bash as Bash
+import System.Agents.Tools.Landlock (LandlockAccess (..), LandlockRule (..), landlockAbi, landlockLauncherArg, landlockLauncherArgs)
 import System.Agents.Tools.ScriptRuntime
 import System.Agents.Tools.ScriptTypes (ScriptInfo (..))
 
@@ -31,7 +32,8 @@ tests =
     testGroup
         "Bash tools v2 runtime"
         [ testGroup "load" loadTests
-        , testGroup "launch" launchTests
+        , testGroup "resolve" resolveTests
+        , testGroup "launch" (launchTests <> landlockLaunchTests)
         , testGroup "run" runTests
         ]
 
@@ -61,10 +63,72 @@ loadTests =
         refusedWith allConfigured "{\"run_as\": {\"user\": \"-x\"}}"
     , testCase "sandbox needs a mechanism (never unconfined by silence)" $
         refusedWith defaultToolRuntimeConfig "{\"sandbox\": {\"net\": \"none\"}}"
-    , testCase "sandbox under landlock is refused (not implemented yet)" $
-        refusedWith defaultToolRuntimeConfig{sandboxMechanism = Just SandboxLandlock} "{\"sandbox\": {}}"
-    , testCase "sandbox under auto loads" $
-        acceptedWith defaultToolRuntimeConfig{sandboxMechanism = Just SandboxAuto} "{\"sandbox\": {\"fs\": {\"read\": [\"/srv\"]}}}"
+    , testCase "landlock refuses net none and tmp private, naming the field" $ do
+        refusedWith landlockConfig "{\"sandbox\": {\"net\": \"none\"}}"
+        refusedWith landlockConfig "{\"sandbox\": {\"tmp\": \"private\"}}"
+    , testCase "landlock loads a tool outside /tmp where the kernel has it" $
+        withLandlock $
+            withToolOutsideTmp (runtimeTool "{\"sandbox\": {\"fs\": {\"read\": [\"/srv\"]}}}" "true") $ \_ path -> do
+                r <- Bash.loadScriptWith landlockConfig nullTracer path
+                either (\err -> assertFailure ("expected to load: " <> show err)) (const (pure ())) r
+    , testCase "landlock refuses a tool under /tmp with a shared /tmp" $
+        withLandlock $
+            refusedWith landlockConfig "{\"sandbox\": {}}"
+    , testCase "sandbox under auto loads where bwrap works" $
+        withBwrap $
+            acceptedWith defaultToolRuntimeConfig{sandboxMechanism = Just SandboxAuto} "{\"sandbox\": {\"fs\": {\"read\": [\"/srv\"]}}}"
+    ]
+
+resolveTests :: [TestTree]
+resolveTests =
+    [ testCase "auto prefers bwrap where it works" $
+        resolveSandboxMechanism (SandboxSupport True (Right 6)) SandboxAuto "/opt/tools" plain @?= Right UseBwrap
+    , testCase "auto falls back to landlock without bwrap" $
+        resolveSandboxMechanism (SandboxSupport False (Right 1)) SandboxAuto "/opt/tools" plain @?= Right UseLandlock
+    , testCase "auto never weakens: net none without bwrap fails" $
+        assertLeftMentions "net" (resolveSandboxMechanism (SandboxSupport False (Right 6)) SandboxAuto "/opt/tools" plain{sandboxNet = NetNone})
+    , testCase "auto with neither mechanism fails, giving both reasons" $
+        assertLeftMentions "bwrap" (resolveSandboxMechanism (SandboxSupport False (Left "no Landlock")) SandboxAuto "/opt/tools" plain)
+    , testCase "landlock without kernel support fails clearly" $
+        assertLeftMentions "no Landlock" (resolveSandboxMechanism (SandboxSupport True (Left "no Landlock")) SandboxLandlock "/opt/tools" plain)
+    , testCase "landlock refuses a tool under /tmp with tmp shared" $
+        assertLeftMentions "/tmp" (resolveSandboxMechanism (SandboxSupport False (Right 6)) SandboxLandlock "/tmp/x/tools" plain)
+    , testCase "bwrap is not probed" $
+        resolveSandboxMechanism (SandboxSupport False (Left "none")) SandboxBwrap "/tmp/x" plain @?= Right UseBwrap
+    ]
+  where
+    plain = Sandbox [] [] NetHost TmpShared
+    assertLeftMentions needle r = case r of
+        Left msg -> assertBool msg (Text.pack needle `Text.isInfixOf` Text.pack msg)
+        Right m -> assertFailure ("expected a refusal, got " <> show m)
+
+landlockLaunchTests :: [TestTree]
+landlockLaunchTests =
+    [ testCase "landlock rules: system read, declared paths, tool dir read-only, shared /tmp" $ do
+        let rules = landlockRules "/opt/tools" (Sandbox ["data", "/srv/ro"] ["/var/out"] NetHost TmpShared)
+        assertBool "tool dir read" (LandlockRule AccessRead "/opt/tools" False `elem` rules)
+        assertBool "relative read resolved" (LandlockRule AccessRead "/opt/tools/data" False `elem` rules)
+        assertBool "absolute read" (LandlockRule AccessRead "/srv/ro" False `elem` rules)
+        assertBool "write" (LandlockRule AccessWrite "/var/out" False `elem` rules)
+        assertBool "system paths optional" (LandlockRule AccessRead "/usr" True `elem` rules)
+        assertBool "shared tmp" (LandlockRule AccessWrite "/tmp" True `elem` rules)
+        assertBool "tool dir never writable" (all (\r -> not (r.ruleAccess == AccessWrite && r.rulePath == "/opt/tools")) rules)
+    , testCase "landlock launcher arguments" $
+        landlockLauncherArgs [LandlockRule AccessRead "/a" False, LandlockRule AccessWrite "/b" True] "/t/tool" ["run", "x"]
+            @?= [landlockLauncherArg, "--read", "/a", "--write-try", "/b", "--", "/t/tool", "run", "x"]
+    , testCase "run_as wraps the landlock launcher, which wraps the tool" $
+        withLandlock $
+            withToolOutsideTmp "" $ \dir path -> do
+                let cfg = landlockConfig{runAsMechanism = Just RunAsSudo}
+                    rt = emptyScriptRuntime{runtimeRunAs = Just (RunAs "svc" Nothing), runtimeSandbox = Just (Sandbox [] [] NetHost TmpShared)}
+                r <- prepareLaunch cfg path rt ["run"] [] []
+                case r of
+                    Left err -> assertFailure err
+                    Right l -> do
+                        l.launchCommand @?= "sudo"
+                        assertBool "launcher after sudo" (landlockLauncherArg `elem` l.launchArgs)
+                        assertBool "tool dir rule" (hasSeq ["--read", dir] l.launchArgs)
+                        assertBool "tool last" (hasSeq ["--", path, "run"] l.launchArgs)
     , testCase "an unknown runtime field is refused" $
         refusedWith allConfigured "{\"run-as\": {\"user\": \"nobody\"}}"
     , testCase "an unknown sandbox field is refused" $
@@ -175,6 +239,34 @@ runTests =
                 let txt = Text.decodeUtf8With lenientDecode out
                 assertBool ("declared write allowed: " <> Text.unpack txt) ("out:ok" `Text.isInfixOf` txt)
                 assertBool ("tool dir read-only: " <> Text.unpack txt) ("tooldir:denied" `Text.isInfixOf` txt)
+    , testCase "a sandboxed tool reads and writes only where it declared (landlock)" $
+        withLandlock $
+            withToolOutsideTmp (runtimeTool "{\"sandbox\": {\"fs\": {\"read\": [\"in\"], \"write\": [\"out\"]}}, \"rundir\": \"out\"}" landlockBody) $ \dir path -> do
+                createDirectory (dir <> "/in")
+                writeFile (dir <> "/in/f") "secret-ok"
+                createDirectory (dir <> "/hidden")
+                writeFile (dir <> "/hidden/f") "x"
+                desc <- loadWith landlockConfig path
+                r <- Bash.runValueWith landlockConfig nullTracer desc Nothing (Aeson.object [])
+                out <- either (\e -> assertFailure (show e)) pure r
+                let txt = Text.decodeUtf8With lenientDecode out
+                    has w = assertBool (w <> ": " <> Text.unpack txt) (Text.pack w `Text.isInfixOf` txt)
+                has "out:ok"
+                has "tooldir:denied"
+                has "in:ok"
+                has "inwrite:denied"
+                has "home:denied"
+                has "tmp:ok"
+                has "pwd:" -- the rundir
+                assertBool "rundir is the working directory" (Text.pack ("pwd:" <> dir <> "/out") `Text.isInfixOf` txt)
+    , testCase "a tool's children stay confined (landlock)" $
+        withLandlock $
+            withToolOutsideTmp (runtimeTool "{\"sandbox\": {}}" "bash -c 'if echo x > \"$(dirname \"$0\")/g\" 2>/dev/null; then echo child:ok; else echo child:denied; fi' \"$0\"") $ \_ path -> do
+                desc <- loadWith landlockConfig path
+                r <- Bash.runValueWith landlockConfig nullTracer desc Nothing (Aeson.object [])
+                out <- either (\e -> assertFailure (show e)) pure r
+                let txt = Text.decodeUtf8With lenientDecode out
+                assertBool (Text.unpack txt) ("child:denied" `Text.isInfixOf` txt)
     ]
 
 -------------------------------------------------------------------------------
@@ -183,6 +275,25 @@ runTests =
 
 nullTracer :: Tracer IO a
 nullTracer = Tracer (\_ -> pure ())
+
+landlockConfig :: ToolRuntimeConfig
+landlockConfig = defaultToolRuntimeConfig{sandboxMechanism = Just SandboxLandlock}
+
+{- | Exercises the read, write and tool-directory rules, and that the
+rest of the file system (the agents-exe user's home) is denied.
+-}
+landlockBody :: String
+landlockBody =
+    unlines
+        [ "dir=$(dirname \"$0\")"
+        , "echo \"pwd:$(pwd)\""
+        , "if echo x > \"$dir/out/f\" 2>/dev/null; then echo out:ok; else echo out:denied; fi"
+        , "if echo x > \"$dir/g\" 2>/dev/null; then echo tooldir:ok; else echo tooldir:denied; fi"
+        , "if [[ $(cat \"$dir/in/f\" 2>/dev/null) == secret-ok ]]; then echo in:ok; else echo in:denied; fi"
+        , "if echo x > \"$dir/in/f\" 2>/dev/null; then echo inwrite:ok; else echo inwrite:denied; fi"
+        , "if ls \"$HOME\" > /dev/null 2>&1; then echo home:ok; else echo home:denied; fi"
+        , "t=$(mktemp) && echo x > \"$t\" && rm -f \"$t\" && echo tmp:ok"
+        ]
 
 allConfigured :: ToolRuntimeConfig
 allConfigured = ToolRuntimeConfig (Just "/nonexistent-envdir-root") (Just RunAsSudo) (Just SandboxBwrap)
@@ -249,6 +360,28 @@ withBwrap k = do
             (code, _, _) <- readProcessWithExitCode "bwrap" ["--ro-bind", "/", "/", "true"] ""
             pure (code == ExitSuccess)
     if usable then k else pure ()
+
+{- | Like 'withTool', in a directory outside @/tmp@ (under the working
+directory): Landlock refuses a tool under a shared @/tmp@.
+-}
+withToolOutsideTmp :: String -> (FilePath -> FilePath -> IO a) -> IO a
+withToolOutsideTmp content k = do
+    cwd <- getCurrentDirectory
+    withTempDirectory cwd ".landlock-test" $ \dir0 -> do
+        dir <- canonicalizePath dir0
+        let path = dir <> "/tool"
+        writeFile path content
+        perms <- getPermissions path
+        setPermissions path (setOwnerExecutable True perms)
+        k dir path
+
+-- | Runs the test only where the kernel has Landlock.
+withLandlock :: Assertion -> Assertion
+withLandlock k = do
+    abi <- landlockAbi
+    case abi of
+        Right _ -> k
+        Left _ -> pure ()
 
 describeThen :: String -> String -> String
 describeThen json body =

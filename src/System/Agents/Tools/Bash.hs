@@ -116,6 +116,7 @@ import System.Agents.Tools.ScriptRuntime (
     cancelSignal,
     getToolRuntimeConfig,
     prepareLaunch,
+    resolveSandbox,
     startTimeoutMicros,
     stopGraceMicros,
  )
@@ -367,7 +368,16 @@ loadScriptWith cfg tracer path = do
         else case Aeson.eitherDecode (LByteString.fromStrict out) of
             Left jsonErr -> pure $ Left $ InvalidDescriptionError path jsonErr
             Right bashInfo -> case validateScriptCommands bashInfo <> validateScriptV2 cfg bashInfo of
-                [] -> pure $ Right $ ScriptDescription path bashInfo{scriptSubcommand = Nothing}
+                [] -> do
+                    -- Which sandbox mechanism enforces the tool can depend on
+                    -- the host (--sandbox landlock|auto): checked here too, so
+                    -- a tool that could never run fails to load.
+                    sandboxProblem <- case scriptRuntimeOf bashInfo >>= (.runtimeSandbox) of
+                        Nothing -> pure Nothing
+                        Just sb -> either Just (const Nothing) <$> resolveSandbox cfg path sb
+                    pure $ case sandboxProblem of
+                        Nothing -> Right $ ScriptDescription path bashInfo{scriptSubcommand = Nothing}
+                        Just problem -> Left $ InvalidDescriptionError path problem
                 problems -> pure $ Left $ InvalidDescriptionError path (List.intercalate "; " problems)
 
 {- | Loads a single bash script and returns the tools it exposes: itself, or

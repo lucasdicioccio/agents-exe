@@ -10,9 +10,15 @@
 
 #### Bash tools v2: runtime for oneshot tools
 - A v2 bash tool may declare a `runtime` object: `envdir` (read the daemontools way under the operator's `--envdir-root`), `environment`, `rundir`, `timeout.start` (the call's deadline) and `timeout.stop`, `cancel` (`SIGTERM` or `SIGINT`), `run_as` (enforced with `--run-as-mechanism setpriv|sudo|runuser`) and `sandbox` (`fs.read`/`fs.write`, `net`, `tmp`; enforced with `--sandbox bwrap|auto`)
-- A tool that declares what the operator did not configure fails to load, naming the field; so does an unknown `runtime` field. Still refused at load: `timeout.idle`, `on_exit`, `cancel` by `send` (service only) and `--sandbox landlock` (not implemented yet)
+- A tool that declares what the operator did not configure fails to load, naming the field; so does an unknown `runtime` field. Still refused at load: `timeout.idle`, `on_exit`, `cancel` by `send` (service only)
 - Library: `ScriptInfo.scriptRuntime` is now a parsed `ScriptRuntime`; new module `System.Agents.Tools.ScriptRuntime`; `loadScriptWith` and `runValueWith` in `System.Agents.Tools.Bash` take the operator configuration explicitly; `RunScriptError` has `ScriptRuntimeError` and `ScriptTimeoutError`
 - See `documentation/binary-tool.md` (Protocol v2: runtime) and `todos/bash-tools-v2.md`
+
+#### Bash tools v2: Landlock sandbox mechanism
+- `--sandbox landlock` confines a tool declaring `sandbox` with Landlock: no privilege and no namespaces; `agents-exe` runs the tool through itself, which applies the rules and execs it. The tool may read and execute the system paths, `/proc`, its own directory and `fs.read`, and has full access to `fs.write` and (`tmp: shared`) `/tmp`; everything else is denied. On kernels with Landlock ABI 6, it can only signal processes inside its own sandbox
+- Landlock cannot honour `net: none` (it only denies TCP), `tmp: private`, or a read-only tool directory under a shared `/tmp`: such a tool fails to load under `--sandbox landlock`, naming the reason, and so does any sandboxed tool on a kernel without Landlock
+- `--sandbox auto` now probes bubblewrap once per process and falls back to Landlock where bubblewrap cannot build a sandbox (e.g. restricted unprivileged user namespaces); a tool neither can honour fails to load with both reasons
+- Library: new module `System.Agents.Tools.Landlock` (and `cbits/landlock_exec.c`); a program that runs Landlock tools calls `landlockLauncherHook` first in `main` (`agents-exe` does); `resolveSandbox`, `resolveSandboxMechanism`, `getSandboxSupport` and `landlockRules` in `System.Agents.Tools.ScriptRuntime`
 
 #### Bash tools v2: protocol 2 and framed oneshot output
 - A bash tool whose `describe` says `"protocol": 2` may declare a `process` object; its output is cut into events (`output.framing`: `jsonl` by default, `lines`, `chunks`) and, under `jsonl`, validated against the declared `output.event` JSON Schema. The model receives a JSON array of events; a line that does not parse or match is kept as `{"invalid": {"raw", "error"}}`

@@ -211,7 +211,7 @@ as the wrong user, by silence.
 | `timeout.stop` | Seconds between the cancel signal and `SIGKILL` (default 0.1) | |
 | `cancel` | The signal sent first when the call is cancelled or times out: `"SIGTERM"` (default) or `"SIGINT"` | |
 | `run_as` | `{"user", "group"}`: run the tool as this user (and group; by default the user's primary group) | `--run-as-mechanism setpriv\|sudo\|runuser` |
-| `sandbox` | `{"fs": {"read": [...], "write": [...]}, "net": "host"\|"none", "tmp": "shared"\|"private"}`: what the tool may touch | `--sandbox bwrap\|auto` |
+| `sandbox` | `{"fs": {"read": [...], "write": [...]}, "net": "host"\|"none", "tmp": "shared"\|"private"}`: what the tool may touch | `--sandbox bwrap\|landlock\|auto` |
 
 The environment a tool sees, from lowest to highest precedence: the
 `agents-exe` environment, the session context variables, the envdir,
@@ -233,11 +233,35 @@ paths read-write; relative paths are relative to the tool's directory, and a
 declared path that does not exist fails the call. `net: none` is a network
 namespace with no interface. The tool dies with `agents-exe`. bubblewrap
 needs unprivileged user namespaces, which some distributions restrict.
+
+Under `landlock` nothing is hidden: the tool sees the whole file system, but
+the kernel denies every access outside its rules. It may read and execute
+the same system paths, `/proc` and its own directory, read `fs.read`, and do
+anything under `fs.write` and (`tmp: shared`) `/tmp`; `/dev/null`,
+`/dev/zero` and `/dev/full` are writable and `/dev/random`, `/dev/urandom`
+readable. On kernels with Landlock ABI 6 or later it can only signal
+processes inside its own sandbox. Landlock needs no privilege and no
+namespaces, only a kernel that has it enabled (`landlock` in
+`/sys/kernel/security/lsm`); the rules are applied by `agents-exe` itself,
+which the tool is started through (`agents-exe __agents-exe-landlock-exec
+... -- tool run ...`) and which execs the tool once the rules are in place.
+The rules hold for the tool's children too, and set `no_new_privs`, so
+set-user-ID programs (such as `sudo`) do not gain privileges inside. It
+cannot honour everything bubblewrap does, and a tool asking for it fails to
+load under `--sandbox landlock`, naming the reason: `net: none` (Landlock
+only denies TCP bind and connect, UDP and unix sockets stay open),
+`tmp: private`, and a tool whose directory is under `/tmp` with
+`tmp: shared` (a path cannot be made read-only beneath one that is
+writable). A kernel without Landlock fails every sandboxed tool to load,
+saying why.
+
 `--sandbox auto` picks, per tool, the strongest mechanism that honours every
-declared field: today that is always bubblewrap. `--sandbox landlock` is
-accepted but not implemented yet: a tool declaring `sandbox` then fails to
-load. `run_as` and `sandbox` compose: the sandbox is set up for the process
-that runs as the user.
+declared field: bubblewrap when it can build a sandbox on this host (probed
+once per process), else Landlock when the kernel has it and the tool asks
+for nothing Landlock cannot enforce; a tool that neither can honour fails to
+load, giving both reasons. `run_as` and `sandbox` compose: the sandbox is
+set up for the process that runs as the user (under `landlock`, that user
+must be able to execute the `agents-exe` binary).
 
 `timeout.idle` and `on_exit` only apply to a `service`, and
 `cancel: {"send": ...}` needs an open stdin (`process.input`): until those

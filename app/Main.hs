@@ -38,6 +38,7 @@ import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 import System.Agents.Base (Agent (..), AgentDescription (..), ExtraAgentRef (..))
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 import qualified System.Agents.Tools.ScriptRuntime as ScriptRuntime
+import qualified System.Agents.Tools.Landlock as Landlock
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.Base (makeFileJsonTracer, makeShowLogFileTracer)
 import qualified System.Agents.CLI.Check as CheckCmd
@@ -1429,7 +1430,7 @@ parseToolRuntimeOptions =
                 (eitherReader ScriptRuntime.parseSandboxMechanism)
                 ( long "sandbox"
                     <> metavar "bwrap|landlock|auto"
-                    <> help "How bash tools declaring runtime.sandbox are confined (landlock is not implemented yet)"
+                    <> help "How bash tools declaring runtime.sandbox are confined (auto: bwrap where it works, else landlock)"
                 )
             )
 
@@ -1476,6 +1477,9 @@ parseProcessParamsOptions =
 
 main :: IO ()
 main = do
+    -- Started as the Landlock launcher of a sandboxed bash tool: confine
+    -- and exec it, never returning (System.Agents.Tools.Landlock).
+    Landlock.landlockLauncherHook
     hSetBuffering stderr LineBuffering
     hSetBuffering stdout LineBuffering
     argzparam <- initArgParserArgs
