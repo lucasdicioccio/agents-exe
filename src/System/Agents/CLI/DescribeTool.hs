@@ -31,7 +31,7 @@ import qualified Prod.Tracer as Prod
 import System.Exit (exitFailure)
 import System.IO (stderr, stdout)
 
-import System.Agents.Tools.Bash (ScriptArg (..), ScriptDescription (..), ScriptInfo (..))
+import System.Agents.Tools.Bash (ScriptArg (..), ScriptCommand (..), ScriptDescription (..), ScriptInfo (..))
 import qualified System.Agents.Tools.Bash as Bash
 
 -- | Output format for tool description
@@ -103,7 +103,7 @@ printPrettyDescription desc = do
     Text.putStrLn $ "Description: " <> info.scriptDescription
     Text.putStrLn $ "Path: " <> Text.pack desc.scriptPath
     Text.putStrLn ""
-    Text.putStrLn "Arguments:"
+    Text.putStrLn $ if null info.scriptCommands then "Arguments:" else "Shared arguments:"
     if null info.scriptArgs
         then Text.putStrLn "  (none)"
         else mapM_ printArg info.scriptArgs
@@ -112,7 +112,23 @@ printPrettyDescription desc = do
         Just behavior -> do
             Text.putStrLn ""
             Text.putStrLn $ "Empty result behavior: " <> Text.pack (show behavior)
+    if null info.scriptCommands
+        then pure ()
+        else do
+            Text.putStrLn ""
+            Text.putStrLn "Subcommands (one tool each):"
+            mapM_ printCommand info.scriptCommands
   where
+    printCommand :: ScriptCommand -> IO ()
+    printCommand cmd = do
+        Text.putStrLn ""
+        Text.putStrLn $ "* " <> cmd.commandName <> " (tool bash_" <> desc.scriptInfo.scriptSlug <> "_" <> cmd.commandName <> ")"
+        Text.putStrLn $ "  Description: " <> cmd.commandDescription
+        Text.putStrLn "  Arguments:"
+        if null cmd.commandArgs
+            then Text.putStrLn "    (none besides shared ones)"
+            else mapM_ printArg cmd.commandArgs
+
     printArg :: ScriptArg -> IO ()
     printArg arg = do
         Text.putStrLn $ "  - " <> arg.argName

@@ -9,7 +9,9 @@ module System.Agents.Tools.Bash (
     ScriptArgCallingMode (..),
     ScriptEmptyResultBehavior (..),
     ScriptInfo (..),
+    ScriptCommand (..),
     translateArguments,
+    expandScriptCommands,
 
     -- * Bash-specific types and functions
     LoadTrace (..),
@@ -17,6 +19,8 @@ module System.Agents.Tools.Bash (
     Scripts (..),
     loadDirectory,
     loadScript,
+    loadScriptTools,
+    selectSubcommand,
     InvalidScriptError (..),
     RunScriptError (..),
     parseArgsForValue,
@@ -81,11 +85,14 @@ import System.Agents.Tools.ScriptTypes (
     ScriptArg (..),
     ScriptArgArity (..),
     ScriptArgCallingMode (..),
+    ScriptCommand (..),
     ScriptDescription (..),
     ScriptEmptyResultBehavior (..),
     ScriptInfo (..),
     argEnvVarName,
+    expandScriptCommands,
     translateArguments,
+    validateScriptCommands,
  )
 
 -------------------------------------------------------------------------------
@@ -239,9 +246,9 @@ loadDirectory :: Tracer IO LoadTrace -> FilePath -> IO (Scripts, [InvalidScriptE
 loadDirectory tracer path = do
     contents <- listDirectory path
     sources <- scriptSources contents
-    loaded <- mapConcurrently (loadScript tracer) sources
+    loaded <- mapConcurrently (loadScriptTools tracer) sources
     let (erroredScripts, loadedScripts) = partitionEithers loaded
-    let ok = Scripts path loadedScripts
+    let ok = Scripts path (mconcat loadedScripts)
     let ko = erroredScripts
     pure (ok, ko)
   where
@@ -275,7 +282,12 @@ data InvalidScriptError
     | InvalidDescriptionError FilePath String
     deriving (Show)
 
--- | Loads a single bash script complying with the describe|run protocol.
+{- | Loads a single bash script complying with the describe|run protocol.
+
+The result is the script's description as it declared it: a script with
+subcommands is one description here, see 'loadScriptTools' for the tools it
+exposes.
+-}
 loadScript :: Tracer IO LoadTrace -> FilePath -> IO (Either InvalidScriptError ScriptDescription)
 loadScript tracer path = do
     let args = ["describe"]
@@ -286,7 +298,33 @@ loadScript tracer path = do
         then pure $ Left $ InvalidScriptError path code err
         else case Aeson.eitherDecode (LByteString.fromStrict out) of
             Left jsonErr -> pure $ Left $ InvalidDescriptionError path jsonErr
-            Right bashInfo -> pure $ Right $ ScriptDescription path bashInfo
+            Right bashInfo -> case validateScriptCommands bashInfo of
+                [] -> pure $ Right $ ScriptDescription path bashInfo{scriptSubcommand = Nothing}
+                problems -> pure $ Left $ InvalidDescriptionError path (List.intercalate "; " problems)
+
+{- | Loads a single bash script and returns the tools it exposes: itself, or
+one tool per subcommand when its @describe@ lists @commands@
+(see 'expandScriptCommands').
+-}
+loadScriptTools :: Tracer IO LoadTrace -> FilePath -> IO (Either InvalidScriptError [ScriptDescription])
+loadScriptTools tracer path = fmap expandScriptCommands <$> loadScript tracer path
+
+{- | Picks the tool of a loaded script to work with (for the CLI helpers that
+take a script path): with no subcommand asked, the script itself when it has
+no subcommands; otherwise the named subcommand.
+-}
+selectSubcommand :: Maybe Text -> ScriptDescription -> Either String ScriptDescription
+selectSubcommand mName desc =
+    case (mName, expandScriptCommands desc) of
+        (Nothing, [single]) | List.null desc.scriptInfo.scriptCommands -> Right single
+        (Nothing, _) -> Left ("this tool has subcommands, pick one of: " <> names)
+        (Just n, tools) -> case List.find (\t -> t.scriptInfo.scriptSubcommand == Just n) tools of
+            Just t -> Right t
+            Nothing
+                | List.null desc.scriptInfo.scriptCommands -> Left "this tool has no subcommands"
+                | otherwise -> Left ("unknown subcommand " <> Prelude.show n <> ", pick one of: " <> names)
+  where
+    names = List.intercalate ", " [Text.unpack c.commandName | c <- desc.scriptInfo.scriptCommands]
 
 data RunScriptError
     = SerializeArgumentErrors FilePath Aeson.Value String
@@ -440,7 +478,10 @@ runValue tracer script mCtx val = do
         Left err ->
             pure $ Left $ SerializeArgumentErrors path val err
         Right (argz, stdin) -> do
-            let args = "run" : [Text.unpack arg | arg <- argz]
+            -- A subcommand tool (see 'expandScriptCommands') is run as
+            -- @run <subcommand> <args...>@.
+            let subcommand = maybeToList script.scriptInfo.scriptSubcommand
+            let args = "run" : [Text.unpack arg | arg <- subcommand <> argz]
             let envArgs = either (const []) id (parseEnvForValue script val)
             runTracer tracer (RunCommandStart path args)
 

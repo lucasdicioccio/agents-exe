@@ -44,6 +44,7 @@ import qualified SessionPrintTests
 -- Import EndpointPredicate tests
 import qualified EndpointPredicateTests
 import qualified BindingsTests
+import qualified BashSubcommandsTests
 -- Import Skills tests
 -- Import FileSandbox predicate tests
 import qualified FileSandboxPredicateTests
@@ -154,6 +155,7 @@ tests =
         , SessionPrintTests.tests
         , EndpointPredicateTests.tests
         , BindingsTests.tests
+        , BashSubcommandsTests.tests
         , NarrowingTests.tests
         , SkillsTests.skillsTestSuite
         , FileSandboxPredicateTests.tests
