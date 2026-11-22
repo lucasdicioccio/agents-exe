@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 {- | A small chat page for local use, served at @\/@.
 
@@ -13,8 +14,11 @@ keeps it to loopback binds unless the server also authenticates its callers.
 module AgentsServer.UI (
     uiPage,
     uiEnabled,
+    faviconPng,
 ) where
 
+import Data.ByteString (ByteString)
+import Data.FileEmbed (embedFile)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -26,6 +30,13 @@ uiEnabled :: Text -> Bool -> Bool
 uiEnabled bind authenticated =
     authenticated || bind `elem` ["127.0.0.1", "localhost", "::1", "[::1]"]
 
+{- | The project's icon (the website's @favicon.png@, 64x64 PNG), embedded at
+compile time so a binary serves it without the checkout. Served at
+@\/favicon.png@ and @\/favicon.ico@ (browsers accept a PNG there).
+-}
+faviconPng :: ByteString
+faviconPng = $(embedFile "website/src/favicon.png")
+
 -- | The page. Attributes are single-quoted so the markup needs no escaping.
 uiPage :: Text
 uiPage =
@@ -34,6 +45,7 @@ uiPage =
         , "<html lang='en'><head><meta charset='utf-8'>"
         , "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         , "<title>agents</title>"
+        , "<link rel='icon' type='image/png' href='/favicon.png'>"
         , "<style>"
         , ":root{--bg:#1b1c1d;--panel:#232425;--edge:#34363a;--fg:#ececec;--dim:#9aa0a6;--accent:#7aa2f7;--warn:#e0af68}"
         , "*{box-sizing:border-box}"

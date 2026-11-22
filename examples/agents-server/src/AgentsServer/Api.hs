@@ -48,7 +48,7 @@ import Text.Read (readMaybe)
 import AgentsServer.Auth (AuthTokens, authenticate, bearerToken, mintSessionToken, tokenDigest)
 import AgentsServer.Mcp (McpContext (..), handleMcp)
 import AgentsServer.OpenApi (apiDocument)
-import AgentsServer.UI (uiPage)
+import AgentsServer.UI (faviconPng, uiPage)
 import System.Agents.AgentStore (HelperError (..))
 import System.Agents.Host (AgentEditError (..), Host (..), deleteStoredAgent, formatHelperError, hostAllAgents, putStoredAgentWithFiles)
 import System.Agents.Host.Runner hiding (getAgent, listAgents)
@@ -183,8 +183,8 @@ application env req respond = do
             | Just apiError <- fromException e -> respond' (errorResponse apiError)
             | otherwise -> respond' $ errorResponse $ ApiError status500 "internal_error" (Text.pack (displayException e))
 
-{- | The three endpoints a client can reach before it has a token describe
-the server itself; everything else needs one, when tokens are in use.
+{- | The endpoints a client can reach before it has a token describe
+the server itself (and its icon); everything else needs one, when tokens are in use.
 @OPTIONS@ (a CORS preflight) is answered on any path, before both auth and
 'checkOrigin': see 'preflightResponse'.
 -}
@@ -194,6 +194,8 @@ route env req = case (requestMethod req, path) of
     ("GET", ["healthz"]) -> healthz env
     ("GET", ["openapi.json"]) -> pure $ json status200 env.envDocument
     ("GET", []) | env.envUI -> pure uiResponse
+    ("GET", ["favicon.ico"]) -> pure faviconResponse
+    ("GET", ["favicon.png"]) -> pure faviconResponse
     _ -> do
         checkOrigin env req
         identify env req path >>= \case
@@ -201,6 +203,17 @@ route env req = case (requestMethod req, path) of
             AsSession sid -> routeSessionToken env req sid path
   where
     path = filter (not . Text.null) (pathInfo req)
+
+{- | The project icon, at @\/favicon.ico@ and @\/favicon.png@. Public, like
+@\/healthz@: a browser asks for it on any page it shows (the chat page,
+@\/openapi.json@), without a token.
+-}
+faviconResponse :: Response
+faviconResponse =
+    responseLBS
+        status200
+        [(hContentType, "image/png"), ("Cache-Control", "public, max-age=86400")]
+        (LByteString.fromStrict faviconPng)
 
 uiResponse :: Response
 uiResponse =

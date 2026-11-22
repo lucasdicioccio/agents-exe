@@ -11,6 +11,7 @@ extra-doc-files:    CHANGELOG.md
                     documentation/agents-server.md
                     documentation/durable-workflows-howto.md
 extra-source-files: documentation/binary-tool.md
+                    website/src/favicon.png
 
 copyright:          2024 Lucas DiCioccio
 synopsis:           An agent framework for building AI-assisted workflows
@@ -487,6 +488,7 @@ library agents-server-internal
                       containers,
                       crypton,
                       directory,
+                      file-embed,
                       http-api-data,
                       http-client,
                       http-types,
