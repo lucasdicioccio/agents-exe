@@ -4,6 +4,13 @@
 
 ### New Features
 
+#### Bash tools v2: protocol 2 and framed oneshot output
+- A bash tool whose `describe` says `"protocol": 2` may declare a `process` object; its output is cut into events (`output.framing`: `jsonl` by default, `lines`, `chunks`) and, under `jsonl`, validated against the declared `output.event` JSON Schema. The model receives a JSON array of events; a line that does not parse or match is kept as `{"invalid": {"raw", "error"}}`
+- Each event is reported as progress as it arrives (`{"stream": "stdout", "event": …, "events": n}`)
+- Not implemented yet, and refused at load rather than ignored: the `stream` and `service` modes, `process.input`, `runtime`. v1 tools are unchanged
+- Library: `ScriptInfo` has four more fields (`scriptProtocol`, `scriptProcess`, `scriptRuntime`, `scriptCheck`); new module `System.Agents.Tools.ScriptProcess`; `runProcessReportingEvents` in `System.Agents.Tools.Bash`
+- See `documentation/binary-tool.md` (Protocol v2) and `todos/bash-tools-v2.md`
+
 #### Versioned SQLite: documentation and behavioural tests
 - `documentation/tools.md` (SQLite Tools) now describes `SqliteVersioned` in full: the access modes, the sharing scopes, where snapshots are stored, version handles and `restore_from`, and promotion
 - Tests cover write, handle, restore and branch, promotion, and what each sharing scope sees (`test/SqliteVersionedBehaviourTests.hs`)

@@ -39,6 +39,7 @@ module System.Agents.Tools.Bash (
     agentIdToString,
     buildToolEnvironment,
     runProcessReportingOutput,
+    runProcessReportingEvents,
     notifyLinePrefix,
 
     -- * Re-exports
@@ -47,7 +48,7 @@ module System.Agents.Tools.Bash (
 
 import Control.Concurrent.Async (concurrently, mapConcurrently)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.MVar (modifyMVar_, newMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
 import Control.Exception (IOException, handle, onException)
 import Control.Monad (forM_, unless, when)
 import qualified Data.ByteString as ByteString
@@ -91,8 +92,17 @@ import System.Agents.Tools.ScriptTypes (
     ScriptInfo (..),
     argEnvVarName,
     expandScriptCommands,
+    scriptProcessOf,
     translateArguments,
     validateScriptCommands,
+    validateScriptV2,
+ )
+import System.Agents.Tools.ScriptProcess (
+    ProcessOutput,
+    ScriptProcess (..),
+    lineToEvent,
+    outputEventToJSON,
+    renderOutput,
  )
 
 -------------------------------------------------------------------------------
@@ -119,7 +129,21 @@ runProcessReportingOutput ::
     CreateProcess ->
     ByteString ->
     IO (ExitCode, ByteString, ByteString)
-runProcessReportingOutput report process input =
+runProcessReportingOutput report = runProcessReportingEvents report Nothing
+
+{- | Like 'runProcessReportingOutput', but when given a stdout line handler
+(the v2 framing, @todos/bash-tools-v2.md@ §2.1), every complete line of
+standard output (and a last unterminated one) goes to it, as it arrives and
+without throttling, instead of the throttled stdout line report. Standard
+error is reported as in 'runProcessReportingOutput'.
+-}
+runProcessReportingEvents ::
+    (Aeson.Value -> IO ()) ->
+    Maybe (ByteString -> IO ()) ->
+    CreateProcess ->
+    ByteString ->
+    IO (ExitCode, ByteString, ByteString)
+runProcessReportingEvents report mStdoutLine process input =
     withCreateProcess process{std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe, create_group = True} $ \mIn mOut mErr ph ->
         case (mIn, mOut, mErr) of
             (Just hIn, Just hOut, Just hErr) -> do
@@ -132,7 +156,7 @@ runProcessReportingOutput report process input =
                         code <- waitForProcess ph
                         pure (code, out, err)
                 body `onException` killProcessGroup ph
-            _ -> error "runProcessReportingOutput: process pipes were not created"
+            _ -> error "runProcessReportingEvents: process pipes were not created"
   where
     ignoreBrokenPipe :: IO () -> IO ()
     ignoreBrokenPipe = handle (\(_ :: IOException) -> pure ())
@@ -145,7 +169,11 @@ runProcessReportingOutput report process input =
         let loop chunks pending lineCount byteCount = do
                 chunk <- ByteString.hGetSome h 32768
                 if ByteString.null chunk
-                    then pure (ByteString.concat (List.reverse chunks))
+                    then do
+                        case (stream, mStdoutLine) of
+                            ("stdout", Just onLine) | not (ByteString.null pending) -> onLine pending
+                            _ -> pure ()
+                        pure (ByteString.concat (List.reverse chunks))
                     else do
                         let buffered = pending <> chunk
                             byteCount' = byteCount + ByteString.length chunk
@@ -160,8 +188,11 @@ runProcessReportingOutput report process input =
                                     forM_ completeLines $ \line ->
                                         forM_ (ByteString.stripPrefix notifyLinePrefix line) $ \notice ->
                                             report (notifyLinePayload notice)
-                                unless (List.null nonEmpty) $
-                                    reportLine lastReport stream (List.last nonEmpty) lineCount' byteCount'
+                                case (stream, mStdoutLine) of
+                                    ("stdout", Just onLine) -> forM_ completeLines onLine
+                                    _ ->
+                                        unless (List.null nonEmpty) $
+                                            reportLine lastReport stream (List.last nonEmpty) lineCount' byteCount'
                                 loop (chunk : chunks) rest lineCount' byteCount'
         loop [] ByteString.empty (0 :: Int) (0 :: Int)
 
@@ -298,7 +329,7 @@ loadScript tracer path = do
         then pure $ Left $ InvalidScriptError path code err
         else case Aeson.eitherDecode (LByteString.fromStrict out) of
             Left jsonErr -> pure $ Left $ InvalidDescriptionError path jsonErr
-            Right bashInfo -> case validateScriptCommands bashInfo of
+            Right bashInfo -> case validateScriptCommands bashInfo <> validateScriptV2 bashInfo of
                 [] -> pure $ Right $ ScriptDescription path bashInfo{scriptSubcommand = Nothing}
                 problems -> pure $ Left $ InvalidDescriptionError path (List.intercalate "; " problems)
 
@@ -492,9 +523,15 @@ runValue tracer script mCtx val = do
             -- Create the process with the modified environment
             let process = (proc path args){env = Just toolEnv}
 
+            let mProcess = scriptProcessOf script.scriptInfo
             (code, out, err) <- case mCtx >>= ctxProgressCallback of
                 Nothing -> readCreateProcessWithExitCode process (Text.encodeUtf8 stdin)
-                Just report -> runProcessReportingOutput report process (Text.encodeUtf8 stdin)
+                Just report -> case mProcess of
+                    Nothing -> runProcessReportingOutput report process (Text.encodeUtf8 stdin)
+                    Just p -> do
+                        counter <- newMVar (0 :: Int)
+                        let onLine = reportEventLine report counter p.processOutput
+                        runProcessReportingEvents report (Just onLine) process (Text.encodeUtf8 stdin)
             runTracer tracer (RunCommandStopped path args code out err)
             if code /= ExitSuccess
                 then pure $ Left $ ScriptExecutionError path code err
@@ -506,5 +543,32 @@ runValue tracer script mCtx val = do
                         adjusted = case maybeBehavior of
                             Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
                             Nothing -> out
+                        -- A v2 tool's result is its framed output (§2.1); an
+                        -- empty output still gets the empty-result message.
+                        framed = case mProcess of
+                            Nothing -> adjusted
+                            Just p
+                                | ByteString.null (ByteStringChar8.strip out)
+                                , Just (AddMessage _) <- maybeBehavior ->
+                                    adjusted
+                                | otherwise -> renderOutput p.processOutput out
                      in
-                        pure $ Right adjusted
+                        pure $ Right framed
+
+{- | Reports one stdout line of a v2 tool as a progress payload
+@{"stream": "stdout", "event": <event>, "events": n}@ (an invalid event is
+@{"invalid": {"raw", "error"}}@). Blank lines are not events.
+-}
+reportEventLine :: (Aeson.Value -> IO ()) -> MVar Int -> ProcessOutput -> ByteString -> IO ()
+reportEventLine report counter out line0 = do
+    let line = case ByteStringChar8.unsnoc line0 of
+            Just (l, '\r') -> l
+            _ -> line0
+    unless (ByteString.null (ByteStringChar8.strip line)) $ do
+        n <- modifyMVar counter (\c -> pure (c + 1, c + 1))
+        report $
+            Aeson.object
+                [ "stream" Aeson..= ("stdout" :: Text)
+                , "event" Aeson..= outputEventToJSON (lineToEvent out line)
+                , "events" Aeson..= n
+                ]

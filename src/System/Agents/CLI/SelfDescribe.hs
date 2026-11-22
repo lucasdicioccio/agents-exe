@@ -58,3 +58,7 @@ handleSelfDescribe opts _apiKeysFile = do
                 Nothing -- No output media type (text output)
                 [] -- No subcommands
                 Nothing
+                1 -- protocol v1
+                Nothing
+                Nothing
+                False
