@@ -49,6 +49,8 @@ Tool output here
 | `args` | Array | Yes | List of argument definitions |
 | `empty-result` | Object | No | Behavior when tool returns empty output |
 | `commands` | Array | No | Subcommands, each its own tool (see [Subcommands](#subcommands)) |
+| `protocol` | Number | No | `1` (default) or `2` (see [Protocol v2](#protocol-v2-framed-output)) |
+| `process` | Object | No | Protocol 2 only: how output is cut into events (see [Protocol v2](#protocol-v2-framed-output)) |
 
 ### Argument Definition
 
@@ -114,6 +116,63 @@ argument. A description that breaks these rules fails to load. Use
 `agents-exe check-tool-call --tool ./kv --command set` to validate a payload
 against one subcommand. The design notes are in
 `todos/bash-tools-subcommands.md`.
+
+## Protocol v2: framed output
+
+A tool that adds `"protocol": 2` to its `describe` output is a v2 tool. The
+full design is `todos/bash-tools-v2.md`; what is implemented today is its
+first slice: `oneshot` tools (run to completion, as v1) whose standard
+output is cut into **events** that the runtime validates and renders.
+
+```json
+{
+  "protocol": 2,
+  "slug": "scan",
+  "description": "Scans files and reports findings",
+  "args": [],
+  "process": {
+    "mode": "oneshot",
+    "output": {
+      "framing": "jsonl",
+      "event": { "type": "object",
+                 "properties": { "file": {"type": "string"}, "level": {"enum": ["info", "error"]} },
+                 "required": ["file"] }
+    }
+  }
+}
+```
+
+| `process` field | Values | Meaning |
+|---|---|---|
+| `mode` | `oneshot` (default) | `stream` and `service` are not implemented yet: a tool declaring them fails to load |
+| `output.framing` | `jsonl` (default), `lines`, `chunks` | One JSON value per line, one text line per event, or the raw output |
+| `output.event` | a JSON Schema | The shape of one event under `jsonl` |
+| `ready` | `{"kind": "exit"}` | The only value that applies to a `oneshot` |
+
+What the model receives as the tool result:
+
+* `jsonl`: a JSON array of the events, one per non-empty line. A line that
+  is not JSON, or does not match `output.event`, is kept as
+  `{"invalid": {"raw": "<the line>", "error": "<why>"}}`, never dropped.
+* `lines`: the non-empty lines, joined by newlines.
+* `chunks`: the output unchanged (the only framing allowed with
+  `output-media-type`).
+
+An empty output still gets the `empty-result` message. While the tool runs,
+each event is also reported as progress, as it arrives:
+`{"stream": "stdout", "event": <event>, "events": <count>}`.
+
+The event schema supports a practical subset of JSON Schema: `type`
+(including `integer` and lists of types), `enum`, `const`, `properties`,
+`required`, `additionalProperties`, `items`, `minItems`/`maxItems`,
+`minLength`/`maxLength`, `minimum`/`maximum`, `allOf`, `anyOf`, `oneOf`,
+`not`, and boolean schemas. Other keywords are ignored.
+
+A v1 tool ignores every v2 field, so `process` without `"protocol": 2`
+changes nothing. Declarations a later slice will implement (`process.input`,
+`runtime`, the `stream` and `service` modes) make the tool fail to load
+rather than run without them. `commands` works in v2 too: every subcommand
+shares the `process` declaration.
 
 ## Empty Result Behavior
 

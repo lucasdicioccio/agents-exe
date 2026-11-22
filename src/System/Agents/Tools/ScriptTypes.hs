@@ -20,6 +20,10 @@ module System.Agents.Tools.ScriptTypes (
     validateScriptCommands,
     expandScriptCommands,
 
+    -- * Protocol v2
+    scriptProcessOf,
+    validateScriptV2,
+
     -- * Script located on disk
     ScriptDescription (..),
 
@@ -36,6 +40,15 @@ import Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
+
+import System.Agents.Tools.ScriptProcess (
+    OutputFraming (..),
+    ProcessMode (..),
+    ProcessOutput (..),
+    ProcessReady (..),
+    ScriptProcess (..),
+    defaultScriptProcess,
+ )
 
 -------------------------------------------------------------------------------
 -- Script Argument Types
@@ -177,6 +190,17 @@ data ScriptInfo
     {- ^ Set by 'expandScriptCommands' only: the subcommand this tool runs,
     passed right after @run@.
     -}
+    , scriptProtocol :: Int
+    {- ^ The @protocol@ field of @describe@: 1 (absent) or 2. See
+    @todos/bash-tools-v2.md@. The v2 fields below are only read when it is 2,
+    so a v2 tool can be tried as a v1 tool by ignoring them (D1).
+    -}
+    , scriptProcess :: Maybe ScriptProcess
+    -- ^ The v2 @process@ object; a v2 tool without one is a @oneshot@ with @jsonl@ output ('scriptProcessOf').
+    , scriptRuntime :: Maybe Aeson.Value
+    -- ^ The v2 @runtime@ object, kept raw: not implemented yet, refused at load ('validateScriptV2').
+    , scriptCheck :: Bool
+    -- ^ The v2 @check@ flag (the @check@ verb is a later slice; recorded only).
     }
     deriving (Show, Eq, Ord)
 
@@ -192,9 +216,20 @@ instance ToJSON ScriptInfo where
                 <> maybe [] (\mime -> ["output-media-type" .= mime]) s.scriptOutputMediaType
                 <> (if List.null s.scriptCommands then [] else ["commands" .= s.scriptCommands])
                 <> maybe [] (\sub -> ["subcommand" .= sub]) s.scriptSubcommand
+                <> (if s.scriptProtocol == 1 then [] else ["protocol" .= s.scriptProtocol])
+                <> maybe [] (\p -> ["process" .= p]) s.scriptProcess
+                <> maybe [] (\r -> ["runtime" .= r]) s.scriptRuntime
+                <> (if s.scriptCheck then ["check" .= True] else [])
 
 instance Aeson.FromJSON ScriptInfo where
-    parseJSON = Aeson.withObject "Script" $ \o ->
+    parseJSON = Aeson.withObject "Script" $ \o -> do
+        protocol <- o Aeson..:? "protocol" .!= 1
+        case protocol of
+            1 -> pure ()
+            2 -> pure ()
+            _ -> fail ("unsupported protocol " <> Prelude.show protocol <> ", allowed: 1, 2")
+        let v2 :: (Aeson.FromJSON a) => Aeson.Key -> Aeson.Parser (Maybe a)
+            v2 k = if protocol == (2 :: Int) then o Aeson..:? k else pure Nothing
         ScriptInfo
             <$> o Aeson..: "args"
             <*> o Aeson..: "slug"
@@ -203,6 +238,63 @@ instance Aeson.FromJSON ScriptInfo where
             <*> o Aeson..:? "output-media-type"
             <*> o Aeson..:? "commands" .!= []
             <*> o Aeson..:? "subcommand"
+            <*> pure protocol
+            <*> v2 "process"
+            <*> v2 "runtime"
+            <*> (maybe False id <$> v2 "check")
+
+{- | The process declaration of a tool: 'Nothing' for a v1 tool; the
+declared one, or the default (@oneshot@, @jsonl@), for a v2 tool.
+-}
+scriptProcessOf :: ScriptInfo -> Maybe ScriptProcess
+scriptProcessOf info
+    | info.scriptProtocol >= 2 = Just (maybe defaultScriptProcess id info.scriptProcess)
+    | otherwise = Nothing
+
+{- | Checks the v2 declarations of a description against what this runtime
+implements (slice 1 of @todos/bash-tools-v2.md@: @oneshot@ with framing and
+validation). Anything that would change how the tool runs if honoured, and
+is not implemented yet, is refused here rather than silently ignored.
+Returns the list of problems (empty when valid, and always for a v1 tool).
+-}
+validateScriptV2 :: ScriptInfo -> [String]
+validateScriptV2 info =
+    case scriptProcessOf info of
+        Nothing -> []
+        Just p ->
+            mconcat
+                [ [ "process.mode " <> modeName p.processMode <> " is not implemented yet (only \"oneshot\" is)"
+                  | p.processMode /= ModeOneshot
+                  ]
+                , [ "process.input is not implemented yet (it needs the stream or service modes)"
+                  | Just _ <- [p.processInput]
+                  ]
+                , [ "process.ready " <> Prelude.show r <> " does not apply to a oneshot tool (only {\"kind\": \"exit\"} does)"
+                  | p.processMode == ModeOneshot
+                  , Just r <- [p.processReady]
+                  , r /= ReadyExit
+                  ]
+                , [ "runtime is not implemented yet (run_as, sandbox, envdir, environment, rundir, timeout, on_exit, cancel)"
+                  | Just _ <- [info.scriptRuntime]
+                  ]
+                , [ "output-media-type requires process.output.framing \"chunks\" (binary output cannot be cut into events)"
+                  | Just _ <- [info.scriptOutputMediaType] <> fmap (.commandOutputMediaType) info.scriptCommands
+                  , p.processOutput.outputFraming /= FramingChunks
+                  ]
+                , [ "process.output.event must be a JSON Schema (an object or a boolean)"
+                  | Just ev <- [p.processOutput.outputEvent]
+                  , not (isSchema ev)
+                  ]
+                ]
+  where
+    modeName m = case m of
+        ModeOneshot -> "\"oneshot\""
+        ModeStream -> "\"stream\""
+        ModeService -> "\"service\""
+    isSchema v = case v of
+        Aeson.Object _ -> True
+        Aeson.Bool _ -> True
+        _ -> False
 
 -------------------------------------------------------------------------------
 -- Subcommands
@@ -290,6 +382,10 @@ expandScriptCommands desc
                     , scriptOutputMediaType = maybe info.scriptOutputMediaType Just cmd.commandOutputMediaType
                     , scriptCommands = []
                     , scriptSubcommand = Just cmd.commandName
+                    , scriptProtocol = info.scriptProtocol
+                    , scriptProcess = info.scriptProcess
+                    , scriptRuntime = info.scriptRuntime
+                    , scriptCheck = info.scriptCheck
                     }
             }
     commandText :: ScriptCommand -> Text
