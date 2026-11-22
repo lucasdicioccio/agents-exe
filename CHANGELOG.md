@@ -11,6 +11,11 @@
 - Library: `ScriptInfo` has four more fields (`scriptProtocol`, `scriptProcess`, `scriptRuntime`, `scriptCheck`); new module `System.Agents.Tools.ScriptProcess`; `runProcessReportingEvents` in `System.Agents.Tools.Bash`
 - See `documentation/binary-tool.md` (Protocol v2) and `todos/bash-tools-v2.md`
 
+#### Agent templates: `sqlite-toolbox`
+- The `agents` template library builds a SQLite toolbox entry: `sqlite-toolbox({name, versioning, description, activation})`, with `sqlite-read-only(path)`, `sqlite-read-write(path)` or `sqlite-versioned({basePath, shared, storageRoot, retention})` as its `versioning`
+- `name`, `versioning`, `basePath` and `shared` are required; `description` defaults to "SQLite database"
+- See `documentation/agent-templates.md`
+
 #### Versioned SQLite: documentation and behavioural tests
 - `documentation/tools.md` (SQLite Tools) now describes `SqliteVersioned` in full: the access modes, the sharing scopes, where snapshots are stored, version handles and `restore_from`, and promotion
 - Tests cover write, handle, restore and branch, promotion, and what each sharing scope sees (`test/SqliteVersionedBehaviourTests.hs`)
@@ -62,6 +67,28 @@
 - A `DirectoryRecursive` predicate written with a trailing slash (`./`, `./src/`) now allows the directory itself, not only its contents
 - The system toolbox's `list-directory` now honours a configured `FileSandbox` even when `attach-file` is not enabled; without a sandbox it stays unrestricted
 - `documentation/cli-commands.md` documents the `config` command
+
+#### `agents-exe spectate`
+- A read-only live dashboard of a running `agents-exe serve`/`agents-server` (`--attach URL|PATH`): the session and sub-agent tree, the tool calls running and recently finished, and the text of one session
+- Library: the model is `System.Agents.Spectate`, a fold over the runner's events
+- See `documentation/cli-commands.md` (spectate) and `documentation/agents-server.md` (Watching with spectate)
+
+#### `agents-server`: several servers on one Postgres database
+- A session's run holds a lease (`run_owner`, `run_lease_until`, Postgres migration 4), renewed while the run lasts; another server takes the session over once its owner stops renewing
+- While another server holds the lease the session is busy: messages and completed calls go to its mail, resume and delete are refused, cancel posts `StopRun`
+- Library: `System.Agents.Host.Coordination` (`noCoordination` for a single process)
+- See `documentation/agents-server.md` (Several servers on one database)
+
+#### `agents-server`: stored agents with bash tool files and helpers
+- `PUT /v1/agents/:slug` stores the files of an agent's bash tools (a `files` object; `files` column, migration 2), written to a directory of their own at each load
+- `extraAgents` of a stored agent name other stored agents by slug; an unknown helper, a cycle, or a path that leaves the agent's directory is refused, and a helper in use cannot be deleted
+- See `documentation/agents-server.md` (Storing agents)
+
+#### `agents-server`: API keys per owner, isolated tool calls
+- `--owner-api-keys OWNER=FILE` (repeatable, with `--auth-tokens`): an owner's sessions, sub-sessions included, use that owner's keys file
+- `--isolate-tools docker:IMAGE|process:PATH`: bash and MCP tool calls run in a worker, with no in-process fallback; off by default
+- A helper that is not also a root agent runs as a session of its own
+- See `documentation/agents-server.md` (API keys per owner, Isolating tool calls)
 
 #### Named file sandboxes
 - An agent may declare file sandboxes once, by name, in `fileSandboxes`; a builtin toolbox (System, Developer, Lua) refers to one with `"FileSandbox": {"ref": "<name>"}`

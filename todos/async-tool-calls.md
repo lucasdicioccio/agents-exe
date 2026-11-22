@@ -6,7 +6,10 @@ out. The user-facing description is `documentation/async-tool-calls.md`.
 This file is the plan as written before the work: "Today the flow is" and
 the unchecked boxes under "Success Criteria" are the starting point, not the
 current state. Later work on the same ground is in
-`todos/session-mailbox.md` (attach/detach, `wait`, interrupts).
+`todos/session-mailbox.md` (attach/detach, `wait`, interrupts). One
+deviation from this plan: in-progress calls are not persisted, but a tool
+that opts in with the `rerunOnRestart` decorator is run again after a
+restart instead of reported as orphaned (PR #619).
 
 ## Goal
 

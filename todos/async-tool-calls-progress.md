@@ -1,6 +1,7 @@
 # Async Tool Calls Implementation Progress
 
-Status: all phases done (`7850f2e`); tracing for async calls was left out.
+Status: all phases done (`7850f2e`). Tracing for async calls, left out at
+the time, came later (PR #617, `211b168`): see "Since then" below.
 The notes below are a log, each section true when it was written. Re-read on
 2026-10-04, what has changed since:
 
@@ -25,6 +26,21 @@ one of the two is out of date. Tracing through `Prod.Tracer` and rate
 limiting beyond a concurrency cap were not re-checked either. Open items
 are tracked in the backlog, not in this file.
 
+Since then (checked 2026-11-22 against the git history):
+
+* Tracing: background calls are traced through `Prod.Tracer` (`tool_call.*`
+  lines; `ctxAsyncTracer`, `AsyncTrace`), PR #617 (`211b168`). See
+  `documentation/async-tool-calls.md` (Logs).
+* The repeated result is fixed: the delivery notice of a result already read
+  with `get-tool-call-status` says `result already read with
+  get-tool-call-status` (PR #616, `949b49a`), as
+  `documentation/async-tool-calls.md` now describes.
+* Deviation from "in-progress calls are not persisted" (Open Questions 4 of
+  `todos/async-tool-calls.md`): a tool that opts in with the
+  `rerunOnRestart` decorator is started again after a restart instead of
+  being reported as orphaned (PR #619, `97f4d33`). Every other call is still
+  orphaned.
+
 ## Plan
 See `todos/async-tool-calls.md`.
 
@@ -35,7 +51,7 @@ See `todos/async-tool-calls.md`.
 - [x] Phase 3: System Capability (building blocks only — see review below)
 - [x] Phase 3.5: End-to-End Correctness (added after review; blocks Phase 4)
 - [x] Phase 4: TUI / OneShot UX (TUI rendering not yet checked by hand)
-- [x] Phase 5: Cleanup & Hardening (tracing not done — see notes)
+- [x] Phase 5: Cleanup & Hardening (tracing not done then; added in PR #617)
 
 ## Success Criteria Status
 
