@@ -802,6 +802,27 @@ echo '{"command": "ls -la"}' | \
     agents-exe tool-call bash --log-file ./tool-debug.log
 ```
 
+### session
+
+Operate durable sessions one step at a time, outside the TUI.
+
+```bash
+agents-exe [--agent-file FILE] session SUBCOMMAND [OPTIONS]
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `start` | Create a new durable session from a prompt |
+| `step` | Run exactly one scheduling step on a session |
+| `pause` | Run one async step and yield |
+| `resume` | Continue execution until completion or next yield |
+| `pending` | List deferred calls and continuation tokens |
+| `complete` | Inject an external result for a continuation token |
+| `run-isolated` | Execute deferred `RunIsolated` calls |
+
+See [durable-workflows-howto.md](durable-workflows-howto.md) for a walkthrough
+and `agents-exe session SUBCOMMAND --help` for the options of each.
+
 ### serve
 
 Run agents over HTTP, like `agents-server`, loading agents-exe.cfg.json like the TUI does.
@@ -1352,136 +1373,11 @@ Session Storage:
     3. ~/.config/agents-exe/sessions/
 ```
 
-### export
+### export / import (removed)
 
-Export agent/tool configurations to archive or git.
-
-```bash
-agents-exe export [OPTIONS]
-```
-
-**Source Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--all` | Export all loaded agents |
-| `--agent-slug SLUG` | Export specific agent by slug |
-| `--tools-only` | Export only tools, not agent config |
-| `--tool TOOLNAME` | Export specific tool |
-
-**Destination Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-o, --output FILE` | Output file path |
-| `--git-url URL` | Git remote URL |
-| `--git-branch BRANCH` | Git branch |
-| `--git-message MESSAGE` | Commit message |
-| `--git-push` | Push after commit |
-| `--git-tag TAG` | Create git tag |
-
-**Format Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--format FORMAT` | Archive format: tar, tar.gz, zip |
-| `--namespace NAMESPACE` | Namespace for export (e.g., "team.project") |
-| `--no-tools` | Exclude tools from export |
-| `--no-mcp` | Exclude MCP servers from export |
-
-**Examples:**
-
-```bash
-# Export to tar.gz
-agents-exe export --output ./my-agent.tar.gz
-
-# Export to git
-agents-exe export \
-  --git-url https://github.com/user/agents-repo \
-  --git-branch main \
-  --git-message "Update agent" \
-  --git-push
-
-# Export tools only
-agents-exe export --tools-only --output ./tools.tar.gz
-
-# Export specific agent
-agents-exe export --agent-slug my-agent --output ./agent.tar.gz
-
-# With namespace
-agents-exe export --namespace team-a.project-1 --output ./export.tar.gz
-```
-
-### import
-
-Import agent/tool configurations from archive or git.
-
-```bash
-agents-exe import [OPTIONS]
-```
-
-**Source Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-f, --from-file FILE` | Import from archive file |
-| `--git-url URL` | Import from git URL |
-| `--git-ref REF` | Git ref (branch, tag, commit) |
-| `--namespace NAMESPACE` | Namespace to import from |
-
-**Destination Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--to-current` | Import to current directory |
-| `--to PATH` | Import to specific path |
-| `--to-config-dir` | Import to config directory |
-| `--install-to-agent FILE` | Install tools to agent's tool directory |
-| `--install-to-tooldir DIR` | Install tools to specific directory |
-
-**Mode Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--overwrite` | Overwrite existing files |
-| `--merge` | Merge with existing files |
-| (default) | Fail on conflict |
-
-**List Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--list-namespaces` | List available namespaces (git only) |
-| `--list-tools` | List available tools (git only) |
-
-**Examples:**
-
-```bash
-# Import from archive
-agents-exe import --from-file ./agent.tar.gz
-
-# Import from git
-agents-exe import \
-  --git-url https://github.com/user/agents-repo \
-  --git-ref main
-
-# Import tools to agent
-agents-exe import \
-  --from-file ./tools.tar.gz \
-  --install-to-agent ./my-agent.json
-
-# Import with overwrite
-agents-exe import --from-file ./agent.tar.gz --overwrite
-
-# List namespaces
-agents-exe import --git-url https://github.com/user/repo --list-namespaces
-
-# Import specific namespace
-agents-exe import \
-  --git-url https://github.com/user/repo \
-  --namespace team-a.tools \
-  --to ./tools/
-```
+The `export` and `import` commands have been removed (issue #339). Agent and
+tool configurations are plain files: copy them, or share them through git.
+See [export-import.md](export-import.md).
 
 ### cowsay
 
@@ -1529,16 +1425,6 @@ agents-exe describe [OPTIONS]
 **Output:** JSON schema for tool calling.
 
 **Use case:** Integration with external systems that need to understand the agent's interface.
-
-### self-describe
-
-Output information about the agents-exe binary itself.
-
-```bash
-agents-exe self-describe
-```
-
-**Output:** Version, build info, and available commands.
 
 ## Configuration File
 
@@ -1642,11 +1528,8 @@ agents-exe run --agent-file ./my-assistant.json --prompt "Test"
 # 6. Start interactive session
 agents-exe tui --agent-file ./my-assistant.json
 
-# 7. Export for sharing
-agents-exe export --agent-file ./my-assistant.json --output ./my-assistant.tar.gz
-
-# 8. Import elsewhere
-agents-exe import --from-file ./my-assistant.tar.gz --to ./new-location/
+# 7. Share it: agent and tool files are plain files (see export-import.md)
+cp -r ./my-assistant.json ./tools ./shared-agents/
 ```
 
 ### Multi-Agent Setup
