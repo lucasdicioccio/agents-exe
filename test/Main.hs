@@ -117,6 +117,7 @@ import qualified SpectateTests
 import qualified TuiPendingTests
 import qualified SqliteVersionsTests
 import qualified SqliteVersionedBehaviourTests
+import qualified System.Agents.Tools.Landlock as Landlock
 
 {- | Run sequentially unless asked otherwise: several tests change the
 process working directory, and tasty >=1.5.4 turns its default @-j@ into
@@ -124,6 +125,8 @@ real parallelism (@+RTS -N@), which makes them race.
 -}
 main :: IO ()
 main = do
+    -- The Landlock tests run tools through this binary as the launcher.
+    Landlock.landlockLauncherHook
     threads <- Env.lookupEnv "TASTY_NUM_THREADS"
     case threads of
         Nothing -> Env.setEnv "TASTY_NUM_THREADS" "1"

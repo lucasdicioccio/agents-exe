@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {- | The @runtime@ object of a v2 bash tool's @describe@ document
 (@todos/bash-tools-v2.md@, §1.2 and §1.4): how a tool asks to be run, and
@@ -42,6 +43,15 @@ module System.Agents.Tools.ScriptRuntime (
     -- * Load-time checks
     validateScriptRuntime,
 
+    -- * Sandbox mechanism resolution
+    SandboxSupport (..),
+    ResolvedSandbox (..),
+    getSandboxSupport,
+    resolveSandboxMechanism,
+    resolveSandbox,
+    landlockFieldProblems,
+    landlockRules,
+
     -- * Launching
     Launch (..),
     prepareLaunch,
@@ -73,11 +83,16 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory)
+import System.Directory (canonicalizePath, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, findExecutable, listDirectory, makeAbsolute)
+import System.Environment (getExecutablePath)
+import System.Exit (ExitCode (..))
 import System.FilePath (isAbsolute, splitDirectories, takeDirectory, (</>))
+import System.Process (readProcessWithExitCode)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Posix.Signals (Signal, sigINT, sigTERM)
 import System.Posix.User (getGroupEntryForID, getUserEntryForName, groupName, userGroupID)
+
+import System.Agents.Tools.Landlock (LandlockAccess (..), LandlockRule (..), landlockAbi, landlockLauncherArgs)
 
 -------------------------------------------------------------------------------
 -- Declaration
@@ -283,9 +298,10 @@ data RunAsMechanism = RunAsSetpriv | RunAsSudo | RunAsRunuser
 -- | How @sandbox@ is enforced (@--sandbox@).
 data SandboxMechanism
     = SandboxBwrap
-    | -- | Accepted on the command line, refused per tool: not implemented yet.
+    | -- | Landlock rules applied before exec ("System.Agents.Tools.Landlock").
       SandboxLandlock
-    | -- | Per tool, the strongest mechanism that honours every declared field.
+    | -- | Per tool, the strongest mechanism that honours every declared field:
+      -- bubblewrap when it works here, else Landlock.
       SandboxAuto
     deriving (Show, Eq, Ord)
 
@@ -376,8 +392,8 @@ validateScriptRuntime cfg r =
             Nothing -> []
             Just sb ->
                 ( case cfg.sandboxMechanism of
-                    Nothing -> ["runtime.sandbox needs a sandbox mechanism configured by the operator (--sandbox bwrap|auto); it never runs unconfined"]
-                    Just SandboxLandlock -> ["runtime.sandbox: the landlock mechanism is not implemented yet (use --sandbox bwrap or auto)"]
+                    Nothing -> ["runtime.sandbox needs a sandbox mechanism configured by the operator (--sandbox bwrap|landlock|auto); it never runs unconfined"]
+                    Just SandboxLandlock -> landlockFieldProblems sb
                     Just _ -> []
                 )
                     <> [ "runtime.sandbox.fs: empty path"
@@ -405,6 +421,141 @@ validateScriptRuntime cfg r =
         not (Text.null p) && not (isAbsolute (Text.unpack p)) && ".." `notElem` splitDirectories (Text.unpack p)
     validAccountName n =
         not (Text.null n) && Text.head n /= '-' && Text.all (\c -> isAlphaNum c || c `elem` ("._-" :: String)) n
+
+-------------------------------------------------------------------------------
+-- Sandbox mechanism resolution
+-------------------------------------------------------------------------------
+
+{- | The fields a Landlock sandbox cannot honour, each naming the field.
+Landlock only denies access: it cannot take the network away (on kernels
+with network rules it denies TCP bind and connect, but UDP, unix sockets and
+raw sockets stay open, which is not @net: none@) and cannot give a private
+@/tmp@. Such a tool fails to load under @--sandbox landlock@ and skips
+Landlock under @--sandbox auto@; it is never weakened.
+-}
+landlockFieldProblems :: Sandbox -> [String]
+landlockFieldProblems sb =
+    [ "runtime.sandbox.net \"none\" cannot be enforced by landlock (it denies TCP bind/connect only; use --sandbox bwrap)"
+    | sb.sandboxNet == NetNone
+    ]
+        <> [ "runtime.sandbox.tmp \"private\" cannot be enforced by landlock (it has no private /tmp; use --sandbox bwrap)"
+           | sb.sandboxTmp == TmpPrivate
+           ]
+
+-- | What this host can do, probed once per process ('getSandboxSupport').
+data SandboxSupport = SandboxSupport
+    { supportBwrap :: Bool
+    -- ^ @bwrap@ is on the PATH and can build a sandbox here.
+    , supportLandlock :: Either String Int
+    -- ^ The kernel's Landlock ABI version, or why there is none.
+    }
+    deriving (Show, Eq)
+
+-- | The mechanism that enforces one tool's @sandbox@.
+data ResolvedSandbox = UseBwrap | UseLandlock
+    deriving (Show, Eq, Ord)
+
+{- | Picks the mechanism for one tool from the operator's choice and what the
+host supports. The tool's directory must be absolute and canonical: Landlock
+cannot make a path read-only beneath one it lets write, so a tool living
+under @/tmp@ with @tmp: shared@ would have a writable directory, which
+bubblewrap does not allow; that is refused rather than weakened.
+
+@--sandbox bwrap@ is not probed (as before: a failing bubblewrap fails the
+call). @--sandbox auto@ is bubblewrap when it works here, else Landlock when
+the kernel has it and it can honour every field, else a load error giving
+both reasons.
+-}
+resolveSandboxMechanism :: SandboxSupport -> SandboxMechanism -> FilePath -> Sandbox -> Either String ResolvedSandbox
+resolveSandboxMechanism support mech toolDir sb = case mech of
+    SandboxBwrap -> Right UseBwrap
+    SandboxLandlock -> landlock
+    SandboxAuto
+        | support.supportBwrap -> Right UseBwrap
+        | otherwise -> case landlock of
+            Right m -> Right m
+            Left why -> Left ("runtime.sandbox: --sandbox auto found no mechanism for this tool: bwrap cannot build a sandbox here, and " <> why)
+  where
+    landlock = case (landlockFieldProblems sb <> underTmp, support.supportLandlock) of
+        (problem : _, _) -> Left problem
+        ([], Left why) -> Left ("runtime.sandbox: landlock: " <> why)
+        ([], Right _) -> Right UseLandlock
+    underTmp =
+        [ "runtime.sandbox: the tool's directory " <> toolDir <> " is under /tmp, which tmp: shared makes writable; landlock cannot keep it read-only (move the tool or use --sandbox bwrap)"
+        | sb.sandboxTmp == TmpShared
+        , take 2 (splitDirectories toolDir) == ["/", "tmp"]
+        ]
+
+supportRef :: IORef (Maybe SandboxSupport)
+supportRef = unsafePerformIO (newIORef Nothing)
+{-# NOINLINE supportRef #-}
+
+{- | Probes what the host supports, once per process: whether @bwrap@ can
+build a sandbox (the options agents-exe uses, with a network namespace), and
+the kernel's Landlock ABI.
+-}
+getSandboxSupport :: IO SandboxSupport
+getSandboxSupport = do
+    cached <- readIORef supportRef
+    case cached of
+        Just s -> pure s
+        Nothing -> do
+            bwrap <- do
+                found <- findExecutable "bwrap"
+                case found of
+                    Nothing -> pure False
+                    Just exe -> do
+                        r <- try (readProcessWithExitCode exe probeArgs "")
+                        pure $ case r of
+                            Right (ExitSuccess, _, _) -> True
+                            Right _ -> False
+                            Left (_ :: IOException) -> False
+            abi <- landlockAbi
+            let s = SandboxSupport bwrap abi
+            writeIORef supportRef (Just s)
+            pure s
+  where
+    probeArgs = ["--die-with-parent", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-net", "--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "true"]
+
+{- | 'resolveSandboxMechanism' for a tool at the given path, against the
+host's support (probed only when the choice depends on it).
+-}
+resolveSandbox :: ToolRuntimeConfig -> FilePath -> Sandbox -> IO (Either String ResolvedSandbox)
+resolveSandbox cfg path sb = case cfg.sandboxMechanism of
+    Nothing -> pure (Left "runtime.sandbox: no sandbox mechanism configured")
+    Just SandboxBwrap -> pure (Right UseBwrap)
+    Just mech -> do
+        support <- getSandboxSupport
+        toolDir <- canonicalToolDir path
+        pure (resolveSandboxMechanism support mech toolDir sb)
+
+canonicalToolDir :: FilePath -> IO FilePath
+canonicalToolDir path = do
+    r <- try (canonicalizePath (takeDirectory path))
+    case r of
+        Right d -> pure d
+        Left (_ :: IOException) -> makeAbsolute (takeDirectory path)
+
+{- | The Landlock rules for a sandbox, the counterpart of 'bwrapArgs': read
+and execute on the system's executables and libraries, @/proc@ and the
+tool's directory, read on the declared @fs.read@, every access on the
+declared @fs.write@ and (@tmp: shared@) on @/tmp@, and the usual character
+devices. Relative paths are relative to the (absolute) tool directory.
+-}
+landlockRules :: FilePath -> Sandbox -> [LandlockRule]
+landlockRules toolDir sb =
+    mconcat
+        [ [LandlockRule AccessRead p True | p <- systemPaths <> ["/proc", "/dev/random", "/dev/urandom"]]
+        , [LandlockRule AccessWrite p True | p <- ["/dev/null", "/dev/zero", "/dev/full"]]
+        , [LandlockRule AccessWrite "/tmp" True | sb.sandboxTmp == TmpShared]
+        , [LandlockRule AccessRead toolDir False]
+        , [LandlockRule AccessRead p False | p <- resolve sb.sandboxRead]
+        , [LandlockRule AccessWrite p False | p <- resolve sb.sandboxWrite]
+        ]
+  where
+    systemPaths = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc", "/nix/store"]
+    resolve = mapMaybe (\p -> if Text.null p then Nothing else Just (absolute (Text.unpack p)))
+    absolute p = if isAbsolute p then p else toolDir </> p
 
 -------------------------------------------------------------------------------
 -- Launching
@@ -456,16 +607,26 @@ prepareLaunch cfg path r args baseEnv argEnv = do
         Just ra -> case cfg.runAsMechanism of
             Nothing -> pure (Left "runtime.run_as: no run-as mechanism configured")
             Just m -> runAsPrefix m ra
+    sandboxing <- case r.runtimeSandbox of
+        Nothing -> pure (Right (path, args))
+        Just sb -> do
+            resolved <- resolveSandbox cfg path sb
+            case resolved of
+                Left problem -> pure (Left problem)
+                Right UseBwrap -> pure (Right ("bwrap", bwrapArgs toolDir rundir sb <> ["--", path] <> args))
+                Right UseLandlock -> do
+                    -- agents-exe itself is the launcher (see
+                    -- "System.Agents.Tools.Landlock"); paths are made
+                    -- absolute since the rundir becomes the working directory.
+                    self <- getExecutablePath
+                    absTool <- makeAbsolute path
+                    absDir <- makeAbsolute toolDir
+                    pure (Right (self, landlockLauncherArgs (landlockRules absDir sb) absTool args))
     pure $ do
         vars <- envdirVars
         () <- mkRundir
         prefix <- runAs
-        sandboxed <- case r.runtimeSandbox of
-            Nothing -> Right (path, args)
-            Just sb -> case cfg.sandboxMechanism of
-                Nothing -> Left "runtime.sandbox: no sandbox mechanism configured"
-                Just SandboxLandlock -> Left "runtime.sandbox: the landlock mechanism is not implemented yet"
-                Just _ -> Right ("bwrap", bwrapArgs toolDir rundir sb <> ["--", path] <> args)
+        sandboxed <- sandboxing
         let literal = [(Text.unpack k, Text.unpack v) | (k, v) <- Map.toList r.runtimeEnvironment]
             env = overrideEnvironment baseEnv (vars <> fmap (fmap Just) literal <> fmap (fmap Just) argEnv)
             (cmd, cmdArgs) = case prefix of

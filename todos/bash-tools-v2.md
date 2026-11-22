@@ -12,9 +12,9 @@ runtime" in the same document), and #539's `commands`
 (`todos/bash-tools-subcommands.md`). Not yet: `check` (the flag is parsed
 and recorded only), `stream`, `service` (refused at load), the
 service-only `runtime` fields (`timeout.idle`, `on_exit`, `cancel` by
-`send`: refused at load), the Landlock sandbox mechanism (`--sandbox
-landlock` is accepted, a tool declaring `sandbox` under it fails to load;
-`--sandbox auto` resolves to bubblewrap), capabilities with backends. The
+`send`: refused at load), capabilities with backends. The Landlock sandbox
+mechanism is implemented (`System.Agents.Tools.Landlock`, agents-exe as its
+own launcher); `check --probe` does not report what `auto` resolved to yet. The
 event schema validator is a subset of JSON Schema, listed in the docs.
 The operator options (`--envdir-root`, `--run-as-mechanism`, `--sandbox`)
 are global to the `agents-exe` process.
