@@ -51,6 +51,7 @@ Tool output here
 | `commands` | Array | No | Subcommands, each its own tool (see [Subcommands](#subcommands)) |
 | `protocol` | Number | No | `1` (default) or `2` (see [Protocol v2](#protocol-v2-framed-output)) |
 | `process` | Object | No | Protocol 2 only: how output is cut into events (see [Protocol v2](#protocol-v2-framed-output)) |
+| `runtime` | Object | No | Protocol 2 only: how the tool is run: user, sandbox, envdir, rundir, timeouts (see [Runtime](#protocol-v2-runtime)) |
 
 ### Argument Definition
 
@@ -170,9 +171,78 @@ The event schema supports a practical subset of JSON Schema: `type`
 
 A v1 tool ignores every v2 field, so `process` without `"protocol": 2`
 changes nothing. Declarations a later slice will implement (`process.input`,
-`runtime`, the `stream` and `service` modes) make the tool fail to load
-rather than run without them. `commands` works in v2 too: every subcommand
-shares the `process` declaration.
+the `stream` and `service` modes) make the tool fail to load rather than run
+without them. `commands` works in v2 too: every subcommand shares the
+`process` and `runtime` declarations.
+
+### Protocol v2: runtime
+
+A v2 tool may say how it wants to be run, in the spirit of a systemd unit or
+a daemontools service directory. The tool names **what** it needs; the
+operator names **how** it is enforced, with options of `agents-exe` (given
+before the subcommand). A tool that declares something the operator did not
+configure **fails to load**, naming the field: it never runs unconfined, or
+as the wrong user, by silence.
+
+```json
+{
+  "protocol": 2,
+  "slug": "report",
+  "description": "Builds the daily report",
+  "args": [],
+  "runtime": {
+    "run_as": { "user": "reports", "group": "reports" },
+    "sandbox": { "fs": { "read": ["/var/log"], "write": ["state"] }, "net": "none", "tmp": "private" },
+    "envdir": "report",
+    "environment": { "LC_ALL": "C" },
+    "rundir": "state",
+    "timeout": { "start": 60, "stop": 5 },
+    "cancel": "SIGTERM"
+  }
+}
+```
+
+| `runtime` field | Meaning | Operator option |
+|---|---|---|
+| `envdir` | A directory name under the envdir root, read the daemontools way at every call: one file per variable, the file name is the name, the first line (trailing spaces and tabs removed) is the value; an empty file unsets the variable | `--envdir-root DIR` (there is no implicit location) |
+| `environment` | Literal variables; they win over the envdir | |
+| `rundir` | A directory relative to the tool's directory (no `..`), created if missing, made the working directory | |
+| `timeout.start` | Seconds the call has to complete; past it the tool is stopped and the call fails | |
+| `timeout.stop` | Seconds between the cancel signal and `SIGKILL` (default 0.1) | |
+| `cancel` | The signal sent first when the call is cancelled or times out: `"SIGTERM"` (default) or `"SIGINT"` | |
+| `run_as` | `{"user", "group"}`: run the tool as this user (and group; by default the user's primary group) | `--run-as-mechanism setpriv\|sudo\|runuser` |
+| `sandbox` | `{"fs": {"read": [...], "write": [...]}, "net": "host"\|"none", "tmp": "shared"\|"private"}`: what the tool may touch | `--sandbox bwrap\|auto` |
+
+The environment a tool sees, from lowest to highest precedence: the
+`agents-exe` environment, the session context variables, the envdir,
+`environment`, then the tool's own `env`-mode arguments.
+
+**run_as.** `setpriv` and `runuser` need `agents-exe` to run as root (or
+with `CAP_SETUID`/`CAP_SETGID`); `sudo` runs `sudo -n --preserve-env -u
+USER [-g GROUP]`, so the sudoers rule must allow it without a password and
+with `SETENV` (the envdir travels in the environment, never on the command
+line). The rundir is created by the `agents-exe` user: give the tool's user
+access to it.
+
+**sandbox.** Under `bwrap` (bubblewrap) the tool runs in a mount namespace
+where only the system's executables and libraries (`/usr`, `/bin`, `/lib*`,
+`/etc`, read-only), `/proc`, `/dev`, `/tmp` (the host's under `shared`, a
+fresh tmpfs under `private`), the tool's own directory (read-only) and the
+declared paths exist. `fs.read` paths are mounted read-only and `fs.write`
+paths read-write; relative paths are relative to the tool's directory, and a
+declared path that does not exist fails the call. `net: none` is a network
+namespace with no interface. The tool dies with `agents-exe`. bubblewrap
+needs unprivileged user namespaces, which some distributions restrict.
+`--sandbox auto` picks, per tool, the strongest mechanism that honours every
+declared field: today that is always bubblewrap. `--sandbox landlock` is
+accepted but not implemented yet: a tool declaring `sandbox` then fails to
+load. `run_as` and `sandbox` compose: the sandbox is set up for the process
+that runs as the user.
+
+`timeout.idle` and `on_exit` only apply to a `service`, and
+`cancel: {"send": ...}` needs an open stdin (`process.input`): until those
+slices land, a tool declaring them fails to load. An unknown field in
+`runtime` (a typo such as `run-as`) also fails to load.
 
 ## Empty Result Behavior
 

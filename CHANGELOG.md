@@ -4,6 +4,12 @@
 
 ### New Features
 
+#### Bash tools v2: runtime for oneshot tools
+- A v2 bash tool may declare a `runtime` object: `envdir` (read the daemontools way under the operator's `--envdir-root`), `environment`, `rundir`, `timeout.start` (the call's deadline) and `timeout.stop`, `cancel` (`SIGTERM` or `SIGINT`), `run_as` (enforced with `--run-as-mechanism setpriv|sudo|runuser`) and `sandbox` (`fs.read`/`fs.write`, `net`, `tmp`; enforced with `--sandbox bwrap|auto`)
+- A tool that declares what the operator did not configure fails to load, naming the field; so does an unknown `runtime` field. Still refused at load: `timeout.idle`, `on_exit`, `cancel` by `send` (service only) and `--sandbox landlock` (not implemented yet)
+- Library: `ScriptInfo.scriptRuntime` is now a parsed `ScriptRuntime`; new module `System.Agents.Tools.ScriptRuntime`; `loadScriptWith` and `runValueWith` in `System.Agents.Tools.Bash` take the operator configuration explicitly; `RunScriptError` has `ScriptRuntimeError` and `ScriptTimeoutError`
+- See `documentation/binary-tool.md` (Protocol v2: runtime) and `todos/bash-tools-v2.md`
+
 #### Bash tools v2: protocol 2 and framed oneshot output
 - A bash tool whose `describe` says `"protocol": 2` may declare a `process` object; its output is cut into events (`output.framing`: `jsonl` by default, `lines`, `chunks`) and, under `jsonl`, validated against the declared `output.event` JSON Schema. The model receives a JSON array of events; a line that does not parse or match is kept as `{"invalid": {"raw", "error"}}`
 - Each event is reported as progress as it arrives (`{"stream": "stdout", "event": …, "events": n}`)

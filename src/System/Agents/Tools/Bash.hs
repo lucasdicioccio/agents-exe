@@ -19,6 +19,7 @@ module System.Agents.Tools.Bash (
     Scripts (..),
     loadDirectory,
     loadScript,
+    loadScriptWith,
     loadScriptTools,
     selectSubcommand,
     InvalidScriptError (..),
@@ -26,6 +27,7 @@ module System.Agents.Tools.Bash (
     parseArgsForValue,
     parseEnvForValue,
     runValue,
+    runValueWith,
 
     -- * Environment and context
     sessionIdEnvVar,
@@ -73,8 +75,9 @@ import System.Environment (getEnvironment)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.Posix.Files as Posix
-import System.Posix.Signals (signalProcessGroup, sigKILL, sigTERM)
+import System.Posix.Signals (Signal, signalProcessGroup, sigKILL, sigTERM)
 import System.Process (CreateProcess (..), ProcessHandle, StdStream (..), getPid, proc, waitForProcess, withCreateProcess)
+import System.Timeout (timeout)
 import System.Process.ByteString (readCreateProcessWithExitCode, readProcessWithExitCode)
 
 import System.Agents.Base (AgentId (..), ConversationId (..))
@@ -93,6 +96,7 @@ import System.Agents.Tools.ScriptTypes (
     argEnvVarName,
     expandScriptCommands,
     scriptProcessOf,
+    scriptRuntimeOf,
     translateArguments,
     validateScriptCommands,
     validateScriptV2,
@@ -103,6 +107,17 @@ import System.Agents.Tools.ScriptProcess (
     lineToEvent,
     outputEventToJSON,
     renderOutput,
+ )
+import System.Agents.Tools.ScriptRuntime (
+    Launch (..),
+    RuntimeTimeout (..),
+    ScriptRuntime (..),
+    ToolRuntimeConfig,
+    cancelSignal,
+    getToolRuntimeConfig,
+    prepareLaunch,
+    startTimeoutMicros,
+    stopGraceMicros,
  )
 
 -------------------------------------------------------------------------------
@@ -143,7 +158,20 @@ runProcessReportingEvents ::
     CreateProcess ->
     ByteString ->
     IO (ExitCode, ByteString, ByteString)
-runProcessReportingEvents report mStdoutLine process input =
+runProcessReportingEvents = runProcessReportingEventsStopping (sigTERM, killGraceMicros)
+
+{- | Like 'runProcessReportingEvents', with the signal sent first when the
+calling thread is cancelled and the grace before @SIGKILL@ (a tool's
+@runtime.cancel@ and @runtime.timeout.stop@).
+-}
+runProcessReportingEventsStopping ::
+    (Signal, Int) ->
+    (Aeson.Value -> IO ()) ->
+    Maybe (ByteString -> IO ()) ->
+    CreateProcess ->
+    ByteString ->
+    IO (ExitCode, ByteString, ByteString)
+runProcessReportingEventsStopping stopping report mStdoutLine process input =
     withCreateProcess process{std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe, create_group = True} $ \mIn mOut mErr ph ->
         case (mIn, mOut, mErr) of
             (Just hIn, Just hOut, Just hErr) -> do
@@ -155,7 +183,7 @@ runProcessReportingEvents report mStdoutLine process input =
                                 feed
                         code <- waitForProcess ph
                         pure (code, out, err)
-                body `onException` killProcessGroup ph
+                body `onException` stopProcessGroup stopping ph
             _ -> error "runProcessReportingEvents: process pipes were not created"
   where
     ignoreBrokenPipe :: IO () -> IO ()
@@ -215,20 +243,20 @@ runProcessReportingEvents report mStdoutLine process input =
 started by a script die with it. Best-effort: signalling failures (the
 process is already gone, or has no group) are ignored.
 -}
-killProcessGroup :: ProcessHandle -> IO ()
-killProcessGroup ph = do
+stopProcessGroup :: (Signal, Int) -> ProcessHandle -> IO ()
+stopProcessGroup (firstSignal, graceMicros) ph = do
     mPid <- getPid ph
     case mPid of
         Nothing -> pure ()
         Just pid -> do
-            ignoreSignalError $ signalProcessGroup sigTERM pid
-            threadDelay killGraceMicros
+            ignoreSignalError $ signalProcessGroup firstSignal pid
+            threadDelay graceMicros
             ignoreSignalError $ signalProcessGroup sigKILL pid
   where
     ignoreSignalError :: IO () -> IO ()
     ignoreSignalError = handle (\(_ :: IOException) -> pure ())
 
--- | Grace period between SIGTERM and SIGKILL for a cancelled script.
+-- | Grace period between SIGTERM and SIGKILL for a cancelled script (unless its @runtime.timeout.stop@ says otherwise).
 killGraceMicros :: Int
 killGraceMicros = 100000
 
@@ -321,6 +349,15 @@ exposes.
 -}
 loadScript :: Tracer IO LoadTrace -> FilePath -> IO (Either InvalidScriptError ScriptDescription)
 loadScript tracer path = do
+    cfg <- getToolRuntimeConfig
+    loadScriptWith cfg tracer path
+
+{- | 'loadScript' against an explicit operator configuration rather than the
+process-wide one: a v2 @runtime@ the configuration cannot honour fails to
+load.
+-}
+loadScriptWith :: ToolRuntimeConfig -> Tracer IO LoadTrace -> FilePath -> IO (Either InvalidScriptError ScriptDescription)
+loadScriptWith cfg tracer path = do
     let args = ["describe"]
     runTracer tracer (LoadCommandStart path args)
     (code, out, err) <- readProcessWithExitCode path args ""
@@ -329,7 +366,7 @@ loadScript tracer path = do
         then pure $ Left $ InvalidScriptError path code err
         else case Aeson.eitherDecode (LByteString.fromStrict out) of
             Left jsonErr -> pure $ Left $ InvalidDescriptionError path jsonErr
-            Right bashInfo -> case validateScriptCommands bashInfo <> validateScriptV2 bashInfo of
+            Right bashInfo -> case validateScriptCommands bashInfo <> validateScriptV2 cfg bashInfo of
                 [] -> pure $ Right $ ScriptDescription path bashInfo{scriptSubcommand = Nothing}
                 problems -> pure $ Left $ InvalidDescriptionError path (List.intercalate "; " problems)
 
@@ -360,6 +397,10 @@ selectSubcommand mName desc =
 data RunScriptError
     = SerializeArgumentErrors FilePath Aeson.Value String
     | ScriptExecutionError FilePath ExitCode ByteString
+    | -- | The v2 @runtime@ could not be set up (envdir, rundir, run_as, sandbox).
+      ScriptRuntimeError FilePath String
+    | -- | A v2 tool did not complete within its @runtime.timeout.start@ (seconds); it was stopped.
+      ScriptTimeoutError FilePath Double
     deriving (Show)
 
 -- | Flattens arguments associated with textual values into an array suitable to run as executable.
@@ -503,6 +544,23 @@ runValue ::
     Aeson.Value ->
     IO (Either RunScriptError ByteString)
 runValue tracer script mCtx val = do
+    cfg <- getToolRuntimeConfig
+    runValueWith cfg tracer script mCtx val
+
+{- | 'runValue' against an explicit operator configuration rather than the
+process-wide one. A v2 tool's @runtime@ (@todos/bash-tools-v2.md@ §1.2) is
+applied here: envdir and @environment@, rundir, run_as and sandbox
+(see 'prepareLaunch'), @timeout.start@ as the call's deadline, and
+@cancel@/@timeout.stop@ when the call is cancelled or times out.
+-}
+runValueWith ::
+    ToolRuntimeConfig ->
+    Tracer IO RunTrace ->
+    ScriptDescription ->
+    Maybe ToolExecutionContext ->
+    Aeson.Value ->
+    IO (Either RunScriptError ByteString)
+runValueWith cfg tracer script mCtx val = do
     let path = script.scriptPath
     let maybeBehavior = script.scriptInfo.scriptEmptyResultBehavior
     case parseArgsForValue script val of
@@ -518,42 +576,60 @@ runValue tracer script mCtx val = do
 
             -- Get the current environment and add session context
             baseEnv <- getEnvironment
-            let toolEnv = envArgs ++ buildToolEnvironment mCtx baseEnv
-
-            -- Create the process with the modified environment
-            let process = (proc path args){env = Just toolEnv}
-
+            let input = Text.encodeUtf8 stdin
             let mProcess = scriptProcessOf script.scriptInfo
-            (code, out, err) <- case mCtx >>= ctxProgressCallback of
-                Nothing -> readCreateProcessWithExitCode process (Text.encodeUtf8 stdin)
-                Just report -> case mProcess of
-                    Nothing -> runProcessReportingOutput report process (Text.encodeUtf8 stdin)
-                    Just p -> do
-                        counter <- newMVar (0 :: Int)
-                        let onLine = reportEventLine report counter p.processOutput
-                        runProcessReportingEvents report (Just onLine) process (Text.encodeUtf8 stdin)
-            runTracer tracer (RunCommandStopped path args code out err)
-            if code /= ExitSuccess
-                then pure $ Left $ ScriptExecutionError path code err
-                else
-                    let
-                        -- Use lenient UTF-8 decoding to handle binary data safely.
-                        -- Invalid bytes are replaced with U+FFFD (replacement character).
-                        outText = Text.decodeUtf8With lenientDecode out
-                        adjusted = case maybeBehavior of
-                            Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
-                            Nothing -> out
-                        -- A v2 tool's result is its framed output (§2.1); an
-                        -- empty output still gets the empty-result message.
-                        framed = case mProcess of
-                            Nothing -> adjusted
-                            Just p
-                                | ByteString.null (ByteStringChar8.strip out)
-                                , Just (AddMessage _) <- maybeBehavior ->
-                                    adjusted
-                                | otherwise -> renderOutput p.processOutput out
-                     in
-                        pure $ Right framed
+            ran <- case scriptRuntimeOf script.scriptInfo of
+                Nothing -> do
+                    -- Create the process with the modified environment
+                    let toolEnv = envArgs ++ buildToolEnvironment mCtx baseEnv
+                        process = (proc path args){env = Just toolEnv}
+                    fmap Right $ case mCtx >>= ctxProgressCallback of
+                        Nothing -> readCreateProcessWithExitCode process input
+                        Just report -> case mProcess of
+                            Nothing -> runProcessReportingOutput report process input
+                            Just p -> do
+                                counter <- newMVar (0 :: Int)
+                                let onLine = reportEventLine report counter p.processOutput
+                                runProcessReportingEvents report (Just onLine) process input
+                Just rt -> do
+                    prepared <- prepareLaunch cfg path rt args (buildToolEnvironment mCtx baseEnv) envArgs
+                    case prepared of
+                        Left problem -> pure (Left (ScriptRuntimeError path problem))
+                        Right launch -> do
+                            let process = (proc launch.launchCommand launch.launchArgs){env = Just launch.launchEnv, cwd = launch.launchCwd}
+                                report = maybe (const (pure ())) id (mCtx >>= ctxProgressCallback)
+                                stopping = (cancelSignal rt, maybe killGraceMicros id (stopGraceMicros rt))
+                            counter <- newMVar (0 :: Int)
+                            let onLine = fmap (\p -> reportEventLine report counter p.processOutput) mProcess
+                                running = runProcessReportingEventsStopping stopping report onLine process input
+                            case (startTimeoutMicros rt, rt.runtimeTimeout.timeoutStart) of
+                                (Just micros, Just secs) -> maybe (Left (ScriptTimeoutError path secs)) Right <$> timeout micros running
+                                _ -> Right <$> running
+            case ran of
+                Left runtimeErr -> pure (Left runtimeErr)
+                Right (code, out, err) -> do
+                    runTracer tracer (RunCommandStopped path args code out err)
+                    if code /= ExitSuccess
+                        then pure $ Left $ ScriptExecutionError path code err
+                        else
+                            let
+                                -- Use lenient UTF-8 decoding to handle binary data safely.
+                                -- Invalid bytes are replaced with U+FFFD (replacement character).
+                                outText = Text.decodeUtf8With lenientDecode out
+                                adjusted = case maybeBehavior of
+                                    Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
+                                    Nothing -> out
+                                -- A v2 tool's result is its framed output (§2.1); an
+                                -- empty output still gets the empty-result message.
+                                framed = case mProcess of
+                                    Nothing -> adjusted
+                                    Just p
+                                        | ByteString.null (ByteStringChar8.strip out)
+                                        , Just (AddMessage _) <- maybeBehavior ->
+                                            adjusted
+                                        | otherwise -> renderOutput p.processOutput out
+                             in
+                                pure $ Right framed
 
 {- | Reports one stdout line of a v2 tool as a progress payload
 @{"stream": "stdout", "event": <event>, "events": n}@ (an invalid event is

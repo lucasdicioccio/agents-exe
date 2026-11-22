@@ -37,6 +37,7 @@ import System.IO (BufferMode (..), hSetBuffering, stderr, stdout)
 
 import System.Agents.Base (Agent (..), AgentDescription (..), ExtraAgentRef (..))
 import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
+import qualified System.Agents.Tools.ScriptRuntime as ScriptRuntime
 import System.Agents.CLI.Aliases (AliasDefinition)
 import System.Agents.CLI.Base (makeFileJsonTracer, makeShowLogFileTracer)
 import qualified System.Agents.CLI.Check as CheckCmd
@@ -402,6 +403,9 @@ data Prog = Prog
     , progTemplateLibraries :: FileLoader.TemplateLibraries
     -- ^ Libraries @.tramaj@ agent files may import (@tramajLibraries@ in
     -- @agents-exe.cfg.json@, over the standard library).
+    , progToolRuntime :: ScriptRuntime.ToolRuntimeConfig
+    -- ^ How bash tools' v2 @runtime@ is enforced (@--envdir-root@,
+    -- @--run-as-mechanism@, @--sandbox@; @todos/bash-tools-v2.md@ §1.2).
     }
 
 -- | Available commands
@@ -1395,6 +1399,39 @@ parseProgOptions argparserargs =
                 )
             )
         <*> pure argparserargs.defaultTemplateLibraries
+        <*> parseToolRuntimeOptions
+
+{- | The operator's side of a bash tool's v2 @runtime@
+(@todos/bash-tools-v2.md@ §1.2, §1.4): nothing is configured by default, and
+a tool that declares @envdir@, @run_as@ or @sandbox@ fails to load until the
+matching option is given.
+-}
+parseToolRuntimeOptions :: Parser ScriptRuntime.ToolRuntimeConfig
+parseToolRuntimeOptions =
+    ScriptRuntime.ToolRuntimeConfig
+        <$> optional
+            ( strOption
+                ( long "envdir-root"
+                    <> metavar "DIR"
+                    <> help "Directory holding the envdirs bash tools may declare (runtime.envdir: one subdirectory per tool, one file per variable)"
+                )
+            )
+        <*> optional
+            ( option
+                (eitherReader ScriptRuntime.parseRunAsMechanism)
+                ( long "run-as-mechanism"
+                    <> metavar "setpriv|sudo|runuser"
+                    <> help "How bash tools declaring runtime.run_as are run as their user"
+                )
+            )
+        <*> optional
+            ( option
+                (eitherReader ScriptRuntime.parseSandboxMechanism)
+                ( long "sandbox"
+                    <> metavar "bwrap|landlock|auto"
+                    <> help "How bash tools declaring runtime.sandbox are confined (landlock is not implemented yet)"
+                )
+            )
 
 {- | Parse @--set@/@--set-json@/@--pin@/@--pin-json@ (all repeatable) into
 'ProcessParams'. The @-json@ variant accepts any JSON value; the plain
@@ -1458,6 +1495,7 @@ main = do
 
     prog :: Prog -> IO ()
     prog pargs = do
+        ScriptRuntime.setToolRuntimeConfig pargs.progToolRuntime
         showFileTracer <- makeShowLogFileTracer pargs.logFile
         baseJsonFileTracer1 <- traverse makeFileJsonTracer pargs.logJsonFile
         let logFileJsonTracer =

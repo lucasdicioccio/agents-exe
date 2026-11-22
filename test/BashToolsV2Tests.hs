@@ -74,8 +74,8 @@ describeTests =
         refused (v2Describe (Just "{\"mode\": \"service\"}"))
     , testCase "process.input is refused (not implemented yet)" $
         refused (v2Describe (Just "{\"input\": {\"framing\": \"jsonl\"}}"))
-    , testCase "runtime is refused (not implemented yet)" $
-        refused "{\"protocol\": 2, \"slug\": \"x\", \"description\": \"d\", \"args\": [], \"runtime\": {\"rundir\": \"state\"}}"
+    , testCase "a runtime envdir is refused without --envdir-root" $
+        refused "{\"protocol\": 2, \"slug\": \"x\", \"description\": \"d\", \"args\": [], \"runtime\": {\"envdir\": \"x\"}}"
     , testCase "a ready line on a oneshot is refused" $
         refused (v2Describe (Just "{\"ready\": {\"kind\": \"line\", \"match\": \"^ready$\"}}"))
     , testCase "an invalid framing is refused" $

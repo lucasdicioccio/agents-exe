@@ -6,11 +6,18 @@ stays valid unchanged: a tool that does not say otherwise is a v1 tool.
 
 Implemented: slice (1) of D2, `describe` v2 parsing and `oneshot` with
 framing and validation (`System.Agents.Tools.ScriptProcess`, documented in
-`documentation/binary-tool.md`, "Protocol v2"), and #539's `commands`
+`documentation/binary-tool.md`, "Protocol v2"), slice (2), `runtime` for
+`oneshot` tools (`System.Agents.Tools.ScriptRuntime`, "Protocol v2:
+runtime" in the same document), and #539's `commands`
 (`todos/bash-tools-subcommands.md`). Not yet: `check` (the flag is parsed
-and recorded only), `runtime` (refused at load), `stream`, `service`
-(refused at load), capabilities with backends. The event schema validator
-is a subset of JSON Schema, listed in the docs.
+and recorded only), `stream`, `service` (refused at load), the
+service-only `runtime` fields (`timeout.idle`, `on_exit`, `cancel` by
+`send`: refused at load), the Landlock sandbox mechanism (`--sandbox
+landlock` is accepted, a tool declaring `sandbox` under it fails to load;
+`--sandbox auto` resolves to bubblewrap), capabilities with backends. The
+event schema validator is a subset of JSON Schema, listed in the docs.
+The operator options (`--envdir-root`, `--run-as-mechanism`, `--sandbox`)
+are global to the `agents-exe` process.
 
 ## Goal
 
