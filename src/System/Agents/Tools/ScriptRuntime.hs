@@ -733,7 +733,7 @@ cancelSignal r = case r.runtimeCancel of
 stopGraceMicros :: ScriptRuntime -> Maybe Int
 stopGraceMicros r = fmap toMicros r.runtimeTimeout.timeoutStop
 
--- | Microseconds a @oneshot@ has to complete, when declared.
+-- | Microseconds a @oneshot@ has to complete, or a @stream@ to reach its @ready@, when declared.
 startTimeoutMicros :: ScriptRuntime -> Maybe Int
 startTimeoutMicros r = fmap toMicros r.runtimeTimeout.timeoutStart
 

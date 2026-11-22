@@ -145,10 +145,10 @@ output is cut into **events** that the runtime validates and renders.
 
 | `process` field | Values | Meaning |
 |---|---|---|
-| `mode` | `oneshot` (default) | `stream` and `service` are not implemented yet: a tool declaring them fails to load |
+| `mode` | `oneshot` (default), `stream` | `stream`: see [Protocol v2: stream](#protocol-v2-stream). `service` is not implemented yet: a tool declaring it fails to load |
 | `output.framing` | `jsonl` (default), `lines`, `chunks` | One JSON value per line, one text line per event, or the raw output |
 | `output.event` | a JSON Schema | The shape of one event under `jsonl` |
-| `ready` | `{"kind": "exit"}` | The only value that applies to a `oneshot` |
+| `ready` | `{"kind": "exit"}`; for a `stream` also `{"kind": "line", "match": REGEX}` and `{"kind": "immediate"}` | When the tool counts as started; only `exit` applies to a `oneshot` |
 
 What the model receives as the tool result:
 
@@ -171,9 +171,62 @@ The event schema supports a practical subset of JSON Schema: `type`
 
 A v1 tool ignores every v2 field, so `process` without `"protocol": 2`
 changes nothing. Declarations a later slice will implement (`process.input`,
-the `stream` and `service` modes) make the tool fail to load rather than run
+the `service` mode) make the tool fail to load rather than run
 without them. `commands` works in v2 too: every subcommand shares the
 `process` and `runtime` declarations.
+
+### Protocol v2: stream
+
+A `stream` tool runs for as long as it has something to report: a log
+follower, a long build, a watcher that exits when its condition is met. Its
+standard output is cut into events with the same framing and validation as
+a `oneshot`, but the whole output is never kept:
+
+* each event is reported as progress as it arrives
+  (`{"stream": "stdout", "event": <event>, "events": <count>}`), which is
+  what `get-tool-call-status` shows while the call runs;
+* the call completes when the tool exits, and the result is its **latest
+  events**: under `jsonl`, `{"events": [...], "elided": <n>}`; under `lines`
+  the lines, and under `chunks` the chunks, preceded by
+  `[<n> earlier lines elided]` when some were dropped. The agent's
+  `streamResultEvents` (default 200) says how many are kept;
+* under `chunks` each read of standard output is an event;
+* a tool that exits with a failure fails the call, and the error carries the
+  tail of its standard error and the result so far;
+* no events and an `empty-result` message: the message is the result.
+
+```json
+{
+  "protocol": 2,
+  "slug": "follow_build",
+  "description": "Follows a build until it ends, reporting each step",
+  "args": [],
+  "process": {
+    "mode": "stream",
+    "output": { "framing": "jsonl", "event": { "type": "object", "required": ["step"] } },
+    "ready": { "kind": "line", "match": "\"step\": *\"started\"" }
+  },
+  "runtime": { "timeout": { "start": 30, "stop": 5 } }
+}
+```
+
+`runtime.timeout.start` bounds reaching `ready`, not the whole run: under
+`{"kind": "line"}`, the first line of standard output matching the POSIX
+extended regular expression `match` (that line is still an event); under
+`{"kind": "exit"}`, the whole run. A `stream` tool declaring
+`timeout.start` without one of those fails to load, as does a `line` ready
+under `chunks` framing and `output-media-type`. Once ready, the tool runs
+until it exits or the call is cancelled (`cancel-tool-call`, or the agent's
+`asyncCallTimeoutSeconds`), then gets its `cancel` signal and, after
+`timeout.stop`, `SIGKILL`.
+
+A stream is best run as an asynchronous call: give the tool a `RunAsync`
+disposition in the agent's `toolCallPolicyConfig` (and an asynchronous
+`executionMode`), so the model gets the `running` placeholder, can follow
+the events with `get-tool-call-status`, and gets the result when the tool
+exits. Under a synchronous disposition the call simply waits for the exit,
+as any call does. Standard input gets the `stdin`-mode arguments and is
+closed, as for a `oneshot`: talking to a running tool is the `service` mode.
 
 ### Protocol v2: runtime
 
@@ -207,7 +260,7 @@ as the wrong user, by silence.
 | `envdir` | A directory name under the envdir root, read the daemontools way at every call: one file per variable, the file name is the name, the first line (trailing spaces and tabs removed) is the value; an empty file unsets the variable | `--envdir-root DIR` (there is no implicit location) |
 | `environment` | Literal variables; they win over the envdir | |
 | `rundir` | A directory relative to the tool's directory (no `..`), created if missing, made the working directory | |
-| `timeout.start` | Seconds the call has to complete; past it the tool is stopped and the call fails | |
+| `timeout.start` | Seconds the call has to complete (for a `stream`: to reach `ready`); past it the tool is stopped and the call fails | |
 | `timeout.stop` | Seconds between the cancel signal and `SIGKILL` (default 0.1) | |
 | `cancel` | The signal sent first when the call is cancelled or times out: `"SIGTERM"` (default) or `"SIGINT"` | |
 | `run_as` | `{"user", "group"}`: run the tool as this user (and group; by default the user's primary group) | `--run-as-mechanism setpriv\|sudo\|runuser` |

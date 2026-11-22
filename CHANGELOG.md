@@ -8,6 +8,14 @@
 - `agents-server` and `agents-exe serve` serve the project's icon (the website's `favicon.png`, embedded in the binary) at `GET /favicon.ico` and `GET /favicon.png`, without a token; the chat page links it with `<link rel="icon">`
 - The icon (website and server) is now a 64x64 reduction of the agents-exe logo (`logo-01.png`, the head on a transparent background) instead of the salmon icon
 
+#### Bash tools v2: stream mode
+- A v2 bash tool may declare `"process": {"mode": "stream"}`: a long-running tool whose events are reported as progress as they arrive and whose result, when it exits, is its latest events with the count of the earlier ones (`{"events": [...], "elided": n}` under `jsonl`). Its output is never held whole: a bounded ring keeps the latest events, sized by the agent's new `streamResultEvents` (default 200), and only the tail of standard error is kept
+- `process.ready` (`line` with a regular expression, `exit`, `immediate`) applies to a stream; `runtime.timeout.start` bounds reaching it rather than the whole run. A stream with `timeout.start` but no `line`/`exit` ready, a `line` ready under `chunks` framing, or `output-media-type` fails to load
+- A failed stream is a `ScriptStreamExitError` carrying its stderr tail and its result so far. Whether a stream detaches (`running` placeholder, `get-tool-call-status`) is the agent's `toolCallPolicyConfig`, as for any call
+- Still refused at load: the `service` mode and `process.input`
+- Library: `RunOptions`, `defaultRunOptions`, `runValueWithOptions` in `System.Agents.Tools.Bash`; `registerBashToolInLLMWith` in `System.Agents.ToolRegistration`; `Agent` has a `streamResultEvents` field; `EventRing` and `renderStreamResult` in `System.Agents.Tools.ScriptProcess`
+- See `documentation/binary-tool.md` (Protocol v2: stream) and `todos/bash-tools-v2.md`
+
 #### Bash tools v2: runtime for oneshot tools
 - A v2 bash tool may declare a `runtime` object: `envdir` (read the daemontools way under the operator's `--envdir-root`), `environment`, `rundir`, `timeout.start` (the call's deadline) and `timeout.stop`, `cancel` (`SIGTERM` or `SIGINT`), `run_as` (enforced with `--run-as-mechanism setpriv|sudo|runuser`) and `sandbox` (`fs.read`/`fs.write`, `net`, `tmp`; enforced with `--sandbox bwrap|auto`)
 - A tool that declares what the operator did not configure fails to load, naming the field; so does an unknown `runtime` field. Still refused at load: `timeout.idle`, `on_exit`, `cancel` by `send` (service only)

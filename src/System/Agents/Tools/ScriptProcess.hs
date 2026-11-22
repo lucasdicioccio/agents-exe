@@ -7,10 +7,13 @@
 framing, validate them against the declared event schema, render the
 result.
 
-Only the first slice of the spec (D2 (1)) is implemented: @describe@ v2
-parsing and @oneshot@ with framing and validation. Declarations that need a
-later slice (@stream@ and @service@ modes, @input@, @runtime@) are parsed
-but refused at load by 'validateScriptProcess', never silently ignored.
+It also holds what a @stream@ tool's result is made of (§2.2): a bounded
+ring of the latest events ('EventRing'), rendered with the count of the
+events it no longer holds, and the @ready@ line match.
+
+Declarations that need a later slice (@service@ mode, @input@) are parsed
+but refused at load by 'System.Agents.Tools.ScriptTypes.validateScriptV2',
+never silently ignored.
 -}
 module System.Agents.Tools.ScriptProcess (
     -- * Declaration
@@ -32,6 +35,19 @@ module System.Agents.Tools.ScriptProcess (
     frameOutput,
     renderOutput,
 
+    -- * Stream results
+    EventRing,
+    emptyEventRing,
+    pushEvent,
+    ringEvents,
+    ringElided,
+    renderStreamResult,
+    defaultStreamResultEvents,
+
+    -- * Ready
+    compileReadyMatch,
+    readyLineMatches,
+
     -- * Event schemas
     validateAgainstSchema,
 ) where
@@ -45,6 +61,8 @@ import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as ByteStringChar8
 import qualified Data.ByteString.Lazy as LByteString
 import Data.Foldable (toList)
+import Data.Sequence (Seq, (|>))
+import qualified Data.Sequence as Seq
 import qualified Data.List as List
 import Data.Maybe (catMaybes)
 import qualified Data.Scientific as Scientific
@@ -52,6 +70,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
+import Text.Regex.TDFA (Regex, makeRegexM, matchTest)
 
 -------------------------------------------------------------------------------
 -- Declaration
@@ -61,7 +80,7 @@ import Data.Text.Encoding.Error (lenientDecode)
 data ProcessMode
     = -- | Run to completion; the output is the result (v1 behaviour, with framing).
       ModeOneshot
-    | -- | The result is the sequence of output events until exit (not implemented yet).
+    | -- | The result is the sequence of output events until exit, bounded to the latest ones.
       ModeStream
     | -- | Outlives the call, addressed by a handle (not implemented yet).
       ModeService
@@ -316,6 +335,89 @@ renderOutput out bytes =
     eventLine (OutputEvent (Aeson.String t)) = Just (Text.encodeUtf8 t)
     eventLine (InvalidEvent raw _) = Just (Text.encodeUtf8 raw)
     eventLine _ = Nothing
+
+-------------------------------------------------------------------------------
+-- Stream results
+-------------------------------------------------------------------------------
+
+{- | The latest events of a @stream@ tool (§2.2), at most a fixed number, and
+how many were seen in all. A long-running tool never has its whole output
+held in memory: only the ring is.
+-}
+data EventRing = EventRing
+    { ringLimit :: !Int
+    , ringSeen :: !Int
+    , ringHeld :: !(Seq OutputEvent)
+    }
+    deriving (Show, Eq)
+
+-- | How many events a @stream@ result keeps when the agent does not say.
+defaultStreamResultEvents :: Int
+defaultStreamResultEvents = 200
+
+-- | An empty ring keeping at most the given number of events (at least one).
+emptyEventRing :: Int -> EventRing
+emptyEventRing n = EventRing (max 1 n) 0 Seq.empty
+
+-- | Adds an event, dropping the oldest one when the ring is full.
+pushEvent :: OutputEvent -> EventRing -> EventRing
+pushEvent ev r =
+    let held = r.ringHeld |> ev
+        trimmed = if Seq.length held > r.ringLimit then Seq.drop (Seq.length held - r.ringLimit) held else held
+     in r{ringSeen = r.ringSeen + 1, ringHeld = trimmed}
+
+-- | The events the ring holds, oldest first.
+ringEvents :: EventRing -> [OutputEvent]
+ringEvents r = toList r.ringHeld
+
+-- | How many events were dropped to stay within the limit.
+ringElided :: EventRing -> Int
+ringElided r = r.ringSeen - Seq.length r.ringHeld
+
+{- | The result a @stream@ tool delivers to the model (§2.2): the latest
+events and the count of the earlier ones it no longer holds. Under @jsonl@
+an object @{"events": [...], "elided": n}@; under @lines@ the lines joined by
+newlines, and under @chunks@ the chunks concatenated, both preceded by a
+@[n earlier lines elided]@ line when some were dropped.
+-}
+renderStreamResult :: ProcessOutput -> EventRing -> ByteString
+renderStreamResult out r =
+    case out.outputFraming of
+        FramingJsonl ->
+            LByteString.toStrict $
+                Aeson.encode $
+                    Aeson.object
+                        [ "events" .= fmap outputEventToJSON (ringEvents r)
+                        , "elided" .= ringElided r
+                        ]
+        FramingLines -> elidedNote "lines" <> ByteStringChar8.intercalate "\n" (fmap eventBytes (ringEvents r))
+        FramingChunks -> elidedNote "chunks" <> ByteString.concat (fmap eventBytes (ringEvents r))
+  where
+    elidedNote :: ByteString -> ByteString
+    elidedNote what
+        | ringElided r > 0 = "[" <> ByteStringChar8.pack (show (ringElided r)) <> " earlier " <> what <> " elided]\n"
+        | otherwise = ""
+    eventBytes ev = case ev of
+        OutputEvent (Aeson.String t) -> Text.encodeUtf8 t
+        OutputEvent v -> LByteString.toStrict (Aeson.encode v)
+        InvalidEvent raw _ -> Text.encodeUtf8 raw
+
+-------------------------------------------------------------------------------
+-- Ready
+-------------------------------------------------------------------------------
+
+{- | Compiles the regular expression of a @ready@ line (POSIX extended
+syntax), or says why it does not compile.
+-}
+compileReadyMatch :: Text -> Either String Regex
+compileReadyMatch pat =
+    case makeRegexM (Text.unpack pat) of
+        Just re -> Right re
+        Nothing -> Left ("process.ready.match " <> show pat <> " is not a valid regular expression")
+
+-- | Whether a line of standard output matches a compiled @ready@ pattern.
+readyLineMatches :: Regex -> ByteString -> Bool
+readyLineMatches re line = matchTest re (Text.unpack (Text.decodeUtf8With lenientDecode line))
 
 -------------------------------------------------------------------------------
 -- Event schemas

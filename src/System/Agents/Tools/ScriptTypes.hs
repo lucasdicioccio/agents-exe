@@ -48,10 +48,12 @@ import System.Agents.Tools.ScriptProcess (
     ProcessOutput (..),
     ProcessReady (..),
     ScriptProcess (..),
+    compileReadyMatch,
     defaultScriptProcess,
  )
 import System.Agents.Tools.ScriptRuntime (
-    ScriptRuntime,
+    RuntimeTimeout (..),
+    ScriptRuntime (..),
     ToolRuntimeConfig,
     validateScriptRuntime,
  )
@@ -265,8 +267,8 @@ scriptRuntimeOf info
     | otherwise = Nothing
 
 {- | Checks the v2 declarations of a description against what this runtime
-implements (slices 1 and 2 of @todos/bash-tools-v2.md@: @oneshot@ with
-framing and validation, and its @runtime@) and what the operator configured
+implements (slices 1 to 3 of @todos/bash-tools-v2.md@: @oneshot@ with
+framing and validation, its @runtime@, and @stream@) and what the operator configured
 (@--envdir-root@, @--run-as-mechanism@, @--sandbox@). Anything that would
 change how the tool runs if honoured, and is not implemented or not
 configured, is refused here rather than silently ignored. Returns the list
@@ -278,11 +280,29 @@ validateScriptV2 cfg info =
         Nothing -> []
         Just p ->
             mconcat
-                [ [ "process.mode " <> modeName p.processMode <> " is not implemented yet (only \"oneshot\" is)"
-                  | p.processMode /= ModeOneshot
+                [ [ "process.mode " <> modeName p.processMode <> " is not implemented yet (\"oneshot\" and \"stream\" are)"
+                  | p.processMode == ModeService
                   ]
-                , [ "process.input is not implemented yet (it needs the stream or service modes)"
+                , [ "process.input is not implemented yet (it needs the service mode and its send tool)"
                   | Just _ <- [p.processInput]
+                  ]
+                , [ problem
+                  | Just (ReadyLine pat) <- [p.processReady]
+                  , Left problem <- [compileReadyMatch pat]
+                  ]
+                , [ "runtime.timeout.start on a stream tool bounds reaching process.ready: declare ready {\"kind\": \"line\", ...} or {\"kind\": \"exit\"}"
+                  | p.processMode == ModeStream
+                  , Just rt <- [info.scriptRuntime]
+                  , Just _ <- [rt.runtimeTimeout.timeoutStart]
+                  , not (startBoundable p.processReady)
+                  ]
+                , [ "process.ready {\"kind\": \"line\"} needs line-based output (framing \"jsonl\" or \"lines\", not \"chunks\")"
+                  | Just (ReadyLine _) <- [p.processReady]
+                  , p.processOutput.outputFraming == FramingChunks
+                  ]
+                , [ "output-media-type does not apply to a stream tool (its result is its latest events)"
+                  | p.processMode == ModeStream
+                  , Just _ <- [info.scriptOutputMediaType] <> fmap (.commandOutputMediaType) info.scriptCommands
                   ]
                 , [ "process.ready " <> Prelude.show r <> " does not apply to a oneshot tool (only {\"kind\": \"exit\"} does)"
                   | p.processMode == ModeOneshot
@@ -300,6 +320,10 @@ validateScriptV2 cfg info =
                   ]
                 ]
   where
+    startBoundable r = case r of
+        Just (ReadyLine _) -> True
+        Just ReadyExit -> True
+        _ -> False
     modeName m = case m of
         ModeOneshot -> "\"oneshot\""
         ModeStream -> "\"stream\""

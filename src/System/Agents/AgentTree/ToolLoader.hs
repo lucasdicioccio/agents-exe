@@ -206,6 +206,7 @@ loadBashTools ::
     IO (Maybe LoadingError, [Bindings.Binding])
 loadBashTools tracer resolvedParams agent toolsTVar = do
     let descriptions = collectBashDescriptions agent
+        runOptions = maybe BashTools.defaultRunOptions BashTools.RunOptions agent.streamResultEvents
         secretParamNames = Set.fromList [p.paramName | p <- fromMaybe [] agent.parameters, p.paramSecret]
 
     if null descriptions
@@ -233,7 +234,7 @@ loadBashTools tracer resolvedParams agent toolsTVar = do
                                   where
                                     makeRegistrations (mbActivation, toolBindings, scripts) =
                                         let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
-                                         in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLM mbActivation) scripts
+                                         in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLMWith runOptions mbActivation) scripts
                                 exposeBindings =
                                     concatMap
                                         (\(_, toolBindings, _) -> filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings)

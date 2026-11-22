@@ -166,7 +166,7 @@ writeAgentFile dir name slugName = do
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
                 , interruptScope = Nothing
-                , wakeOn = Nothing
+                , wakeOn = Nothing, streamResultEvents = Nothing
                 }
     LByteString.writeFile path (Aeson.encode (AgentDescription agent))
     pure path

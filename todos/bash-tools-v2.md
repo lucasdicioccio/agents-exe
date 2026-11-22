@@ -8,9 +8,13 @@ Implemented: slice (1) of D2, `describe` v2 parsing and `oneshot` with
 framing and validation (`System.Agents.Tools.ScriptProcess`, documented in
 `documentation/binary-tool.md`, "Protocol v2"), slice (2), `runtime` for
 `oneshot` tools (`System.Agents.Tools.ScriptRuntime`, "Protocol v2:
-runtime" in the same document), and #539's `commands`
+runtime" in the same document), slice (3), `stream` (§2.2, "Protocol v2:
+stream" there: a bounded ring of the latest events, the agent's
+`streamResultEvents`, `ready` line/exit bounded by `timeout.start`; whether
+the call detaches stays the agent's `toolCallPolicyConfig`, a tool does not
+declare its own disposition), and #539's `commands`
 (`todos/bash-tools-subcommands.md`). Not yet: `check` (the flag is parsed
-and recorded only), `stream`, `service` (refused at load), the
+and recorded only), `service` and `process.input` (refused at load), the
 service-only `runtime` fields (`timeout.idle`, `on_exit`, `cancel` by
 `send`: refused at load), capabilities with backends. The Landlock sandbox
 mechanism is implemented (`System.Agents.Tools.Landlock`, agents-exe as its

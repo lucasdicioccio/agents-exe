@@ -2056,6 +2056,11 @@ data Agent
     either way, this only gates whether it wakes the session by itself).
     Default @[\"user\", \"tool\", \"parent\", \"child\"]@ when unset.
     -}
+    , streamResultEvents :: Maybe Int
+    {- ^ @todos/bash-tools-v2.md@ §2.2: how many of its latest events the
+    result of a @stream@ bash tool keeps (the count of the earlier ones is
+    stated). Default 200 when unset.
+    -}
     }
     deriving (Show, Eq, Generic)
 
