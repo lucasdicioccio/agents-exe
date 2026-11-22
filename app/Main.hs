@@ -1633,8 +1633,9 @@ API keys and process parameters agents-exe already resolved from
 handleServe :: Prog -> SessionStore.SessionStore -> [FilePath] -> ServeOptions -> IO ()
 handleServe pargs sessionStore files opts = do
     logger <- SrvLog.newHandleLogger stderr
+    keysFile <- serveApiKeysFile logger pargs
     let serverOpts =
-            (Srv.serverOptionsFromFlags files pargs.apiKeysFile opts.serveFlags pargs.progParams)
+            (Srv.serverOptionsFromFlags files keysFile opts.serveFlags pargs.progParams)
                 { Srv.soLegacySessionDirs = sessionStore.sessionReadPrefixes
                 , Srv.soTemplateLibraries = pargs.progTemplateLibraries
                 }
@@ -1644,6 +1645,23 @@ handleServe pargs sessionStore files opts = do
         Left (e :: SomeException) -> do
             SrvLog.logLine logger "server.failed" ["message" .= displayException e]
             exitFailure
+
+{- | The API keys file @serve@ hands the server. The default one
+(@<config-dir>/secret-keys@) is optional: when it does not exist, the server
+starts without keys and calls the LLM endpoints without authentication, for
+endpoints that need none (a llama.cpp or ollama server on the LAN). A file
+named with @--api-keys@ is used as given, so a wrong path still fails.
+-}
+serveApiKeysFile :: SrvLog.Logger -> Prog -> IO (Maybe FilePath)
+serveApiKeysFile logger pargs
+    | pargs.apiKeysFile /= ConfigLoader.secretKeysFileIn pargs.configDir = pure (Just pargs.apiKeysFile)
+    | otherwise = do
+        exists <- doesFileExist pargs.apiKeysFile
+        if exists
+            then pure (Just pargs.apiKeysFile)
+            else do
+                SrvLog.logLine logger "server.no-api-keys" ["path" .= pargs.apiKeysFile, "message" .= ("no API keys file: LLM endpoints are called without authentication" :: Text)]
+                pure Nothing
 
 -- | Create HTTP JSON tracer
 makeHttpJsonTrace :: (Aeson.ToJSON a) => Prod.Tracer IO HttpClient.Trace -> Text -> IO (Prod.Tracer IO a)

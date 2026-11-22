@@ -79,6 +79,7 @@ main =
             , testCase "with --stream-tokens, answers arrive as text.delta events" streamingTest
             , testCase "owners with their own API keys call the LLM with them, others with the shared ones" ownerApiKeysTest
             , testCase "--owner-api-keys is refused at startup without --auth-tokens" ownerApiKeysStartupTest
+            , testCase "without an API keys file, the LLM is called without authentication" noApiKeysTest
             , testCase "admins store agents, which serve sessions and MCP until deleted" storedAgentsTest
             , testCase "a stored agent carries its bash tools and names stored helpers" storedAgentFilesTest
             , testCase "without admin owners, storing agents is disabled" agentEditsDisabledTest
@@ -672,7 +673,7 @@ corsWildcardStartupTest = withSystemTempDirectory "agents-server-cors" $ \dir ->
     let opts =
             ServerOptions
                 { soAgentFiles = ["/nonexistent/agent.json"]
-                , soApiKeysFile = "/nonexistent/keys.json"
+                , soApiKeysFile = Just "/nonexistent/keys.json"
                 , soDatabase = dir </> "agents.db"
                 , soBind = "127.0.0.1"
                 , soPort = 0
@@ -760,7 +761,7 @@ ownerApiKeysTest = withSystemTempDirectory "agents-server-owner-keys" $ \dir -> 
                 c
                     { hcCompletion = Nothing
                     , hcStreamTokens = True
-                    , hcApiKeysFile = shared
+                    , hcApiKeysFile = Just shared
                     , hcOwnerApiKeysFiles = [("alice", aliceKeys), ("bob", bobKeys)]
                     }
         withServerConfig (Just tokens) extra adjust id $ \anonymous ->
@@ -770,12 +771,31 @@ ownerApiKeysTest = withSystemTempDirectory "agents-server-owner-keys" $ \dir -> 
     sent <- readIORef seen
     sent @?= map Just ["Bearer alice-key", "Bearer bob-key", "Bearer shared-key", "Bearer alice-key"]
 
+{- | No API keys file (an unauthenticated endpoint): the server starts and
+the LLM call carries no @Authorization@ header.
+-}
+noApiKeysTest :: Assertion
+noApiKeysTest = do
+    seen <- newIORef []
+    let recording req respond = do
+            modifyIORef' seen (<> [lookup "Authorization" (Wai.requestHeaders req)])
+            ignored <- newIORef []
+            fakeStreamingLlm ignored req respond
+    testWithApplication (pure recording) $ \llmPort -> do
+        let extra = "{\"modelUrl\": \"http://127.0.0.1:" <> show llmPort <> "/v1\"}"
+            adjust c = c{hcCompletion = Nothing, hcStreamTokens = True, hcApiKeysFile = Nothing}
+        withServerConfig Nothing extra adjust id $ \srv -> do
+            (created, view) <- call srv "POST" "/v1/sessions?wait=true" (Just (createBody []))
+            (created, field "status" view) @?= (201, "idle")
+    sent <- readIORef seen
+    sent @?= [Nothing]
+
 ownerApiKeysStartupTest :: Assertion
 ownerApiKeysStartupTest = withSystemTempDirectory "agents-server-owner-keys" $ \dir -> do
     let opts =
             ServerOptions
                 { soAgentFiles = ["/nonexistent/agent.json"]
-                , soApiKeysFile = "/nonexistent/keys.json"
+                , soApiKeysFile = Just "/nonexistent/keys.json"
                 , soDatabase = dir </> "agents.db"
                 , soBind = "127.0.0.1"
                 , soPort = 0
@@ -1202,7 +1222,7 @@ withServerConfig auth extraConfig adjust adjustEnv k =
             Aeson.encode $
                 Aeson.object ["tag" .= ("OpenAIAgentDescription" :: Text), "contents" .= merge baseConfig extra]
         writeFile keysFile "{}"
-        let cfg = adjust (defaultHostConfig [agentFile] keysFile (dir </> "agents.db"))
+        let cfg = adjust (defaultHostConfig [agentFile] (Just keysFile) (dir </> "agents.db"))
         manager <- Http.newManager Http.defaultManagerSettings{Http.managerResponseTimeout = Http.responseTimeoutMicro 30_000_000}
         withHost cfg silent $ \host ->
             withSessionRunner host $ \runner -> do
@@ -1427,7 +1447,7 @@ socketHealthzTest = withSystemTempDirectory "agents-server-socket" $ \dir -> do
     let opts =
             ServerOptions
                 { soAgentFiles = [agentFile]
-                , soApiKeysFile = keysFile
+                , soApiKeysFile = Just keysFile
                 , soDatabase = dir </> "agents.db"
                 , soBind = "127.0.0.1"
                 , soPort = port

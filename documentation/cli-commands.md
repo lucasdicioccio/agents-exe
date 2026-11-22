@@ -844,6 +844,13 @@ does not match. It shares agents-exe's global `--api-keys`,
 `--set`/`--set-json`/`--pin`/`--pin-json` and `--params-file`, so those are
 not repeated below.
 
+The API keys file is optional for `serve`: when `--api-keys` is not given and
+the default `secret-keys` file does not exist, the server starts without keys
+and calls the LLM endpoints without authentication (for unauthenticated
+endpoints such as a LAN llama.cpp or ollama server). A file named with
+`--api-keys` must exist. See `agents-server.md`, "Unauthenticated LLM
+endpoints".
+
 **Options:**
 
 | Option | Default | Description |

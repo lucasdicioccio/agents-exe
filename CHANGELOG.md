@@ -16,6 +16,13 @@
 - Library: `RunOptions`, `defaultRunOptions`, `runValueWithOptions` in `System.Agents.Tools.Bash`; `registerBashToolInLLMWith` in `System.Agents.ToolRegistration`; `Agent` has a `streamResultEvents` field; `EventRing` and `renderStreamResult` in `System.Agents.Tools.ScriptProcess`
 - See `documentation/binary-tool.md` (Protocol v2: stream) and `todos/bash-tools-v2.md`
 
+#### Server: API keys file is optional (unauthenticated LLM endpoints)
+- `agents-server --api-keys` is no longer required: without it the server starts with no keys and agents call their models without an `Authorization` header, for endpoints that need none (a llama.cpp or ollama server on the LAN)
+- `agents-exe serve` starts without keys when `--api-keys` is not given and the default `secret-keys` file does not exist (logged as `server.no-api-keys`); a file named with `--api-keys` must still exist
+- With a keys file, nothing changes
+- Library: `HostConfig.hcApiKeysFile` and `ServerOptions.soApiKeysFile` are now `Maybe FilePath`; `defaultHostConfig` and `serverOptionsFromFlags` take a `Maybe FilePath`
+- See `documentation/agents-server.md` (Unauthenticated LLM endpoints)
+
 #### Bash tools v2: runtime for oneshot tools
 - A v2 bash tool may declare a `runtime` object: `envdir` (read the daemontools way under the operator's `--envdir-root`), `environment`, `rundir`, `timeout.start` (the call's deadline) and `timeout.stop`, `cancel` (`SIGTERM` or `SIGINT`), `run_as` (enforced with `--run-as-mechanism setpriv|sudo|runuser`) and `sandbox` (`fs.read`/`fs.write`, `net`, `tmp`; enforced with `--sandbox bwrap|auto`)
 - A tool that declares what the operator did not configure fails to load, naming the field; so does an unknown `runtime` field. Still refused at load: `timeout.idle`, `on_exit`, `cancel` by `send` (service only)

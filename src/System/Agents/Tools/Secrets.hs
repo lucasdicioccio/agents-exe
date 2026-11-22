@@ -388,6 +388,10 @@ resolveSecretSource _ (FileSystem path) = do
             | otherwise ->
                 pure $ Left $ SourceReadError $ "Error reading file " <> Text.pack path <> ": " <> Text.pack (show e)
         Right content -> pure $ Right $ Text.decodeUtf8 $ LByteString.toStrict content
+resolveSecretSource "" (ApiKeySource keyId) =
+    -- No API keys file configured (e.g. a server talking to an
+    -- unauthenticated LLM endpoint): there is nothing to look the key up in.
+    pure $ Left $ ApiKeyNotFound $ "API key not found (no API keys file configured): " <> keyId
 resolveSecretSource apiKeysFile (ApiKeySource keyId) = do
     result <- try @IOException $ LByteString.readFile apiKeysFile
     case result of

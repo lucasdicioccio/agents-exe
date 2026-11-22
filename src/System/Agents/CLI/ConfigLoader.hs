@@ -386,7 +386,7 @@ passed in take priority over 'rcAgentFiles' when non-empty, mirroring
 -}
 hostConfigFromResolved :: ResolvedConfig -> [FilePath] -> FilePath -> FilePath -> HostConfig
 hostConfigFromResolved rc explicitAgentFiles apiKeysFile dbPath =
-    (defaultHostConfig agentFiles apiKeysFile dbPath)
+    (defaultHostConfig agentFiles (Just apiKeysFile) dbPath)
         { hcLegacySessionDirs = rc.rcSessionStore.sessionReadPrefixes
         , hcTemplateLibraries = rc.rcTemplateLibraries
         }

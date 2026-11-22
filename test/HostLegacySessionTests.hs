@@ -65,7 +65,7 @@ legacySessionReadableTest =
         -- Open a host over an unrelated, empty SQLite database, with the
         -- legacy directory as a read fallback only (§6). No agent files
         -- are needed here: only 'hostBackend' is under test.
-        let cfg = (defaultHostConfig [] "/dev/null" dbPath){hcLegacySessionDirs = [legacyDir]}
+        let cfg = (defaultHostConfig [] (Just "/dev/null") dbPath){hcLegacySessionDirs = [legacyDir]}
         withHost cfg silent $ \host -> do
             found <- sbLoad host.hostBackend sid
             case found of
