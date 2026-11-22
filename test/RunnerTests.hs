@@ -685,7 +685,7 @@ withHostTest =
                 <> "\"modelUrl\": \"http://127.0.0.1:1\", \"modelName\": \"mock\", \"announce\": \"smoke test\", "
                 <> "\"systemPrompt\": [\"You are a test\"], \"builtinToolboxes\": [], \"mcpServers\": []}}"
         writeFile keysFile "{}"
-        let cfg = (defaultHostConfig [agentFile] keysFile dbFile){hcCompletion = Just (const mockCompletion)}
+        let cfg = (defaultHostConfig [agentFile] (Just keysFile) dbFile){hcCompletion = Just (const mockCompletion)}
         withHost cfg silent $ \host -> do
             Map.keys host.hostAgents @?= ["smoke"]
             withSessionRunner host $ \runner -> do
@@ -727,7 +727,7 @@ storedAgentsTest =
                     <> "}"
             writeAgentFile slug = writeFile (agentFile slug) ("{\"tag\": \"OpenAIAgentDescription\", \"contents\": " <> config slug "" <> "}")
             decodeAgent txt = either (assertFailure . ("bad config: " <>)) pure (Aeson.eitherDecode (LBS8.pack txt))
-            cfg files = (defaultHostConfig (map agentFile files) keysFile dbFile){hcCompletion = Just (const mockCompletion)}
+            cfg files = (defaultHostConfig (map agentFile files) (Just keysFile) dbFile){hcCompletion = Just (const mockCompletion)}
         writeFile keysFile "{}"
         writeAgentFile "smoke"
         helper <- decodeAgent (config "helper" "")
@@ -810,7 +810,7 @@ storedAgentToolsTest =
                         , [openAICall "call_1" "bash_greet" "{}", openAICall "call_2" "io_prompt_agent_helper" "{\"what\": \"help\"}"]
                         )
                 | otherwise = pure (LlmResponse Nothing Nothing Aeson.Null Nothing, [openAICall "call_3" "bash_shout" "{}"])
-            cfg = (defaultHostConfig [] keysFile (dir </> "agents.db")){hcCompletion = Just complete}
+            cfg = (defaultHostConfig [] (Just keysFile) (dir </> "agents.db")){hcCompletion = Just complete}
             runBoss host = withSessionRunner host $ \runner -> do
                 meta <- expectRight =<< createSession runner "boss" (message "go") (Just UntilBlocked)
                 (idle, _) <- expectRight =<< awaitRun runner meta.smSessionId 10
@@ -851,7 +851,7 @@ storedAgentHelperErrorsTest :: Assertion
 storedAgentHelperErrorsTest =
     withSystemTempDirectory "agents-stored-helpers" $ \dir -> do
         let keysFile = dir </> "keys.json"
-            cfg = (defaultHostConfig [] keysFile (dir </> "agents.db")){hcCompletion = Just (const mockCompletion)}
+            cfg = (defaultHostConfig [] (Just keysFile) (dir </> "agents.db")){hcCompletion = Just (const mockCompletion)}
             refs slugs = ", \"extraAgents\": [" <> List.intercalate ", " ["{\"slug\": \"" <> s <> "\"}" | s <- slugs] <> "]"
             put host slug extra files = do
                 agent <- storedAgentJson slug extra

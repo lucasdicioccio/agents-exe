@@ -112,7 +112,7 @@ ownerKeysStartupTest :: Assertion
 ownerKeysStartupTest = withSystemTempDirectory "owner-keys" $ \dir -> do
     let good = dir </> "good.json"
         bad = dir </> "bad.json"
-        cfg owners = (defaultHostConfig [] "/dev/null" (dir </> "agents.db")){hcOwnerApiKeysFiles = owners}
+        cfg owners = (defaultHostConfig [] (Just "/dev/null") (dir </> "agents.db")){hcOwnerApiKeysFiles = owners}
         start owners = try (withHost (cfg owners) silent (\host -> pure (Map.keys host.hostOwnerApiKeys)))
     writeFile good "{\"keys\": [{\"id\": \"main\", \"value\": \"k\"}]}"
     writeFile bad "{\"keys\": 3}"

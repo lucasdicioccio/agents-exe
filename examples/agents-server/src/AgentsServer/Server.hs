@@ -50,7 +50,11 @@ import System.Agents.Tools.Params.Types (ProcessParams, ProcessValue (..))
 
 data ServerOptions = ServerOptions
     { soAgentFiles :: [FilePath]
-    , soApiKeysFile :: FilePath
+    , soApiKeysFile :: Maybe FilePath
+    {- ^ @--api-keys@. 'Nothing': no keys, the agents call their models
+    without authentication (an unauthenticated endpoint such as a LAN
+    llama.cpp or ollama server).
+    -}
     , soDatabase :: FilePath
     , soBind :: String
     , soPort :: Int
@@ -116,9 +120,11 @@ serverOptions =
 agentFileOption :: Parser [FilePath]
 agentFileOption = some (strOption (long "agent-file" <> metavar "FILE" <> help "Root agent file; repeat for several agents"))
 
--- | @--api-keys@, required (as for @agents-server@).
-apiKeysOption :: Parser FilePath
-apiKeysOption = strOption (long "api-keys" <> metavar "FILE" <> help "API keys file")
+{- | @--api-keys@, optional: without it the agents call their models
+without an @Authorization@ header, for LLM endpoints that need no key.
+-}
+apiKeysOption :: Parser (Maybe FilePath)
+apiKeysOption = optional (strOption (long "api-keys" <> metavar "FILE" <> help "API keys file (optional: without it, LLM endpoints are called without authentication)"))
 
 {- | The server's own flags: everything in 'ServerOptions' except the agent
 files, the API keys file and the process parameters, which @agents-exe
@@ -178,7 +184,7 @@ parseIsolateTools raw = case break (== ':') raw of
     _ -> Left "expected docker:IMAGE or process:PATH"
 
 -- | Assemble a 'ServerOptions' from agent files, an API keys path, 'ServerFlags' and process parameters.
-serverOptionsFromFlags :: [FilePath] -> FilePath -> ServerFlags -> ProcessParams -> ServerOptions
+serverOptionsFromFlags :: [FilePath] -> Maybe FilePath -> ServerFlags -> ProcessParams -> ServerOptions
 serverOptionsFromFlags agentFiles apiKeysFile flags params =
     ServerOptions
         { soAgentFiles = agentFiles

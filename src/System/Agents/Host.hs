@@ -46,7 +46,7 @@ import Control.Monad (forM_, zipWithM)
 import Data.Foldable (toList)
 import Data.IORef (atomicModifyIORef', newIORef)
 import Data.List (partition)
-import Data.Maybe (isNothing)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -122,7 +122,12 @@ data Host = Host
 data HostConfig = HostConfig
     { hcAgentFiles :: [FilePath]
     -- ^ Root agent files; each root is addressable by its slug.
-    , hcApiKeysFile :: FilePath
+    , hcApiKeysFile :: Maybe FilePath
+    {- ^ The LLM API keys. 'Nothing' means no keys: every agent calls its
+    model without authentication (no @Authorization@ header), which is what
+    an unauthenticated endpoint (a llama.cpp or ollama server on the LAN)
+    expects. A tool secret sourced from an API key then fails to resolve.
+    -}
     , hcDatabasePath :: FilePath
     -- ^ SQLite database, for 'withHost'; 'withHostStores' ignores it.
     , hcCompletion :: Maybe (OSAgentNode -> Completion)
@@ -162,7 +167,7 @@ data HostConfig = HostConfig
     }
 
 -- | A configuration with the default idle time of 15 minutes.
-defaultHostConfig :: [FilePath] -> FilePath -> FilePath -> HostConfig
+defaultHostConfig :: [FilePath] -> Maybe FilePath -> FilePath -> HostConfig
 defaultHostConfig files keysFile dbPath =
     HostConfig
         { hcAgentFiles = files
@@ -256,7 +261,7 @@ withHostStores cfg stores tracer action = do
             [] -> stores.hsSessions
             dirs -> mkCompositeSessionStore (stores.hsSessions : map (fileSessionBackend . FileSessionStore) dirs)
         store = stores.hsContinuations
-    keys <- readOpenApiKeysFile cfg.hcApiKeysFile
+    keys <- maybe (pure []) readOpenApiKeysFile cfg.hcApiKeysFile
     ownerKeys <- loadOwnerApiKeys cfg.hcOwnerApiKeysFiles
     isolation <- case traverse toolIsolationFromSpec cfg.hcToolIsolation of
         Left err -> throwIO $ ToolIsolationRefused err
@@ -280,7 +285,7 @@ withHostStores cfg stores tracer action = do
         props file =
             Props
                 { apiKeys = keys
-                , apiKeysFile = cfg.hcApiKeysFile
+                , apiKeysFile = fromMaybe "" cfg.hcApiKeysFile
                 , rootAgentFile = file
                 , interactiveTracer = contramap HostTreeTrace tracer
                 , agentToTool = OneShotTool.turnAgentRuntimeIntoIOTool (contramap HostSubAgentTrace tracer) subDeps

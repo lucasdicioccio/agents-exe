@@ -201,7 +201,7 @@ runnerTest baseUrl = withDatabase baseUrl $ \url -> withSystemTempDirectory "age
         keysFile = dir </> "keys.json"
     LByteString.writeFile agentFile $ Aeson.encode $ Aeson.object ["tag" .= ("OpenAIAgentDescription" :: Text), "contents" .= agentConfig]
     writeFile keysFile "{}"
-    let cfg = (defaultHostConfig [agentFile] keysFile "unused.db"){hcCompletion = Just (const (firstThen [remoteCall "call_1"]))}
+    let cfg = (defaultHostConfig [agentFile] (Just keysFile) "unused.db"){hcCompletion = Just (const (firstThen [remoteCall "call_1"]))}
     withPostgresStores url $ \stores ->
         withHostStores cfg stores silent $ \host ->
             withSessionRunner host $ \runner -> do
@@ -340,7 +340,7 @@ withServerOn url config adjust completion k = withSystemTempDirectory "agents-pg
         keysFile = dir </> "keys.json"
     LByteString.writeFile agentFile $ Aeson.encode $ Aeson.object ["tag" .= ("OpenAIAgentDescription" :: Text), "contents" .= agentConfig]
     writeFile keysFile "{}"
-    let cfg = (defaultHostConfig [agentFile] keysFile "unused.db"){hcCompletion = Just (const completion)}
+    let cfg = (defaultHostConfig [agentFile] (Just keysFile) "unused.db"){hcCompletion = Just (const completion)}
     withPostgresStores url $ \stores ->
         withHostStores cfg (adjust stores) silent $ \host ->
             bracket (newSessionRunnerWith config host) shutdownSessionRunner k

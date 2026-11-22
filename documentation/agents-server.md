@@ -31,7 +31,7 @@ cabal run agents-server -- \
 | Flag | Default | Meaning |
 |---|---|---|
 | `--agent-file FILE` | (required) | A root agent file. Repeat it to serve several agents; each is addressed by its `slug`, which must be unique. |
-| `--api-keys FILE` | (required) | The API keys file, as for `agents-exe`. |
+| `--api-keys FILE` | (none) | The API keys file, as for `agents-exe`. Optional: without it the agents call their models without authentication. See [Unauthenticated LLM endpoints](#unauthenticated-llm-endpoints). |
 | `--db FILE\|URL` | `agents-server.db` | Where sessions and continuation tokens live: a SQLite file, or a `postgresql://` URL (see [Postgres](#postgres)). Created or migrated on start. |
 | `--bind HOST` | `127.0.0.1` | Address to listen on. |
 | `--port PORT` | `8080` | Port to listen on. |
@@ -864,6 +864,28 @@ Several tokens may share an owner. The file is read at startup.
 
 All owners share the agents of the server, and its API keys unless they
 have their own (next section).
+
+### Unauthenticated LLM endpoints
+
+Some LLM endpoints need no key: a llama.cpp, vLLM or ollama server on the
+LAN, for instance. The server does not need an API keys file for them.
+
+* `agents-server` without `--api-keys` starts with no keys.
+* `agents-exe serve` without `--api-keys` uses
+  `~/.config/agents-exe/secret-keys` (or `secret-keys` in the configured
+  config directory) when it exists, and starts with no keys when it does
+  not, logging a `server.no-api-keys` line. A file named with `--api-keys`
+  must exist, as before.
+
+An agent whose `apiKeyId` is not found (no keys file, or a file without that
+id) calls its `modelUrl` without an `Authorization` header. With a keys file
+that holds the id, the key is sent as a bearer token, as before. A tool
+secret sourced from an API key (`{"tag": "ApiKey", ...}`) does not resolve
+without a keys file, as for a key id missing from the file.
+
+```bash
+agents-server --agent-file ./qwen-lan.json --port 8080
+```
 
 ### API keys per owner
 
