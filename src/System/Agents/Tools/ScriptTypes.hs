@@ -22,6 +22,7 @@ module System.Agents.Tools.ScriptTypes (
 
     -- * Protocol v2
     scriptProcessOf,
+    scriptRuntimeOf,
     validateScriptV2,
 
     -- * Script located on disk
@@ -48,6 +49,11 @@ import System.Agents.Tools.ScriptProcess (
     ProcessReady (..),
     ScriptProcess (..),
     defaultScriptProcess,
+ )
+import System.Agents.Tools.ScriptRuntime (
+    ScriptRuntime,
+    ToolRuntimeConfig,
+    validateScriptRuntime,
  )
 
 -------------------------------------------------------------------------------
@@ -197,8 +203,8 @@ data ScriptInfo
     -}
     , scriptProcess :: Maybe ScriptProcess
     -- ^ The v2 @process@ object; a v2 tool without one is a @oneshot@ with @jsonl@ output ('scriptProcessOf').
-    , scriptRuntime :: Maybe Aeson.Value
-    -- ^ The v2 @runtime@ object, kept raw: not implemented yet, refused at load ('validateScriptV2').
+    , scriptRuntime :: Maybe ScriptRuntime
+    -- ^ The v2 @runtime@ object: how the tool asks to be run (see "System.Agents.Tools.ScriptRuntime").
     , scriptCheck :: Bool
     -- ^ The v2 @check@ flag (the @check@ verb is a later slice; recorded only).
     }
@@ -251,14 +257,23 @@ scriptProcessOf info
     | info.scriptProtocol >= 2 = Just (maybe defaultScriptProcess id info.scriptProcess)
     | otherwise = Nothing
 
-{- | Checks the v2 declarations of a description against what this runtime
-implements (slice 1 of @todos/bash-tools-v2.md@: @oneshot@ with framing and
-validation). Anything that would change how the tool runs if honoured, and
-is not implemented yet, is refused here rather than silently ignored.
-Returns the list of problems (empty when valid, and always for a v1 tool).
+{- | The runtime declaration of a tool: only a v2 tool's is honoured (D1).
 -}
-validateScriptV2 :: ScriptInfo -> [String]
-validateScriptV2 info =
+scriptRuntimeOf :: ScriptInfo -> Maybe ScriptRuntime
+scriptRuntimeOf info
+    | info.scriptProtocol >= 2 = info.scriptRuntime
+    | otherwise = Nothing
+
+{- | Checks the v2 declarations of a description against what this runtime
+implements (slices 1 and 2 of @todos/bash-tools-v2.md@: @oneshot@ with
+framing and validation, and its @runtime@) and what the operator configured
+(@--envdir-root@, @--run-as-mechanism@, @--sandbox@). Anything that would
+change how the tool runs if honoured, and is not implemented or not
+configured, is refused here rather than silently ignored. Returns the list
+of problems (empty when valid, and always for a v1 tool).
+-}
+validateScriptV2 :: ToolRuntimeConfig -> ScriptInfo -> [String]
+validateScriptV2 cfg info =
     case scriptProcessOf info of
         Nothing -> []
         Just p ->
@@ -274,9 +289,7 @@ validateScriptV2 info =
                   , Just r <- [p.processReady]
                   , r /= ReadyExit
                   ]
-                , [ "runtime is not implemented yet (run_as, sandbox, envdir, environment, rundir, timeout, on_exit, cancel)"
-                  | Just _ <- [info.scriptRuntime]
-                  ]
+                , maybe [] (validateScriptRuntime cfg) info.scriptRuntime
                 , [ "output-media-type requires process.output.framing \"chunks\" (binary output cannot be cut into events)"
                   | Just _ <- [info.scriptOutputMediaType] <> fmap (.commandOutputMediaType) info.scriptCommands
                   , p.processOutput.outputFraming /= FramingChunks

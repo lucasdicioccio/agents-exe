@@ -148,6 +148,7 @@ library agents-lib
                     , System.Agents.Tools.PostgREST.Converter
                     , System.Agents.Tools.PostgRESToolbox
                     , System.Agents.Tools.ScriptProcess
+                    , System.Agents.Tools.ScriptRuntime
                     , System.Agents.Tools.ScriptTypes
                     , System.Agents.Tools.Secrets
                     , System.Agents.Tools.Skills.Types
@@ -559,6 +560,7 @@ test-suite agents-tests
                     , OwnerIsolationTests
                     , BashSubcommandsTests
                     , BashToolsV2Tests
+                    , BashToolsRuntimeTests
                     , BindingsTests
                     , ConfigLoaderTests
                     , TemplateTests
