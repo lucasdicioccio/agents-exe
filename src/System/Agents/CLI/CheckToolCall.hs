@@ -27,13 +27,15 @@ import System.IO (stderr)
 
 import qualified Prod.Tracer as Prod
 import qualified System.Agents.ToolRegistration as ToolReg
-import System.Agents.Tools.Bash (LoadTrace, ScriptDescription (..), ScriptInfo (..), loadScript)
+import System.Agents.Tools.Bash (LoadTrace, ScriptDescription (..), ScriptInfo (..), loadScript, selectSubcommand)
 import System.Agents.Tools.Validation (formatValidationErrors, validateToolInput)
 
 -- | Options for the check-tool-call command
 data CheckToolCallOptions = CheckToolCallOptions
     { toolPath :: FilePath
     -- ^ Path to the tool script to validate against
+    , toolCommand :: Maybe Text.Text
+    -- ^ Subcommand to validate against, for a tool that declares @commands@
     }
     deriving (Show, Eq)
 
@@ -50,7 +52,11 @@ handleCheckToolCall tracer opts = do
         Left err -> do
             Text.hPutStrLn stderr $ "Failed to load tool: " <> Text.pack (show err)
             exitFailure
-        Right scriptDesc -> do
+        Right rawDesc -> case selectSubcommand opts.toolCommand rawDesc of
+          Left err -> do
+            Text.hPutStrLn stderr $ "Error: " <> Text.pack err
+            exitFailure
+          Right scriptDesc -> do
             -- Read JSON payload from stdin
             input <- LByteString.getContents
             case Aeson.decode' input of

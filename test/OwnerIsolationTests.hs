@@ -289,7 +289,7 @@ withBashFixture k = withSystemTempDirectory "tool-isolation" $ \dir -> do
             , "echo \"{\\\"token\\\":\\\"$TOKEN\\\",\\\"status\\\":\\\"success\\\",\\\"result\\\":{\\\"type\\\":\\\"text\\\",\\\"content\\\":\\\"from worker\\\"}}\""
             ]
     mapM_ (\f -> setPermissions f emptyPermissions{readable = True, executable = True}) [script, worker]
-    let tool = registerBashToolInLLM Nothing (ScriptDescription script (ScriptInfo [] "touch" "leaves a marker" Nothing Nothing))
+    let tool = registerBashToolInLLM Nothing (ScriptDescription script (ScriptInfo [] "touch" "leaves a marker" Nothing Nothing [] Nothing))
     k (BashFixture dir tool marker worker envelope)
 
 -- | Agent config whose own policy runs every call in-process, synchronously.

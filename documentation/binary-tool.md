@@ -48,6 +48,7 @@ Tool output here
 | `description` | String | Yes | Human-readable description for the LLM |
 | `args` | Array | Yes | List of argument definitions |
 | `empty-result` | Object | No | Behavior when tool returns empty output |
+| `commands` | Array | No | Subcommands, each its own tool (see [Subcommands](#subcommands)) |
 
 ### Argument Definition
 
@@ -72,6 +73,47 @@ The `mode` field determines how arguments are passed to the script:
 | `dashdashspace` | Added as `--name value` (two args) | `script run --name value` |
 | `dashdashequal` | Added as `--name=value` (one arg) | `script run --name=value` |
 | `stdin` | Concatenated to stdin with blank separators | `echo "value" \| script run` |
+
+## Subcommands
+
+A program that does several things through subcommands, each with its own
+arguments, lists them in `commands`. It is then exposed as one tool per
+subcommand, named `bash_<slug>_<name>`, whose arguments are the top-level
+`args` (shared by every subcommand) followed by the subcommand's own:
+
+```json
+{
+  "slug": "kv",
+  "description": "a key-value store",
+  "args": [ { "name": "store", "description": "store name", "type": "string",
+              "backing_type": "string", "arity": "single", "mode": "dashdashspace" } ],
+  "commands": [
+    { "name": "get", "description": "reads a key",
+      "args": [ { "name": "key", "description": "the key", "type": "string",
+                  "backing_type": "string", "arity": "single", "mode": "dashdashspace" } ] },
+    { "name": "set", "description": "writes a key",
+      "args": [ { "name": "key", "description": "the key", "type": "string",
+                  "backing_type": "string", "arity": "single", "mode": "dashdashspace" },
+                { "name": "value", "description": "the value", "type": "string",
+                  "backing_type": "string", "arity": "single", "mode": "positional" } ],
+      "empty-result": { "tag": "AddMessage", "contents": "done" } }
+  ]
+}
+```
+
+`run` receives the subcommand name first, then the arguments:
+
+```bash
+$ ./kv run set --store s1 --key k v
+```
+
+Each command has `name` (ASCII letters, digits, `_`, `-`; unique),
+`description`, and optionally `args`, `empty-result` and `output-media-type`
+(overriding the top-level ones). A subcommand may not redeclare a shared
+argument. A description that breaks these rules fails to load. Use
+`agents-exe check-tool-call --tool ./kv --command set` to validate a payload
+against one subcommand. The design notes are in
+`todos/bash-tools-subcommands.md`.
 
 ## Empty Result Behavior
 

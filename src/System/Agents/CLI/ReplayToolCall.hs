@@ -33,7 +33,7 @@ import System.Posix.Files as Posix
 import qualified Prod.Tracer as Prod
 import System.Agents.Session.Base (LlmToolCall (..), LlmTurnContent (..), Session (..), Turn (..))
 import qualified System.Agents.ToolRegistration as ToolReg
-import System.Agents.Tools.Bash (LoadTrace, RunTrace, ScriptDescription (..), ScriptInfo (..), loadScript, runValue)
+import System.Agents.Tools.Bash (LoadTrace, RunTrace, ScriptDescription (..), ScriptInfo (..), loadScriptTools, runValue)
 import System.Agents.Tools.Validation (formatValidationErrors, validateToolInput)
 
 -- | Information about a tool call extracted from a session
@@ -231,10 +231,21 @@ handleReplayToolCall tracer opts = do
                     exitFailure
                 (targetCall : _) -> do
                     -- Load the tool
-                    toolResult <- loadScript (Prod.contramap BashLoadTrace tracer) opts.replayToolPath
-                    case toolResult of
-                        Left err -> do
-                            Text.hPutStrLn stderr $ "Failed to load tool: " <> Text.pack (show err)
+                    toolResult <- loadScriptTools (Prod.contramap BashLoadTrace tracer) opts.replayToolPath
+                    -- A script with subcommands exposes several tools: pick
+                    -- the one the recorded call named.
+                    let pickTool :: [ScriptDescription] -> Either Text ScriptDescription
+                        pickTool tools = case tools of
+                            [single] -> Right single
+                            _ -> case filter (\t -> "bash_" <> t.scriptInfo.scriptSlug == targetCall.toolCallName) tools of
+                                (t : _) -> Right t
+                                [] -> Left ("the tool call names " <> targetCall.toolCallName <> ", which is none of this script's subcommand tools")
+                    let picked = case toolResult of
+                            Left err -> Left ("Failed to load tool: " <> Text.pack (show err))
+                            Right tools -> either (Left . ("Error: " <>)) Right (pickTool tools)
+                    case picked of
+                        Left msg -> do
+                            Text.hPutStrLn stderr msg
                             exitFailure
                         Right scriptDesc -> do
                             -- Validate the tool call arguments

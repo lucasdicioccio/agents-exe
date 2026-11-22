@@ -511,6 +511,13 @@ parseCheckToolCallOptions =
                 <> metavar "TOOLPATH"
                 <> help "Path to the tool script to validate against"
             )
+        <*> optional
+            ( strOption
+                ( long "command"
+                    <> metavar "SUBCOMMAND"
+                    <> help "Subcommand to validate against, for a tool whose describe lists commands"
+                )
+            )
 
 -- | Parse the config command and its subcommands
 parseConfigCommand :: ArgParserArgs -> Parser Command

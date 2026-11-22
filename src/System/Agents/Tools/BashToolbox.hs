@@ -205,19 +205,20 @@ initializeSingleSource tracer path toolSource = do
     result <- loadScriptOnce
     case result of
         Left err -> pure $ Left (LoadingError ("error when loading script: " ++ path) [err])
-        Right script -> do
+        Right scripts -> do
             lock <- newEmptyTMVarIO
             bgToolsVal <-
                 Background.background
                     (contramap ReloadToolsTrace tracer)
                     ()
-                    [script]
+                    scripts
                     (const (reloadScriptOnTrigger lock))
             let triggerReloadTools = tryPutTMVar lock ()
             pure $ Right (BackgroundBashTools toolSource bgToolsVal triggerReloadTools)
   where
-    loadScriptOnce :: IO (Either BashTools.InvalidScriptError BashTools.ScriptDescription)
-    loadScriptOnce = BashTools.loadScript (contramap BashToolsLoadingTrace tracer) path
+    -- One script may expose several tools (one per subcommand).
+    loadScriptOnce :: IO (Either BashTools.InvalidScriptError [BashTools.ScriptDescription])
+    loadScriptOnce = BashTools.loadScriptTools (contramap BashToolsLoadingTrace tracer) path
 
     reloadScriptOnTrigger :: TMVar () -> IO ([BashTools.ScriptDescription], ())
     reloadScriptOnTrigger lock = do
@@ -225,7 +226,7 @@ initializeSingleSource tracer path toolSource = do
         result <- loadScriptOnce
         case result of
             Left _ -> pure ([], ()) -- Keep empty on error, will retry on next reload
-            Right script -> pure ([script], ())
+            Right scripts -> pure (scripts, ())
 
 {- | Filter scripts by basename filter.
 Only keeps scripts whose filename contains the filter string.

@@ -556,6 +556,7 @@ test-suite agents-tests
     other-modules:    ActivationSessionTests
                     , AgentFactoryTests
                     , OwnerIsolationTests
+                    , BashSubcommandsTests
                     , BindingsTests
                     , ConfigLoaderTests
                     , TemplateTests

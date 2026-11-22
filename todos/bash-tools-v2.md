@@ -107,6 +107,9 @@ the process group).
 
 ### 1.3 `commands` and `help`: several actions in one binary (from #539)
 
+`commands` is implemented (in v1 too): see `todos/bash-tools-subcommands.md`.
+Tool names use `<slug>_<name>`, since `.` is not allowed in tool names.
+
 Out of scope of the process story but part of the same `describe` bump:
 `"commands": [ {"name", "description", "args"} ]` lets one binary expose
 several tools (`slug.name` each), and `help` (`./tool help [command]`)
