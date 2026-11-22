@@ -770,7 +770,7 @@ minimalBaseAgent =
         , Base.interruptCompletions = Nothing
         , Base.mailInToolResult = Nothing
         , Base.mailScope = Nothing
-        , Base.interruptScope = Nothing, Base.wakeOn = Nothing
+        , Base.interruptScope = Nothing, Base.wakeOn = Nothing, Base.streamResultEvents = Nothing
         }
 
 -- | Tool-call policy config JSON round-trip tests.

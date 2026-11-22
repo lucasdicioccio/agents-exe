@@ -357,7 +357,7 @@ agentSerializationTests =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -393,7 +393,7 @@ agentSerializationTests =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -431,7 +431,7 @@ agentSerializationTests =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                     }
             let desc = Base.AgentDescription agent
             let json = encode desc
@@ -475,7 +475,7 @@ agentSerializationTests =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -524,7 +524,7 @@ agentSerializationTests =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -570,7 +570,7 @@ agentSerializationTests =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                     , Base.extraAgents = Nothing
                     }
             let json = encode agent
@@ -712,7 +712,7 @@ bashToolboxTests =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent
@@ -749,7 +749,7 @@ bashToolboxTests =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                     }
             let json = encode agent
             let mAgent = decode json :: Maybe Base.Agent

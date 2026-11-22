@@ -374,7 +374,7 @@ buildAgentConfig catalog opts = do
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
                 }
 
     pure (presetName, agent)

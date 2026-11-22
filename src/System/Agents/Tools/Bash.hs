@@ -28,6 +28,9 @@ module System.Agents.Tools.Bash (
     parseEnvForValue,
     runValue,
     runValueWith,
+    RunOptions (..),
+    defaultRunOptions,
+    runValueWithOptions,
 
     -- * Environment and context
     sessionIdEnvVar,
@@ -48,11 +51,11 @@ module System.Agents.Tools.Bash (
     ScriptDescription (..),
 ) where
 
-import Control.Concurrent.Async (concurrently, mapConcurrently)
+import Control.Concurrent.Async (concurrently, mapConcurrently, race, waitCatch, withAsync, cancel, wait)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newEmptyMVar, newMVar, readMVar, tryPutMVar)
 import Control.Exception (IOException, handle, onException)
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, unless, void, when)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as ByteStringChar8
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
@@ -102,11 +105,22 @@ import System.Agents.Tools.ScriptTypes (
     validateScriptV2,
  )
 import System.Agents.Tools.ScriptProcess (
-    ProcessOutput,
+    OutputEvent (..),
+    OutputFraming (..),
+    ProcessMode (..),
+    ProcessOutput (..),
+    ProcessReady (..),
     ScriptProcess (..),
+    compileReadyMatch,
+    defaultStreamResultEvents,
+    emptyEventRing,
     lineToEvent,
     outputEventToJSON,
+    pushEvent,
+    readyLineMatches,
     renderOutput,
+    renderStreamResult,
+    ringEvents,
  )
 import System.Agents.Tools.ScriptRuntime (
     Launch (..),
@@ -172,7 +186,44 @@ runProcessReportingEventsStopping ::
     CreateProcess ->
     ByteString ->
     IO (ExitCode, ByteString, ByteString)
-runProcessReportingEventsStopping stopping report mStdoutLine process input =
+runProcessReportingEventsStopping stopping report mStdoutLine =
+    runProcessHandling stopping report (keepAllOutput{stdoutLine = mStdoutLine})
+
+{- | What the runner does with a process's output, beyond reporting it.
+A @oneshot@ tool keeps all of it (it is the result); a @stream@ tool keeps
+none of its standard output (its events go to the handlers, the result is
+built from them) and only the tail of its standard error, so a tool that
+runs for hours does not fill memory.
+-}
+data OutputHandling = OutputHandling
+    { stdoutLine :: Maybe (ByteString -> IO ())
+    -- ^ Each complete line of standard output (and a last unterminated one).
+    , stdoutChunk :: Maybe (ByteString -> IO ())
+    -- ^ Each chunk of standard output, as read (takes precedence over 'stdoutLine').
+    , keepStdout :: Bool
+    -- ^ Whether the standard output is returned ('False': it comes back empty).
+    , stderrTail :: Maybe Int
+    -- ^ Keep only the last that many bytes of standard error.
+    }
+
+keepAllOutput :: OutputHandling
+keepAllOutput = OutputHandling Nothing Nothing True Nothing
+
+-- | How much standard error a @stream@ tool keeps for its error report.
+streamStderrTailBytes :: Int
+streamStderrTailBytes = 65536
+
+{- | The process runner behind 'runProcessReportingEvents', with the stop
+policy of 'runProcessReportingEventsStopping' and an 'OutputHandling'.
+-}
+runProcessHandling ::
+    (Signal, Int) ->
+    (Aeson.Value -> IO ()) ->
+    OutputHandling ->
+    CreateProcess ->
+    ByteString ->
+    IO (ExitCode, ByteString, ByteString)
+runProcessHandling stopping report handling process input =
     withCreateProcess process{std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe, create_group = True} $ \mIn mOut mErr ph ->
         case (mIn, mOut, mErr) of
             (Just hIn, Just hOut, Just hErr) -> do
@@ -187,6 +238,8 @@ runProcessReportingEventsStopping stopping report mStdoutLine process input =
                 body `onException` stopProcessGroup stopping ph
             _ -> error "runProcessReportingEvents: process pipes were not created"
   where
+    mStdoutLine = handling.stdoutLine
+
     ignoreBrokenPipe :: IO () -> IO ()
     ignoreBrokenPipe = handle (\(_ :: IOException) -> pure ())
 
@@ -195,19 +248,33 @@ runProcessReportingEventsStopping stopping report mStdoutLine process input =
         lastReport <- newMVar (Nothing :: Maybe UTCTime)
         -- chunks: everything read so far (reversed); pending: text after the
         -- last newline, not yet a complete line.
+        let isStdout = stream == "stdout"
+            keep chunk chunks
+                | isStdout && not handling.keepStdout = chunks
+                | not isStdout, Just n <- handling.stderrTail =
+                    -- a single, trimmed chunk: the tail of everything so far
+                    let joined = ByteString.concat (List.reverse (chunk : chunks))
+                     in [ByteString.drop (ByteString.length joined - n) joined]
+                | otherwise = chunk : chunks
+            onChunk = if isStdout then handling.stdoutChunk else Nothing
         let loop chunks pending lineCount byteCount = do
                 chunk <- ByteString.hGetSome h 32768
                 if ByteString.null chunk
                     then do
-                        case (stream, mStdoutLine) of
-                            ("stdout", Just onLine) | not (ByteString.null pending) -> onLine pending
+                        case (stream, mStdoutLine, onChunk) of
+                            ("stdout", Just onLine, Nothing) | not (ByteString.null pending) -> onLine pending
                             _ -> pure ()
                         pure (ByteString.concat (List.reverse chunks))
                     else do
-                        let buffered = pending <> chunk
+                        forM_ onChunk ($ chunk)
+                        -- With a chunk handler, lines are not tracked, so
+                        -- output without newlines is not buffered either.
+                        let buffered = case onChunk of
+                                Just _ -> ByteString.empty
+                                Nothing -> pending <> chunk
                             byteCount' = byteCount + ByteString.length chunk
                         case ByteStringChar8.elemIndexEnd '\n' buffered of
-                            Nothing -> loop (chunk : chunks) buffered lineCount byteCount'
+                            Nothing -> loop (keep chunk chunks) buffered lineCount byteCount'
                             Just ix -> do
                                 let (complete, rest) = ByteString.splitAt (ix + 1) buffered
                                     completeLines = ByteStringChar8.lines complete
@@ -217,12 +284,13 @@ runProcessReportingEventsStopping stopping report mStdoutLine process input =
                                     forM_ completeLines $ \line ->
                                         forM_ (ByteString.stripPrefix notifyLinePrefix line) $ \notice ->
                                             report (notifyLinePayload notice)
-                                case (stream, mStdoutLine) of
-                                    ("stdout", Just onLine) -> forM_ completeLines onLine
+                                case (stream, mStdoutLine, onChunk) of
+                                    ("stdout", _, Just _) -> pure ()
+                                    ("stdout", Just onLine, _) -> forM_ completeLines onLine
                                     _ ->
                                         unless (List.null nonEmpty) $
                                             reportLine lastReport stream (List.last nonEmpty) lineCount' byteCount'
-                                loop (chunk : chunks) rest lineCount' byteCount'
+                                loop (keep chunk chunks) rest lineCount' byteCount'
         loop [] ByteString.empty (0 :: Int) (0 :: Int)
 
     reportLine lastReport stream line lineCount byteCount = do
@@ -411,6 +479,10 @@ data RunScriptError
       ScriptRuntimeError FilePath String
     | -- | A v2 tool did not complete within its @runtime.timeout.start@ (seconds); it was stopped.
       ScriptTimeoutError FilePath Double
+    | {- | A @stream@ tool exited with a failure: its exit code, the tail of its
+      standard error, and its result so far (the latest events, rendered).
+      -}
+      ScriptStreamExitError FilePath ExitCode ByteString ByteString
     deriving (Show)
 
 -- | Flattens arguments associated with textual values into an array suitable to run as executable.
@@ -557,6 +629,18 @@ runValue tracer script mCtx val = do
     cfg <- getToolRuntimeConfig
     runValueWith cfg tracer script mCtx val
 
+{- | Per-agent options of a bash tool call (as opposed to the operator's
+'ToolRuntimeConfig').
+-}
+newtype RunOptions = RunOptions
+    { runStreamResultEvents :: Int
+    -- ^ How many of the latest events a @stream@ tool's result keeps (agent @streamResultEvents@).
+    }
+    deriving (Show, Eq)
+
+defaultRunOptions :: RunOptions
+defaultRunOptions = RunOptions defaultStreamResultEvents
+
 {- | 'runValue' against an explicit operator configuration rather than the
 process-wide one. A v2 tool's @runtime@ (@todos/bash-tools-v2.md@ §1.2) is
 applied here: envdir and @environment@, rundir, run_as and sandbox
@@ -570,7 +654,18 @@ runValueWith ::
     Maybe ToolExecutionContext ->
     Aeson.Value ->
     IO (Either RunScriptError ByteString)
-runValueWith cfg tracer script mCtx val = do
+runValueWith = runValueWithOptions defaultRunOptions
+
+-- | 'runValueWith' with the agent's 'RunOptions'.
+runValueWithOptions ::
+    RunOptions ->
+    ToolRuntimeConfig ->
+    Tracer IO RunTrace ->
+    ScriptDescription ->
+    Maybe ToolExecutionContext ->
+    Aeson.Value ->
+    IO (Either RunScriptError ByteString)
+runValueWithOptions opts cfg tracer script mCtx val = do
     let path = script.scriptPath
     let maybeBehavior = script.scriptInfo.scriptEmptyResultBehavior
     case parseArgsForValue script val of
@@ -588,58 +683,62 @@ runValueWith cfg tracer script mCtx val = do
             baseEnv <- getEnvironment
             let input = Text.encodeUtf8 stdin
             let mProcess = scriptProcessOf script.scriptInfo
-            ran <- case scriptRuntimeOf script.scriptInfo of
-                Nothing -> do
-                    -- Create the process with the modified environment
-                    let toolEnv = envArgs ++ buildToolEnvironment mCtx baseEnv
-                        process = (proc path args){env = Just toolEnv}
-                    fmap Right $ case mCtx >>= ctxProgressCallback of
-                        Nothing -> readCreateProcessWithExitCode process input
-                        Just report -> case mProcess of
-                            Nothing -> runProcessReportingOutput report process input
-                            Just p -> do
-                                counter <- newMVar (0 :: Int)
-                                let onLine = reportEventLine report counter p.processOutput
-                                runProcessReportingEvents report (Just onLine) process input
-                Just rt -> do
-                    prepared <- prepareLaunch cfg path rt args (buildToolEnvironment mCtx baseEnv) envArgs
-                    case prepared of
-                        Left problem -> pure (Left (ScriptRuntimeError path problem))
-                        Right launch -> do
-                            let process = (proc launch.launchCommand launch.launchArgs){env = Just launch.launchEnv, cwd = launch.launchCwd}
-                                report = maybe (const (pure ())) id (mCtx >>= ctxProgressCallback)
-                                stopping = (cancelSignal rt, maybe killGraceMicros id (stopGraceMicros rt))
-                            counter <- newMVar (0 :: Int)
-                            let onLine = fmap (\p -> reportEventLine report counter p.processOutput) mProcess
-                                running = runProcessReportingEventsStopping stopping report onLine process input
-                            case (startTimeoutMicros rt, rt.runtimeTimeout.timeoutStart) of
-                                (Just micros, Just secs) -> maybe (Left (ScriptTimeoutError path secs)) Right <$> timeout micros running
-                                _ -> Right <$> running
-            case ran of
-                Left runtimeErr -> pure (Left runtimeErr)
-                Right (code, out, err) -> do
-                    runTracer tracer (RunCommandStopped path args code out err)
-                    if code /= ExitSuccess
-                        then pure $ Left $ ScriptExecutionError path code err
-                        else
-                            let
-                                -- Use lenient UTF-8 decoding to handle binary data safely.
-                                -- Invalid bytes are replaced with U+FFFD (replacement character).
-                                outText = Text.decodeUtf8With lenientDecode out
-                                adjusted = case maybeBehavior of
-                                    Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
-                                    Nothing -> out
-                                -- A v2 tool's result is its framed output (§2.1); an
-                                -- empty output still gets the empty-result message.
-                                framed = case mProcess of
-                                    Nothing -> adjusted
-                                    Just p
-                                        | ByteString.null (ByteStringChar8.strip out)
-                                        , Just (AddMessage _) <- maybeBehavior ->
-                                            adjusted
-                                        | otherwise -> renderOutput p.processOutput out
-                             in
-                                pure $ Right framed
+            case mProcess of
+              Just p | p.processMode == ModeStream ->
+                runStreamValue opts cfg tracer script mCtx p path args (buildToolEnvironment mCtx baseEnv) envArgs input
+              _ -> do
+               ran <- case scriptRuntimeOf script.scriptInfo of
+                   Nothing -> do
+                       -- Create the process with the modified environment
+                       let toolEnv = envArgs ++ buildToolEnvironment mCtx baseEnv
+                           process = (proc path args){env = Just toolEnv}
+                       fmap Right $ case mCtx >>= ctxProgressCallback of
+                           Nothing -> readCreateProcessWithExitCode process input
+                           Just report -> case mProcess of
+                               Nothing -> runProcessReportingOutput report process input
+                               Just p -> do
+                                   counter <- newMVar (0 :: Int)
+                                   let onLine = reportEventLine report counter p.processOutput
+                                   runProcessReportingEvents report (Just onLine) process input
+                   Just rt -> do
+                       prepared <- prepareLaunch cfg path rt args (buildToolEnvironment mCtx baseEnv) envArgs
+                       case prepared of
+                           Left problem -> pure (Left (ScriptRuntimeError path problem))
+                           Right launch -> do
+                               let process = (proc launch.launchCommand launch.launchArgs){env = Just launch.launchEnv, cwd = launch.launchCwd}
+                                   report = maybe (const (pure ())) id (mCtx >>= ctxProgressCallback)
+                                   stopping = (cancelSignal rt, maybe killGraceMicros id (stopGraceMicros rt))
+                               counter <- newMVar (0 :: Int)
+                               let onLine = fmap (\p -> reportEventLine report counter p.processOutput) mProcess
+                                   running = runProcessReportingEventsStopping stopping report onLine process input
+                               case (startTimeoutMicros rt, rt.runtimeTimeout.timeoutStart) of
+                                   (Just micros, Just secs) -> maybe (Left (ScriptTimeoutError path secs)) Right <$> timeout micros running
+                                   _ -> Right <$> running
+               case ran of
+                   Left runtimeErr -> pure (Left runtimeErr)
+                   Right (code, out, err) -> do
+                       runTracer tracer (RunCommandStopped path args code out err)
+                       if code /= ExitSuccess
+                           then pure $ Left $ ScriptExecutionError path code err
+                           else
+                               let
+                                   -- Use lenient UTF-8 decoding to handle binary data safely.
+                                   -- Invalid bytes are replaced with U+FFFD (replacement character).
+                                   outText = Text.decodeUtf8With lenientDecode out
+                                   adjusted = case maybeBehavior of
+                                       Just behavior -> Text.encodeUtf8 $ adjustOutput behavior outText
+                                       Nothing -> out
+                                   -- A v2 tool's result is its framed output (§2.1); an
+                                   -- empty output still gets the empty-result message.
+                                   framed = case mProcess of
+                                       Nothing -> adjusted
+                                       Just p
+                                           | ByteString.null (ByteStringChar8.strip out)
+                                           , Just (AddMessage _) <- maybeBehavior ->
+                                               adjusted
+                                           | otherwise -> renderOutput p.processOutput out
+                                in
+                                   pure $ Right framed
 
 {- | Reports one stdout line of a v2 tool as a progress payload
 @{"stream": "stdout", "event": <event>, "events": n}@ (an invalid event is
@@ -658,3 +757,105 @@ reportEventLine report counter out line0 = do
                 , "event" Aeson..= outputEventToJSON (lineToEvent out line)
                 , "events" Aeson..= n
                 ]
+
+{- | Runs a @stream@ v2 tool (@todos/bash-tools-v2.md@ §2.2). Its standard
+output is cut into events as it arrives; each event is reported as progress
+(@{"stream": "stdout", "event": ..., "events": n}@, as for a @oneshot@) and
+kept in a bounded ring ('RunOptions'), never the whole output. The call
+completes when the process exits; the result is the latest events and the
+count of the earlier ones ('renderStreamResult'). A failed exit is a
+'ScriptStreamExitError' carrying that result too.
+
+@runtime.timeout.start@ bounds reaching @process.ready@: under a @line@
+ready, the first matching line of standard output (still an event); under
+@exit@, the whole run. Once ready, the tool runs until it exits or the call
+is cancelled (@cancel-tool-call@, the async engine's call timeout); then its
+declared @cancel@ signal and @timeout.stop@ apply, as for a @oneshot@.
+-}
+runStreamValue ::
+    RunOptions ->
+    ToolRuntimeConfig ->
+    Tracer IO RunTrace ->
+    ScriptDescription ->
+    Maybe ToolExecutionContext ->
+    ScriptProcess ->
+    FilePath ->
+    [String] ->
+    [(String, String)] ->
+    [(String, String)] ->
+    ByteString ->
+    IO (Either RunScriptError ByteString)
+runStreamValue opts cfg tracer script mCtx p path args toolEnv envArgs input = do
+    prepared <- case scriptRuntimeOf script.scriptInfo of
+        Nothing ->
+            pure (Right ((proc path args){env = Just (envArgs ++ toolEnv)}, (sigTERM, killGraceMicros), Nothing))
+        Just rt -> do
+            launched <- prepareLaunch cfg path rt args toolEnv envArgs
+            pure $ case launched of
+                Left problem -> Left (ScriptRuntimeError path problem)
+                Right launch ->
+                    Right
+                        ( (proc launch.launchCommand launch.launchArgs){env = Just launch.launchEnv, cwd = launch.launchCwd}
+                        , (cancelSignal rt, maybe killGraceMicros id (stopGraceMicros rt))
+                        , (,) <$> startTimeoutMicros rt <*> rt.runtimeTimeout.timeoutStart
+                        )
+    case prepared of
+        Left err -> pure (Left err)
+        Right (process, stopping, mStart) -> do
+            ring <- newMVar (emptyEventRing opts.runStreamResultEvents)
+            counter <- newMVar (0 :: Int)
+            readyVar <- newEmptyMVar
+            let out = p.processOutput
+                report = maybe (const (pure ())) id (mCtx >>= ctxProgressCallback)
+                readyRe = case p.processReady of
+                    Just (ReadyLine pat) -> either (const Nothing) Just (compileReadyMatch pat)
+                    _ -> Nothing
+                onEvent ev = do
+                    n <- modifyMVar counter (\c -> pure (c + 1, c + 1))
+                    modifyMVar_ ring (pure . pushEvent ev)
+                    report $
+                        Aeson.object
+                            [ "stream" Aeson..= ("stdout" :: Text)
+                            , "event" Aeson..= outputEventToJSON ev
+                            , "events" Aeson..= n
+                            ]
+                onLine line0 = do
+                    let line = case ByteStringChar8.unsnoc line0 of
+                            Just (l, '\r') -> l
+                            _ -> line0
+                    unless (ByteString.null (ByteStringChar8.strip line)) $
+                        onEvent (lineToEvent out line)
+                    forM_ readyRe $ \re ->
+                        when (readyLineMatches re line) $ void (tryPutMVar readyVar ())
+                onChunk chunk = onEvent (OutputEvent (Aeson.String (Text.decodeUtf8With lenientDecode chunk)))
+                isChunks = out.outputFraming == FramingChunks
+                handling =
+                    OutputHandling
+                        { stdoutLine = if isChunks then Nothing else Just onLine
+                        , stdoutChunk = if isChunks then Just onChunk else Nothing
+                        , keepStdout = False
+                        , stderrTail = Just streamStderrTailBytes
+                        }
+                running = runProcessHandling stopping report handling process input
+            ran <- case (mStart, p.processReady) of
+                (Just (micros, secs), Just (ReadyLine _)) ->
+                    withAsync running $ \a -> do
+                        started <- timeout micros (race (readMVar readyVar) (waitCatch a))
+                        case started of
+                            Nothing -> cancel a >> pure (Left (ScriptTimeoutError path secs))
+                            Just _ -> Right <$> wait a
+                (Just (micros, secs), _) ->
+                    maybe (Left (ScriptTimeoutError path secs)) Right <$> timeout micros running
+                _ -> Right <$> running
+            case ran of
+                Left err -> pure (Left err)
+                Right (code, _, err) -> do
+                    runTracer tracer (RunCommandStopped path args code ByteString.empty err)
+                    events <- readMVar ring
+                    let rendered = renderStreamResult out events
+                    pure $
+                        if code /= ExitSuccess
+                            then Left (ScriptStreamExitError path code err rendered)
+                            else case script.scriptInfo.scriptEmptyResultBehavior of
+                                Just (AddMessage msg) | List.null (ringEvents events) -> Right (Text.encodeUtf8 msg)
+                                _ -> Right rendered

@@ -144,7 +144,7 @@ defaultOpenAIAgent =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
         }
 
 -- | Mistral AI agent configuration
@@ -184,7 +184,7 @@ mistralAgent =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
         }
 
 -- | Ollama local LLM agent configuration
@@ -224,7 +224,7 @@ ollamaAgent =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
         }
 
 -- | Orchestrator agent that can delegate to other agents
@@ -273,7 +273,7 @@ orchestratorAgent =
                 , interruptCompletions = Nothing
                 , mailInToolResult = Nothing
                 , mailScope = Nothing
-                , interruptScope = Nothing, wakeOn = Nothing
+                , interruptScope = Nothing, wakeOn = Nothing, streamResultEvents = Nothing
         }
 
 -- | Ensure the config directory structure exists with default files

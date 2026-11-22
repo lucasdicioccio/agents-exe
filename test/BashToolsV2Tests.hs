@@ -29,6 +29,7 @@ import System.Agents.Session.Base (SessionId (..), TurnId (..))
 import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.Context (ToolExecutionContext (..), mkMinimalContext)
 import System.Agents.Tools.ScriptProcess
+import System.Agents.Tools.ScriptRuntime (defaultToolRuntimeConfig)
 import qualified System.Agents.Tools.ScriptTypes as ScriptTypes
 
 tests :: TestTree
@@ -39,6 +40,8 @@ tests =
         , testGroup "event schemas" schemaTests
         , testGroup "framing" framingTests
         , testGroup "oneshot run" runTests
+        , testGroup "stream results" ringTests
+        , testGroup "stream run" streamTests
         ]
 
 describeTests :: [TestTree]
@@ -68,8 +71,18 @@ describeTests =
             Aeson.decode (Aeson.encode desc.scriptInfo) @?= Just desc.scriptInfo
     , testCase "an unknown protocol is refused" $
         refused "{\"protocol\": 3, \"slug\": \"x\", \"description\": \"d\", \"args\": []}"
-    , testCase "stream mode is refused (not implemented yet)" $
-        refused (v2Describe (Just "{\"mode\": \"stream\"}"))
+    , testCase "stream mode loads" $
+        withFixture "st" (describeThen (v2Describe (Just "{\"mode\": \"stream\", \"ready\": {\"kind\": \"line\", \"match\": \"^ready$\"}}")) "true") $ \path -> do
+            desc <- loadOk path
+            fmap (.processMode) desc.scriptInfo.scriptProcess @?= Just ModeStream
+    , testCase "an invalid ready pattern is refused" $
+        refused (v2Describe (Just "{\"mode\": \"stream\", \"ready\": {\"kind\": \"line\", \"match\": \"(\"}}"))
+    , testCase "a ready line needs line-based framing" $
+        refused (v2Describe (Just "{\"mode\": \"stream\", \"output\": {\"framing\": \"chunks\"}, \"ready\": {\"kind\": \"line\", \"match\": \"x\"}}"))
+    , testCase "timeout.start on a stream needs a ready line or exit" $
+        refused "{\"protocol\": 2, \"slug\": \"x\", \"description\": \"d\", \"args\": [], \"process\": {\"mode\": \"stream\"}, \"runtime\": {\"timeout\": {\"start\": 1}}}"
+    , testCase "output-media-type does not apply to a stream" $
+        refused "{\"protocol\": 2, \"slug\": \"x\", \"description\": \"d\", \"args\": [], \"output-media-type\": \"image/png\", \"process\": {\"mode\": \"stream\", \"output\": {\"framing\": \"chunks\"}}}"
     , testCase "service mode is refused (not implemented yet)" $
         refused (v2Describe (Just "{\"mode\": \"service\"}"))
     , testCase "process.input is refused (not implemented yet)" $
@@ -180,6 +193,94 @@ runTests =
                 (first : _) -> first @?= obj [("line", "started")]
                 _ -> pure ()
     ]
+
+ringTests :: [TestTree]
+ringTests =
+    [ testCase "the ring keeps the latest events and counts the others" $ do
+        let r = foldl (flip pushEvent) (emptyEventRing 2) [OutputEvent (Aeson.String t) | t <- ["a", "b", "c"]]
+        ringEvents r @?= [OutputEvent (Aeson.String "b"), OutputEvent (Aeson.String "c")]
+        ringElided r @?= 1
+    , testCase "jsonl renders the events and the elided count" $ do
+        let r = foldl (flip pushEvent) (emptyEventRing 1) [OutputEvent (obj [("line", "x")]), OutputEvent (obj [("line", "y")])]
+        Aeson.decodeStrict (renderStreamResult (ProcessOutput FramingJsonl Nothing) r)
+            @?= Just (Aeson.object ["events" Aeson..= [obj [("line", "y")]], "elided" Aeson..= (1 :: Int)])
+    , testCase "lines are preceded by an elided note" $ do
+        let r = foldl (flip pushEvent) (emptyEventRing 2) [OutputEvent (Aeson.String t) | t <- ["a", "b", "c"]]
+        renderStreamResult (ProcessOutput FramingLines Nothing) r @?= "[1 earlier lines elided]\nb\nc"
+    , testCase "nothing elided, no note" $ do
+        let r = foldl (flip pushEvent) (emptyEventRing 5) [OutputEvent (Aeson.String t) | t <- ["a", "b"]]
+        renderStreamResult (ProcessOutput FramingLines Nothing) r @?= "a\nb"
+    ]
+
+streamTests :: [TestTree]
+streamTests =
+    [ testCase "a stream's result is its latest events, with the elided count" $
+        withFixture "st" (describeThen streamDescribe countBody) $ \path -> do
+            desc <- loadOk path
+            r <- Bash.runValueWithOptions (Bash.RunOptions 2) defaultToolRuntimeConfig nullTracer desc Nothing (Aeson.object [])
+            case r of
+                Right bytes ->
+                    Aeson.decodeStrict bytes
+                        @?= Just (Aeson.object ["events" Aeson..= [num 4, num 5], "elided" Aeson..= (3 :: Int)])
+                Left err -> assertFailure (show err)
+    , testCase "each event of a stream is reported as progress" $
+        withFixture "st" (describeThen streamDescribe countBody) $ \path -> do
+            desc <- loadOk path
+            reports <- newMVar []
+            ctx <- testContext (\v -> modifyMVar_ reports (pure . (v :)))
+            _ <- runOk desc (Just ctx)
+            rs <- reverse <$> readMVar reports
+            [e | Aeson.Object o <- rs, Just e <- [KeyMap.lookup "event" o]] @?= fmap num [1 .. 5]
+    , testCase "a failed stream reports its events so far" $
+        withFixture "st" (describeThen streamDescribe (countBody <> "echo oops >&2\nexit 3\n")) $ \path -> do
+            desc <- loadOk path
+            r <- Bash.runValue nullTracer desc Nothing (Aeson.object [])
+            case r of
+                Left (Bash.ScriptStreamExitError _ _ err rendered) -> do
+                    assertBool "stderr kept" (Text.isInfixOf "oops" (Text.decodeUtf8 err))
+                    assertBool "events kept" (Text.isInfixOf "\"elided\":0" (Text.decodeUtf8 rendered))
+                other -> assertFailure ("expected a stream exit error, got " <> show (fmap (const ()) other))
+    , testCase "an empty stream gets the empty-result message" $
+        withFixture "st" (describeThen streamEmpty "true") $ \path -> do
+            desc <- loadOk path
+            out <- runOk desc Nothing
+            out @?= "nothing"
+    , testCase "chunks framing streams raw chunks" $
+        withFixture "st" (describeThen (v2Describe (Just "{\"mode\": \"stream\", \"output\": {\"framing\": \"chunks\"}}")) "printf 'abc'") $ \path -> do
+            desc <- loadOk path
+            out <- runOk desc Nothing
+            out @?= "abc"
+    , testCase "timeout.start bounds reaching the ready line, not the whole run" $
+        withFixture "st" (describeThen (streamReady 1) "echo ready\nsleep 1.5\necho done\n") $ \path -> do
+            desc <- loadOk path
+            out <- runOk desc Nothing
+            out @?= "ready\ndone"
+    , testCase "a stream that never gets ready times out" $
+        withFixture "st" (describeThen (streamReady 0.3) "sleep 5\necho ready\n") $ \path -> do
+            desc <- loadOk path
+            r <- Bash.runValue nullTracer desc Nothing (Aeson.object [])
+            case r of
+                Left (Bash.ScriptTimeoutError _ _) -> pure ()
+                other -> assertFailure ("expected a timeout, got " <> show (fmap (const ()) other))
+    ]
+  where
+    num :: Int -> Aeson.Value
+    num n = Aeson.object ["n" Aeson..= n]
+
+streamDescribe :: String
+streamDescribe = v2Describe (Just "{\"mode\": \"stream\"}")
+
+streamEmpty :: String
+streamEmpty = "{\"protocol\": 2, \"slug\": \"e\", \"description\": \"d\", \"args\": [], \"empty-result\": {\"tag\": \"AddMessage\", \"contents\": \"nothing\"}, \"process\": {\"mode\": \"stream\"}}"
+
+streamReady :: Double -> String
+streamReady secs =
+    "{\"protocol\": 2, \"slug\": \"r\", \"description\": \"d\", \"args\": [], \"process\": {\"mode\": \"stream\", \"output\": {\"framing\": \"lines\"}, \"ready\": {\"kind\": \"line\", \"match\": \"^ready$\"}}, \"runtime\": {\"timeout\": {\"start\": "
+        <> show secs
+        <> "}}}"
+
+countBody :: String
+countBody = "for i in 1 2 3 4 5; do echo \"{\\\"n\\\": $i}\"; done\n"
 
 -------------------------------------------------------------------------------
 -- Fixtures

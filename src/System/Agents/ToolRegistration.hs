@@ -28,6 +28,7 @@ module System.Agents.ToolRegistration (
 
     -- * Registration functions
     registerBashToolInLLM,
+    registerBashToolInLLMWith,
     registerIOScriptInLLM,
     registerMcpToolInLLM,
     registerOpenAPIToolInLLM,
@@ -106,6 +107,7 @@ import System.Agents.Tools.Base (
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptArgArity (..), ScriptDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
+import System.Agents.Tools.ScriptRuntime (getToolRuntimeConfig)
 import System.Agents.Tools.Context (ToolCall, ToolExecutionContext)
 import qualified System.Agents.Tools.Context as Context
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
@@ -302,7 +304,15 @@ registerBashToolInLLM ::
     Maybe Activation ->
     ScriptDescription ->
     ToolRegistration
-registerBashToolInLLM mbActivation script =
+registerBashToolInLLM = registerBashToolInLLMWith BashTools.defaultRunOptions
+
+-- | 'registerBashToolInLLM' with the agent's options for running the tool.
+registerBashToolInLLMWith ::
+    BashTools.RunOptions ->
+    Maybe Activation ->
+    ScriptDescription ->
+    ToolRegistration
+registerBashToolInLLMWith opts mbActivation script =
     let
         matchName :: ScriptDescription -> ToolCall -> Bool
         matchName bash call = getToolName (bash2LLMName bash) == call.callToolName
@@ -316,7 +326,7 @@ registerBashToolInLLM mbActivation script =
                 }
 
         tool :: Tool ()
-        tool = bashTool script
+        tool = bashTool opts script
 
         find :: ToolCall -> Maybe (Tool ToolCall)
         find call = if matchName script call then Just (mapToolResult (const call) tool) else Nothing
@@ -1883,9 +1893,10 @@ luaTool box =
 
 -- | Builder for a tool based on a Bash script-description.
 bashTool ::
+    BashTools.RunOptions ->
     ScriptDescription ->
     Tool ()
-bashTool script =
+bashTool opts script =
     ToolBase.Tool
         { ToolBase.toolDef = BashTool script
         , ToolBase.toolRun = run
@@ -1893,7 +1904,8 @@ bashTool script =
   where
     call = ()
     run tracer ctx v = do
-        ret <- BashTools.runValue (contramap BashToolsRunTrace tracer) script (Just ctx) v
+        cfg <- getToolRuntimeConfig
+        ret <- BashTools.runValueWithOptions opts cfg (contramap BashToolsRunTrace tracer) script (Just ctx) v
         case ret of
             Left err -> pure $ BashToolError call err
             Right rsp -> pure $ BlobToolSuccess call rsp Nothing
