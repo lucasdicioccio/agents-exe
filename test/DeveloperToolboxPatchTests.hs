@@ -40,6 +40,8 @@ patchToolbox = do
                     ]
                 , developerToolboxActivation = Nothing
                 , developerToolboxBuildCommand = Nothing
+                , developerToolboxWholeReadMaxLines = Nothing
+                , developerToolboxWholeReadMaxBytes = Nothing
                 , developerToolboxFileSandbox =
                     Just $ InlineFileSandbox
                         FileSandboxConfig

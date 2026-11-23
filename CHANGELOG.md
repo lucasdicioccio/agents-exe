@@ -4,6 +4,12 @@
 
 ### New Features
 
+#### Developer toolbox: whole-file reads are capped
+- `read-file-range` with `ranges` omitted, empty or `whole` returns at most 400 lines and 32768 bytes; past that it sets `truncated: true` and a `hint` (e.g. "file has 2134 lines; showing lines 1-400 ... Pass ranges='401-800' to read more"). Explicit line ranges are never capped
+- Configure per toolbox with `WholeReadMaxLines` and `WholeReadMaxBytes`; `0` turns a limit off. The `ranges` schema text names the cap in effect
+- Library: `DeveloperToolboxDescription` has two more fields (`developerToolboxWholeReadMaxLines`, `developerToolboxWholeReadMaxBytes`); `ReadFileRangeResult` has `readFileTruncated` and `readFileHint`
+- See `documentation/tools.md` (read-file-range)
+
 #### agents-server: favicon
 - `agents-server` and `agents-exe serve` serve the project's icon (the website's `favicon.png`, embedded in the binary) at `GET /favicon.ico` and `GET /favicon.png`, without a token; the chat page links it with `<link rel="icon">`
 - The icon (website and server) is now a 64x64 reduction of the agents-exe logo (`logo-01.png`, the head on a transparent background) instead of the salmon icon

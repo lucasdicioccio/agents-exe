@@ -63,6 +63,8 @@ testToolbox = do
                     , DevToolWriteFileRange
                     ]
                 , developerToolboxBuildCommand = Nothing
+                , developerToolboxWholeReadMaxLines = Nothing
+                , developerToolboxWholeReadMaxBytes = Nothing
                 , developerToolboxFileSandbox = Just $ InlineFileSandbox FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing

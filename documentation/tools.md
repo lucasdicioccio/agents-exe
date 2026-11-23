@@ -1265,6 +1265,8 @@ The Developer Toolbox provides utilities for writing and validating agents and t
         "Name": "dev",
         "Description": "Development utilities",
         "Capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file"],
+        "WholeReadMaxLines": 400,
+        "WholeReadMaxBytes": 32768,
         "FileSandbox": {
           "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./src"},
           "fsbMaxFileSize": null,
@@ -1275,6 +1277,8 @@ The Developer Toolbox provides utilities for writing and validating agents and t
   ]
 }
 ```
+
+`WholeReadMaxLines` and `WholeReadMaxBytes` are optional: they cap a whole-file `read-file-range` (see below). They default to 400 lines and 32768 bytes; `0` turns a limit off.
 
 ### File Sandbox for Developer Tools
 
@@ -1339,7 +1343,7 @@ Reads specific line ranges from a file and returns them with line numbers. Suppo
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to the file to read |
-| `ranges` | string | No | Line ranges (e.g., `"1-10"`, `"5"`, `"head"`, `"tail"`, `"1-5,20-30"`). Omit to read entire file. |
+| `ranges` | string | No | Line ranges (e.g., `"1-10"`, `"5"`, `"head"`, `"tail"`, `"1-5,20-30"`). Omit (or `"whole"`) to read the entire file, up to the whole-file cap. |
 | `session_id` | string | No | Read from an in-progress write-file-range session's staged buffer |
 | `metadata_only` | boolean | No | Return only metadata (path, line counts, snapshot ref) without content |
 
@@ -1378,6 +1382,22 @@ Reads specific line ranges from a file and returns them with line numbers. Suppo
 ```
 
 The content includes line numbers prepended with a tab separator in the format `{line_num}\t{line_content}`.
+
+**Whole-file cap:**
+When `ranges` is omitted, empty or `"whole"`, the read returns at most the toolbox's `WholeReadMaxLines` (default 400) lines and `WholeReadMaxBytes` (default 32768) bytes of content, counting each line's UTF-8 bytes plus its newline. A file past the cap comes back with its first lines, `"truncated": true` and a `hint` naming the range to read next:
+
+```json
+{
+  "path": "./src/Big.hs",
+  "linesRead": 400,
+  "totalLineCount": 2134,
+  "rangesParsed": ["whole"],
+  "truncated": true,
+  "hint": "file has 2134 lines; showing lines 1-400 (whole-file reads are capped at 400 lines / 32768 bytes). Pass ranges='401-800' to read more, or a narrower range around what you need; explicit ranges are not capped."
+}
+```
+
+Explicit ranges (`"401-800"`, `"1-2134"`) are never capped, so a model pages through a large file with them. `metadata_only` reads are not affected. The `ranges` parameter's schema text states the cap in effect for the toolbox. `truncated` is `false` and `hint` is `null` on every other read.
 
 **Reading from Staged Sessions:**
 When `session_id` is provided, the read is served from the session's in-memory buffer rather than disk. This allows inspecting pending edits before committing:

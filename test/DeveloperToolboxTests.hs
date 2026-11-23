@@ -83,6 +83,8 @@ testToolbox = do
                     ]
                 , developerToolboxActivation = Nothing
                 , developerToolboxBuildCommand = Nothing
+                , developerToolboxWholeReadMaxLines = Nothing
+                , developerToolboxWholeReadMaxBytes = Nothing
                 , developerToolboxFileSandbox = Just $ InlineFileSandbox FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing
@@ -107,6 +109,8 @@ testDirectoryToolbox = do
                     ]
                 , developerToolboxActivation = Nothing
                 , developerToolboxBuildCommand = Nothing
+                , developerToolboxWholeReadMaxLines = Nothing
+                , developerToolboxWholeReadMaxBytes = Nothing
                 , developerToolboxFileSandbox = Just $ InlineFileSandbox FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing
@@ -155,6 +159,7 @@ tests =
         , indentationTests
         , directoryTests
         , fileEditDispatchTests
+        , wholeReadCapTests
         ]
 
 -------------------------------------------------------------------------------
@@ -1133,6 +1138,8 @@ buildCommandDesc cmd =
         , developerToolboxCapabilities = [DevToolBuildCommand]
         , developerToolboxActivation = Nothing
         , developerToolboxBuildCommand = cmd
+        , developerToolboxWholeReadMaxLines = Nothing
+        , developerToolboxWholeReadMaxBytes = Nothing
         , developerToolboxFileSandbox = Nothing
         }
 
@@ -1299,6 +1306,8 @@ fileEditToolbox = do
                     ]
                 , developerToolboxActivation = Nothing
                 , developerToolboxBuildCommand = Nothing
+                , developerToolboxWholeReadMaxLines = Nothing
+                , developerToolboxWholeReadMaxBytes = Nothing
                 , developerToolboxFileSandbox = Just $ InlineFileSandbox FileSandboxConfig
                     { fsbPredicate = AlwaysAllow
                     , fsbMaxFileSize = Nothing
@@ -1393,3 +1402,122 @@ testFileToolDeclaration = do
             assertBool "description names read-file-range" $
                 "read-file-range" `Text.isInfixOf` ToolSchema.toolDescriptionText decl
         _ -> assertFailure "Expected one developer tool registration"
+
+-------------------------------------------------------------------------------
+-- Whole-file read cap
+-------------------------------------------------------------------------------
+
+-- | A read toolbox with the given whole-read caps (Nothing = default).
+cappedToolbox :: Maybe Int -> Maybe Int -> IO Toolbox
+cappedToolbox maxLines maxBytes = do
+    let desc =
+            DeveloperToolboxDescription
+                { developerToolboxName = "test-capped"
+                , developerToolboxDescription = "Test toolbox with a read cap"
+                , developerToolboxCapabilities = [DevToolReadFileRange]
+                , developerToolboxActivation = Nothing
+                , developerToolboxBuildCommand = Nothing
+                , developerToolboxWholeReadMaxLines = maxLines
+                , developerToolboxWholeReadMaxBytes = maxBytes
+                , developerToolboxFileSandbox = Just $ InlineFileSandbox FileSandboxConfig
+                    { fsbPredicate = AlwaysAllow
+                    , fsbMaxFileSize = Nothing
+                    , fsbName = Nothing
+                    }
+                }
+    result <- DeveloperToolbox.initializeToolbox silent desc
+    case result of
+        Left err -> error $ "Failed to initialize capped toolbox: " ++ err
+        Right toolbox -> pure toolbox
+
+-- | A file of @n@ short numbered lines.
+bigFileContent :: Int -> Text
+bigFileContent n = Text.unlines [Text.pack ("line " <> show i) | i <- [1 .. n]]
+
+withBigFile :: Int -> (FilePath -> IO a) -> IO a
+withBigFile n action = withTempDir $ \tmpDir -> withTestFile tmpDir (bigFileContent n) action
+
+wholeReadCapTests :: TestTree
+wholeReadCapTests =
+    testGroup
+        "Whole-file read cap"
+        [ testCase "Omitted ranges on a big file is capped at the default" $
+            withBigFile 1000 $ \fp -> do
+                toolbox <- cappedToolbox Nothing Nothing
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRange silent toolbox fp ""
+                readFileLinesRead r @?= defaultWholeReadMaxLines
+                readFileTotalLines r @?= 1000
+                readFileTruncated r @?= True
+                let hint = maybe "" id (readFileHint r)
+                assertBool ("hint names the size: " <> Text.unpack hint) $ "file has 1000 lines" `Text.isInfixOf` hint
+                assertBool ("hint names the next page: " <> Text.unpack hint) $ "ranges='401-800'" `Text.isInfixOf` hint
+                assertBool "last line shown is 400" $ "400\tline 400\n" `Text.isSuffixOf` readFileContent r
+        , testCase "'whole' is capped like omitted ranges" $
+            withBigFile 1000 $ \fp -> do
+                toolbox <- cappedToolbox Nothing Nothing
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRange silent toolbox fp "whole"
+                readFileTruncated r @?= True
+                readFileLinesRead r @?= 400
+        , testCase "Explicit ranges are never capped" $
+            withBigFile 1000 $ \fp -> do
+                toolbox <- cappedToolbox (Just 10) (Just 100)
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRange silent toolbox fp "1-1000"
+                readFileLinesRead r @?= 1000
+                readFileTruncated r @?= False
+                readFileHint r @?= Nothing
+        , testCase "A small file is not truncated" $
+            withBigFile 10 $ \fp -> do
+                toolbox <- cappedToolbox Nothing Nothing
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRange silent toolbox fp ""
+                readFileLinesRead r @?= 10
+                readFileTruncated r @?= False
+                readFileHint r @?= Nothing
+        , testCase "A configured line cap is used" $
+            withBigFile 100 $ \fp -> do
+                toolbox <- cappedToolbox (Just 25) Nothing
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRange silent toolbox fp ""
+                readFileLinesRead r @?= 25
+                assertBool "next page is 26-50" $ maybe False ("ranges='26-50'" `Text.isInfixOf`) (readFileHint r)
+        , testCase "The byte cap truncates before the line cap" $
+            withBigFile 100 $ \fp -> do
+                -- "line 1".."line 9" are 7 bytes with the newline, "line 10".. 8.
+                toolbox <- cappedToolbox Nothing (Just 30)
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRange silent toolbox fp ""
+                readFileLinesRead r @?= 4
+                readFileTruncated r @?= True
+                assertBool "next page starts at 5" $ maybe False ("ranges='5-" `Text.isInfixOf`) (readFileHint r)
+        , testCase "0 disables both caps" $
+            withBigFile 1000 $ \fp -> do
+                toolbox <- cappedToolbox (Just 0) (Just 0)
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRange silent toolbox fp ""
+                readFileLinesRead r @?= 1000
+                readFileTruncated r @?= False
+        , testCase "metadata_only is not truncated" $
+            withBigFile 1000 $ \fp -> do
+                toolbox <- cappedToolbox Nothing Nothing
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRangeWith silent toolbox fp "" Nothing True
+                readFileTruncated r @?= False
+                readFileTotalLines r @?= 1000
+        , testCase "JSON carries truncated and hint" $
+            withBigFile 1000 $ \fp -> do
+                toolbox <- cappedToolbox Nothing Nothing
+                r <- expectRight =<< DeveloperToolbox.executeReadFileRange silent toolbox fp ""
+                case Aeson.toJSON r of
+                    Aeson.Object o -> do
+                        KeyMap.lookup "truncated" o @?= Just (Aeson.Bool True)
+                        assertBool "hint is a string" $ case KeyMap.lookup "hint" o of
+                            Just (Aeson.String _) -> True
+                            _ -> False
+                    other -> assertFailure $ "expected an object, got " <> show other
+        , testCase "The tool schema names the cap" $ do
+            toolbox <- cappedToolbox Nothing Nothing
+            regs <- ToolReg.registerDeveloperTools toolbox
+            case regs of
+                Right (reg : _) -> do
+                    let descs = map ToolSchema.propertyDescription (ToolSchema.toolDescriptionParamProperties (ToolReg.declareTool reg))
+                    assertBool "ranges description names 400 lines / 32768 bytes" $
+                        any ("capped at 400 lines / 32768 bytes" `Text.isInfixOf`) descs
+                _ -> assertFailure "expected a registration"
+        ]
+  where
+    expectRight = either (\e -> assertFailure (show e)) pure

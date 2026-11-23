@@ -1497,6 +1497,15 @@ data DeveloperToolboxDescription
     build-command capability, in the agent's working directory.
     Required when build-command is enabled; ignored otherwise.
     -}
+    , developerToolboxWholeReadMaxLines :: Maybe Int
+    {- ^ Cap on the lines a whole-file read-file-range returns (ranges
+    omitted, empty or @whole@). Explicit line ranges are never capped.
+    Default: 400 when absent; 0 disables the cap.
+    -}
+    , developerToolboxWholeReadMaxBytes :: Maybe Int
+    {- ^ Cap on the bytes of file content a whole-file read-file-range
+    returns. Default: 32768 when absent; 0 disables the cap.
+    -}
     }
     deriving (Show, Ord, Eq, Generic)
 
