@@ -4,6 +4,13 @@
 
 ### New Features
 
+#### Bash tools v2: the check verb and `check --probe`
+- A v2 tool declaring `"check": true` answers `./tool check` with a read-only self-test, one JSON document `{"ok", "detail", "fix"}`, exit 0 when usable
+- `agents-exe check --probe` runs every loaded bash tool's `check` under its real `runtime` (envdir, environment, rundir, run_as, sandbox, `timeout.start` else 30s) and reports `ok`, `failed` (with detail and fix), `unverified` (no `check`) or `skipped` (the `--sandbox` mechanism cannot enforce the tool's `sandbox`), with the time taken and what `--sandbox auto` resolved to; `--json` prints the §1.5 shape (one capability per tool binary for now)
+- With `--probe`, `check` exits 1 when an agent file does not load and 2 when a tool has no active backend (its probe failed or was skipped)
+- Library: `System.Agents.Tools.ScriptCheck`; `CheckOptions` has `probe` and `probeJson`; `runProcessReportingEventsStopping` is exported from `System.Agents.Tools.Bash`
+- See `documentation/binary-tool.md` (Protocol v2: check) and `todos/bash-tools-v2.md`
+
 #### Developer toolbox: whole-file reads are capped
 - `read-file-range` with `ranges` omitted, empty or `whole` returns at most 400 lines and 32768 bytes; past that it sets `truncated: true` and a `hint` (e.g. "file has 2134 lines; showing lines 1-400 ... Pass ranges='401-800' to read more"). Explicit line ranges are never capped
 - Configure per toolbox with `WholeReadMaxLines` and `WholeReadMaxBytes`; `0` turns a limit off. The `ranges` schema text names the cap in effect

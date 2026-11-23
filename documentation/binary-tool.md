@@ -434,6 +434,51 @@ must be able to execute the `agents-exe` binary).
 [Protocol v2: service](#protocol-v2-service)). An unknown field in
 `runtime` (a typo such as `run-as`) also fails to load.
 
+### Protocol v2: check
+
+A v2 tool may say `"check": true` in `describe` and then answers
+`./tool check` with a cheap, **read-only** self-test: no writes, no login,
+no remote mutation, no long-lived process (a `service` is not started). It
+prints one JSON document and exits 0 when the tool is usable:
+
+```json
+{ "ok": false, "detail": "jina reader answered 429", "fix": "set JINA_API_KEY in the envdir" }
+```
+
+`detail` and `fix` are for the operator; `fix` is a prescription. A
+subcommand tool is checked once (`./tool check`, no subcommand).
+
+`agents-exe check --probe [--json]` loads the agent files as plain `check`
+does, then runs the `check` of every bash tool any agent of the tree loads,
+exactly as a call would run it (same `runtime`: envdir, `environment`,
+rundir, `run_as`, `sandbox`; bounded by `timeout.start`, else 30 seconds).
+Each tool is reported as:
+
+| Status | Meaning |
+|--------|---------|
+| `ok` | `check` exited 0 and printed `"ok": true` |
+| `failed` | anything else: a non-zero exit, `"ok": false`, no JSON document, a timeout or a launch error, with `detail` (and `fix` when the tool gave one) |
+| `unverified` | the tool declares no `check` (a v1 tool, or one that cannot be checked without side effects); never reported `ok` |
+| `skipped` | the operator's `--sandbox` cannot enforce what the tool's `sandbox` declares; `check` was not run |
+
+A tool with a `sandbox` also reports the configured `--sandbox` and the
+mechanism it resolved to (with `--sandbox auto`: `bwrap` or `landlock`).
+`--json` prints the report in the shape of `todos/bash-tools-v2.md` §1.5,
+one capability per tool binary until capabilities with several backends
+exist:
+
+```json
+[ { "capability": "web_read", "active": "web_read",
+    "backends": [ { "name": "web_read", "path": "tools/web_read", "tools": ["web_read"],
+                    "status": "ok", "ms": 310,
+                    "sandbox": { "configured": "auto", "mechanism": "landlock" } } ] } ]
+```
+
+A capability's active backend is its first `ok` one, else its first
+`unverified` one. Exit codes with `--probe`: 1 when an agent file does not
+load, 2 when every file loads but a tool has no active backend (`failed`
+or `skipped`), 0 otherwise. Only bash tools are probed.
+
 ## Empty Result Behavior
 
 The optional `empty-result` field controls what happens when the tool produces no output:

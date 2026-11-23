@@ -152,6 +152,7 @@ library agents-lib
                     , System.Agents.Tools.ScriptProcess
                     , System.Agents.Tools.ScriptRuntime
                     , System.Agents.Tools.ScriptService
+                    , System.Agents.Tools.ScriptCheck
                     , System.Agents.Tools.Landlock
                     , System.Agents.Tools.ScriptTypes
                     , System.Agents.Tools.Secrets
@@ -567,6 +568,7 @@ test-suite agents-tests
                     , BashToolsV2Tests
                     , BashToolsServiceTests
                     , BashToolsRuntimeTests
+                    , BashToolsCheckTests
                     , BindingsTests
                     , ConfigLoaderTests
                     , TemplateTests

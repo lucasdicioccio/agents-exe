@@ -6,6 +6,14 @@
 The check command validates agent configuration files and displays
 information about loaded agents including their tools.
 
+With @--probe@ (@todos/bash-tools-v2.md@ §1.5) it also runs the @check@ verb
+of every bash tool the agents load, under the tool's real @runtime@, and
+reports each one as @ok@, @failed@, @unverified@ or @skipped@, with what the
+operator's @--sandbox@ resolved to for it; @--json@ prints that report as
+JSON. Exit codes with @--probe@: 1 when a configuration does not load, 2
+when it loads but a tool has no active backend (its probe failed or was
+skipped), 0 otherwise.
+
 This module uses OS-native structures for agent management.
 -}
 module System.Agents.CLI.Check (
@@ -17,7 +25,11 @@ module System.Agents.CLI.Check (
 ) where
 
 import Control.Concurrent.STM (readTVarIO)
-import Control.Monad (forM_, when)
+import Control.Monad (forM, forM_, unless, when)
+import Data.IORef (modifyIORef', newIORef, readIORef)
+import qualified Data.Map.Strict as Map
+import System.Exit (ExitCode (..), exitWith)
+import System.IO (stderr)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.ByteString.Lazy.Char8 as LBS8
@@ -32,7 +44,10 @@ import qualified System.Agents.FileLoader as FileLoader
 import qualified System.Agents.SessionStore as SessionStore
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
+import System.Agents.Tools.Base (Tool (..), ToolDef (..))
+import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Params.Types as Params
+import qualified System.Agents.Tools.ScriptCheck as ScriptCheck
 
 data Trace
     = AgentTreeTrace !AgentTree.TreeTrace
@@ -56,6 +71,10 @@ data CheckOptions = CheckOptions
     { toolsOutputMode :: ToolsOutputMode
     , showConfig :: Bool
     -- ^ Print the agent file's JSON; for a @.tramaj@ template, the JSON it evaluates to.
+    , probe :: Bool
+    -- ^ Run every bash tool's @check@ verb and report it (@--probe@).
+    , probeJson :: Bool
+    -- ^ Print the probe report as JSON (@--json@, with @--probe@).
     }
     deriving (Show, Eq)
 
@@ -75,6 +94,9 @@ handleCheck ::
     IO ()
 handleCheck tracer opts apiKeysFile processParams templateLibraries agentFiles = do
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
+    loadFailed <- newIORef False
+    scripts <- newIORef []
+    let quiet = opts.probe && opts.probeJson
 
     forM_ agentFiles $ \agentFile -> do
         when opts.showConfig $ printEvaluatedConfig (FileLoader.TemplateEnv templateLibraries processParams) agentFile
@@ -90,10 +112,46 @@ handleCheck tracer opts apiKeysFile processParams templateLibraries agentFiles =
                 , AgentTree.templateLibraries = templateLibraries
                 }
             $ \result -> case result of
-                AgentTree.Errors errs -> mapM_ print errs
+                AgentTree.Errors errs -> do
+                    modifyIORef' loadFailed (const True)
+                    if quiet then mapM_ (Text.hPutStrLn stderr . Text.pack . show) errs else mapM_ print errs
                 AgentTree.Initialized tree -> do
                     -- Print agent check information
-                    printAgentCheckOS opts tree
+                    unless quiet $ printAgentCheckOS opts tree
+                    when opts.probe $ do
+                        found <- treeBashScripts tree
+                        modifyIORef' scripts (<> found)
+
+    when opts.probe $ do
+        failed <- readIORef loadFailed
+        found <- readIORef scripts
+        reports <- forM (ScriptCheck.toolBinaries found) $ \(desc, names) -> do
+            r <- ScriptCheck.probeScript names desc
+            pure (ScriptCheck.capabilityReport r.probeName [r])
+        if opts.probeJson
+            then LBS8.putStrLn (Aeson.encodePretty reports)
+            else printProbeReport reports
+        if failed
+            then exitWith (ExitFailure 1)
+            else
+                unless (all ScriptCheck.hasActiveBackend reports) $
+                    exitWith (ExitFailure 2)
+
+-- | Every bash tool loaded by any agent of the tree.
+treeBashScripts :: AgentTree.OSAgentTree -> IO [Bash.ScriptDescription]
+treeBashScripts tree = do
+    perNode <- forM (Map.elems (AgentTree.osTreeNodes tree)) $ \node -> do
+        tools <- readTVarIO (AgentTree.osNodeTools node)
+        pure [script | tool <- tools, BashTool script <- [tool.innerTool.toolDef]]
+    pure (concat perNode)
+
+printProbeReport :: [ScriptCheck.CapabilityReport] -> IO ()
+printProbeReport reports = do
+    Text.putStrLn ""
+    Text.putStrLn "**Probes:**"
+    when (null reports) $ Text.putStrLn "(no bash tools)"
+    forM_ reports $ \c -> forM_ c.capabilityBackends $ \p ->
+        Text.putStrLn ("- " <> ScriptCheck.renderProbeLine p)
 
 {- | Print the JSON an agent file holds, as loading sees it: a @.tramaj@
 template is evaluated first. A file that does not load prints nothing here;
