@@ -1649,8 +1649,8 @@ buildDeveloperToolParams box =
                 { propertyKey = "patch"
                 , propertyType = StringParamType
                 , propertyDescription =
-                    "For patch-file: a unified diff. Each hunk starts with '@@ -START,COUNT +START,COUNT @@', where START is the exact 1-based "
-                        <> "line number of the hunk's first context or removed line (read it with read-file-range first; the hunk is not searched for). "
+                    "For patch-file: a unified diff. Each hunk starts with '@@ -START,COUNT +START,COUNT @@', where START is the 1-based "
+                        <> "line number of the hunk's first context or removed line (read it with read-file-range first; if the hunk does not match there, the nearest exact match is used). "
                         <> "Then one line per file line: ' ' (a space) + text for unchanged context, '-' + text for a removed line, '+' + text for an added line. "
                         <> "Context and removed lines must match the file exactly, including indentation and blank lines."
                 , propertyRequired = False
@@ -2894,8 +2894,9 @@ formatCapabilityHelp DevToolPatchFile =
         , "Patch Format (Unified Diff):"
         , "  - File headers (--- and +++) are optional and ignored"
         , "  - Each hunk starts with @@ -START,COUNT +START,COUNT @@ (e.g., @@ -10,3 +10,4 @@)"
-        , "    START must be the exact 1-based line number of the hunk's first context"
-        , "    or removed line: the hunk is applied there and is not searched for."
+        , "    START should be the 1-based line number of the hunk's first context"
+        , "    or removed line; if the hunk does not match there, the nearest place"
+        , "    where its context and removed lines match exactly is used."
         , "    Read the lines with read-file-range first to get the numbers."
         , "  - Context lines start with a single space, then the file's text unchanged"
         , "    (keep the space even when the line itself is indented)"

@@ -25,6 +25,8 @@ module System.Agents.Tools.DeveloperToolbox.Patch (
     parseUnifiedDiff,
     validateHunk,
     validateAllHunks,
+    locateHunk,
+    locateAllHunks,
     applyHunk,
 ) where
 
@@ -33,7 +35,7 @@ import Control.Exception (SomeException, try)
 import Control.Monad (when)
 import qualified Data.ByteString as BS
 import Data.Char (isDigit)
-import Data.List (find, sortOn)
+import Data.List (find, isPrefixOf, sortOn, tails)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -194,12 +196,15 @@ proceedWithPatchApplication tracer toolbox filePath patchText = do
             content <- Text.readFile filePath
             let lines' = Text.lines content
 
-            -- Validate ALL hunks before applying any
-            case validateAllHunks lines' hunks of
+            -- Locate and validate ALL hunks before applying any. A hunk whose
+            -- @@ header is off by a few lines is found by searching nearby.
+            case locateAllHunks lines' hunks of
                 Left err -> do
                     runTracer tracer (PatchFileErrorTrace (Text.pack filePath) $ Text.pack $ show err)
                     pure $ Left $ PatchValidationError err
-                Right validHunks -> do
+                Right located -> do
+                    let validHunks = map fst located
+                    let offsets = map snd located
                     -- Take snapshot before patch if snapshot enabled
                     mBeforeSnapshotRef <- takeSnapshotBeforePatch tracer toolbox filePath
 
@@ -235,6 +240,7 @@ proceedWithPatchApplication tracer toolbox filePath patchText = do
                                         , patchHunksApplied = applied
                                         , patchHunksRejected = 0
                                         , patchLinesChanged = linesChanged
+                                        , patchHunkOffsets = offsets
                                         , patchBeforeSnapshotRef = mBeforeSnapshotRef
                                         , patchAfterSnapshotRef = mAfterSnapshotRef
                                         }
@@ -291,6 +297,95 @@ validateAllHunks fileLines hunks = do
         Nothing -> do
             -- Then validate each hunk individually
             mapM (validateHunk fileLines) hunks
+
+{- | Locate every hunk in the file, then validate them as a set.
+
+Hunks are located in the order they appear in the patch. Each hunk is first
+tried at its exact header line; failing that, the nearest match to its
+header line shifted by the offset at which the previous hunk was found wins
+(an off-by-N header usually means every later header is off by the same N).
+See 'locateHunk'.
+
+On success, returns the hunks in the order they appear in the patch, each
+rewritten to start where it was found, paired with its offset (found start
+minus header start; 0 when the header was right). Overlaps are checked on
+the located positions.
+-}
+locateAllHunks :: [Text] -> [Hunk] -> Either PatchError [(Hunk, Int)]
+locateAllHunks fileLines hunks = do
+    -- Check the headers first, so a patch with overlapping hunks is
+    -- refused the same way as before offset search existed.
+    case findOverlappingHunks (sortOn hunkOldStart hunks) of
+        Just (h1, h2) -> Left $ PatchHunkOverlap (hunkOldStart h1) (hunkOldStart h2)
+        Nothing -> pure ()
+    located <- go 0 hunks
+    case findOverlappingLocated (sortOn hunkOldStart (map fst located)) of
+        Just (h1, h2) -> Left $ PatchHunkOverlap (hunkOldStart h1) (hunkOldStart h2)
+        Nothing -> Right located
+  where
+    go _ [] = Right []
+    go carried (h : hs) = do
+        (h', off) <- locateHunkFrom carried fileLines h
+        rest <- go off hs
+        Right ((h', off) : rest)
+
+    findOverlappingLocated [] = Nothing
+    findOverlappingLocated [_] = Nothing
+    findOverlappingLocated (a : b : rest)
+        | hunkOldStart b < hunkOldStart a + hunkOldLength a = Just (a, b)
+        | otherwise = findOverlappingLocated (b : rest)
+
+{- | Locate a single hunk in the file, starting from its @\@\@@ header line.
+
+If the hunk matches at its header line, it is returned unchanged with offset
+0. Otherwise the hunk's old lines (context and removed lines, in order) are
+searched for in the whole file, and the occurrence nearest the header line
+wins; on a tie, the later position (positive offset) wins, as with GNU
+patch. The hunk is returned rewritten to start at the match, with the
+offset. There is no fuzz: every old line must still match exactly.
+
+A hunk with no old lines (a pure insertion) cannot be located by content
+and is only accepted at its header line. When no position matches, the error
+is the one 'validateHunk' gives at the header line, so the caller still sees
+the expected and actual lines there.
+-}
+locateHunk :: [Text] -> Hunk -> Either PatchError (Hunk, Int)
+locateHunk = locateHunkFrom 0
+
+-- | 'locateHunk', searching outward from the header line shifted by a
+-- carried offset (an exact match at the header line always wins).
+locateHunkFrom :: Int -> [Text] -> Hunk -> Either PatchError (Hunk, Int)
+locateHunkFrom carried fileLines hunk =
+    case validateHunk fileLines hunk of
+        Right h -> Right (h, 0)
+        exact
+            | null oldLines -> fmap (\h -> (h, 0)) exact
+            | otherwise ->
+                case matches of
+                    [] -> fmap (\h -> (h, 0)) exact
+                    _ ->
+                        let start = minimumOn distance matches
+                         in Right (hunk{hunkOldStart = start}, start - header)
+  where
+    header = hunkOldStart hunk
+    oldLines = hunkOldLines hunk
+    guess = header + carried
+    -- Every 1-based position where the hunk's old lines occur.
+    matches = [i | (i, rest) <- zip [1 ..] (tails fileLines), oldLines `isPrefixOf` rest]
+    -- Nearest to the guess first; on a tie, the later position.
+    distance i = (abs (i - guess), negate i)
+    minimumOn f = foldr1 (\a b -> if f a <= f b then a else b)
+
+-- | The lines a hunk expects in the file: context and removed lines, in order.
+hunkOldLines :: Hunk -> [Text]
+hunkOldLines hunk = concatMap segOld (hunkSegments hunk)
+  where
+    segOld (HunkContext ctx) = ctx
+    segOld (HunkChange removedLines _) = removedLines
+
+-- | Number of file lines a hunk spans, from its body (not its header count).
+hunkOldLength :: Hunk -> Int
+hunkOldLength = length . hunkOldLines
 
 -- | Find any overlapping hunks in the list.
 findOverlappingHunks :: [Hunk] -> Maybe (Hunk, Hunk)
