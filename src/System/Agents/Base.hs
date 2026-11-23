@@ -1317,24 +1317,31 @@ Example configuration:
 {
   "tag": "LuaToolbox",
   "contents": {
-    "name": "lua",
-    "description": "Sandboxed Lua interpreter for tool orchestration",
-    "maxMemoryMB": 256,
-    "maxExecutionTimeSeconds": 300,
-    "allowedTools": ["bash", "sqlite", "io"],
-    "allowedHosts": ["localhost", "127.0.0.1"],
-    "fileSandbox": {
-      "predicate": {"tag": "PathPrefix", "contents": "./repro"},
-      "maxFileSize": 10485760,
-      "name": "lua-sandbox"
+    "Name": "lua",
+    "Description": "Sandboxed Lua interpreter for tool orchestration",
+    "MaxMemoryMB": 256,
+    "MaxExecutionTimeSeconds": 300,
+    "AllowedTools": ["bash_read_file", "sqlite_memory_query"],
+    "AllowedHosts": ["localhost", "127.0.0.1"],
+    "FileSandbox": {
+      "fsbPredicate": {"tag": "DirectoryRecursive", "contents": "./repro"},
+      "fsbMaxFileSize": 10485760,
+      "fsbName": "lua-sandbox"
     },
-    "lifetime": "conversation",
-    "activation": "always"
+    "Activation": "always"
   }
 }
 @
 
-The 'activation' field controls progressive disclosure (default: 'AlwaysActivated').
+Keys are the field names without the @luaToolbox@ prefix, capitalized as
+written above ('luaToolboxOptions'); lowercase keys fail to parse.
+@AllowedTools@ entries are exact tool names as the model sees them (e.g.
+@sqlite_<toolbox>_query@), and @AllowedHosts@ entries are exact host names:
+neither list matches prefixes or wildcards, and an empty list allows nothing.
+@FileSandbox@ is inline (@fsbPredicate@, @fsbMaxFileSize@, @fsbName@) or a
+reference @{"ref": "<name>"}@ to one of the agent's @fileSandboxes@.
+
+The 'Activation' field controls progressive disclosure (default: 'AlwaysActivated').
 -}
 data LuaToolboxDescription = LuaToolboxDescription
     { luaToolboxName :: Text
@@ -1532,11 +1539,11 @@ Example configuration:
 @
 {
   "builtinToolboxes": [
-    {"tag": "SqliteToolbox", "contents": {"name": "memory", "description": "a set of memories", "path": "/path/to/memories.sqlite", "access": "read-write"}},
-    {"tag": "SqliteToolbox", "contents": {"name": "guidelines", "description": "a set of guidelines", "path": "/path/to/guidelines.sqlite", "access": "read-only"}},
-    {"tag": "SystemToolbox", "contents": {"name": "system", "description": "System context", "capabilities": ["date", "hostname"], "envVarFilter": null}},
-    {"tag": "DeveloperToolbox", "contents": {"name": "developer", "description": "Development tools", "capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file", "help", "snapshot", "restore-file"]}},
-    {"tag": "LuaToolbox", "contents": {"name": "lua", "description": "Lua orchestration", "maxMemoryMB": 256, "maxExecutionTimeSeconds": 300, "allowedTools": ["bash"], "fileSandbox": {"predicate": {"tag": "AlwaysAllow"}, "maxFileSize": 10485760, "name": "lua-sandbox"}}}
+    {"tag": "SqliteToolbox", "contents": {"Name": "memory", "Description": "a set of memories", "Versioning": {"tag": "SqliteReadWrite", "path": "/path/to/memories.sqlite"}}},
+    {"tag": "SqliteToolbox", "contents": {"Name": "guidelines", "Description": "a set of guidelines", "Versioning": {"tag": "SqliteReadOnly", "path": "/path/to/guidelines.sqlite"}}},
+    {"tag": "SystemToolbox", "contents": {"Name": "system", "Description": "System context", "Capabilities": ["date", "hostname"], "EnvVarFilter": null}},
+    {"tag": "DeveloperToolbox", "contents": {"Name": "developer", "Description": "Development tools", "Capabilities": ["show-spec", "validate-agent", "create-agent", "create-tool", "read-file-range", "write-file-range", "patch-file", "help", "snapshot", "restore-file"]}},
+    {"tag": "LuaToolbox", "contents": {"Name": "lua", "Description": "Lua orchestration", "MaxMemoryMB": 256, "MaxExecutionTimeSeconds": 300, "AllowedTools": ["sqlite_memory_query"], "AllowedHosts": [], "FileSandbox": {"fsbPredicate": {"tag": "AlwaysAllow"}, "fsbMaxFileSize": 10485760, "fsbName": "lua-sandbox"}}}
   ]
 }
 @
