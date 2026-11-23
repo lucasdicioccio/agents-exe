@@ -14,6 +14,15 @@
 - `agents-server` and `agents-exe serve` serve the project's icon (the website's `favicon.png`, embedded in the binary) at `GET /favicon.ico` and `GET /favicon.png`, without a token; the chat page links it with `<link rel="icon">`
 - The icon (website and server) is now a 64x64 reduction of the agents-exe logo (`logo-01.png`, the head on a transparent background) instead of the salmon icon
 
+#### Bash tools v2: service mode
+- A v2 bash tool may declare `"process": {"mode": "service"}`: starting it returns a process handle (`{"process": "p-...", "tool", "status", "since"}`) once the process is `ready` (`line` or `immediate`, bounded by `runtime.timeout.start`); the process outlives the call and belongs to the session that started it. Each start is its own process
+- Output events go to a bounded ring and to the session as mail from `process:<id>`, folded per `process.digest` (`events`/`seconds`/`round`)
+- `process.input` keeps stdin open and adds a typed companion tool `<tool>_send` (`process` + `event`, the event's schema being `input.event` verbatim); it answers with the events produced in reply, or `accepted`
+- One shared `processes` tool (`list`, `status`, `tail`, `stop`) for every service family of the agent
+- Service-only runtime fields now load on a service: `timeout.idle`, `on_exit` (`report`, `fail`, `restart` with backoff, at most 5 times) and `cancel: {"send": ...}`. Deleting a session stops its processes; processes do not survive an agents-exe restart
+- Library: `System.Agents.Tools.ScriptService`; `registerBashToolsInLLMWith`, `registerProcessesTool` in `System.Agents.ToolRegistration`; `SchemaParamType` in `System.Agents.ToolSchema`; `ScriptServiceError` in `RunScriptError`; `validateScriptRuntimeFor` in `System.Agents.Tools.ScriptRuntime`
+- See `documentation/binary-tool.md` (Protocol v2: service) and `todos/bash-tools-v2.md`
+
 #### Bash tools v2: a tool may declare that its calls run in the background
 - A v2 bash tool may declare `"process": {"background": true}` (or `{"attachSeconds": n}`) so that its calls run as `RunAsync` without the agent naming it in `toolCallPolicyConfig`; meant for `stream` tools, accepted on `oneshot` ones too. A negative `attachSeconds` fails to load; v1 tools ignore it
 - Which wins: the agent's `toolCallPolicyConfig.rules` entry naming the tool, then the tool's declaration, then the agent's `default`; `wrappers` decorate the result. Documented in `documentation/binary-tool.md` (Protocol v2: stream)

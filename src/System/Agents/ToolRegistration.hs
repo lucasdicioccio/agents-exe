@@ -30,6 +30,9 @@ module System.Agents.ToolRegistration (
     -- * Registration functions
     registerBashToolInLLM,
     registerBashToolInLLMWith,
+    registerBashToolsInLLMWith,
+    registerProcessesTool,
+    processesToolName,
     registerIOScriptInLLM,
     registerMcpToolInLLM,
     registerOpenAPIToolInLLM,
@@ -110,7 +113,9 @@ import System.Agents.Tools.Bash (ScriptArg (..), ScriptArgArity (..), ScriptDesc
 import qualified System.Agents.Tools.Bash as BashTools
 import System.Agents.Tools.ScriptProcess (ProcessBackground)
 import System.Agents.Tools.ScriptRuntime (getToolRuntimeConfig)
-import System.Agents.Tools.ScriptTypes (scriptBackgroundOf)
+import System.Agents.Tools.ScriptProcess (ProcessInput (..), ProcessMode (..), ScriptProcess (..))
+import qualified System.Agents.Tools.ScriptService as Service
+import System.Agents.Tools.ScriptTypes (scriptBackgroundOf, scriptProcessOf)
 import System.Agents.Tools.Context (ToolCall, ToolExecutionContext)
 import qualified System.Agents.Tools.Context as Context
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
@@ -350,6 +355,120 @@ registerBashToolInLLMWith opts mbActivation script =
             , declareTool = mapToolDescriptionBash2LLM script
             , findTool = find
             , toolActivation = mbActivation
+            }
+
+{- | The registrations of a bash tool: the tool itself and, for a @service@
+tool (@todos/bash-tools-v2.md@ §2.4), its typed @send@ companion
+(@<name>_send@, taking a @process@ handle and an @event@ shaped as the
+declared @process.input.event@). The companion exists from load, so the
+tool list does not change while processes come and go; a service without
+@process.input@ has none (its processes take no events).
+-}
+registerBashToolsInLLMWith ::
+    BashTools.RunOptions ->
+    Maybe Activation ->
+    ScriptDescription ->
+    [ToolRegistration]
+registerBashToolsInLLMWith opts mbActivation script =
+    registerBashToolInLLMWith opts mbActivation script
+        : case scriptProcessOf script.scriptInfo of
+            Just p
+                | p.processMode == ModeService
+                , Just input <- p.processInput ->
+                    [registerServiceSendTool mbActivation script input]
+            _ -> []
+
+registerServiceSendTool :: Maybe Activation -> ScriptDescription -> ProcessInput -> ToolRegistration
+registerServiceSendTool mbActivation script input =
+    let
+        family = getToolName (bash2LLMName script)
+        llmName = OpenAI.ToolName (capToolName (family <> Service.sendToolSuffix))
+        toolDescription =
+            ToolDescription
+                { toolDescriptionName = llmName
+                , toolDescriptionText =
+                    "Sends an event to a running process started by "
+                        <> family
+                        <> " (by its handle). Answers with the events the process produced in reply, or accepted. "
+                        <> script.scriptInfo.scriptDescription
+                , toolDescriptionParamProperties =
+                    [ ParamProperty
+                        { propertyKey = "process"
+                        , propertyType = StringParamType
+                        , propertyDescription = "The process handle returned when " <> family <> " was started (see the processes tool)"
+                        , propertyRequired = True
+                        }
+                    , ParamProperty
+                        { propertyKey = "event"
+                        , propertyType = SchemaParamType (Maybe.fromMaybe (Aeson.Bool True) input.inputEvent)
+                        , propertyDescription = "The event to send to the process"
+                        , propertyRequired = True
+                        }
+                    ]
+                }
+        tool :: Tool ()
+        tool =
+            ToolBase.Tool
+                { ToolBase.toolDef = BashTool script
+                , ToolBase.toolRun = \_tracer ctx v -> do
+                    ret <- Service.sendToService Service.globalProcessRegistry family script ctx v
+                    pure $ case ret of
+                        Left err -> BashToolError () err
+                        Right rsp -> BlobToolSuccess () (toStrict (Aeson.encode rsp)) Nothing
+                }
+        find :: ToolCall -> Maybe (Tool ToolCall)
+        find call = if call.callToolName == getToolName llmName then Just (mapToolResult (const call) tool) else Nothing
+     in
+        ToolRegistration
+            { innerTool = tool
+            , declareTool = toolDescription
+            , findTool = find
+            , toolActivation = mbActivation
+            }
+
+-- | The name of the shared @processes@ tool.
+processesToolName :: OpenAI.ToolName
+processesToolName = OpenAI.ToolName "processes"
+
+{- | The shared @processes@ tool (@todos/bash-tools-v2.md@ §2.4): @list@,
+@status@, @tail@ and @stop@ for every process the session started, whatever
+its family. Registered once per agent that has a @service@ tool.
+-}
+registerProcessesTool :: ToolRegistration
+registerProcessesTool =
+    let
+        toolDescription =
+            ToolDescription
+                { toolDescriptionName = processesToolName
+                , toolDescriptionText =
+                    "Manages the processes this session started with service tools: list them, see one's status (counters, last events, last stderr lines, accepted input), tail its latest output events, or stop it. Their output also arrives as mail from process:<handle>."
+                , toolDescriptionParamProperties =
+                    [ ParamProperty "command" (EnumParamType ["list", "status", "tail", "stop"]) "list: every process of this session; status, tail, stop: one process" True
+                    , ParamProperty "process" StringParamType "For status, tail and stop: the process handle" False
+                    , ParamProperty "n" NumberParamType "For tail: how many of the latest events (default 20)" False
+                    , ParamProperty "force" BoolParamType "For stop: kill at once instead of the declared polite stop" False
+                    ]
+                }
+        tool :: Tool ()
+        tool =
+            ToolBase.Tool
+                { ToolBase.toolDef = MetaTool "processes"
+                , ToolBase.toolRun = \_tracer ctx v -> case Service.parseProcessesCommand v of
+                    Left err -> pure (BashToolError () (BashTools.SerializeArgumentErrors "processes" v err))
+                    Right cmd -> do
+                        ret <- Service.runProcessesCommand Service.globalProcessRegistry ctx cmd
+                        pure $ case ret of
+                            Left err -> BashToolError () (BashTools.ScriptServiceError "processes" err)
+                            Right rsp -> BlobToolSuccess () (toStrict (Aeson.encode rsp)) Nothing
+                }
+        find :: ToolCall -> Maybe (Tool ToolCall)
+        find call = if call.callToolName == getToolName processesToolName then Just (mapToolResult (const call) tool) else Nothing
+     in
+        ToolRegistration
+            { innerTool = tool
+            , declareTool = toolDescription
+            , findTool = find
+            , toolActivation = Nothing
             }
 
 -------------------------------------------------------------------------------
@@ -1952,10 +2071,19 @@ bashTool opts script =
     call = ()
     run tracer ctx v = do
         cfg <- getToolRuntimeConfig
-        ret <- BashTools.runValueWithOptions opts cfg (contramap BashToolsRunTrace tracer) script (Just ctx) v
-        case ret of
-            Left err -> pure $ BashToolError call err
-            Right rsp -> pure $ BlobToolSuccess call rsp Nothing
+        case scriptProcessOf script.scriptInfo of
+            -- A service is started, not run to completion: the result is its handle.
+            Just p | p.processMode == ModeService -> do
+                let svcOpts = Service.defaultServiceOptions{Service.svcRingEvents = opts.runStreamResultEvents}
+                ret <- Service.startService svcOpts cfg Service.globalProcessRegistry (getToolName (bash2LLMName script)) script ctx v
+                case ret of
+                    Left err -> pure $ BashToolError call err
+                    Right started -> pure $ BlobToolSuccess call (toStrict (Aeson.encode started)) Nothing
+            _ -> do
+                ret <- BashTools.runValueWithOptions opts cfg (contramap BashToolsRunTrace tracer) script (Just ctx) v
+                case ret of
+                    Left err -> pure $ BashToolError call err
+                    Right rsp -> pure $ BlobToolSuccess call rsp Nothing
 
 -- | Builder for a tool based on an MCP toolbox tool.
 mcpTool ::

@@ -483,6 +483,11 @@ data RunScriptError
       standard error, and its result so far (the latest events, rendered).
       -}
       ScriptStreamExitError FilePath ExitCode ByteString ByteString
+    | {- | A @service@ tool, its @send@ companion or the @processes@ tool
+      refused the call (unknown handle, process not running, an event that
+      does not match the declared input, an exit before @ready@...).
+      -}
+      ScriptServiceError FilePath String
     deriving (Show)
 
 -- | Flattens arguments associated with textual values into an array suitable to run as executable.
@@ -684,6 +689,8 @@ runValueWithOptions opts cfg tracer script mCtx val = do
             let input = Text.encodeUtf8 stdin
             let mProcess = scriptProcessOf script.scriptInfo
             case mProcess of
+              Just p | p.processMode == ModeService ->
+                pure (Left (ScriptServiceError path "a service tool is started through its tool registration (System.Agents.Tools.ScriptService.startService), not run to completion"))
               Just p | p.processMode == ModeStream ->
                 runStreamValue opts cfg tracer script mCtx p path args (buildToolEnvironment mCtx baseEnv) envArgs input
               _ -> do

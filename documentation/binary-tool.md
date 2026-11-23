@@ -145,7 +145,7 @@ output is cut into **events** that the runtime validates and renders.
 
 | `process` field | Values | Meaning |
 |---|---|---|
-| `mode` | `oneshot` (default), `stream` | `stream`: see [Protocol v2: stream](#protocol-v2-stream). `service` is not implemented yet: a tool declaring it fails to load |
+| `mode` | `oneshot` (default), `stream`, `service` | `stream`: see [Protocol v2: stream](#protocol-v2-stream); `service`: see [Protocol v2: service](#protocol-v2-service) |
 | `output.framing` | `jsonl` (default), `lines`, `chunks` | One JSON value per line, one text line per event, or the raw output |
 | `output.event` | a JSON Schema | The shape of one event under `jsonl` |
 | `ready` | `{"kind": "exit"}`; for a `stream` also `{"kind": "line", "match": REGEX}` and `{"kind": "immediate"}` | When the tool counts as started; only `exit` applies to a `oneshot` |
@@ -170,9 +170,9 @@ The event schema supports a practical subset of JSON Schema: `type`
 `not`, and boolean schemas. Other keywords are ignored.
 
 A v1 tool ignores every v2 field, so `process` without `"protocol": 2`
-changes nothing. Declarations a later slice will implement (`process.input`,
-the `service` mode) make the tool fail to load rather than run
-without them. `commands` works in v2 too: every subcommand shares the
+changes nothing. Declarations that only apply to a `service`
+(`process.input`, `process.digest`) make any other tool fail to load rather
+than be ignored. `commands` works in v2 too: every subcommand shares the
 `process` and `runtime` declarations.
 
 ### Protocol v2: stream
@@ -250,6 +250,95 @@ while its `default` only covers tools that declare nothing. The
 read when the agent is built, with the tool list. Under a synchronous
 disposition the call simply waits for the exit, as any call does. Standard input gets the `stdin`-mode arguments and is
 closed, as for a `oneshot`: talking to a running tool is the `service` mode.
+
+### Protocol v2: service
+
+A `service` tool starts a process that outlives the call: a log watcher, a
+REPL, a small server. Starting it is an ordinary call with the declared
+`args`; it completes when the process is **ready**, and its result is a
+**process handle**:
+
+```json
+{"process": "p-1a2b3c4d", "tool": "bash_log_watcher", "status": "running", "since": "..."}
+```
+
+Each start is a new process with its own handle; starting the same tool on
+two files gives two handles. A process belongs to the session that started
+it: other sessions neither see nor reach it.
+
+```json
+{
+  "protocol": 2,
+  "slug": "log_watcher",
+  "description": "Follows a log file and reports matching lines. A service: send it {op: pattern|pause|resume}.",
+  "args": [ { "name": "path", "type": "string", "backing_type": "string",
+              "arity": "single", "mode": "dashdashspace", "description": "the file to follow" } ],
+  "process": {
+    "mode": "service",
+    "output": { "framing": "jsonl", "event": { "type": "object", "required": ["line"] } },
+    "input":  { "framing": "jsonl", "event": { "type": "object",
+                "properties": { "op": {"enum": ["pattern", "pause", "resume"]}, "value": {"type": "string"} },
+                "required": ["op"] } },
+    "ready": { "kind": "line", "match": "watching" },
+    "digest": { "per": "round" }
+  },
+  "runtime": { "timeout": { "start": 10, "stop": 5, "idle": 3600 }, "on_exit": "report",
+               "cancel": { "send": { "op": "quit" } } }
+}
+```
+
+* `ready`: `{"kind": "line", "match": REGEX}` (that line is still an event)
+  or `{"kind": "immediate"}` (the default); `exit` does not apply.
+  `runtime.timeout.start` bounds reaching a `line` ready (a service with
+  `timeout.start` and no `line` ready fails to load). A process that exits,
+  or times out, before it is ready fails the call, with the tail of its
+  standard error, and leaves no handle.
+* **Output** is cut into events as for a `stream`, and kept in a bounded
+  ring (the agent's `streamResultEvents`, default 200) with the tail of
+  standard error. Events reach the session as **mail** from
+  `process:<handle>`, a JSON digest
+  `{"process", "tool", "events": [...], "elided": n}`, folded as
+  `process.digest` declares: `{"per": "events", "n": N}` every N events,
+  `{"per": "seconds", "n": N}` every N seconds, `{"per": "round"}` (the
+  default) once the output has been quiet for a second. Mail wakes the
+  session like any other mail from the system (`wakeOn` `tool`). Without a
+  mail router (no mailbox in this front-end) the events are only in the
+  ring.
+* **Input**: with `process.input`, standard input stays open (after the
+  `stdin`-mode arguments) and the tool gets a typed companion,
+  `<tool>_send` (`bash_log_watcher_send`), present from load. Its arguments
+  are `process` (the handle) and `event`, whose schema is `input.event`
+  verbatim. The event is checked against the schema and written as one JSON
+  line (`jsonl`) or as the string (`lines`). The answer is the events the
+  process produced within about two seconds (returned once it is quiet for
+  0.3s; those events are not mailed again), or `{"status": "accepted"}`.
+  Without `process.input`, standard input is closed and there is no
+  companion.
+* **`processes`**: an agent with at least one service tool also gets one
+  shared tool, `processes`, whatever the number of families:
+
+  | `command` | Arguments | Answer |
+  |---|---|---|
+  | `list` | | every process of this session: handle, tool, status, `since`, `age_seconds` |
+  | `status` | `process` | the handle, `events`, `sent`, `restarts`, `last_events`, `last_stderr`, the accepted `input` schema, the declared `runtime` |
+  | `tail` | `process`, `n` (default 20) | the latest `n` events, oldest first, and how many earlier ones are `elided` |
+  | `stop` | `process`, `force` | the declared `cancel` (a signal, or the `send` event written to stdin), `SIGKILL` after `timeout.stop` (default 2s); `force` kills at once. Answers the final handle |
+
+* **Status**: `starting`, `running`, `stopping`, `exited` (with `code`,
+  negative for a signal), `failed` (with `reason`), `restarting` (with
+  `restarts`). A finished process stays listed until its session is deleted.
+* **`runtime.on_exit`**: `report` (default) and `fail`: the exit is final
+  and mailed (`{"process", "exit", "status": "exited", "code"}`); `restart`:
+  the process is started again with the same arguments after 1, 2, 4...
+  seconds (at most 30), each restart mailed, at most 5 times, then
+  `failed`. A process that exits before it was first ready is never
+  restarted: its start fails.
+* **`runtime.timeout.idle`**: a process with no output event and no input
+  event for that many seconds is stopped (its declared `cancel`), and the
+  exit mail says `"stopped": "idle for ...s"`.
+* Deleting a session stops its processes with their declared `cancel`.
+  Processes are not durable (D3): they are lost with agents-exe, and a
+  handle from before a restart is answered as unknown.
 
 ### Protocol v2: runtime
 
@@ -340,8 +429,9 @@ set up for the process that runs as the user (under `landlock`, that user
 must be able to execute the `agents-exe` binary).
 
 `timeout.idle` and `on_exit` only apply to a `service`, and
-`cancel: {"send": ...}` needs an open stdin (`process.input`): until those
-slices land, a tool declaring them fails to load. An unknown field in
+`cancel: {"send": ...}` needs an open stdin (a `service` with
+`process.input`): on any other tool they fail to load (see
+[Protocol v2: service](#protocol-v2-service)). An unknown field in
 `runtime` (a typo such as `run-as`) also fails to load.
 
 ## Empty Result Behavior

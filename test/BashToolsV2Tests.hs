@@ -108,9 +108,7 @@ describeTests =
         refused "{\"protocol\": 2, \"slug\": \"x\", \"description\": \"d\", \"args\": [], \"process\": {\"mode\": \"stream\"}, \"runtime\": {\"timeout\": {\"start\": 1}}}"
     , testCase "output-media-type does not apply to a stream" $
         refused "{\"protocol\": 2, \"slug\": \"x\", \"description\": \"d\", \"args\": [], \"output-media-type\": \"image/png\", \"process\": {\"mode\": \"stream\", \"output\": {\"framing\": \"chunks\"}}}"
-    , testCase "service mode is refused (not implemented yet)" $
-        refused (v2Describe (Just "{\"mode\": \"service\"}"))
-    , testCase "process.input is refused (not implemented yet)" $
+    , testCase "process.input is refused on a oneshot (only a service reads events)" $
         refused (v2Describe (Just "{\"input\": {\"framing\": \"jsonl\"}}"))
     , testCase "a runtime envdir is refused without --envdir-root" $
         refused "{\"protocol\": 2, \"slug\": \"x\", \"description\": \"d\", \"args\": [], \"runtime\": {\"envdir\": \"x\"}}"

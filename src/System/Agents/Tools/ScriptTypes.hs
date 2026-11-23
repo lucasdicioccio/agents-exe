@@ -47,6 +47,8 @@ import System.Agents.Tools.ScriptProcess (
     OutputFraming (..),
     ProcessBackground (..),
     ProcessMode (..),
+    ProcessDigest (..),
+    ProcessInput (..),
     ProcessOutput (..),
     ProcessReady (..),
     ScriptProcess (..),
@@ -54,10 +56,11 @@ import System.Agents.Tools.ScriptProcess (
     defaultScriptProcess,
  )
 import System.Agents.Tools.ScriptRuntime (
+    CancelPolicy (..),
     RuntimeTimeout (..),
     ScriptRuntime (..),
     ToolRuntimeConfig,
-    validateScriptRuntime,
+    validateScriptRuntimeFor,
  )
 
 -------------------------------------------------------------------------------
@@ -275,8 +278,8 @@ scriptBackgroundOf :: ScriptInfo -> Maybe ProcessBackground
 scriptBackgroundOf info = scriptProcessOf info >>= (.processBackground)
 
 {- | Checks the v2 declarations of a description against what this runtime
-implements (slices 1 to 3 of @todos/bash-tools-v2.md@: @oneshot@ with
-framing and validation, its @runtime@, and @stream@) and what the operator configured
+implements (slices 1 to 4 of @todos/bash-tools-v2.md@: @oneshot@ with
+framing and validation, its @runtime@, @stream@ and @service@) and what the operator configured
 (@--envdir-root@, @--run-as-mechanism@, @--sandbox@). Anything that would
 change how the tool runs if honoured, and is not implemented or not
 configured, is refused here rather than silently ignored. Returns the list
@@ -288,11 +291,45 @@ validateScriptV2 cfg info =
         Nothing -> []
         Just p ->
             mconcat
-                [ [ "process.mode " <> modeName p.processMode <> " is not implemented yet (\"oneshot\" and \"stream\" are)"
-                  | p.processMode == ModeService
-                  ]
-                , [ "process.input is not implemented yet (it needs the service mode and its send tool)"
+                [ [ "process.input only applies to a service (process.mode \"service\"), not to " <> modeName p.processMode
                   | Just _ <- [p.processInput]
+                  , not isService
+                  ]
+                , [ "process.digest only applies to a service (process.mode \"service\"), not to " <> modeName p.processMode
+                  | Just _ <- [p.processDigest]
+                  , not isService
+                  ]
+                , [ "process.input.event must be a JSON Schema (an object or a boolean)"
+                  | Just i <- [p.processInput]
+                  , Just ev <- [i.inputEvent]
+                  , not (isSchema ev)
+                  ]
+                , [ "process.ready {\"kind\": \"exit\"} does not apply to a service (it outlives the call): use \"line\" or \"immediate\""
+                  | isService
+                  , Just ReadyExit <- [p.processReady]
+                  ]
+                , [ "runtime.timeout.start on a service bounds reaching process.ready: declare ready {\"kind\": \"line\", ...}"
+                  | isService
+                  , Just rt <- [info.scriptRuntime]
+                  , Just _ <- [rt.runtimeTimeout.timeoutStart]
+                  , not (isReadyLine p.processReady)
+                  ]
+                , [ "runtime.cancel {\"send\": ...} needs process.input (the event is written to the process's standard input)"
+                  | isService
+                  , Nothing <- [p.processInput]
+                  , Just rt <- [info.scriptRuntime]
+                  , Just (CancelSend _) <- [rt.runtimeCancel]
+                  ]
+                , [ "output-media-type does not apply to a service (its output is events, delivered as mail)"
+                  | isService
+                  , Just _ <- [info.scriptOutputMediaType] <> fmap (.commandOutputMediaType) info.scriptCommands
+                  ]
+                , [ "process.digest.n must be a positive number"
+                  | Just d <- [p.processDigest]
+                  , case d of
+                        DigestPerEvents n -> n < 1
+                        DigestPerSeconds n -> n < 1
+                        DigestPerRound -> False
                   ]
                 , [ problem
                   | Just (ReadyLine pat) <- [p.processReady]
@@ -322,7 +359,7 @@ validateScriptV2 cfg info =
                   , Just n <- [bg.backgroundAttachSeconds]
                   , n < 0
                   ]
-                , maybe [] (validateScriptRuntime cfg) info.scriptRuntime
+                , maybe [] (validateScriptRuntimeFor isService cfg) info.scriptRuntime
                 , [ "output-media-type requires process.output.framing \"chunks\" (binary output cannot be cut into events)"
                   | Just _ <- [info.scriptOutputMediaType] <> fmap (.commandOutputMediaType) info.scriptCommands
                   , p.processOutput.outputFraming /= FramingChunks
@@ -333,6 +370,10 @@ validateScriptV2 cfg info =
                   ]
                 ]
   where
+    isService = maybe False (\p -> p.processMode == ModeService) (scriptProcessOf info)
+    isReadyLine r = case r of
+        Just (ReadyLine _) -> True
+        _ -> False
     startBoundable r = case r of
         Just (ReadyLine _) -> True
         Just ReadyExit -> True
