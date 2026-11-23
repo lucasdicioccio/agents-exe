@@ -310,7 +310,7 @@ buildCapabilityHelp cap = case cap of
             , "Patch Format (Unified Diff):"
             , "  - File headers (--- and +++ lines) are ignored"
             , "  - Hunk headers start with @@ (e.g., @@ -10,5 +11,6 @@)"
-            , "  - Context lines have no prefix (a single leading space in raw diff output)"
+            , "  - Context lines start with a single space, then the file's text unchanged"
             , "  - Removed lines start with -"
             , "  - Added lines start with +"
             , ""

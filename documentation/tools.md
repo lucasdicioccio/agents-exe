@@ -1411,7 +1411,7 @@ Replaces specific lines in a file with new content. Supports **multi-turn edit s
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to the file to modify |
 | `ranges` | string | Yes | Range specs: `N` replace line N, `N-M` replace lines N-M, `N+` insert after line N, `head` prepend, `tail` append, `whole` overwrite file |
-| `contentBlocks` | array[string] | Yes | Array of content blocks, one per range. Use empty strings to delete lines. |
+| `contentBlocks` | array[string] | Yes | Array of content blocks, one per range. Use empty strings to delete lines. A bare string, a non-string element, or a missing `contentBlocks` (outside a session continuation) is refused rather than blanking the range. |
 | `session_id` | string | No | Continue an existing edit session |
 | `expected_snapshot_ref` | string | No | Optimistic locking: only proceed if file matches this snapshot |
 | `commit` | boolean | No | If true, write to disk and close session. If false, stage changes. |
@@ -1525,8 +1525,8 @@ Applies a unified diff patch to a file atomically with context validation and ri
 **Patch Format:**
 Follows standard unified diff format:
 - File headers (`---` and `+++` lines) are ignored
-- Hunk headers start with `@@` (e.g., `@@ -10,5 +11,6 @@`)
-- Context lines have no prefix
+- Hunk headers start with `@@` (e.g., `@@ -10,5 +11,6 @@`); the old start must be the exact 1-based line of the hunk's first context or removed line (hunks are not searched for)
+- Context lines start with a single space, then the file's text unchanged
 - Removed lines start with `-`
 - Added lines start with `+`
 

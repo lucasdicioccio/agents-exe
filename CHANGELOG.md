@@ -23,6 +23,11 @@
 - Library: `HostConfig.hcApiKeysFile` and `ServerOptions.soApiKeysFile` are now `Maybe FilePath`; `defaultHostConfig` and `serverOptionsFromFlags` take a `Maybe FilePath`
 - See `documentation/agents-server.md` (Unauthenticated LLM endpoints)
 
+#### Developer toolbox: file tools a mid-size model gets right the first time
+- `write-file-range` refuses a `contentBlocks` that is a bare string, holds a non-string element, or is missing (outside a session continuation), with an error showing the expected shape. Before, any of these fell back to one empty block, so the call blanked the range, or with no `ranges` emptied the whole file
+- `patch-file`: the tool schema and `help` now say context lines start with a single space and that the `@@ -START` line must be the exact line of the hunk's first context or removed line; the `help` example is a hunk with context. The old text said context lines have no prefix, which breaks on indented code
+- `ranges` describes the read and write meanings separately; `session_id` is declared once (it was declared twice and the read-side description was lost); the tool description names `read-file-range`, `write-file-range` and `patch-file` when they are enabled
+
 #### Bash tools v2: runtime for oneshot tools
 - A v2 bash tool may declare a `runtime` object: `envdir` (read the daemontools way under the operator's `--envdir-root`), `environment`, `rundir`, `timeout.start` (the call's deadline) and `timeout.stop`, `cancel` (`SIGTERM` or `SIGINT`), `run_as` (enforced with `--run-as-mechanism setpriv|sudo|runuser`) and `sandbox` (`fs.read`/`fs.write`, `net`, `tmp`; enforced with `--sandbox bwrap|auto`)
 - A tool that declares what the operator did not configure fails to load, naming the field; so does an unknown `runtime` field. Still refused at load: `timeout.idle`, `on_exit`, `cancel` by `send` (service only)
