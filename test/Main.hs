@@ -76,6 +76,7 @@ import qualified LuaToolboxJsonValueTests
 import qualified SqliteRestoreFromTests
 -- Import LuaToolbox HTTP module tests
 import qualified LuaToolboxHttpTests
+import qualified LuaToolboxHttpDenylistTests
 -- Import OS Core ECS tests
 import qualified OS.CoreTests
 -- Import OS Conversation tests
@@ -185,6 +186,7 @@ tests =
         , LuaToolboxJsonValueTests.luaToJsonValueTests
         , SqliteRestoreFromTests.tests
         , LuaToolboxHttpTests.luaToolboxHttpTests
+        , LuaToolboxHttpDenylistTests.luaToolboxHttpDenylistTests
         , DeveloperToolboxTests.tests
         , DeveloperToolboxWriteRangeTests.tests
         , DeveloperToolboxPatchTests.tests
@@ -544,6 +546,8 @@ agentSerializationTests =
                     , Base.luaToolboxMaxExecutionTimeSeconds = 300
                     , Base.luaToolboxAllowedTools = ["bash", "sqlite"]
                     , Base.luaToolboxAllowedHosts = ["localhost"]
+                    , Base.luaToolboxHttpMode = Nothing
+                    , Base.luaToolboxDeniedHosts = Nothing
                     , Base.luaToolboxActivation = Nothing
                     }
             let builtinToolbox = Base.LuaToolbox luaDesc

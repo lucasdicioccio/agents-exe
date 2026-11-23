@@ -165,6 +165,8 @@ standardLibrarySource =
         , "   MaxExecutionTimeSeconds: lookup($spec, \"maxExecutionTimeSeconds\", 300),"
         , "   AllowedTools: lookup($spec, \"allowedTools\", []),"
         , "   AllowedHosts: lookup($spec, \"allowedHosts\", [])}"
+        , "  <> $opt($spec, \"httpMode\", (v) => {HttpMode: $v})"
+        , "  <> $opt($spec, \"deniedHosts\", (v) => {DeniedHosts: $v})"
         , "  <> $opt($spec, \"sandbox\", (v) => {FileSandbox: $v})"
         , "  <> $opt($spec, \"activation\", (v) => {Activation: $v}))}"
         , ""

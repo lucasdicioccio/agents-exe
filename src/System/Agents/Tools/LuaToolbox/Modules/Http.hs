@@ -1,36 +1,41 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-{- | HTTP client module for LuaToolbox with enhanced host whitelisting.
+{- | HTTP client module for LuaToolbox with host filtering.
 
-This module provides HTTP request capabilities that are restricted to
-specific allowed hosts. Key security features:
+This module provides HTTP request capabilities restricted by an 'HttpConfig'.
+Key security features:
 
 * Proper URI parsing for host extraction
-* Host whitelist validation
-* Secure default: empty allowedHosts means NO network access
+* Two modes ('HttpMode'): an allowlist (the default; empty allowedHosts means
+  NO network access) or a denylist (every host except deniedHosts)
+* deniedHosts apply in both modes and win over allowedHosts; an IP-literal
+  entry also refuses any host that resolves to that address
+* Redirects are followed by hand and every hop is checked again
 * Standard HTTP methods: GET, POST, and generic request
-
-Host validation extracts the host from the URL and validates it against
-the whitelist before making any requests.
 -}
 module System.Agents.Tools.LuaToolbox.Modules.Http (
     HttpConfig (..),
+    HttpMode,
+    LuaHttpMode (..),
     HttpTrace (..),
     RequestOptions (..),
     registerHttpModule,
     extractHost,
     validateHost,
+    checkUrl,
+    maxRedirects,
     parseOptions,
 ) where
 
 import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
+import Data.Bits (shiftR, (.&.))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.CaseInsensitive (mk)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -42,13 +47,17 @@ import Network.HTTP.Client (
     Request (..),
     RequestBody (RequestBodyBS, RequestBodyLBS),
     Response (..),
+    getUri,
     httpLbs,
     parseRequest,
  )
+import Network.HTTP.Client.Internal (getRedirectedRequest)
 import qualified Network.HTTP.Client.TLS as HTTPS
 import Network.HTTP.Types (statusCode)
+import qualified Network.Socket as NS
 import Network.URI (URI (..), parseURI, uriAuthority, uriRegName)
 import Prod.Tracer (Tracer (..), runTracer)
+import System.Agents.Base (LuaHttpMode (..))
 
 stackIdxToInt :: Lua.StackIndex -> Int
 stackIdxToInt (Lua.StackIndex n) = fromIntegral n
@@ -70,24 +79,37 @@ data HttpTrace
       HttpRequestTrace !Text !Text !Int !(Maybe Text) !(Maybe Int)
     deriving (Show, Eq)
 
+-- | How hosts are filtered (the toolbox's @HttpMode@).
+type HttpMode = LuaHttpMode
+
 {- | HTTP module configuration.
 
 Security defaults:
-* Empty allowedHosts means NO network access
-* All hosts must be explicitly whitelisted
+* In allowlist mode, empty allowedHosts means NO network access
+* deniedHosts win over allowedHosts, in both modes
 
 Example:
 @
 HttpConfig
-    { httpAllowedHosts = ["localhost", "127.0.0.1", "api.example.com"]
+    { httpMode = LuaHttpAllowlist
+    , httpAllowedHosts = ["localhost", "127.0.0.1", "api.example.com"]
+    , httpDeniedHosts = []
     }
 @
 -}
 data HttpConfig = HttpConfig
-    { httpAllowedHosts :: [Text]
-    -- ^ Whitelist of allowed hosts. If empty, NO hosts are allowed (secure default).
+    { httpMode :: HttpMode
+    -- ^ 'LuaHttpAllowlist': only allowedHosts; 'LuaHttpDenylist': all but deniedHosts.
+    , httpAllowedHosts :: [Text]
+    -- ^ Whitelist of allowed hosts (allowlist mode). If empty, NO hosts are allowed.
+    , httpDeniedHosts :: [Text]
+    -- ^ Hosts never reached, in either mode.
     }
     deriving (Show, Eq)
+
+-- | How many redirects a request follows (each hop is re-checked).
+maxRedirects :: Int
+maxRedirects = 10
 
 -- | Register the http module.
 registerHttpModule :: Tracer IO HttpTrace -> Lua.State -> HttpConfig -> IO ()
@@ -129,16 +151,90 @@ extractHost url =
                         then Left "No host in URL"
                         else Right hostVal
 
-{- | Validate host against whitelist.
+{- | Validate a host name against the config, by name only.
 
-An empty whitelist means no hosts are allowed (secure default).
-Returns Left with error message if host is not allowed.
+In allowlist mode an empty whitelist means no hosts are allowed (secure
+default). Denied hosts win in both modes. Hosts are compared ignoring case
+and a trailing dot. Returns Left with an error message if the host is refused.
+
+This does not resolve the host: 'checkUrl' also refuses hosts that resolve to
+an IP-literal entry of deniedHosts.
 -}
 validateHost :: HttpConfig -> Text -> Either Text ()
 validateHost config hostVal
-    | null (httpAllowedHosts config) = Left "No hosts allowed (empty whitelist)"
-    | hostVal `elem` httpAllowedHosts config = Right ()
-    | otherwise = Left $ "Host not in allowed list: " <> hostVal
+    | normHost hostVal `elem` map normHost (httpDeniedHosts config) =
+        Left $ "Host is in denied list: " <> hostVal
+    | otherwise = case httpMode config of
+        LuaHttpDenylist -> Right ()
+        LuaHttpAllowlist
+            | null (httpAllowedHosts config) -> Left "No hosts allowed (empty whitelist)"
+            | normHost hostVal `elem` map normHost (httpAllowedHosts config) -> Right ()
+            | otherwise -> Left $ "Host not in allowed list: " <> hostVal
+
+-- | Lowercase, and drop IPv6 brackets and one trailing dot.
+normHost :: Text -> Text
+normHost h0 =
+    let h1 = Text.toLower (Text.strip h0)
+        h2 = fromMaybe h1 (Text.stripPrefix "[" h1 >>= Text.stripSuffix "]")
+     in fromMaybe h2 (Text.stripSuffix "." h2)
+
+{- | Check a URL before a request (or a redirect hop) is made.
+
+Returns @Left (status, message)@ when the URL is refused: 400 for a URL with
+no usable host, 403 for a host the config refuses.
+-}
+checkUrl :: HttpConfig -> Text -> IO (Either (Int, Text) ())
+checkUrl config url =
+    case extractHost url of
+        Left err -> pure (Left (400, err))
+        Right hostVal -> case validateHost config hostVal of
+            Left err -> pure (Left (403, err))
+            Right () -> checkResolved config hostVal
+
+{- | Refuse a host that resolves to an IP-literal entry of deniedHosts.
+
+Only resolves when deniedHosts has IP literals. Fails closed: a host that
+cannot be resolved is refused, since it could not be checked.
+-}
+checkResolved :: HttpConfig -> Text -> IO (Either (Int, Text) ())
+checkResolved config hostVal = do
+    deniedAddrs <- concat <$> mapM numericAddrs (httpDeniedHosts config)
+    if null deniedAddrs
+        then pure (Right ())
+        else do
+            r <- try (NS.getAddrInfo (Just NS.defaultHints) (Just (Text.unpack (normHost hostVal))) Nothing)
+            case r of
+                Left (_ :: SomeException) ->
+                    pure (Left (403, "Could not resolve host to check it against the denied list: " <> hostVal))
+                Right infos ->
+                    let addrs = mapMaybe (addrKey . NS.addrAddress) infos
+                     in if any (`elem` deniedAddrs) addrs
+                            then pure (Left (403, "Host resolves to a denied address: " <> hostVal))
+                            else pure (Right ())
+
+-- | The addresses of a deniedHosts entry if it is an IP literal, else [].
+numericAddrs :: Text -> IO [AddrKey]
+numericAddrs entry = do
+    let hints = NS.defaultHints{NS.addrFlags = [NS.AI_NUMERICHOST]}
+    r <- try (NS.getAddrInfo (Just hints) (Just (Text.unpack (normHost entry))) Nothing)
+    pure $ case r of
+        Left (_ :: SomeException) -> []
+        Right infos -> mapMaybe (addrKey . NS.addrAddress) infos
+
+-- | An address without port, with IPv4-mapped IPv6 folded into IPv4.
+data AddrKey = AddrV4 (Int, Int, Int, Int) | AddrV6 NS.HostAddress6
+    deriving (Eq, Show)
+
+addrKey :: NS.SockAddr -> Maybe AddrKey
+addrKey (NS.SockAddrInet _ h) =
+    let (a, b, c, d) = NS.hostAddressToTuple h
+     in Just (AddrV4 (fromIntegral a, fromIntegral b, fromIntegral c, fromIntegral d))
+addrKey (NS.SockAddrInet6 _ _ h _) =
+    case NS.hostAddress6ToTuple h of
+        (0, 0, 0, 0, 0, 0xffff, hi, lo) ->
+            Just (AddrV4 (fromIntegral (hi `shiftR` 8), fromIntegral (hi .&. 0xff), fromIntegral (lo `shiftR` 8), fromIntegral (lo .&. 0xff)))
+        _ -> Just (AddrV6 h)
+addrKey _ = Nothing
 
 -- | HTTP GET request with host validation.
 luaGet :: Tracer IO HttpTrace -> HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
@@ -167,22 +263,16 @@ luaGet tracer config manager = do
             let url = Text.pack $ Text.unpack $ Text.decodeUtf8 urlBs
 
             -- Validate host
-            case extractHost url of
-                Left err -> do
-                    liftIO $ runTracer tracer (HttpGetTrace url 400 (Just err) Nothing)
+            checked <- liftIO $ checkUrl config url
+            case checked of
+                Left (code, err) -> do
+                    liftIO $ runTracer tracer (HttpGetTrace url code (Just err) Nothing)
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
-                Right hostVal ->
-                    case validateHost config hostVal of
-                        Left err -> do
-                            liftIO $ runTracer tracer (HttpGetTrace url 403 (Just err) Nothing)
-                            Lua.pushnil
-                            Lua.pushstring (Text.encodeUtf8 err)
-                            pure 2
-                        Right () -> do
-                            let opts = fromMaybe defaultOptions mOptions
-                            performRequest tracer manager "GET" url opts (RequestBodyLBS LBS.empty)
+                Right () -> do
+                    let opts = fromMaybe defaultOptions mOptions
+                    performRequest tracer config manager "GET" url opts (RequestBodyLBS LBS.empty)
 
 {- | HTTP POST request with host validation.
 
@@ -225,22 +315,16 @@ luaPost tracer config manager = do
             let url = Text.pack $ Text.unpack $ Text.decodeUtf8 urlBs
 
             -- Validate host
-            case extractHost url of
-                Left err -> do
-                    liftIO $ runTracer tracer (HttpPostTrace url 400 (Just err) Nothing)
+            checked <- liftIO $ checkUrl config url
+            case checked of
+                Left (code, err) -> do
+                    liftIO $ runTracer tracer (HttpPostTrace url code (Just err) Nothing)
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
-                Right hostVal ->
-                    case validateHost config hostVal of
-                        Left err -> do
-                            liftIO $ runTracer tracer (HttpPostTrace url 403 (Just err) Nothing)
-                            Lua.pushnil
-                            Lua.pushstring (Text.encodeUtf8 err)
-                            pure 2
-                        Right () -> do
-                            let opts = fromMaybe defaultOptions mOptions
-                            performRequest tracer manager "POST" url opts (RequestBodyBS bodyBs)
+                Right () -> do
+                    let opts = fromMaybe defaultOptions mOptions
+                    performRequest tracer config manager "POST" url opts (RequestBodyBS bodyBs)
 
 -- | Generic HTTP request with host validation.
 luaRequest :: Tracer IO HttpTrace -> HttpConfig -> Manager -> Lua.LuaE Lua.Exception Lua.NumResults
@@ -286,25 +370,19 @@ luaRequest tracer config manager = do
             let reqMethod = if BS.null mMethodBs then "GET" else Text.decodeUtf8 mMethodBs
 
             -- Validate host
-            case extractHost url of
-                Left err -> do
-                    liftIO $ runTracer tracer (HttpRequestTrace reqMethod url 400 (Just err) Nothing)
+            checked <- liftIO $ checkUrl config url
+            case checked of
+                Left (code, err) -> do
+                    liftIO $ runTracer tracer (HttpRequestTrace reqMethod url code (Just err) Nothing)
                     Lua.pushnil
                     Lua.pushstring (Text.encodeUtf8 err)
                     pure 2
-                Right hostVal ->
-                    case validateHost config hostVal of
-                        Left err -> do
-                            liftIO $ runTracer tracer (HttpRequestTrace reqMethod url 403 (Just err) Nothing)
-                            Lua.pushnil
-                            Lua.pushstring (Text.encodeUtf8 err)
-                            pure 2
-                        Right () -> do
-                            let opts = fromMaybe defaultOptions mOptions
-                            let reqBody = case mBodyBs of
-                                    Just bs -> RequestBodyBS bs
-                                    Nothing -> RequestBodyLBS LBS.empty
-                            performRequest tracer manager (Text.unpack reqMethod) url opts reqBody
+                Right () -> do
+                    let opts = fromMaybe defaultOptions mOptions
+                    let reqBody = case mBodyBs of
+                            Just bs -> RequestBodyBS bs
+                            Nothing -> RequestBodyLBS LBS.empty
+                    performRequest tracer config manager (Text.unpack reqMethod) url opts reqBody
 
 -- | Request options.
 data RequestOptions = RequestOptions
@@ -385,9 +463,15 @@ parseHeadersTable _idx = do
                 Lua.pop 1 -- pop value, keep key for next iteration
                 go ((keyBs, valBs) : acc)
 
--- | Perform HTTP request.
-performRequest :: Tracer IO HttpTrace -> Manager -> String -> Text -> RequestOptions -> RequestBody -> Lua.LuaE Lua.Exception Lua.NumResults
-performRequest tracer manager reqMethod url opts reqBody = do
+{- | Perform HTTP request.
+
+Redirects are not left to http-client: each 3xx with a Location is turned
+into the next request ('getRedirectedRequest', so methods and headers change
+as http-client would change them), and that hop's URL goes through
+'checkUrl' before it is sent. A refused hop ends the call with an error.
+-}
+performRequest :: Tracer IO HttpTrace -> HttpConfig -> Manager -> String -> Text -> RequestOptions -> RequestBody -> Lua.LuaE Lua.Exception Lua.NumResults
+performRequest tracer config manager reqMethod url opts reqBody = do
     result <- liftIO $ try $ do
         initReq <- parseRequest (Text.unpack url)
         let req =
@@ -395,28 +479,52 @@ performRequest tracer manager reqMethod url opts reqBody = do
                     { method = Text.encodeUtf8 $ Text.pack reqMethod
                     , requestBody = reqBody
                     , requestHeaders = map (\(k, v) -> (mk k, v)) (optHeaders opts)
+                    , redirectCount = 0
                     }
-        httpLbs req manager
+        followRedirects config manager maxRedirects req
 
     case result of
         Left (e :: SomeException) -> do
             let errMsg = Text.pack $ show e
-            liftIO $ case reqMethod of
-                "GET" -> runTracer tracer (HttpGetTrace url 0 (Just errMsg) Nothing)
-                "POST" -> runTracer tracer (HttpPostTrace url 0 (Just errMsg) Nothing)
-                _ -> runTracer tracer (HttpRequestTrace (Text.pack reqMethod) url 0 (Just errMsg) Nothing)
+            liftIO $ traceOutcome 0 (Just errMsg) Nothing
             Lua.pushnil
             Lua.pushstring (Text.encodeUtf8 errMsg)
             pure 2
-        Right response -> do
+        Right (Left (code, errMsg)) -> do
+            liftIO $ traceOutcome code (Just errMsg) Nothing
+            Lua.pushnil
+            Lua.pushstring (Text.encodeUtf8 errMsg)
+            pure 2
+        Right (Right response) -> do
             let status = statusCode $ responseStatus response
             let bodySize = Just $ fromIntegral $ LBS.length $ responseBody response
-            liftIO $ case reqMethod of
-                "GET" -> runTracer tracer (HttpGetTrace url status Nothing bodySize)
-                "POST" -> runTracer tracer (HttpPostTrace url status Nothing bodySize)
-                _ -> runTracer tracer (HttpRequestTrace (Text.pack reqMethod) url status Nothing bodySize)
+            liftIO $ traceOutcome status Nothing bodySize
             pushResponse response
             pure 1
+  where
+    traceOutcome code mErr mSize = case reqMethod of
+        "GET" -> runTracer tracer (HttpGetTrace url code mErr mSize)
+        "POST" -> runTracer tracer (HttpPostTrace url code mErr mSize)
+        _ -> runTracer tracer (HttpRequestTrace (Text.pack reqMethod) url code mErr mSize)
+
+{- | Send a request with redirects disabled, and follow 3xx responses by hand,
+checking each hop's URL first. @Left (status, message)@ when a hop is refused
+or there are too many redirects.
+-}
+followRedirects :: HttpConfig -> Manager -> Int -> Request -> IO (Either (Int, Text) (Response LBS.ByteString))
+followRedirects config manager hopsLeft req = do
+    response <- httpLbs req manager
+    let code = statusCode (responseStatus response)
+    case getRedirectedRequest req req (responseHeaders response) (responseCookieJar response) code of
+        Nothing -> pure (Right response)
+        Just next
+            | hopsLeft <= 0 -> pure (Left (400, "Too many redirects (more than " <> Text.pack (show maxRedirects) <> ")"))
+            | otherwise -> do
+                let nextUrl = Text.pack (show (getUri next))
+                checked <- checkUrl config nextUrl
+                case checked of
+                    Left (c, err) -> pure (Left (c, "Redirect to " <> nextUrl <> " refused: " <> err))
+                    Right () -> followRedirects config manager (hopsLeft - 1) next{redirectCount = 0}
 
 -- | Push response as Lua table.
 pushResponse :: Response LBS.ByteString -> Lua.LuaE Lua.Exception ()

@@ -83,6 +83,8 @@ testLuaToolboxHttp =
         , luaToolboxAllowedTools = []
         , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = ["localhost", "127.0.0.1"]
+        , luaToolboxHttpMode = Nothing
+        , luaToolboxDeniedHosts = Nothing
         }
 
 -- | Toolbox config with NO http access (empty allowedHosts)
@@ -96,6 +98,8 @@ testLuaToolboxNoHttp =
         , luaToolboxAllowedTools = []
         , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = []
+        , luaToolboxHttpMode = Nothing
+        , luaToolboxDeniedHosts = Nothing
         }
 
 withTestToolboxHttp :: (LuaToolbox.Toolbox -> IO ()) -> IO ()

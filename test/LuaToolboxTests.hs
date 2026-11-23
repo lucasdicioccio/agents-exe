@@ -92,6 +92,8 @@ testLuaToolbox =
         , luaToolboxMaxExecutionTimeSeconds = 10
         , luaToolboxAllowedTools = []
         , luaToolboxAllowedHosts = []
+        , luaToolboxHttpMode = Nothing
+        , luaToolboxDeniedHosts = Nothing
         , luaToolboxActivation = Nothing
         , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         }

@@ -149,7 +149,7 @@ import qualified HsLua as Lua
 
 import Prod.Tracer (Tracer (..), contramap, runTracer)
 
-import System.Agents.Base (LuaToolboxDescription (..), defaultFileSandboxConfig, effectiveFileSandbox)
+import System.Agents.Base (LuaToolboxDescription (..), defaultFileSandboxConfig, effectiveFileSandbox, luaToolboxEffectiveDeniedHosts, luaToolboxEffectiveHttpMode)
 import System.Agents.Tools.Context (ToolExecutionContext, ToolPortal)
 
 -- Import standard library modules
@@ -314,7 +314,8 @@ is created fresh for each tool call and destroyed immediately after execution.
 
 Security configuration:
 * fsAllowedPaths: whitelist for filesystem access (empty = no access)
-* httpAllowedHosts: whitelist for HTTP hosts (empty = no access)
+* httpAllowedHosts: whitelist for HTTP hosts (empty = no access), or with
+  HttpMode "denylist" every host except httpDeniedHosts
 * luaToolboxAllowedTools: whitelist for tools (empty = no access)
 
 Example:
@@ -422,12 +423,15 @@ registerStandardModules moduleTracer lstate desc parentCtx portal = do
         fsSandboxConfig
 
     -- Register http module with sandboxing
-    -- Security: empty allowedHosts means NO network access
+    -- Security: in allowlist mode (the default) empty allowedHosts means NO
+    -- network access; deniedHosts are refused in both modes
     HttpMod.registerHttpModule
         httpTracer
         lstate
         HttpMod.HttpConfig
-            { HttpMod.httpAllowedHosts = desc.luaToolboxAllowedHosts
+            { HttpMod.httpMode = luaToolboxEffectiveHttpMode desc
+            , HttpMod.httpAllowedHosts = desc.luaToolboxAllowedHosts
+            , HttpMod.httpDeniedHosts = luaToolboxEffectiveDeniedHosts desc
             }
 
     -- Register tools module with portal

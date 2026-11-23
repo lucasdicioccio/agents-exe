@@ -1362,7 +1362,8 @@ Six standard library modules are pre-registered and available via @require()@:
     * @fs.list(path)@, @fs.mkdir(path)@, @fs.isdir(path)@, @fs.isfile(path)@
     * @fs.patch(path, search, replace)@ - Search and replace in file
 
-* __http__: HTTP requests (host-whitelisted by allowedHosts config)
+* __http__: HTTP requests, restricted by @HttpMode@ (an @AllowedHosts@
+  allowlist by default, or every host except @DeniedHosts@)
     * @http.get(url, [options])@, @http.post(url, body, [options])@
     * @http.request({method, url, body, headers})@ - Generic request
     * Returns: @{status, headers, body}@ table
@@ -1411,6 +1412,47 @@ written above ('luaToolboxOptions'); lowercase keys fail to parse.
 @AllowedTools@ entries are exact tool names as the model sees them (e.g.
 @sqlite_<toolbox>_query@), and @AllowedHosts@ entries are exact host names:
 neither list matches prefixes or wildcards, and an empty list allows nothing.
+
+== HTTP access: allowlist or denylist
+
+@HttpMode@ chooses how the @http@ module decides which hosts a script may
+reach. It is optional and defaults to @"allowlist"@, so a config without it
+behaves as before:
+
+* @"allowlist"@ (default): only the hosts in @AllowedHosts@ are reachable,
+  and an empty @AllowedHosts@ means no network access.
+* @"denylist"@: every host is reachable except those in @DeniedHosts@.
+  @AllowedHosts@ must then be empty or left out; a non-empty one is a parse
+  error rather than a silently ignored list.
+
+@DeniedHosts@ (optional, default empty) applies in both modes and always
+wins over @AllowedHosts@. Its entries follow the same rule as @AllowedHosts@
+(an exact host, no port, no prefix or wildcard), compared case-insensitively
+and ignoring a trailing dot. An entry that is an IP literal (e.g.
+@169.254.169.254@ or @fd00:ec2::254@) also denies any host name, or other
+spelling of the address, that resolves to it: the host is resolved before the
+request and the request is refused if any address matches (or if it cannot be
+resolved). Redirects are followed up to 10 hops, and each hop's target is
+checked again, in both modes. A denylist is a convenience, not a sandbox: it
+cannot see addresses a host name resolves to between the check and the
+connection.
+
+A denylist config that keeps scripts away from cloud instance metadata:
+
+@
+{
+  "tag": "LuaToolbox",
+  "contents": {
+    "Name": "lua",
+    "Description": "Lua with open web access, minus instance metadata",
+    "MaxMemoryMB": 256,
+    "MaxExecutionTimeSeconds": 300,
+    "AllowedTools": [],
+    "HttpMode": "denylist",
+    "DeniedHosts": ["169.254.169.254", "fd00:ec2::254", "metadata.google.internal"]
+  }
+}
+@
 @FileSandbox@ is inline (@fsbPredicate@, @fsbMaxFileSize@, @fsbName@) or a
 reference @{"ref": "<name>"}@ to one of the agent's @fileSandboxes@.
 
@@ -1428,7 +1470,12 @@ data LuaToolboxDescription = LuaToolboxDescription
     , luaToolboxAllowedTools :: [Text]
     -- ^ Whitelist of tool names that Lua scripts can call via the portal
     , luaToolboxAllowedHosts :: [Text]
-    -- ^ Whitelist of network hosts accessible to Lua HTTP module
+    -- ^ Whitelist of network hosts accessible to Lua HTTP module (allowlist
+    -- mode); must be empty in denylist mode. Defaults to @[]@ when omitted.
+    , luaToolboxHttpMode :: Maybe LuaHttpMode
+    -- ^ How the HTTP module filters hosts (default: 'LuaHttpAllowlist')
+    , luaToolboxDeniedHosts :: Maybe [Text]
+    -- ^ Hosts the HTTP module never reaches, in either mode (default: none)
     , luaToolboxActivation :: Maybe Activation
     -- ^ Optional activation mode (default: AlwaysActivated)
     , luaToolboxFileSandbox :: Maybe FileSandboxSpec
@@ -1454,7 +1501,47 @@ instance ToJSON LuaToolboxDescription where
     toEncoding = Aeson.genericToEncoding luaToolboxOptions
 
 instance FromJSON LuaToolboxDescription where
-    parseJSON = Aeson.genericParseJSON luaToolboxOptions
+    parseJSON = Aeson.withObject "LuaToolboxDescription" $ \o -> do
+        -- AllowedHosts may be left out (a denylist config has no use for it).
+        let o' =
+                if KeyMap.member "AllowedHosts" o
+                    then o
+                    else KeyMap.insert "AllowedHosts" (Aeson.Array mempty) o
+        desc <- Aeson.genericParseJSON luaToolboxOptions (Aeson.Object o')
+        case luaToolboxEffectiveHttpMode desc of
+            LuaHttpDenylist
+                | not (null desc.luaToolboxAllowedHosts) ->
+                    fail "LuaToolbox: AllowedHosts must be empty when HttpMode is \"denylist\" (list the hosts to refuse in DeniedHosts)"
+            _ -> pure desc
+
+{- | How the Lua @http@ module decides which hosts a script may reach.
+
+Encoded in JSON as @"allowlist"@ or @"denylist"@.
+-}
+data LuaHttpMode
+    = -- | Only @AllowedHosts@ are reachable (minus @DeniedHosts@).
+      LuaHttpAllowlist
+    | -- | Every host is reachable except @DeniedHosts@.
+      LuaHttpDenylist
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON LuaHttpMode where
+    toJSON LuaHttpAllowlist = Aeson.String "allowlist"
+    toJSON LuaHttpDenylist = Aeson.String "denylist"
+
+instance FromJSON LuaHttpMode where
+    parseJSON = Aeson.withText "LuaHttpMode" $ \case
+        "allowlist" -> pure LuaHttpAllowlist
+        "denylist" -> pure LuaHttpDenylist
+        other -> fail $ "LuaToolbox HttpMode: expecting \"allowlist\" or \"denylist\", got " <> show other
+
+-- | The HTTP mode of a Lua toolbox, with the default applied.
+luaToolboxEffectiveHttpMode :: LuaToolboxDescription -> LuaHttpMode
+luaToolboxEffectiveHttpMode d = fromMaybe LuaHttpAllowlist d.luaToolboxHttpMode
+
+-- | The denied hosts of a Lua toolbox, with the default applied.
+luaToolboxEffectiveDeniedHosts :: LuaToolboxDescription -> [Text]
+luaToolboxEffectiveDeniedHosts d = fromMaybe [] d.luaToolboxDeniedHosts
 
 -------------------------------------------------------------------------------
 -- Developer Toolbox Configuration

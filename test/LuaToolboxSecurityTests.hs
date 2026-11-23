@@ -178,17 +178,17 @@ hostValidationTests =
     testGroup
         "Host validation"
         [ testCase "empty allowedHosts blocks all access" $ do
-            let config = HttpMod.HttpConfig{HttpMod.httpAllowedHosts = []}
+            let config = HttpMod.HttpConfig{HttpMod.httpMode = HttpMod.LuaHttpAllowlist, HttpMod.httpAllowedHosts = [], HttpMod.httpDeniedHosts = []}
             case HttpMod.validateHost config "example.com" of
                 Left msg | "No hosts allowed" `Text.isPrefixOf` msg -> pure ()
                 _ -> assertFailure "Expected 'No hosts allowed' error"
         , testCase "host not in whitelist is rejected" $ do
-            let config = HttpMod.HttpConfig{HttpMod.httpAllowedHosts = ["allowed.com"]}
+            let config = HttpMod.HttpConfig{HttpMod.httpMode = HttpMod.LuaHttpAllowlist, HttpMod.httpAllowedHosts = ["allowed.com"], HttpMod.httpDeniedHosts = []}
             case HttpMod.validateHost config "other.com" of
                 Left msg | "Host not in allowed list" `Text.isPrefixOf` msg -> pure ()
                 _ -> assertFailure "Expected 'Host not in allowed list' error"
         , testCase "host in whitelist is allowed" $ do
-            let config = HttpMod.HttpConfig{HttpMod.httpAllowedHosts = ["allowed.com"]}
+            let config = HttpMod.HttpConfig{HttpMod.httpMode = HttpMod.LuaHttpAllowlist, HttpMod.httpAllowedHosts = ["allowed.com"], HttpMod.httpDeniedHosts = []}
             case HttpMod.validateHost config "allowed.com" of
                 Right () -> pure ()
                 Left err -> assertFailure $ "Expected host to be allowed: " ++ Text.unpack err
@@ -248,6 +248,8 @@ securityDefaultsTests =
                             , luaToolboxAllowedTools = []
                             , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
                             , luaToolboxAllowedHosts = []
+                            , luaToolboxHttpMode = Nothing
+                            , luaToolboxDeniedHosts = Nothing
                             , luaToolboxActivation = Nothing
                             }
 
@@ -278,6 +280,8 @@ securityDefaultsTests =
                         , luaToolboxAllowedTools = []
                         , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
                         , luaToolboxAllowedHosts = []
+                        , luaToolboxHttpMode = Nothing
+                        , luaToolboxDeniedHosts = Nothing
                         , luaToolboxActivation = Nothing
                         }
 
