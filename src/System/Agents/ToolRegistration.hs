@@ -25,6 +25,7 @@ module System.Agents.ToolRegistration (
     Tool,
     Trace (..),
     ToolRegistration (..),
+    toolDeclaredBackground,
 
     -- * Registration functions
     registerBashToolInLLM,
@@ -107,7 +108,9 @@ import System.Agents.Tools.Base (
 import qualified System.Agents.Tools.Base as ToolBase
 import System.Agents.Tools.Bash (ScriptArg (..), ScriptArgArity (..), ScriptDescription (..))
 import qualified System.Agents.Tools.Bash as BashTools
+import System.Agents.Tools.ScriptProcess (ProcessBackground)
 import System.Agents.Tools.ScriptRuntime (getToolRuntimeConfig)
+import System.Agents.Tools.ScriptTypes (scriptBackgroundOf)
 import System.Agents.Tools.Context (ToolCall, ToolExecutionContext)
 import qualified System.Agents.Tools.Context as Context
 import qualified System.Agents.Tools.DeveloperToolbox as DeveloperTools
@@ -177,6 +180,17 @@ instance Show ToolRegistration where
             , show tr.toolActivation
             , ")"
             ]
+
+{- | What a registered tool declares about where its calls run, keyed by
+the name the LLM calls it by: a v2 bash tool's @process.background@
+('scriptBackgroundOf'). Other tools declare nothing.
+-}
+toolDeclaredBackground :: ToolRegistration -> Maybe (Text, ProcessBackground)
+toolDeclaredBackground reg = case reg.innerTool.toolDef of
+    BashTool script -> do
+        bg <- scriptBackgroundOf script.scriptInfo
+        pure (getToolName reg.declareTool.toolDescriptionName, bg)
+    _ -> Nothing
 
 -- naming policy for IO tools
 io2LLMName :: forall a b. IOScript a b -> OpenAI.ToolName

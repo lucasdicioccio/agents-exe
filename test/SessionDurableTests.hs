@@ -40,7 +40,8 @@ import System.Agents.CLI.SessionDurable (
     parseContinuationToken,
     parseResultFile,
  )
-import System.Agents.Session.AgentConfig (argAtPath, argPredicateHolds, llmToolCallArguments, wrapperMatchHolds)
+import qualified Data.Map.Strict as Map
+import System.Agents.Session.AgentConfig (applyAgentDurableConfigWith, argAtPath, argPredicateHolds, buildToolCallPolicyWith, llmToolCallArguments, wrapperMatchHolds)
 import System.Agents.Session.Base
 import System.Agents.Session.Step (applyContinuationMail, getPartialTurn, naiveTilNoToolCallStep, partialTurnForLlm, receiveMailForTurn, runStepM, runStepMAsync)
 import System.Agents.Session.Types
@@ -902,6 +903,20 @@ buildPolicyTests =
             let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "defer_me" (Defer (Reason "test"))] []
             let policy = buildToolCallPolicy cfg
             policy undefined (mkCall "defer_me") @?= Defer (Reason "test")
+        , testCase "a tool's declaration beats the agent's default, the agent's rule beats both" $ do
+            let declared = Map.fromList [("bash_follow", RunAsync Nothing), ("bash_tail", RunAsync (Just 5))]
+                cfg =
+                    Base.ToolCallPolicyConfig
+                        RunSync
+                        [Base.ToolCallPolicyRule "bash_tail" RunSync]
+                        [Base.ToolCallWrapperRule (Base.WrapperMatch (Just "bash_*") Nothing) [WithTimeout 30]]
+                policy = buildToolCallPolicyWith declared cfg
+            -- Declared, no rule: the declaration, still decorated by wrappers.
+            policy undefined (mkCall "bash_follow") @?= Decorate [WithTimeout 30] (RunAsync Nothing)
+            -- Declared, and the agent names the tool: the agent's rule.
+            policy undefined (mkCall "bash_tail") @?= Decorate [WithTimeout 30] RunSync
+            -- Not declared: the agent's default.
+            policy undefined (mkCall "other") @?= RunSync
         , testCase "uses default disposition for unknown tool" $ do
             let cfg = Base.ToolCallPolicyConfig RunSync [Base.ToolCallPolicyRule "defer_me" (Defer (Reason "test"))] []
             let policy = buildToolCallPolicy cfg
@@ -992,6 +1007,16 @@ applyConfigTests =
             let agent' = applyAgentDurableConfig jsonAgent agent
             ctxToolCallPolicy agent' undefined (mkCall "bash_command") @?= Defer (Reason "approval")
             ctxToolCallPolicy agent' undefined (mkCall "other") @?= RunSync
+        , testCase "tool declarations apply with and without a toolCallPolicyConfig" $ do
+            let declared = Map.fromList [("bash_follow", RunAsync (Just 2))]
+                cfg = Base.ToolCallPolicyConfig RunSync [] []
+                withCfg = applyAgentDurableConfigWith declared minimalBaseAgent{Base.toolCallPolicyConfig = Just cfg} (mkAsyncAgent defaultToolCallPolicy)
+                withoutCfg = applyAgentDurableConfigWith declared minimalBaseAgent (mkAsyncAgent (\_ _ -> Defer (Reason "base")))
+            ctxToolCallPolicy withCfg undefined (mkCall "bash_follow") @?= RunAsync (Just 2)
+            ctxToolCallPolicy withCfg undefined (mkCall "other") @?= RunSync
+            -- Without a config, other calls keep the agent's own policy.
+            ctxToolCallPolicy withoutCfg undefined (mkCall "bash_follow") @?= RunAsync (Just 2)
+            ctxToolCallPolicy withoutCfg undefined (mkCall "other") @?= Defer (Reason "base")
         , testCase "sets yield strategy and max concurrency from JSON agent" $ do
             let jsonAgent =
                     minimalBaseAgent

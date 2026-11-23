@@ -10,7 +10,11 @@ same everywhere.
 -}
 module System.Agents.Session.AgentConfig (
     applyAgentDurableConfig,
+    applyAgentDurableConfigWith,
+    DeclaredDispositions,
     buildToolCallPolicy,
+    buildToolCallPolicyWith,
+    withDeclaredDispositions,
     llmToolCallName,
     matchGlob,
     wrapperMatchHolds,
@@ -23,6 +27,8 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as AesonKey
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.List (find)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -43,9 +49,30 @@ its decorators, in file order (outermost first), composed as a single
 'Decorate' around that base.
 -}
 buildToolCallPolicy :: Base.ToolCallPolicyConfig -> ToolCallPolicy
-buildToolCallPolicy cfg _ctx call =
+buildToolCallPolicy = buildToolCallPolicyWith Map.empty
+
+{- | The dispositions tools declare for their own calls, keyed by the name
+the LLM calls them by. Today only a v2 bash tool declares one, with
+@process.background@ (a @RunAsync@).
+-}
+type DeclaredDispositions = Map Text ToolCallDisposition
+
+{- | 'buildToolCallPolicy', also honouring what tools declare for their own
+calls. The base disposition of a call is, first match wins:
+
+1. the agent's 'Base.tpcRules' entry naming the tool: the agent always has
+   the last word on a tool it names;
+2. the tool's own declaration ('DeclaredDispositions');
+3. the agent's 'Base.tpcDefaultDisposition'.
+
+So a tool declaring @process.background@ runs in the background under an
+agent whose default is @runSync@, unless that agent has a rule for it.
+'Base.tpcWrappers' decorate whichever base was picked, as before.
+-}
+buildToolCallPolicyWith :: DeclaredDispositions -> Base.ToolCallPolicyConfig -> ToolCallPolicy
+buildToolCallPolicyWith declared cfg _ctx call =
     let base =
-            maybe (Base.tpcDefaultDisposition cfg) Base.tprDisposition $
+            maybe (fromMaybe (Base.tpcDefaultDisposition cfg) (Map.lookup toolName declared)) Base.tprDisposition $
                 find (\rule -> Base.tprToolName rule == toolName) (Base.tpcRules cfg)
         decorators =
             concat
@@ -140,14 +167,37 @@ matchGlob pattern = go (Text.unpack pattern) . Text.unpack
 Fields absent from the JSON leave the runtime agent unchanged.
 -}
 applyAgentDurableConfig :: Base.Agent -> Agent r -> Agent r
-applyAgentDurableConfig jsonAgent =
+applyAgentDurableConfig = applyAgentDurableConfigWith Map.empty
+
+{- | 'applyAgentDurableConfig', also honouring what the agent's tools declare
+for their own calls. With a @toolCallPolicyConfig@, the policy is
+'buildToolCallPolicyWith' (the agent's rule for a tool, then the tool's
+declaration, then the agent's default). Without one, a declaring tool's
+calls get its declaration and every other call keeps the agent's current
+policy ('withDeclaredDispositions').
+-}
+applyAgentDurableConfigWith :: DeclaredDispositions -> Base.Agent -> Agent r -> Agent r
+applyAgentDurableConfigWith declared jsonAgent =
     setMaybe (Base.asyncCallTimeoutSeconds jsonAgent) (\n a -> a{ctxAsyncCallTimeout = Just n})
         . setMaybe (Base.maxConcurrency jsonAgent) (\n a -> a{ctxMaxConcurrency = Just n})
         . setMaybe (Base.asyncYieldStrategy jsonAgent) withAsyncYieldStrategy
-        . setMaybe (Base.toolCallPolicyConfig jsonAgent) (withToolCallPolicy . buildToolCallPolicy)
+        . maybe (withDeclaredDispositions declared) (withToolCallPolicy . buildToolCallPolicyWith declared) (Base.toolCallPolicyConfig jsonAgent)
         . setMaybe (Base.executionMode jsonAgent) withExecutionMode
         . setMaybe (Base.interruptCompletions jsonAgent) withInterruptCompletions
         . setMaybe (Base.mailInToolResult jsonAgent) withMailInToolResult
   where
     setMaybe :: Maybe a -> (a -> b -> b) -> b -> b
     setMaybe m f x = maybe x (`f` x) m
+
+{- | Give the calls of each declaring tool its declared disposition, and
+leave every other call to the agent's current policy. An empty map leaves
+the agent unchanged.
+-}
+withDeclaredDispositions :: DeclaredDispositions -> Agent r -> Agent r
+withDeclaredDispositions declared agent
+    | Map.null declared = agent
+    | otherwise =
+        agent
+            { ctxToolCallPolicy = \ctx call ->
+                fromMaybe (ctxToolCallPolicy agent ctx call) (Map.lookup (llmToolCallName call) declared)
+            }

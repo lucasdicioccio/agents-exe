@@ -8,7 +8,8 @@ MCP server, and agents called as tools by other agents) builds its agents with
 'buildAgent', so they all get the same behaviour:
 
 1. prompt, tools, tool execution, and the LLM completion function;
-2. the execution settings from the agent's JSON ('applyAgentDurableConfig');
+2. the execution settings from the agent's JSON, and what its tools declare
+   for their own calls ('applyAgentDurableConfigWith', 'declaredDispositions');
 3. the optional continuation store and tool cache from 'AgentDeps';
 4. progressive disclosure of tools ('agentEvaluateActiveTools');
 5. session persistence into the 'SessionSink' from 'AgentDeps', installed
@@ -35,6 +36,7 @@ module System.Agents.AgentFactory (
 
     -- * Helpers
     toolRegistrationToSystemTool,
+    declaredDispositions,
 ) where
 
 import Control.Concurrent.STM (readTVarIO)
@@ -53,7 +55,7 @@ import qualified System.Agents.Combinators.ProgressiveDisclosure as ProgressiveD
 import System.Agents.Combinators.StoreSessionProgress (SessionSink (..), agentPersistSession)
 import qualified System.Agents.HttpClient as HttpClient
 import qualified System.Agents.LLMs.OpenAI as OpenAI
-import System.Agents.Session.AgentConfig (applyAgentDurableConfig)
+import System.Agents.Session.AgentConfig (DeclaredDispositions, applyAgentDurableConfigWith)
 import System.Agents.Session.Async (ContinuationStore)
 import System.Agents.Session.Base
 import qualified System.Agents.Session.Compat as SessionCompat
@@ -67,6 +69,7 @@ import System.Agents.Tools.Context (CallStackEntry (..))
 import System.Agents.Tools.ExecuteToolCall (executeLlmToolCall)
 import System.Agents.Tools.Isolated (ToolIsolation, isolatePortal, isolateToolCalls)
 import System.Agents.Tools.Params.Types (Params)
+import System.Agents.Tools.ScriptProcess (ProcessBackground (..))
 
 -------------------------------------------------------------------------------
 -- Traces
@@ -173,7 +176,8 @@ buildAgent ::
 buildAgent tracer deps role convId node = do
     let agentCfg = node.osNodeConfig
     let sPrompt = SystemPrompt $ Text.unlines $ Base.systemPrompt agentCfg
-    sTools <- fmap toolRegistrationToSystemTool <$> readTVarIO node.osNodeTools
+    registrations <- readTVarIO node.osNodeTools
+    let sTools = fmap toolRegistrationToSystemTool registrations
     resolvedParams <- readTVarIO node.osNodeParams
     exposeBindings <- readTVarIO node.osNodeExposeBindings
     completeF <- case deps.adCompletion of
@@ -237,7 +241,7 @@ buildAgent tracer deps role convId node = do
             (fmap (`Map.union` resolvedParams) deps.adLiveParams)
             exposeBindings
             node.osNodeTools
-            (applyAgentDurableConfig agentCfg base)
+            (applyAgentDurableConfigWith (declaredDispositions registrations) agentCfg base)
     -- Isolation wraps the tool execution that progressive disclosure
     -- installs, so that nothing set before it can leave a covered call
     -- in-process.
@@ -250,6 +254,20 @@ buildAgent tracer deps role convId node = do
     sinkBackend :: SessionSink -> Maybe SessionBackend
     sinkBackend (SinkBackend backend) = Just backend
     sinkBackend _ = Nothing
+
+{- | What the agent's tools declare for their own calls: a tool declaring
+@process.background@ asks for @RunAsync@, with its @attachSeconds@.
+
+Read from the tools registered when the agent is built, like the tool list
+the agent advertises, so a call is classified the same way every time the
+policy is asked about it.
+-}
+declaredDispositions :: [ToolRegistration.ToolRegistration] -> DeclaredDispositions
+declaredDispositions regs =
+    Map.fromList
+        [ (toolName, RunAsync bg.backgroundAttachSeconds)
+        | Just (toolName, bg) <- fmap ToolRegistration.toolDeclaredBackground regs
+        ]
 
 -- | The completion function for the agent's configured endpoint and API key.
 openAICompletion :: Tracer IO Trace -> LoadedApiKeys -> Maybe (Text.Text -> IO ()) -> Base.Agent -> IO Completion

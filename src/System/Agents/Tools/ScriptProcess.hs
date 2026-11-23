@@ -24,6 +24,7 @@ module System.Agents.Tools.ScriptProcess (
     ProcessInput (..),
     ProcessDigest (..),
     ProcessReady (..),
+    ProcessBackground (..),
     ScriptProcess (..),
     defaultScriptProcess,
     defaultProcessOutput,
@@ -56,6 +57,7 @@ import Data.Aeson (FromJSON (..), ToJSON (..), (.!=), (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.Aeson.Types as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as ByteStringChar8
@@ -227,6 +229,38 @@ instance ToJSON ProcessReady where
         ReadyExit -> Aeson.object ["kind" .= ("exit" :: Text)]
         ReadyImmediate -> Aeson.object ["kind" .= ("immediate" :: Text)]
 
+{- | @process.background@: the tool asks for its calls to run in the
+background, as an asynchronous call (@RunAsync@), unless the agent decides
+otherwise. @true@ detaches per the agent's yield strategy;
+@{"attachSeconds": n}@ waits up to @n@ seconds for the call to finish
+before detaching it; @false@, like no field at all, declares nothing. How
+the declaration and the agent's @toolCallPolicyConfig@ combine is
+'System.Agents.Session.AgentConfig.buildToolCallPolicyWith'.
+-}
+newtype ProcessBackground = ProcessBackground
+    { backgroundAttachSeconds :: Maybe Int
+    -- ^ The @attachSeconds@ of the resulting @RunAsync@ disposition.
+    }
+    deriving (Show, Eq, Ord)
+
+instance FromJSON ProcessBackground where
+    parseJSON = Aeson.withObject "process.background" $ \o ->
+        ProcessBackground <$> o .:? "attachSeconds"
+
+instance ToJSON ProcessBackground where
+    toJSON b = case b.backgroundAttachSeconds of
+        Nothing -> Aeson.Bool True
+        Just n -> Aeson.object ["attachSeconds" .= n]
+
+-- | Parses @process.background@: a boolean or an object ('ProcessBackground').
+parseBackground :: Aeson.Value -> Aeson.Parser (Maybe ProcessBackground)
+parseBackground v = case v of
+    Aeson.Bool True -> pure (Just (ProcessBackground Nothing))
+    Aeson.Bool False -> pure Nothing
+    Aeson.Null -> pure Nothing
+    Aeson.Object _ -> Just <$> parseJSON v
+    _ -> fail "invalid process.background, allowed: true, false, {\"attachSeconds\": n}"
+
 -- | The @process@ object of a v2 @describe@.
 data ScriptProcess
     = ScriptProcess
@@ -235,12 +269,14 @@ data ScriptProcess
     , processInput :: Maybe ProcessInput
     , processDigest :: Maybe ProcessDigest
     , processReady :: Maybe ProcessReady
+    , processBackground :: Maybe ProcessBackground
+    -- ^ @process.background@: whether the tool asks for its calls to run in the background.
     }
     deriving (Show, Eq, Ord)
 
 -- | What a v2 tool without a @process@ object gets: a @oneshot@ with @jsonl@ output.
 defaultScriptProcess :: ScriptProcess
-defaultScriptProcess = ScriptProcess ModeOneshot defaultProcessOutput Nothing Nothing Nothing
+defaultScriptProcess = ScriptProcess ModeOneshot defaultProcessOutput Nothing Nothing Nothing Nothing
 
 instance FromJSON ScriptProcess where
     parseJSON = Aeson.withObject "process" $ \o ->
@@ -250,6 +286,7 @@ instance FromJSON ScriptProcess where
             <*> o .:? "input"
             <*> o .:? "digest"
             <*> o .:? "ready"
+            <*> (maybe (pure Nothing) parseBackground =<< o .:? "background")
 
 instance ToJSON ScriptProcess where
     toJSON p =
@@ -260,6 +297,7 @@ instance ToJSON ScriptProcess where
                 <> maybe [] (\i -> ["input" .= i]) p.processInput
                 <> maybe [] (\d -> ["digest" .= d]) p.processDigest
                 <> maybe [] (\r -> ["ready" .= r]) p.processReady
+                <> maybe [] (\b -> ["background" .= b]) p.processBackground
 
 -------------------------------------------------------------------------------
 -- Events

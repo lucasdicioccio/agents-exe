@@ -26,6 +26,7 @@ import Test.Tasty.HUnit
 
 import System.Agents.Base (ConversationId (..))
 import System.Agents.Session.Base (SessionId (..), TurnId (..))
+import qualified System.Agents.ToolRegistration as ToolRegistration
 import qualified System.Agents.Tools.Bash as Bash
 import System.Agents.Tools.Context (ToolExecutionContext (..), mkMinimalContext)
 import System.Agents.Tools.ScriptProcess
@@ -75,6 +76,30 @@ describeTests =
         withFixture "st" (describeThen (v2Describe (Just "{\"mode\": \"stream\", \"ready\": {\"kind\": \"line\", \"match\": \"^ready$\"}}")) "true") $ \path -> do
             desc <- loadOk path
             fmap (.processMode) desc.scriptInfo.scriptProcess @?= Just ModeStream
+    , testCase "process.background is parsed (true, object, false) and round-trips" $ do
+        let bgOf process =
+                withFixture "bg" (describeThen (v2Describe (Just process)) "true") $ \path -> do
+                    desc <- loadOk path
+                    Aeson.decode (Aeson.encode desc.scriptInfo) @?= Just desc.scriptInfo
+                    pure (ScriptTypes.scriptBackgroundOf desc.scriptInfo)
+        bgOf "{\"mode\": \"stream\", \"background\": true}" >>= (@?= Just (ProcessBackground Nothing))
+        bgOf "{\"mode\": \"stream\", \"background\": {\"attachSeconds\": 3}}" >>= (@?= Just (ProcessBackground (Just 3)))
+        bgOf "{\"mode\": \"stream\", \"background\": false}" >>= (@?= Nothing)
+        bgOf "{\"mode\": \"stream\"}" >>= (@?= Nothing)
+    , testCase "process.background is ignored on a v1 tool (D1)" $
+        withFixture "bg1" (describeThen "{\"slug\": \"v1\", \"description\": \"d\", \"args\": [], \"process\": {\"background\": true}}" "true") $ \path -> do
+            desc <- loadOk path
+            ScriptTypes.scriptBackgroundOf desc.scriptInfo @?= Nothing
+    , testCase "a stream tool's background declaration reaches its registration" $
+        withFixture "bgr" (describeThen (v2Describe (Just "{\"mode\": \"stream\", \"background\": {\"attachSeconds\": 0}}")) "true") $ \path -> do
+            desc <- loadOk path
+            fmap snd (ToolRegistration.toolDeclaredBackground (ToolRegistration.registerBashToolInLLM Nothing desc))
+                @?= Just (ProcessBackground (Just 0))
+            fmap fst (ToolRegistration.toolDeclaredBackground (ToolRegistration.registerBashToolInLLM Nothing desc))
+                @?= Just "bash_v2"
+    , testCase "an invalid process.background is refused" $ do
+        refused (v2Describe (Just "{\"mode\": \"stream\", \"background\": \"yes\"}"))
+        refused (v2Describe (Just "{\"mode\": \"stream\", \"background\": {\"attachSeconds\": -1}}"))
     , testCase "an invalid ready pattern is refused" $
         refused (v2Describe (Just "{\"mode\": \"stream\", \"ready\": {\"kind\": \"line\", \"match\": \"(\"}}"))
     , testCase "a ready line needs line-based framing" $

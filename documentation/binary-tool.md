@@ -220,12 +220,35 @@ until it exits or the call is cancelled (`cancel-tool-call`, or the agent's
 `asyncCallTimeoutSeconds`), then gets its `cancel` signal and, after
 `timeout.stop`, `SIGKILL`.
 
-A stream is best run as an asynchronous call: give the tool a `RunAsync`
-disposition in the agent's `toolCallPolicyConfig` (and an asynchronous
-`executionMode`), so the model gets the `running` placeholder, can follow
-the events with `get-tool-call-status`, and gets the result when the tool
-exits. Under a synchronous disposition the call simply waits for the exit,
-as any call does. Standard input gets the `stdin`-mode arguments and is
+A stream is best run as an asynchronous call, so the model gets the
+`running` placeholder, can follow the events with `get-tool-call-status`,
+and gets the result when the tool exits. The tool can ask for that itself
+with `process.background`:
+
+```json
+"process": { "mode": "stream", "background": true }
+```
+
+`true` runs each call as `RunAsync`, detached per the agent's
+`asyncYieldStrategy`; `{"attachSeconds": n}` runs it as `RunAsync` with
+that many seconds to finish before it is detached (`0` detaches at once);
+`false`, or no field, declares nothing. A `oneshot` tool may declare it
+too (a long build, say). It only takes effect under an asynchronous
+`executionMode`, like any `RunAsync`.
+
+The agent still decides. A call's disposition is, first match wins:
+
+1. the agent's `toolCallPolicyConfig.rules` entry naming the tool;
+2. the tool's `process.background`;
+3. the agent's `toolCallPolicyConfig.default` (without a
+   `toolCallPolicyConfig`, the agent's built-in default, `runSync`).
+
+So an agent overrides a tool's declaration by naming the tool in a rule
+(e.g. `{"tool": "bash_follow_build", "disposition": {"tag": "runSync"}}`),
+while its `default` only covers tools that declare nothing. The
+`wrappers` decorate whichever disposition was picked. The declaration is
+read when the agent is built, with the tool list. Under a synchronous
+disposition the call simply waits for the exit, as any call does. Standard input gets the `stdin`-mode arguments and is
 closed, as for a `oneshot`: talking to a running tool is the `service` mode.
 
 ### Protocol v2: runtime

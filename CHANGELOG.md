@@ -8,6 +8,11 @@
 - `agents-server` and `agents-exe serve` serve the project's icon (the website's `favicon.png`, embedded in the binary) at `GET /favicon.ico` and `GET /favicon.png`, without a token; the chat page links it with `<link rel="icon">`
 - The icon (website and server) is now a 64x64 reduction of the agents-exe logo (`logo-01.png`, the head on a transparent background) instead of the salmon icon
 
+#### Bash tools v2: a tool may declare that its calls run in the background
+- A v2 bash tool may declare `"process": {"background": true}` (or `{"attachSeconds": n}`) so that its calls run as `RunAsync` without the agent naming it in `toolCallPolicyConfig`; meant for `stream` tools, accepted on `oneshot` ones too. A negative `attachSeconds` fails to load; v1 tools ignore it
+- Which wins: the agent's `toolCallPolicyConfig.rules` entry naming the tool, then the tool's declaration, then the agent's `default`; `wrappers` decorate the result. Documented in `documentation/binary-tool.md` (Protocol v2: stream)
+- Library: `ProcessBackground` and `processBackground` in `System.Agents.Tools.ScriptProcess`; `scriptBackgroundOf` in `System.Agents.Tools.ScriptTypes`; `toolDeclaredBackground` in `System.Agents.ToolRegistration`; `DeclaredDispositions`, `buildToolCallPolicyWith`, `applyAgentDurableConfigWith`, `withDeclaredDispositions` in `System.Agents.Session.AgentConfig`; `declaredDispositions` in `System.Agents.AgentFactory`
+
 #### Bash tools v2: stream mode
 - A v2 bash tool may declare `"process": {"mode": "stream"}`: a long-running tool whose events are reported as progress as they arrive and whose result, when it exits, is its latest events with the count of the earlier ones (`{"events": [...], "elided": n}` under `jsonl`). Its output is never held whole: a bounded ring keeps the latest events, sized by the agent's new `streamResultEvents` (default 200), and only the tail of standard error is kept
 - `process.ready` (`line` with a regular expression, `exit`, `immediate`) applies to a stream; `runtime.timeout.start` bounds reaching it rather than the whole run. A stream with `timeout.start` but no `line`/`exit` ready, a `line` ready under `chunks` framing, or `output-media-type` fails to load
