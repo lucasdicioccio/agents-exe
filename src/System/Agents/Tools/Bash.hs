@@ -45,6 +45,7 @@ module System.Agents.Tools.Bash (
     buildToolEnvironment,
     runProcessReportingOutput,
     runProcessReportingEvents,
+    runProcessReportingEventsStopping,
     notifyLinePrefix,
 
     -- * Re-exports

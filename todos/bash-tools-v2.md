@@ -19,14 +19,17 @@ and the typed `<tool>_send` companion, the shared `processes` tool with
 `list`/`status`/`tail`/`stop`, mail digests from `process:<id>`,
 `timeout.idle`, `on_exit` and `cancel` by `send`, stopped on session
 delete), and #539's `commands`
-(`todos/bash-tools-subcommands.md`). Not yet: `check` (the flag is parsed
-and recorded only), capabilities with backends; for `service`: `list` does
+(`todos/bash-tools-subcommands.md`), and the `check` verb with
+`agents-exe check --probe [--json]` (§1.5, `System.Agents.Tools.ScriptCheck`,
+"Protocol v2: check" there: one capability per tool binary for now; exit 2
+when a tool's probe is `failed` or `skipped`; probes run on demand only,
+never at load). Not yet: capabilities with backends; for `service`: `list` does
 not include a root agent's sub-sessions' processes, an agent configuration
 cannot yet omit a `_send` companion (D6), and `digest: round` is
 approximated by a one-second quiet period (the tool layer does not see the
 session's rounds). The Landlock sandbox
 mechanism is implemented (`System.Agents.Tools.Landlock`, agents-exe as its
-own launcher); `check --probe` does not report what `auto` resolved to yet. The
+own launcher); `check --probe` reports what `auto` resolved to per tool. The
 event schema validator is a subset of JSON Schema, listed in the docs.
 The operator options (`--envdir-root`, `--run-as-mechanism`, `--sandbox`)
 are global to the `agents-exe` process.

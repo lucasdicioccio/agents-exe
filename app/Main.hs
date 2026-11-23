@@ -502,6 +502,14 @@ parseCheckOptions =
             ( long "show-config"
                 <> help "Print each agent file's JSON configuration; for a .tramaj template, the JSON it evaluates to"
             )
+        <*> switch
+            ( long "probe"
+                <> help "Run every bash tool's check verb under its runtime and report ok/failed/unverified/skipped and the sandbox mechanism used; exits 2 when a tool has no active backend"
+            )
+        <*> switch
+            ( long "json"
+                <> help "With --probe, print the probe report as JSON"
+            )
 
 -- | Parse the check-tool-call command
 parseCheckToolCallCommand :: Parser Command

@@ -48,6 +48,7 @@ import qualified BashSubcommandsTests
 import qualified BashToolsV2Tests
 import qualified BashToolsServiceTests
 import qualified BashToolsRuntimeTests
+import qualified BashToolsCheckTests
 -- Import Skills tests
 -- Import FileSandbox predicate tests
 import qualified FileSandboxPredicateTests
@@ -165,6 +166,7 @@ tests =
         , BashToolsV2Tests.tests
         , BashToolsServiceTests.tests
         , BashToolsRuntimeTests.tests
+        , BashToolsCheckTests.tests
         , NarrowingTests.tests
         , SkillsTests.skillsTestSuite
         , FileSandboxPredicateTests.tests

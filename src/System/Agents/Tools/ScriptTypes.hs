@@ -213,7 +213,7 @@ data ScriptInfo
     , scriptRuntime :: Maybe ScriptRuntime
     -- ^ The v2 @runtime@ object: how the tool asks to be run (see "System.Agents.Tools.ScriptRuntime").
     , scriptCheck :: Bool
-    -- ^ The v2 @check@ flag (the @check@ verb is a later slice; recorded only).
+    -- ^ The v2 @check@ flag: the tool answers @./tool check@ ("System.Agents.Tools.ScriptCheck").
     }
     deriving (Show, Eq, Ord)
 
