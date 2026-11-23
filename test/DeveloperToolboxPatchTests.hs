@@ -81,6 +81,14 @@ tests =
         , testCase "Multi-hunk patch with line insertions succeeds" testMultiHunkNoDrift
         , testCase "Expected snapshot mismatch is rejected" testExpectedSnapshotMismatch
         , testCase "Expected snapshot match succeeds" testExpectedSnapshotMatch
+        , testCase "Exact header reports zero offset" testExactHeaderZeroOffset
+        , testCase "Hunk with header too low is located below" testOffsetForward
+        , testCase "Hunk with header too high is located above" testOffsetBackward
+        , testCase "Header past end of file is located" testOffsetPastEnd
+        , testCase "Later hunks reuse the first hunk's offset" testOffsetCarried
+        , testCase "Nearest match to the header wins" testOffsetNearestWins
+        , testCase "Context found nowhere still reports mismatch at header" testOffsetNoMatch
+        , testCase "Located hunks that overlap are rejected" testOffsetOverlap
         ]
 
 -- | Baseline: a well-formed patch with exact context applies cleanly.
@@ -303,3 +311,120 @@ testExpectedSnapshotMatch = withTempDir $ \tmpDir ->
                 assertBool "Should not contain original line 2" $
                     not ("line 2" `Text.isInfixOf` content)
 
+
+-- | A ten-line file, "l1" .. "l10".
+tenLines :: Text
+tenLines = Text.unlines [Text.pack ("l" ++ show i) | i <- [1 :: Int .. 10]]
+
+-- | Apply a patch and return its offsets and the file's lines afterwards.
+applyAndRead :: Text -> Text -> IO (Either DeveloperToolError ([Int], [Text]))
+applyAndRead original patch = withTempDir $ \tmpDir ->
+    withTestFile tmpDir original $ \filePath -> do
+        toolbox <- patchToolbox
+        result <- applyPatch toolbox filePath patch Nothing
+        content <- Text.readFile filePath
+        pure $ fmap (\r -> (patchHunkOffsets r, Text.lines content)) result
+
+testExactHeaderZeroOffset :: Assertion
+testExactHeaderZeroOffset = do
+    result <- applyAndRead tenLines (Text.unlines ["@@ -4,3 +4,3 @@", " l4", "-l5", "+L5", " l6"])
+    case result of
+        Left err -> assertFailure $ show err
+        Right (offsets, lines') -> do
+            offsets @?= [0]
+            take 6 lines' @?= ["l1", "l2", "l3", "l4", "L5", "l6"]
+
+testOffsetForward :: Assertion
+testOffsetForward = do
+    -- The hunk really starts at line 6, the header says 3.
+    result <- applyAndRead tenLines (Text.unlines ["@@ -3,3 +3,3 @@", " l6", "-l7", "+L7", " l8"])
+    case result of
+        Left err -> assertFailure $ show err
+        Right (offsets, lines') -> do
+            offsets @?= [3]
+            drop 5 lines' @?= ["l6", "L7", "l8", "l9", "l10"]
+            take 5 lines' @?= ["l1", "l2", "l3", "l4", "l5"]
+
+testOffsetBackward :: Assertion
+testOffsetBackward = do
+    -- The hunk really starts at line 2, the header says 7.
+    result <- applyAndRead tenLines (Text.unlines ["@@ -7,3 +7,4 @@", " l2", "-l3", "+L3a", "+L3b", " l4"])
+    case result of
+        Left err -> assertFailure $ show err
+        Right (offsets, lines') -> do
+            offsets @?= [-5]
+            take 6 lines' @?= ["l1", "l2", "L3a", "L3b", "l4", "l5"]
+            length lines' @?= 11
+
+testOffsetPastEnd :: Assertion
+testOffsetPastEnd = do
+    result <- applyAndRead tenLines (Text.unlines ["@@ -40,2 +40,2 @@", " l9", "-l10", "+L10"])
+    case result of
+        Left err -> assertFailure $ show err
+        Right (offsets, lines') -> do
+            offsets @?= [-31]
+            drop 8 lines' @?= ["l9", "L10"]
+
+testOffsetCarried :: Assertion
+testOffsetCarried = do
+    -- The first hunk is found 2 lines below its header. "x" appears at
+    -- lines 3, 7 and 9: on its own, the second hunk's header (4) is nearest
+    -- to 3, but the first hunk's offset (+2) moves the guess to 6, nearest 7.
+    let original = Text.unlines ["a", "b", "x", "c", "d", "e", "x", "f", "x"]
+    let patch =
+            Text.unlines
+                [ "@@ -2,2 +2,2 @@"
+                , " c"
+                , "-d"
+                , "+D"
+                , "@@ -4,1 +4,1 @@"
+                , "-x"
+                , "+X"
+                ]
+    result <- applyAndRead original patch
+    case result of
+        Left err -> assertFailure $ show err
+        Right (offsets, lines') -> do
+            offsets @?= [2, 3]
+            lines' @?= ["a", "b", "x", "c", "D", "e", "X", "f", "x"]
+
+testOffsetNearestWins :: Assertion
+testOffsetNearestWins = do
+    -- "dup" occurs at lines 2 and 8; the header (6) is nearer to 8.
+    let original = Text.unlines ["a", "dup", "b", "c", "d", "e", "f", "dup", "g"]
+    result <- applyAndRead original (Text.unlines ["@@ -6,1 +6,1 @@", "-dup", "+DUP"])
+    case result of
+        Left err -> assertFailure $ show err
+        Right (offsets, lines') -> do
+            offsets @?= [2]
+            lines' @?= ["a", "dup", "b", "c", "d", "e", "f", "DUP", "g"]
+
+testOffsetNoMatch :: Assertion
+testOffsetNoMatch = do
+    result <- applyAndRead tenLines (Text.unlines ["@@ -4,2 +4,2 @@", " l4", "-nope", "+yes"])
+    case result of
+        Right _ -> assertFailure "Expected PatchContextMismatch"
+        Left (PatchValidationError (PatchContextMismatch line _ expected actual)) -> do
+            line @?= 5
+            expected @?= ["nope"]
+            actual @?= ["l5"]
+        Left err -> assertFailure $ "Expected PatchContextMismatch, got: " ++ show err
+
+testOffsetOverlap :: Assertion
+testOffsetOverlap = do
+    -- Distinct headers, but both hunks are found at lines 5-6.
+    let patch =
+            Text.unlines
+                [ "@@ -1,2 +1,2 @@"
+                , " l5"
+                , "-l6"
+                , "+L6"
+                , "@@ -8,2 +8,2 @@"
+                , "-l5"
+                , "+L5"
+                , " l6"
+                ]
+    result <- applyAndRead tenLines patch
+    case result of
+        Left (PatchValidationError (PatchHunkOverlap _ _)) -> pure ()
+        other -> assertFailure $ "Expected PatchHunkOverlap, got: " ++ show other

@@ -28,6 +28,11 @@
 - `patch-file`: the tool schema and `help` now say context lines start with a single space and that the `@@ -START` line must be the exact line of the hunk's first context or removed line; the `help` example is a hunk with context. The old text said context lines have no prefix, which breaks on indented code
 - `ranges` describes the read and write meanings separately; `session_id` is declared once (it was declared twice and the read-side description was lost); the tool description names `read-file-range`, `write-file-range` and `patch-file` when they are enabled
 
+#### patch-file: offset search for off-by-N hunk headers
+- A hunk that does not match at its `@@` line is applied at the nearest place where its context and removed lines match exactly (no fuzz); later hunks start their search from the previous hunk's offset. A hunk found nowhere fails as before, with the mismatch reported at its header line
+- `PatchResult` has `patchHunkOffsets` (JSON `hunkOffsets`): per hunk, found line minus header line
+- Library: `locateHunk` and `locateAllHunks` in `System.Agents.Tools.DeveloperToolbox`
+
 #### Bash tools v2: runtime for oneshot tools
 - A v2 bash tool may declare a `runtime` object: `envdir` (read the daemontools way under the operator's `--envdir-root`), `environment`, `rundir`, `timeout.start` (the call's deadline) and `timeout.stop`, `cancel` (`SIGTERM` or `SIGINT`), `run_as` (enforced with `--run-as-mechanism setpriv|sudo|runuser`) and `sandbox` (`fs.read`/`fs.write`, `net`, `tmp`; enforced with `--sandbox bwrap|auto`)
 - A tool that declares what the operator did not configure fails to load, naming the field; so does an unknown `runtime` field. Still refused at load: `timeout.idle`, `on_exit`, `cancel` by `send` (service only)

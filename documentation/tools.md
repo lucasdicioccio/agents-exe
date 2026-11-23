@@ -1525,7 +1525,7 @@ Applies a unified diff patch to a file atomically with context validation and ri
 **Patch Format:**
 Follows standard unified diff format:
 - File headers (`---` and `+++` lines) are ignored
-- Hunk headers start with `@@` (e.g., `@@ -10,5 +11,6 @@`); the old start must be the exact 1-based line of the hunk's first context or removed line (hunks are not searched for)
+- Hunk headers start with `@@` (e.g., `@@ -10,5 +11,6 @@`); the old start is the 1-based line of the hunk's first context or removed line; a hunk that does not match there is applied at the nearest place where its context and removed lines match exactly
 - Context lines start with a single space, then the file's text unchanged
 - Removed lines start with `-`
 - Added lines start with `+`

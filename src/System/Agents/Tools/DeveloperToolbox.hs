@@ -95,6 +95,8 @@ module System.Agents.Tools.DeveloperToolbox (
     parseUnifiedDiff,
     validateHunk,
     validateAllHunks,
+    locateHunk,
+    locateAllHunks,
     applyHunk,
 
     -- * Config-based template functions (exposed for testing)

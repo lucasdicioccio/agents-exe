@@ -540,6 +540,9 @@ data PatchResult = PatchResult
     -- ^ Number of hunks rejected
     , patchLinesChanged :: Int
     -- ^ Total number of lines changed
+    , patchHunkOffsets :: [Int]
+    -- ^ Per hunk, in patch order: found line minus the @\@\@@ header line
+    -- (0 when the header was right, non-zero when the hunk was located nearby)
     , patchBeforeSnapshotRef :: Maybe SnapshotRef
     -- ^ Reference to snapshot of file content before patch (if snapshot enabled)
     , patchAfterSnapshotRef :: Maybe SnapshotRef
@@ -555,6 +558,7 @@ instance ToJSON PatchResult where
             , "hunksApplied" .= patchHunksApplied result
             , "hunksRejected" .= patchHunksRejected result
             , "linesChanged" .= patchLinesChanged result
+            , "hunkOffsets" .= patchHunkOffsets result
             , "beforeSnapshotRef" .= patchBeforeSnapshotRef result
             , "afterSnapshotRef" .= patchAfterSnapshotRef result
             ]
