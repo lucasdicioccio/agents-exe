@@ -10,9 +10,9 @@ framing and validation (`System.Agents.Tools.ScriptProcess`, documented in
 `oneshot` tools (`System.Agents.Tools.ScriptRuntime`, "Protocol v2:
 runtime" in the same document), slice (3), `stream` (§2.2, "Protocol v2:
 stream" there: a bounded ring of the latest events, the agent's
-`streamResultEvents`, `ready` line/exit bounded by `timeout.start`; whether
-the call detaches stays the agent's `toolCallPolicyConfig`, a tool does not
-declare its own disposition), and #539's `commands`
+`streamResultEvents`, `ready` line/exit bounded by `timeout.start`; a tool
+may ask for its calls to run in the background with `process.background`,
+which the agent's `toolCallPolicyConfig` rule for that tool overrides), and #539's `commands`
 (`todos/bash-tools-subcommands.md`). Not yet: `check` (the flag is parsed
 and recorded only), `service` and `process.input` (refused at load), the
 service-only `runtime` fields (`timeout.idle`, `on_exit`, `cancel` by

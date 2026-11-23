@@ -23,6 +23,7 @@ module System.Agents.Tools.ScriptTypes (
     -- * Protocol v2
     scriptProcessOf,
     scriptRuntimeOf,
+    scriptBackgroundOf,
     validateScriptV2,
 
     -- * Script located on disk
@@ -44,6 +45,7 @@ import GHC.Generics (Generic)
 
 import System.Agents.Tools.ScriptProcess (
     OutputFraming (..),
+    ProcessBackground (..),
     ProcessMode (..),
     ProcessOutput (..),
     ProcessReady (..),
@@ -266,6 +268,12 @@ scriptRuntimeOf info
     | info.scriptProtocol >= 2 = info.scriptRuntime
     | otherwise = Nothing
 
+{- | Whether a tool asks for its calls to run in the background
+(@process.background@): only a v2 tool's declaration is honoured (D1).
+-}
+scriptBackgroundOf :: ScriptInfo -> Maybe ProcessBackground
+scriptBackgroundOf info = scriptProcessOf info >>= (.processBackground)
+
 {- | Checks the v2 declarations of a description against what this runtime
 implements (slices 1 to 3 of @todos/bash-tools-v2.md@: @oneshot@ with
 framing and validation, its @runtime@, and @stream@) and what the operator configured
@@ -308,6 +316,11 @@ validateScriptV2 cfg info =
                   | p.processMode == ModeOneshot
                   , Just r <- [p.processReady]
                   , r /= ReadyExit
+                  ]
+                , [ "process.background.attachSeconds must be 0 or more, got " <> Prelude.show n
+                  | Just bg <- [p.processBackground]
+                  , Just n <- [bg.backgroundAttachSeconds]
+                  , n < 0
                   ]
                 , maybe [] (validateScriptRuntime cfg) info.scriptRuntime
                 , [ "output-media-type requires process.output.framing \"chunks\" (binary output cannot be cut into events)"
