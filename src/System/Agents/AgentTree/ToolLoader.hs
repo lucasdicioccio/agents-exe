@@ -73,6 +73,8 @@ import System.Agents.ToolSchema (getToolName)
 import qualified System.Agents.Tools.Bindings as Bindings
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import System.Agents.Tools.ScriptProcess (ProcessMode (..), ScriptProcess (..))
+import System.Agents.Tools.ScriptTypes (scriptProcessOf)
 import System.Agents.Tools.Activation (Activation)
 import qualified System.Agents.Tools.Params as ParamsResolve
 import System.Agents.Tools.Params.Types (ParamValue (..), ParameterDecl (..), Params, ProcessParams)
@@ -230,11 +232,26 @@ loadBashTools tracer resolvedParams agent toolsTVar = do
                         [] -> do
                             -- Create registrations for each script, applying the source's activation
                             -- config and any partial-application bindings (todos/tool-partial-application.md)
-                            let registrations = concatMap makeRegistrations activationAndScripts
+                            -- A service tool also brings its typed send companion,
+                            -- and any service the shared processes tool, once
+                            -- (todos/bash-tools-v2.md §2.4).
+                            let toolRegistrations = concatMap makeRegistrations activationAndScripts
                                   where
                                     makeRegistrations (mbActivation, toolBindings, scripts) =
                                         let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
-                                         in map (Bindings.applyBindings specialized . ToolReg.registerBashToolInLLMWith runOptions mbActivation) scripts
+                                         in concatMap
+                                                ( \script -> case ToolReg.registerBashToolsInLLMWith runOptions mbActivation script of
+                                                    (start : companions) -> Bindings.applyBindings specialized start : companions
+                                                    [] -> []
+                                                )
+                                                scripts
+                                hasService =
+                                    or
+                                        [ maybe False (\p -> p.processMode == ModeService) (scriptProcessOf script.scriptInfo)
+                                        | (_, _, scripts) <- activationAndScripts
+                                        , script <- scripts
+                                        ]
+                                registrations = toolRegistrations <> [ToolReg.registerProcessesTool | hasService]
                                 exposeBindings =
                                     concatMap
                                         (\(_, toolBindings, _) -> filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings)

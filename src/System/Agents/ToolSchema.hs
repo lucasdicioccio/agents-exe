@@ -13,6 +13,7 @@ module System.Agents.ToolSchema (
 
 import Data.Aeson (FromJSON, ToJSON, Value (..), (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -40,6 +41,11 @@ data ParamType
     | OpaqueParamType Text
     | MultipleParamType Text -- todo: break limitation preventing string-enum and null
     | ObjectParamType [ParamProperty]
+    | {- | A JSON Schema given verbatim (a service tool's declared
+      @process.input.event@, for its typed @send@ companion); the
+      description is added to it.
+      -}
+      SchemaParamType Value
     deriving (Show, Ord, Eq, Generic)
 instance FromJSON ParamType
 instance ToJSON ParamType
@@ -64,6 +70,11 @@ jsonSchema p =
             ["type" .= typ, "description" .= p.propertyDescription]
         MultipleParamType allowedTypes ->
             ["type" .= allowedTypes, "description" .= p.propertyDescription]
+        SchemaParamType schema -> case schema of
+            Object o -> [(k, v) | (k, v) <- KM.toList o, k /= "description"] <> ["description" .= p.propertyDescription]
+            -- a boolean schema: true accepts anything, false nothing
+            Bool False -> ["not" .= Aeson.object [], "description" .= p.propertyDescription]
+            _ -> ["description" .= p.propertyDescription]
         ObjectParamType propz ->
             let requiredProps = filter propertyRequired propz
              in [ "type" .= ("object" :: Text)

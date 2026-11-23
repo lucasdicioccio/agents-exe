@@ -225,6 +225,9 @@ validateParamTypeWithPath path paramType value = case (paramType, value) of
                 ]
     (EnumParamType _, _) ->
         [ValidationError path $ "Expected string (enum) but got " <> valueTypeName value]
+    (SchemaParamType _, _) ->
+        -- A verbatim schema (a service's input event) is checked by its consumer
+        []
     (OpaqueParamType _, _) ->
         -- Opaque types accept any value (used for flexible/unknown types)
         []

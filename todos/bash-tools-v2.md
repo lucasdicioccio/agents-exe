@@ -12,11 +12,19 @@ runtime" in the same document), slice (3), `stream` (§2.2, "Protocol v2:
 stream" there: a bounded ring of the latest events, the agent's
 `streamResultEvents`, `ready` line/exit bounded by `timeout.start`; a tool
 may ask for its calls to run in the background with `process.background`,
-which the agent's `toolCallPolicyConfig` rule for that tool overrides), and #539's `commands`
+which the agent's `toolCallPolicyConfig` rule for that tool overrides), slice (4), `service` (§2.3, §2.4,
+`System.Agents.Tools.ScriptService`, "Protocol v2: service" there: handles
+in a process-wide registry owned by the starting session, `process.input`
+and the typed `<tool>_send` companion, the shared `processes` tool with
+`list`/`status`/`tail`/`stop`, mail digests from `process:<id>`,
+`timeout.idle`, `on_exit` and `cancel` by `send`, stopped on session
+delete), and #539's `commands`
 (`todos/bash-tools-subcommands.md`). Not yet: `check` (the flag is parsed
-and recorded only), `service` and `process.input` (refused at load), the
-service-only `runtime` fields (`timeout.idle`, `on_exit`, `cancel` by
-`send`: refused at load), capabilities with backends. The Landlock sandbox
+and recorded only), capabilities with backends; for `service`: `list` does
+not include a root agent's sub-sessions' processes, an agent configuration
+cannot yet omit a `_send` companion (D6), and `digest: round` is
+approximated by a one-second quiet period (the tool layer does not see the
+session's rounds). The Landlock sandbox
 mechanism is implemented (`System.Agents.Tools.Landlock`, agents-exe as its
 own launcher); `check --probe` does not report what `auto` resolved to yet. The
 event schema validator is a subset of JSON Schema, listed in the docs.

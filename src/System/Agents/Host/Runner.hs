@@ -174,6 +174,7 @@ import System.Agents.SessionStore (
  )
 import System.Agents.ToolRegistration (ToolRegistration (..))
 import System.Agents.ToolSchema (ToolDescription (..), ToolName (..))
+import System.Agents.Tools.ScriptService (globalProcessRegistry, stopSessionProcesses)
 import System.Agents.Tools.Params.Types (
     ParamName,
     ParamScope (..),
@@ -2597,6 +2598,9 @@ deleteSession runner sid mode =
                 else do
                     mOwner <- ownerOfLive runner s
                     n <- host.hostContinuations.csDeleteSession s
+                    -- its service processes are stopped with their declared cancel
+                    -- (todos/bash-tools-v2.md §3)
+                    stopSessionProcesses globalProcessRegistry s
                     host.hostBackend.sbDelete s
                     dropLive runner live
                     emitOwned runner s mOwner (SessionDeleted s)

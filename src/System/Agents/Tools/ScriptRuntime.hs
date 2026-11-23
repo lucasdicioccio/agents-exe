@@ -14,9 +14,9 @@ A tool that declares something the operator did not configure fails to load,
 naming the field: it never runs unconfined, or as the wrong user, by
 silence.
 
-What a @oneshot@ cannot use (@timeout.idle@, @on_exit@, a @cancel@ that
-writes to stdin) is refused at load by 'validateScriptRuntime'; the service
-slice implements it.
+What only a @service@ uses (@timeout.idle@, @on_exit@, a @cancel@ that
+writes to stdin) is refused at load on any other tool by
+'validateScriptRuntimeFor'; @System.Agents.Tools.ScriptService@ implements it.
 -}
 module System.Agents.Tools.ScriptRuntime (
     -- * Declaration (what the tool asks for)
@@ -42,6 +42,7 @@ module System.Agents.Tools.ScriptRuntime (
 
     -- * Load-time checks
     validateScriptRuntime,
+    validateScriptRuntimeFor,
 
     -- * Sandbox mechanism resolution
     SandboxSupport (..),
@@ -354,12 +355,19 @@ getToolRuntimeConfig = readIORef toolRuntimeConfigRef
 -- Load-time checks
 -------------------------------------------------------------------------------
 
-{- | Checks a @oneshot@ tool's @runtime@ against what this runtime implements
-and what the operator configured. Returns the problems (empty when valid),
-each naming the field.
+{- | Checks a @oneshot@ (or @stream@) tool's @runtime@ against what this
+runtime implements and what the operator configured. Returns the problems
+(empty when valid), each naming the field.
 -}
 validateScriptRuntime :: ToolRuntimeConfig -> ScriptRuntime -> [String]
-validateScriptRuntime cfg r =
+validateScriptRuntime = validateScriptRuntimeFor False
+
+{- | 'validateScriptRuntime', saying whether the tool is a @service@: only a
+service may declare @timeout.idle@, @on_exit@ and a @cancel@ that writes an
+event to its standard input.
+-}
+validateScriptRuntimeFor :: Bool -> ToolRuntimeConfig -> ScriptRuntime -> [String]
+validateScriptRuntimeFor isService cfg r =
     mconcat
         [ case r.runtimeEnvdir of
             Nothing -> []
@@ -404,14 +412,17 @@ validateScriptRuntime cfg r =
           | (name, Just s) <- [("start", r.runtimeTimeout.timeoutStart), ("stop", r.runtimeTimeout.timeoutStop), ("idle", r.runtimeTimeout.timeoutIdle)]
           , s <= 0
           ]
-        , [ "runtime.timeout.idle only applies to a service (not implemented yet)"
-          | isJust r.runtimeTimeout.timeoutIdle
+        , [ "runtime.timeout.idle only applies to a service (process.mode \"service\")"
+          | not isService
+          , isJust r.runtimeTimeout.timeoutIdle
           ]
-        , [ "runtime.on_exit only applies to a service (not implemented yet)"
-          | isJust r.runtimeOnExit
+        , [ "runtime.on_exit only applies to a service (process.mode \"service\")"
+          | not isService
+          , isJust r.runtimeOnExit
           ]
-        , [ "runtime.cancel {\"send\": ...} needs an open stdin (process.input, not implemented yet); use \"SIGTERM\" or \"SIGINT\""
-          | Just (CancelSend _) <- [r.runtimeCancel]
+        , [ "runtime.cancel {\"send\": ...} needs an open stdin (a service with process.input); use \"SIGTERM\" or \"SIGINT\""
+          | not isService
+          , Just (CancelSend _) <- [r.runtimeCancel]
           ]
         ]
   where
