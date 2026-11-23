@@ -489,6 +489,11 @@ data RunScriptError
       does not match the declared input, an exit before @ready@...).
       -}
       ScriptServiceError FilePath String
+    | {- | A call to a capability (@todos/bash-tools-v2.md@ §1.5) failed: the
+      capability, the backend that served it, and how it failed. The next
+      backend is not tried.
+      -}
+      ScriptBackendError Text Text RunScriptError
     deriving (Show)
 
 -- | Flattens arguments associated with textual values into an array suitable to run as executable.

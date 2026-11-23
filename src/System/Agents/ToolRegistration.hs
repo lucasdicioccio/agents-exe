@@ -31,6 +31,8 @@ module System.Agents.ToolRegistration (
     registerBashToolInLLM,
     registerBashToolInLLMWith,
     registerBashToolsInLLMWith,
+    registerCapabilityToolInLLMWith,
+    tagBackendResult,
     registerProcessesTool,
     processesToolName,
     registerIOScriptInLLM,
@@ -377,6 +379,38 @@ registerBashToolsInLLMWith opts mbActivation script =
                 , Just input <- p.processInput ->
                     [registerServiceSendTool mbActivation script input]
             _ -> []
+
+{- | The registration of a capability (@todos/bash-tools-v2.md@ §1.5): the
+active backend's tool under the capability's name, given here as the
+script (see "System.Agents.Tools.Capability"), whose results name the
+backend that served them ('tagBackendResult').
+-}
+registerCapabilityToolInLLMWith ::
+    BashTools.RunOptions ->
+    Maybe Activation ->
+    -- | The capability.
+    Text ->
+    -- | The active backend's name.
+    Text ->
+    ScriptDescription ->
+    ToolRegistration
+registerCapabilityToolInLLMWith opts mbActivation capability backend script =
+    let reg = registerBashToolInLLMWith opts mbActivation script
+        tagged :: Tool a -> Tool a
+        tagged t = t{ToolBase.toolRun = \tr ctx v -> tagBackendResult capability backend <$> ToolBase.toolRun t tr ctx v}
+     in reg{innerTool = tagged reg.innerTool, findTool = fmap tagged . reg.findTool}
+
+{- | Every result of a capability carries the backend that served it: a text
+result starts with a @[backend NAME]@ line, an error is wrapped in
+'BashTools.ScriptBackendError'. A binary result is left as it is.
+-}
+tagBackendResult :: Text -> Text -> CallResult a -> CallResult a
+tagBackendResult capability backend r = case r of
+    BlobToolSuccess c bs Nothing
+        | Right _ <- Text.decodeUtf8' bs ->
+            BlobToolSuccess c (Text.encodeUtf8 ("[backend " <> backend <> "]\n") <> bs) Nothing
+    BashToolError c err -> BashToolError c (BashTools.ScriptBackendError capability backend err)
+    other -> other
 
 registerServiceSendTool :: Maybe Activation -> ScriptDescription -> ProcessInput -> ToolRegistration
 registerServiceSendTool mbActivation script input =

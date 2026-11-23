@@ -19,7 +19,7 @@ import Control.Concurrent.STM (STM, atomically)
 import Control.Concurrent.STM.TMVar (TMVar, newEmptyTMVarIO, takeTMVar, tryPutTMVar)
 import Data.Either (partitionEithers)
 import qualified Data.List as List
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Prod.Background as Background
@@ -30,6 +30,7 @@ import System.FilePath (takeFileName, (</>))
 import System.Agents.Base (BashToolboxDescription (..), FileSystemDirectoryDescription (..), SingleToolDescription (..))
 import System.Agents.Tools.Activation (Activation)
 import qualified System.Agents.Tools.Bash as BashTools
+import qualified System.Agents.Tools.ScriptCheck as ScriptCheck
 import System.Agents.Tools.Bindings.Types (Binding)
 
 -------------------------------------------------------------------------------
@@ -39,6 +40,10 @@ data Trace
     = BashToolsLoadingTrace !BashTools.LoadTrace
     | ReloadToolsTrace !(Background.Track [BashTools.ScriptDescription])
     | SourceLoadingError !FilePath String
+    | {- | A capability's backends were probed at load: the capability, the
+      active backend (if any), and the probes that ran, in order.
+      -}
+      CapabilitySelected !Text !(Maybe Text) ![ScriptCheck.ProbeResult]
     deriving (Show)
 
 -------------------------------------------------------------------------------
@@ -94,8 +99,11 @@ data MultiSourceBashTools = MultiSourceBashTools
 
 Relative paths are always resolved relative to the execution's current
 working directory.
+
+A 'Capability' is not a source: its backends are loaded and selected by
+"System.Agents.Tools.Capability", so it has none here.
 -}
-descriptionToSource :: BashToolboxDescription -> IO ToolSource
+descriptionToSource :: BashToolboxDescription -> IO (Maybe ToolSource)
 descriptionToSource (FileSystemDirectory desc) = do
     cwd <- getCurrentDirectory
 
@@ -103,14 +111,15 @@ descriptionToSource (FileSystemDirectory desc) = do
     let fsDir = fromMaybe "" desc.fsDirRoot </> desc.fsDirPath
         resolved = if isRelative fsDir then cwd </> fsDir else desc.fsDirPath
 
-    pure $ DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved desc.fsDirActivation (fromMaybe [] desc.fsDirBindings)
+    pure $ Just $ DirectorySource desc.fsDirPath desc.fsDirBasenameFilter resolved desc.fsDirActivation (fromMaybe [] desc.fsDirBindings)
 descriptionToSource (SingleTool desc) = do
     cwd <- getCurrentDirectory
 
     -- Build the full path
     let resolved = if isRelative desc.singleToolPath then cwd </> desc.singleToolPath else desc.singleToolPath
 
-    pure $ SingleSource resolved desc.singleToolActivation (fromMaybe [] desc.singleToolBindings)
+    pure $ Just $ SingleSource resolved desc.singleToolActivation (fromMaybe [] desc.singleToolBindings)
+descriptionToSource (Capability _) = pure Nothing
 
 -- | Check if a path is relative (simple heuristic).
 isRelative :: FilePath -> Bool
@@ -135,7 +144,7 @@ initializeMultiSourceToolbox ::
     [BashToolboxDescription] ->
     IO (Either LoadingError MultiSourceBashTools)
 initializeMultiSourceToolbox tracer descriptions = do
-    toolSources <- mapM descriptionToSource descriptions
+    toolSources <- catMaybes <$> mapM descriptionToSource descriptions
     results <- mapM (initializeSource tracer) toolSources
     let (errors, bgTools) = partitionEithers results
     if null errors

@@ -37,6 +37,7 @@ module System.Agents.Tools.ScriptRuntime (
     defaultToolRuntimeConfig,
     parseRunAsMechanism,
     parseSandboxMechanism,
+    parseBackendOverride,
     setToolRuntimeConfig,
     getToolRuntimeConfig,
 
@@ -314,11 +315,15 @@ data ToolRuntimeConfig = ToolRuntimeConfig
     -- ^ @--envdir-root@ (D7: never an implicit location).
     , runAsMechanism :: Maybe RunAsMechanism
     , sandboxMechanism :: Maybe SandboxMechanism
+    , backendOverrides :: [(Text, Text)]
+    {- ^ @--backend CAPABILITY=BACKEND@ (repeatable, §1.5): the named backend
+    of the capability is tried first. A name no backend has is ignored.
+    -}
     }
     deriving (Show, Eq, Ord)
 
 defaultToolRuntimeConfig :: ToolRuntimeConfig
-defaultToolRuntimeConfig = ToolRuntimeConfig Nothing Nothing Nothing
+defaultToolRuntimeConfig = ToolRuntimeConfig Nothing Nothing Nothing []
 
 parseRunAsMechanism :: String -> Either String RunAsMechanism
 parseRunAsMechanism s = case s of
@@ -326,6 +331,13 @@ parseRunAsMechanism s = case s of
     "sudo" -> Right RunAsSudo
     "runuser" -> Right RunAsRunuser
     _ -> Left ("unknown run-as mechanism " <> show s <> ", allowed: setpriv, sudo, runuser")
+
+-- | Parses one @--backend CAPABILITY=BACKEND@.
+parseBackendOverride :: String -> Either String (Text, Text)
+parseBackendOverride s = case break (== '=') s of
+    (cap, '=' : backend)
+        | not (null cap) && not (null backend) -> Right (Text.pack cap, Text.pack backend)
+    _ -> Left ("expected CAPABILITY=BACKEND, got " <> show s)
 
 parseSandboxMechanism :: String -> Either String SandboxMechanism
 parseSandboxMechanism s = case s of

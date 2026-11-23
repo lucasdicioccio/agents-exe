@@ -32,13 +32,14 @@ import Control.Concurrent.STM (TVar, atomically, modifyTVar', readTVar)
 import Control.Exception (SomeException, try)
 import qualified Data.Aeson as Aeson
 import Data.Either (partitionEithers)
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.ByteString.Lazy.Char8 as LChar8
 import System.Environment (getEnvironment)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
-import Prod.Tracer (Tracer (..), contramap)
+import Prod.Tracer (Tracer (..), contramap, runTracer)
 import System.Directory (getCurrentDirectory)
 import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
@@ -48,6 +49,7 @@ import System.Agents.Base (
     Agent (..),
     BashToolboxDescription (..),
     BuiltinToolboxDescription (..),
+    CapabilityDescription (..),
     DeveloperToolboxDescription (..),
     FileSystemDirectoryDescription (..),
     LuaToolboxDescription (..),
@@ -63,6 +65,7 @@ import System.Agents.Base (
     SqliteToolboxDescription (..),
     SystemToolCapability (..),
     SystemToolboxDescription (..),
+    capabilityIsRequired,
     resolveBuiltinToolboxSandboxes,
  )
 import System.Agents.SessionStore (SessionCatalog)
@@ -73,6 +76,8 @@ import System.Agents.ToolSchema (getToolName)
 import qualified System.Agents.Tools.Bindings as Bindings
 import qualified System.Agents.Tools.Bash as BashTools
 import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import qualified System.Agents.Tools.Capability as Capability
+import System.Agents.Tools.ScriptRuntime (ToolRuntimeConfig (..), getToolRuntimeConfig)
 import System.Agents.Tools.ScriptProcess (ProcessMode (..), ScriptProcess (..))
 import System.Agents.Tools.ScriptTypes (scriptProcessOf)
 import System.Agents.Tools.Activation (Activation)
@@ -207,7 +212,26 @@ loadBashTools ::
     TVar [ToolRegistration] ->
     IO (Maybe LoadingError, [Bindings.Binding])
 loadBashTools tracer resolvedParams agent toolsTVar = do
-    let descriptions = collectBashDescriptions agent
+    (sourcesErr, sourcesExpose) <- loadBashSources tracer resolvedParams agent toolsTVar
+    (capErrs, capExpose) <- loadCapabilities tracer resolvedParams agent toolsTVar
+    let err = case (sourcesErr, capErrs) of
+            (Just e, _) -> Just e
+            (Nothing, []) -> Nothing
+            (Nothing, errs) -> Just (BashLoadingError (List.intercalate "\n" errs))
+    pure (err, sourcesExpose <> capExpose)
+
+-- | The bash tools of the directories and single tools of the agent.
+loadBashSources ::
+    Tracer IO Trace ->
+    Params ->
+    Agent ->
+    TVar [ToolRegistration] ->
+    IO (Maybe LoadingError, [Bindings.Binding])
+loadBashSources tracer resolvedParams agent toolsTVar = do
+    let descriptions = [d | d <- collectBashDescriptions agent, not (isCapability d)]
+        isCapability d = case d of
+            Capability _ -> True
+            _ -> False
         runOptions = maybe BashTools.defaultRunOptions BashTools.RunOptions agent.streamResultEvents
         secretParamNames = Set.fromList [p.paramName | p <- fromMaybe [] agent.parameters, p.paramSecret]
 
@@ -259,6 +283,60 @@ loadBashTools tracer resolvedParams agent toolsTVar = do
 
                             atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
                             pure (Nothing, exposeBindings)
+
+{- | The capabilities of the agent (@todos/bash-tools-v2.md@ §1.5): for each
+one, its backends are loaded and probed in order, and the active one is
+registered under the capability's name. A configuration error, or a
+required capability without an active backend, is an error; an optional
+one without an active backend is left out (traced).
+-}
+loadCapabilities ::
+    Tracer IO Trace ->
+    Params ->
+    Agent ->
+    TVar [ToolRegistration] ->
+    IO ([String], [Bindings.Binding])
+loadCapabilities tracer resolvedParams agent toolsTVar = do
+    let caps = [c | Capability c <- collectBashDescriptions agent]
+        runOptions = maybe BashTools.defaultRunOptions BashTools.RunOptions agent.streamResultEvents
+        secretParamNames = Set.fromList [p.paramName | p <- fromMaybe [] agent.parameters, p.paramSecret]
+    if null caps
+        then pure ([], [])
+        else do
+            cfg <- getToolRuntimeConfig
+            cwd <- getCurrentDirectory
+            results <- mapM (loadCapability cfg cwd runOptions secretParamNames) caps
+            let (errs, loaded) = partitionEithers results
+                registrations = concat [regs | Just (regs, _) <- loaded]
+                exposed = concat [ex | Just (_, ex) <- loaded]
+            atomically $ modifyTVar' toolsTVar (\existing -> existing ++ registrations)
+            pure (errs, exposed)
+  where
+    loadCapability cfg cwd runOptions secretParamNames cap = do
+        let capability = cap.capName
+            paths = [if BashToolbox.isRelative p then cwd </> p else p | p <- cap.capBackends]
+            bashTracer = contramap BashToolboxTrace tracer
+        backends <- Capability.loadBackendsWith cfg (contramap BashToolbox.BashToolsLoadingTrace bashTracer) paths
+        case Capability.validateBackends capability backends of
+            Left problem -> pure (Left problem)
+            Right () -> do
+                let ordered = Capability.orderBackends cfg.backendOverrides capability backends
+                (active, probes) <- Capability.selectActiveBackend cfg capability ordered
+                runTracer bashTracer (BashToolbox.CapabilitySelected capability (fmap ((.backendName) . fst) active) probes)
+                case active of
+                    Nothing
+                        | capabilityIsRequired cap -> pure (Left (Capability.noActiveBackendMessage capability probes))
+                        | otherwise -> pure (Right Nothing)
+                    Just (backend, desc) -> do
+                        let script = Capability.capabilityTool capability desc
+                            toolBindings = fromMaybe [] cap.capBindings
+                        case checkSecretBindingModes secretParamNames (cap.capActivation, toolBindings, [script]) of
+                            (problem : _) -> pure (Left problem)
+                            [] -> do
+                                let specialized = Bindings.specializeProcessParams resolvedParams toolBindings
+                                    reg = ToolReg.registerCapabilityToolInLLMWith runOptions cap.capActivation capability backend.backendName script
+                                    exposed = filter ((== Bindings.Expose) . Bindings.bindWhenUnbound) toolBindings
+                                pure (Right (Just ([Bindings.applyBindings specialized reg], exposed)))
 
 {- | Load-time guard against a secret parameter binding to a bash argument
 whose calling mode is not @env@: a positional/@--foo@/@--foo=@ argument

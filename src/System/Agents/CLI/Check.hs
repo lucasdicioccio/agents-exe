@@ -10,9 +10,11 @@ With @--probe@ (@todos/bash-tools-v2.md@ §1.5) it also runs the @check@ verb
 of every bash tool the agents load, under the tool's real @runtime@, and
 reports each one as @ok@, @failed@, @unverified@ or @skipped@, with what the
 operator's @--sandbox@ resolved to for it; @--json@ prints that report as
-JSON. Exit codes with @--probe@: 1 when a configuration does not load, 2
-when it loads but a tool has no active backend (its probe failed or was
-skipped), 0 otherwise.
+JSON. A capability (§1.5) is reported with every backend probed, in the
+order they are tried (after the operator's @--backend@), and its active
+backend; any other bash tool binary is a capability of its own. Exit codes
+with @--probe@: 1 when a configuration does not load, 2 when it loads but a
+tool, or a required capability, has no active backend, 0 otherwise.
 
 This module uses OS-native structures for agent management.
 -}
@@ -48,6 +50,13 @@ import System.Agents.Tools.Base (Tool (..), ToolDef (..))
 import qualified System.Agents.Tools.Bash as Bash
 import qualified System.Agents.Tools.Params.Types as Params
 import qualified System.Agents.Tools.ScriptCheck as ScriptCheck
+import qualified System.Agents.Base as Base
+import qualified System.Agents.Tools.BashToolbox as BashToolbox
+import qualified System.Agents.Tools.Capability as Capability
+import System.Agents.Tools.ScriptRuntime (ToolRuntimeConfig (..), getToolRuntimeConfig)
+import System.Directory (getCurrentDirectory)
+import System.FilePath ((</>))
+import qualified Data.List as List
 
 data Trace
     = AgentTreeTrace !AgentTree.TreeTrace
@@ -96,6 +105,7 @@ handleCheck tracer opts apiKeysFile processParams templateLibraries agentFiles =
     apiKeys <- AgentTree.readOpenApiKeysFile apiKeysFile
     loadFailed <- newIORef False
     scripts <- newIORef []
+    capabilities <- newIORef []
     let quiet = opts.probe && opts.probeJson
 
     forM_ agentFiles $ \agentFile -> do
@@ -121,37 +131,77 @@ handleCheck tracer opts apiKeysFile processParams templateLibraries agentFiles =
                     when opts.probe $ do
                         found <- treeBashScripts tree
                         modifyIORef' scripts (<> found)
+                        modifyIORef' capabilities (<> treeCapabilities tree)
 
     when opts.probe $ do
         failed <- readIORef loadFailed
         found <- readIORef scripts
-        reports <- forM (ScriptCheck.toolBinaries found) $ \(desc, names) -> do
+        caps <- List.nub <$> readIORef capabilities
+        binaryReports <- forM (ScriptCheck.toolBinaries found) $ \(desc, names) -> do
             r <- ScriptCheck.probeScript names desc
             pure (ScriptCheck.capabilityReport r.probeName [r])
+        capReports <- forM caps probeCapabilityDescription
+        let reports = binaryReports <> map snd capReports
         if opts.probeJson
             then LBS8.putStrLn (Aeson.encodePretty reports)
-            else printProbeReport reports
+            else printProbeReport binaryReports capReports
+        let missing =
+                not (all ScriptCheck.hasActiveBackend binaryReports)
+                    || or [Base.capabilityIsRequired c && not (ScriptCheck.hasActiveBackend r) | (c, r) <- capReports]
         if failed
             then exitWith (ExitFailure 1)
-            else
-                unless (all ScriptCheck.hasActiveBackend reports) $
-                    exitWith (ExitFailure 2)
+            else when missing $ exitWith (ExitFailure 2)
 
--- | Every bash tool loaded by any agent of the tree.
+-- | Probes every backend of a capability, in the order they are tried.
+probeCapabilityDescription :: Base.CapabilityDescription -> IO (Base.CapabilityDescription, ScriptCheck.CapabilityReport)
+probeCapabilityDescription cap = do
+    cfg <- getToolRuntimeConfig
+    cwd <- getCurrentDirectory
+    let paths = [if BashToolbox.isRelative p then cwd </> p else p | p <- cap.capBackends]
+    backends <- Capability.loadBackendsWith cfg Prod.silent paths
+    report <- Capability.probeCapability cfg cap.capName (Capability.orderBackends cfg.backendOverrides cap.capName backends)
+    pure (cap, report)
+
+-- | Every capability declared by any agent of the tree.
+treeCapabilities :: AgentTree.OSAgentTree -> [Base.CapabilityDescription]
+treeCapabilities tree =
+    [ c
+    | node <- Map.elems (AgentTree.osTreeNodes tree)
+    , Base.Capability c <- maybe [] id (Base.bashToolboxes node.osNodeConfig)
+    ]
+
+{- | Every bash tool loaded by any agent of the tree, except the active
+backends of capabilities, which are reported with their capability.
+-}
 treeBashScripts :: AgentTree.OSAgentTree -> IO [Bash.ScriptDescription]
 treeBashScripts tree = do
     perNode <- forM (Map.elems (AgentTree.osTreeNodes tree)) $ \node -> do
         tools <- readTVarIO (AgentTree.osNodeTools node)
-        pure [script | tool <- tools, BashTool script <- [tool.innerTool.toolDef]]
+        let capNames = [c.capName | Base.Capability c <- maybe [] id (Base.bashToolboxes node.osNodeConfig)]
+        pure
+            [ script
+            | tool <- tools
+            , BashTool script <- [tool.innerTool.toolDef]
+            , script.scriptInfo.scriptSlug `notElem` capNames
+            ]
     pure (concat perNode)
 
-printProbeReport :: [ScriptCheck.CapabilityReport] -> IO ()
-printProbeReport reports = do
+printProbeReport :: [ScriptCheck.CapabilityReport] -> [(Base.CapabilityDescription, ScriptCheck.CapabilityReport)] -> IO ()
+printProbeReport binaries caps = do
     Text.putStrLn ""
     Text.putStrLn "**Probes:**"
-    when (null reports) $ Text.putStrLn "(no bash tools)"
-    forM_ reports $ \c -> forM_ c.capabilityBackends $ \p ->
+    when (null binaries && null caps) $ Text.putStrLn "(no bash tools)"
+    forM_ binaries $ \c -> forM_ c.capabilityBackends $ \p ->
         Text.putStrLn ("- " <> ScriptCheck.renderProbeLine p)
+    forM_ caps $ \(cap, c) -> do
+        Text.putStrLn $
+            "- capability "
+                <> c.capabilityName
+                <> (if Base.capabilityIsRequired cap then "" else " (optional)")
+                <> ": "
+                <> maybe "no active backend" ("active " <>) c.capabilityActive
+        forM_ c.capabilityBackends $ \p ->
+            Text.putStrLn ("  - " <> ScriptCheck.renderProbeLine p)
 
 {- | Print the JSON an agent file holds, as loading sees it: a @.tramaj@
 template is evaluated first. A file that does not load prints nothing here;

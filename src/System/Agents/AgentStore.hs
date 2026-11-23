@@ -111,6 +111,7 @@ storedPathErrors agent files =
         [("toolDirectory", dir) | Just dir <- [Base.toolDirectory agent]]
             ++ [("bashToolboxes path", desc.fsDirPath) | Base.FileSystemDirectory desc <- toolboxes]
             ++ [("bashToolboxes path", desc.singleToolPath) | Base.SingleTool desc <- toolboxes]
+            ++ [("bashToolboxes backend", path) | Base.Capability desc <- toolboxes, path <- desc.capBackends]
     contained path =
         not (null path) && not (isAbsolute path) && ".." `notElem` splitDirectories path
 
@@ -169,6 +170,7 @@ materializeToolFiles dir sa = do
             ++ [desc.fsDirPath | Base.FileSystemDirectory desc <- fromMaybe [] (Base.bashToolboxes agent)]
     inDir (Base.FileSystemDirectory desc) = Base.FileSystemDirectory desc{Base.fsDirPath = dir </> desc.fsDirPath}
     inDir (Base.SingleTool desc) = Base.SingleTool desc{Base.singleToolPath = dir </> desc.singleToolPath}
+    inDir (Base.Capability desc) = Base.Capability desc{Base.capBackends = map (dir </>) desc.capBackends}
 
 -- | An agent store in the host's SQLite database (table @agents@).
 mkSqliteAgentStore :: Connection -> IO AgentStore

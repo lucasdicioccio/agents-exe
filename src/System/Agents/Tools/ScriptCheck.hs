@@ -24,8 +24,9 @@ A probe's 'ProbeStatus' is:
 * 'ProbeSkipped': the operator's sandbox mechanism cannot enforce what the
   tool declares here (§1.4), so @check@ was not run.
 
-Capabilities with ordered backends are a later slice: for now each tool
-binary is its own capability with a single backend ('CapabilityReport').
+A tool binary that is not a backend of a capability
+("System.Agents.Tools.Capability") is reported as a capability of its own
+with a single backend ('CapabilityReport').
 -}
 module System.Agents.Tools.ScriptCheck (
     ProbeStatus (..),
@@ -124,9 +125,8 @@ instance Aeson.ToJSON ProbeResult where
                 <> maybe [] (\f -> ["fix" .= f]) p.probeFix
                 <> maybe [] (\s -> ["sandbox" .= s]) p.probeSandbox
 
-{- | The @check --probe --json@ shape of §1.5, per capability. Until
-capabilities with ordered backends land, a capability is one tool binary
-with a single backend.
+{- | The @check --probe --json@ shape of §1.5, per capability: its backends
+in the order they are tried, and the active one (by name).
 -}
 data CapabilityReport = CapabilityReport
     { capabilityName :: Text

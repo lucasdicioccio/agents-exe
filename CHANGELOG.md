@@ -4,6 +4,15 @@
 
 ### New Features
 
+#### Bash tools v2: capabilities with ordered backends
+- A `bashToolboxes` entry `{"tag": "Capability", "contents": {"capability": "web_read", "backends": [...], "required": true}}` gives the model one tool, `bash_web_read`, served by the first working backend: probes run in order when the agent loads and stop at the first `ok` backend, else the first `unverified` one is active. A backend that does not load is `failed`
+- Backends must be single-command, non-service tools with the same `args` (names, types, arity); otherwise the agent does not load. A required capability (the default) with no active backend fails the load with every probe in the error; an optional one is left out
+- `--backend CAPABILITY=BACKEND` (repeatable) moves the named backend (its file name) first; an unknown name is ignored
+- A capability's text results start with `[backend NAME]`; its errors are `ScriptBackendError capability backend err`. A failed call is not retried on another backend
+- `check --probe` reports each capability with every backend, in order, and the active one; it exits 2 when a required capability has no active backend
+- Library: `System.Agents.Tools.Capability`; `Capability`/`CapabilityDescription` in `System.Agents.Base`; `backendOverrides` in `ToolRuntimeConfig`; `registerCapabilityToolInLLMWith` and `tagBackendResult` in `System.Agents.ToolRegistration`; `BashToolbox.descriptionToSource` returns a `Maybe`
+- See `documentation/binary-tool.md` (Protocol v2: capabilities with ordered backends) and `todos/bash-tools-v2.md`
+
 #### Bash tools v2: the check verb and `check --probe`
 - A v2 tool declaring `"check": true` answers `./tool check` with a read-only self-test, one JSON document `{"ok", "detail", "fix"}`, exit 0 when usable
 - `agents-exe check --probe` runs every loaded bash tool's `check` under its real `runtime` (envdir, environment, rundir, run_as, sandbox, `timeout.start` else 30s) and reports `ok`, `failed` (with detail and fix), `unverified` (no `check`) or `skipped` (the `--sandbox` mechanism cannot enforce the tool's `sandbox`), with the time taken and what `--sandbox auto` resolved to; `--json` prints the §1.5 shape (one capability per tool binary for now)
