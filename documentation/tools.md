@@ -1839,8 +1839,58 @@ The Lua toolbox enables a powerful pattern called **Recursive Language Models (L
 | `MaxMemoryMB` | integer | Maximum Lua heap memory in megabytes |
 | `MaxExecutionTimeSeconds` | integer | Maximum script execution time in seconds |
 | `AllowedTools` | [string] | Whitelist of tool names Lua scripts can call via the portal |
-| `AllowedHosts` | [string] | Whitelist of network hosts accessible to Lua HTTP module |
+| `AllowedHosts` | [string] | Whitelist of network hosts accessible to Lua HTTP module (allowlist mode); must be empty or absent in denylist mode; defaults to `[]` |
+| `HttpMode` | string? | `"allowlist"` (default) or `"denylist"`; see [HTTP access](#http-access-allowlist-or-denylist) |
+| `DeniedHosts` | [string]? | Hosts the HTTP module never reaches, in either mode; wins over `AllowedHosts` |
 | `FileSandbox` | object? | File sandbox configuration for Lua `fs` module; inline or `{"ref": name}` |
+
+### HTTP access: allowlist or denylist
+
+`HttpMode` chooses how the Lua `http` module filters hosts. It is optional,
+so existing configs keep their behaviour:
+
+- `"allowlist"` (default): only `AllowedHosts` are reachable; an empty list
+  means no network access.
+- `"denylist"`: every host is reachable except `DeniedHosts`. `AllowedHosts`
+  must be empty or left out; a non-empty one fails to parse instead of being
+  silently ignored.
+
+`DeniedHosts` applies in both modes and always wins over `AllowedHosts`.
+
+Matching rules, the same for both lists: an entry is an exact host (no
+scheme, port, path, prefix or wildcard), compared ignoring case and a
+trailing dot, so `169.254.169.254` refuses every port of that address and
+`metadata.google.internal` does not refuse `x.metadata.google.internal`.
+An IPv6 entry is written with or without brackets.
+
+An IP-literal entry in `DeniedHosts` also refuses any host that resolves to
+that address (a DNS name pointing at it, or another spelling such as
+`2852039166` for `169.254.169.254`, or an IPv4-mapped IPv6 address): when the
+list has IP literals the host is resolved before the request, and a host that
+cannot be resolved is refused.
+
+Redirects are followed up to 10 hops, and each hop's target goes through the
+same check, in both modes. A redirect to a refused host ends the call with
+`nil, "Redirect to <url> refused: ..."`.
+
+A denylist is a convenience, not a network sandbox: it cannot see a host whose
+DNS answer changes between the check and the connection. Use a firewall rule
+when the address must be unreachable.
+
+```json
+{
+  "tag": "LuaToolbox",
+  "contents": {
+    "Name": "lua",
+    "Description": "Lua with open web access, minus instance metadata",
+    "MaxMemoryMB": 256,
+    "MaxExecutionTimeSeconds": 300,
+    "AllowedTools": [],
+    "HttpMode": "denylist",
+    "DeniedHosts": ["169.254.169.254", "fd00:ec2::254", "metadata.google.internal"]
+  }
+}
+```
 
 ### File Sandbox for Lua
 
@@ -1878,7 +1928,7 @@ The Lua toolbox provides a sandboxed execution environment:
 - **Memory limits**: a script whose Lua heap grows past `MaxMemoryMB` fails with a memory-limit error (`0` disables the limit)
 - **Timeout enforcement**: Scripts that exceed `MaxExecutionTimeSeconds` are terminated
 - **Path sandboxing**: Filesystem access restricted to `FileSandbox` configuration
-- **Host whitelisting**: HTTP requests limited to `allowedHosts`
+- **Host filtering**: HTTP requests limited to `AllowedHosts`, or with `"HttpMode": "denylist"` to every host except `DeniedHosts`; redirects are re-checked
 - **Tool whitelist**: Only tools in `allowedTools` can be called through the portal
 - **Dangerous functions removed**: `os.execute`, `io.popen`, `loadfile`, `dofile`, etc. are removed
 - **Empty whitelist = no access**: Secure defaults - empty lists mean no access
@@ -2678,7 +2728,7 @@ data PortalError
 9. **Progressive disclosure**: Use Skills for complex tool suites
 10. **Portal safety**: Always whitelist tools for portal access
 11. **Recursive agents**: When using LRM pattern, set appropriate maxDepth to prevent infinite recursion
-12. **Lua security**: Always specify allowedTools, allowedPaths, and allowedHosts - empty means no access
+12. **Lua security**: Always specify AllowedTools, FileSandbox, and AllowedHosts - empty means no access (a denylist `HttpMode` opens the network to everything but `DeniedHosts`)
 13. **Media output**: Declare `output-media-type` for tools that produce binary content
 14. **Mixed responses**: Use `MixedResponse` for rich multi-modal tool outputs
 15. **File range operations**: Use `read-file-range` and `write-file-range` for precise file editing rather than reading/writing entire files

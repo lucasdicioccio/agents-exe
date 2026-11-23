@@ -198,7 +198,7 @@ $a.agent({
 |---|---|
 | `developer-toolbox` | `name`, `capabilities`; optional `description`, `sandbox`, `activation`, `buildCommand` |
 | `system-toolbox` | `name`, `capabilities`; optional `description`, `sandbox`, `activation`, `envVarFilter`, `commandFilter` |
-| `lua-toolbox` | `name`; optional `description`, `maxMemoryMB`, `maxExecutionTimeSeconds`, `allowedTools`, `allowedHosts`, `sandbox`, `activation` |
+| `lua-toolbox` | `name`; optional `description`, `maxMemoryMB`, `maxExecutionTimeSeconds`, `allowedTools`, `allowedHosts`, `httpMode`, `deniedHosts`, `sandbox`, `activation` |
 | `sqlite-toolbox` | `name`, `versioning`; optional `description`, `activation` |
 | `tools-dir` | `path`; optional `filter`, `activation`, `bindings` (a `bashToolboxes` entry) |
 | `tool` | `path`; optional `activation`, `bindings` (a `bashToolboxes` entry) |

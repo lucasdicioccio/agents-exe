@@ -92,7 +92,10 @@ import qualified Prod.Tracer as Prod
 import System.Agents.Base (
     DeveloperToolCapability (..),
     DeveloperToolboxDescription (..),
+    LuaHttpMode (..),
     LuaToolboxDescription (..),
+    luaToolboxEffectiveDeniedHosts,
+    luaToolboxEffectiveHttpMode,
     SqliteToolboxDescription (..),
     SqliteVersioningConfig (..),
     SystemToolCapability (..),
@@ -1911,7 +1914,15 @@ buildLuaToolDescription config =
             Just (InlineFileSandbox sandbox) -> sandbox /= defaultFileSandboxConfig
             Just (NamedFileSandbox _) -> False
             Nothing -> False
-        hasHttpAccess = not (null config.luaToolboxAllowedHosts)
+        deniedHosts = luaToolboxEffectiveDeniedHosts config
+        httpModuleLine = case luaToolboxEffectiveHttpMode config of
+            LuaHttpDenylist
+                | null deniedHosts -> "http (get, post, request - any host)"
+                | otherwise -> "http (get, post, request - any host except: " <> Text.intercalate ", " deniedHosts <> ")"
+            LuaHttpAllowlist
+                | null config.luaToolboxAllowedHosts -> "http (disabled - no allowed hosts configured)"
+                | null deniedHosts -> "http (get, post, request - host restricted to: " <> Text.intercalate ", " config.luaToolboxAllowedHosts <> ")"
+                | otherwise -> "http (get, post, request - host restricted to: " <> Text.intercalate ", " config.luaToolboxAllowedHosts <> "; never: " <> Text.intercalate ", " deniedHosts <> ")"
         hasToolAccess = not (null config.luaToolboxAllowedTools)
 
         -- Build module list dynamically
@@ -1927,9 +1938,7 @@ buildLuaToolDescription config =
             [ if hasFileAccess
                 then "fs (read, write, list, etc. - path restricted)"
                 else "fs (disabled - no file sandbox configured)"
-            , if hasHttpAccess
-                then "http (get, post, request - host restricted to: " <> Text.intercalate ", " config.luaToolboxAllowedHosts <> ")"
-                else "http (disabled - no allowed hosts configured)"
+            , httpModuleLine
             , if hasToolAccess
                 then "tools (call other tools - whitelist: " <> Text.intercalate ", " config.luaToolboxAllowedTools <> ")"
                 else "tools (disabled - no allowed tools configured)"

@@ -78,6 +78,8 @@ testLuaToolbox =
         , luaToolboxAllowedTools = []
         , luaToolboxFileSandbox = Just $ InlineFileSandbox $ FileSandboxConfig { fsbPredicate = fromPathList [], fsbMaxFileSize = Nothing, fsbName = Just "test-sandbox" }
         , luaToolboxAllowedHosts = []
+        , luaToolboxHttpMode = Nothing
+        , luaToolboxDeniedHosts = Nothing
         }
 
 withTestToolbox :: (LuaToolbox.Toolbox -> IO ()) -> IO ()
