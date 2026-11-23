@@ -100,8 +100,9 @@ using it:
 | `GET /` | A small chat page, for a person at this machine. Served on a loopback bind, or when `--auth-tokens` is on; `--no-ui` turns it off. |
 | `GET /openapi.json` | The whole API as an OpenAPI 3 document, generated from the routes. |
 | `GET /healthz` | Liveness and counters. |
+| `GET /favicon.ico`, `GET /favicon.png` | The project's icon (a PNG, embedded in the binary), so browser tabs show it. |
 
-None of the three needs a bearer token: they describe the server, not its
+None of these needs a bearer token: they describe the server, not its
 sessions or its agents.
 
 The OpenAPI document is the machine-readable reference, and it is generated
@@ -567,6 +568,7 @@ All bodies are JSON. Errors are `{"error": "<code>", "message": "<text>"}`.
 | `GET /` | | `200 text/html` chat page | 404 when the page is off |
 | `GET /openapi.json` | | `200` OpenAPI 3 document | |
 | `GET /healthz` | | `200 {ok, live_sessions, active_runs}` | |
+| `GET /favicon.ico`, `GET /favicon.png` | | `200 image/png` | |
 | `POST /mcp` | JSON-RPC message or batch | `200` JSON-RPC answer, or `202` | see [MCP over HTTP](#mcp-over-http) |
 | `GET /v1/agents` | | `200 [{slug, description, model, system_prompt, tools, parameters, helpers, source, …}]` | |
 | `GET /v1/agents/:slug` | | `200` agent (same shape) | 404 `unknown_agent` |

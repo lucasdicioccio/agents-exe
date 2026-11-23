@@ -85,6 +85,7 @@ main =
             , testCase "replacing or deleting a stored agent stops its MCP server" storedAgentMcpReleaseTest
             , testCase "the openapi document covers every route and resolves" openApiTest
             , testCase "the chat page is served only when it is enabled" uiPageTest
+            , testCase "the favicon is served without a token" faviconTest
             , testCase "EventSource may carry its token as a query parameter" accessTokenTest
             , testCase "an attached file is stored on the turn that carried it" mediaRoundTripTest
             , testCase "--socket: /healthz answers over a Unix domain socket" socketHealthzTest
@@ -1068,7 +1069,24 @@ uiPageTest = do
             , -- the parameter form: rendered from the descriptor, sent as params
               "showParams"
             , "paramValues"
+            , -- the project icon
+              "rel='icon'"
             ]
+
+{- | The icon is embedded in the binary and public: a browser asks for it on
+any page, with or without a token.
+-}
+faviconTest :: Assertion
+faviconTest =
+    withServerAuth (Just (authTokensFromList [("alice-token", "alice")])) "{}" mockCompletion $ \srv ->
+        mapM_
+            ( \p -> do
+                (status, contentType, body) <- fetchWhole srv "GET" p
+                status @?= 200
+                contentType @?= Just "image/png"
+                assertBool "a PNG" ("\137PNG\r\n\26\n" `ByteString.isPrefixOf` body)
+            )
+            ["/favicon.ico", "/favicon.png"]
 
 {- | @EventSource@ cannot set headers, so the event stream also takes the
 token as a query parameter. No other endpoint does.
