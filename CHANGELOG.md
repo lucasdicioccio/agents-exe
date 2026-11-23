@@ -6,6 +6,7 @@
 
 #### agents-server: favicon
 - `agents-server` and `agents-exe serve` serve the project's icon (the website's `favicon.png`, embedded in the binary) at `GET /favicon.ico` and `GET /favicon.png`, without a token; the chat page links it with `<link rel="icon">`
+- The icon (website and server) is now a 64x64 reduction of the agents-exe logo (`logo-01.png`, the head on a transparent background) instead of the salmon icon
 
 #### Bash tools v2: runtime for oneshot tools
 - A v2 bash tool may declare a `runtime` object: `envdir` (read the daemontools way under the operator's `--envdir-root`), `environment`, `rundir`, `timeout.start` (the call's deadline) and `timeout.stop`, `cancel` (`SIGTERM` or `SIGINT`), `run_as` (enforced with `--run-as-mechanism setpriv|sudo|runuser`) and `sandbox` (`fs.read`/`fs.write`, `net`, `tmp`; enforced with `--sandbox bwrap|auto`)
