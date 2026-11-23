@@ -21,9 +21,13 @@ and the typed `<tool>_send` companion, the shared `processes` tool with
 delete), and #539's `commands`
 (`todos/bash-tools-subcommands.md`), and the `check` verb with
 `agents-exe check --probe [--json]` (§1.5, `System.Agents.Tools.ScriptCheck`,
-"Protocol v2: check" there: one capability per tool binary for now; exit 2
-when a tool's probe is `failed` or `skipped`; probes run on demand only,
-never at load). Not yet: capabilities with backends; for `service`: `list` does
+"Protocol v2: check" there: exit 2 when a tool's probe is `failed` or
+`skipped`; plain tools are probed on demand only, never at load), and
+capabilities with ordered backends and `--backend` (§1.5,
+`System.Agents.Tools.Capability`, "Protocol v2: capabilities with ordered
+backends" there: declared as a `Capability` entry of the agent's
+`bashToolboxes`; backends probed in order when the agent loads, stopping at
+the first `ok`; no automatic fallback on a failed call). Not yet: for `service`: `list` does
 not include a root agent's sub-sessions' processes, an agent configuration
 cannot yet omit a `_send` companion (D6), and `digest: round` is
 approximated by a one-second quiet period (the tool layer does not see the

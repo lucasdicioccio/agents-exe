@@ -296,7 +296,7 @@ landlockBody =
         ]
 
 allConfigured :: ToolRuntimeConfig
-allConfigured = ToolRuntimeConfig (Just "/nonexistent-envdir-root") (Just RunAsSudo) (Just SandboxBwrap)
+allConfigured = ToolRuntimeConfig (Just "/nonexistent-envdir-root") (Just RunAsSudo) (Just SandboxBwrap) []
 
 fullRuntime :: String
 fullRuntime =

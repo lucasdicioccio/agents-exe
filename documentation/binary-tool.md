@@ -463,9 +463,9 @@ Each tool is reported as:
 
 A tool with a `sandbox` also reports the configured `--sandbox` and the
 mechanism it resolved to (with `--sandbox auto`: `bwrap` or `landlock`).
-`--json` prints the report in the shape of `todos/bash-tools-v2.md` §1.5,
-one capability per tool binary until capabilities with several backends
-exist:
+`--json` prints the report in the shape of `todos/bash-tools-v2.md` §1.5:
+a tool binary that is not a backend of a capability (next section) is a
+capability of its own, with one backend:
 
 ```json
 [ { "capability": "web_read", "active": "web_read",
@@ -476,8 +476,59 @@ exist:
 
 A capability's active backend is its first `ok` one, else its first
 `unverified` one. Exit codes with `--probe`: 1 when an agent file does not
-load, 2 when every file loads but a tool has no active backend (`failed`
-or `skipped`), 0 otherwise. Only bash tools are probed.
+load, 2 when every file loads but a tool, or a required capability, has no
+active backend (`failed` or `skipped`), 0 otherwise. Only bash tools are
+probed.
+
+### Protocol v2: capabilities with ordered backends
+
+The same capability can be served by several tool binaries. An agent
+declares it in `bashToolboxes`, preferred backend first:
+
+```json
+{ "tag": "Capability",
+  "contents": { "capability": "web_read",
+                "backends": ["tools/web/read-jina", "tools/web/read-curl"],
+                "required": true } }
+```
+
+The model sees one tool, `bash_web_read`, with the description of the
+active backend. `activation` and `bindings` work as for a `SingleTool`
+(bindings name the tool `bash_web_read`). A backend is named by its file
+name (`read-jina`); relative paths are resolved from the working directory.
+
+* **Same arguments.** Every backend is a single-command tool (no
+  `commands`), not a `service`, and declares the same `args`: names, types
+  and arity. Argument descriptions and calling modes may differ. Anything
+  else is a loading error.
+* **The active backend** is chosen when the agent loads: backends are
+  probed in order (their `check`, as in `check --probe`) and probing stops
+  at the first `ok` one, which is active; otherwise the first `unverified`
+  one is. A backend that does not load here (missing binary, failing
+  `describe`) is `failed`. The choice holds until the agent is loaded
+  again. Plain tools are still never probed at load.
+* **No active backend.** A required capability (the default) fails the
+  agent's loading, with every probe in the error; one with
+  `"required": false` is left out of the agent's tools.
+* **The operator's override.** `agents-exe --backend web_read=read-curl`
+  (repeatable) moves the named backend first. A name no backend has is
+  ignored, so a stale override never hides a working backend.
+* **Results name their backend.** A text result starts with a
+  `[backend read-curl]` line; an error is a `ScriptBackendError` naming the
+  capability and the backend. A failed call is not retried on the next
+  backend: the model sees the failure. A binary (media) result is left as
+  it is.
+
+`agents-exe check --probe` reports a capability with every backend probed,
+in the order they are tried, and the active one:
+
+```
+- capability web_read: active read-curl
+  - failed      read-jina  (4ms)  jina answered 429  fix: set JINA_API_KEY
+  - unverified  read-curl  the tool declares no check
+```
+
+and with `--json` the §1.5 shape, `{"capability", "active", "backends"}`.
 
 ## Empty Result Behavior
 

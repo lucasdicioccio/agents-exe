@@ -341,6 +341,70 @@ instance ToJSON SingleToolDescription where
 instance FromJSON SingleToolDescription where
     parseJSON = Aeson.genericParseJSON singleToolOptions
 
+{- | A capability served by an ordered list of bash tool binaries, its
+backends (@todos/bash-tools-v2.md@ §1.5). The model sees one tool, named
+after the capability (@bash_<capability>@); the binary serving it, the
+/active backend/, is the first backend whose @check@ probe is @ok@, else the
+first one that cannot be checked (@unverified@), else none.
+
+Example configuration:
+
+@
+{
+  "tag": "Capability",
+  "contents": {
+    "capability": "web_read",
+    "backends": ["tools/web/read-jina", "tools/web/read-curl"],
+    "required": true
+  }
+}
+@
+
+Every backend must be a single-command tool (no @commands@), not a
+@service@, and declare the same @args@ (names, types and arity). A backend
+is named by its file name (@read-jina@), which is what the operator's
+@--backend web_read=read-curl@ and the tool results refer to.
+
+Note: Relative paths are resolved relative to the execution's current
+working directory.
+-}
+data CapabilityDescription = CapabilityDescription
+    { capName :: Text
+    -- ^ The capability, which is also the tool's slug (@[a-zA-Z0-9_-]+@).
+    , capBackends :: [FilePath]
+    -- ^ The tool binaries that can serve it, preferred first.
+    , capRequired :: Maybe Bool
+    {- ^ Whether the agent fails to load when no backend is active (default
+    'True'); an optional capability is omitted with a warning instead.
+    -}
+    , capActivation :: Maybe Activation
+    , capBindings :: Maybe [Binding]
+    }
+    deriving (Show, Ord, Eq, Generic)
+
+instance ToJSON CapabilityDescription where
+    toJSON c =
+        Aeson.object $
+            [ "capability" .= capName c
+            , "backends" .= capBackends c
+            ]
+                <> maybe [] (\r -> ["required" .= r]) (capRequired c)
+                <> maybe [] (\a -> ["activation" .= a]) (capActivation c)
+                <> maybe [] (\b -> ["bindings" .= b]) (capBindings c)
+
+instance FromJSON CapabilityDescription where
+    parseJSON = Aeson.withObject "CapabilityDescription" $ \v ->
+        CapabilityDescription
+            <$> v .: "capability"
+            <*> v .: "backends"
+            <*> v .:? "required"
+            <*> v .:? "activation"
+            <*> v .:? "bindings"
+
+-- | Whether a capability must have an active backend for its agent to load.
+capabilityIsRequired :: CapabilityDescription -> Bool
+capabilityIsRequired c = fromMaybe True (capRequired c)
+
 {- | Wrapper type for bash toolbox descriptions with tag-based JSON serialization.
 
 This is a tagged union type that allows extensible bash toolbox types.
@@ -369,6 +433,8 @@ working directory.
 data BashToolboxDescription
     = FileSystemDirectory FileSystemDirectoryDescription
     | SingleTool SingleToolDescription
+    | -- | One tool served by the first working of several binaries (@todos/bash-tools-v2.md@ §1.5).
+      Capability CapabilityDescription
     deriving (Show, Ord, Eq, Generic)
 
 instance ToJSON BashToolboxDescription where
@@ -382,6 +448,11 @@ instance ToJSON BashToolboxDescription where
             [ "tag" .= ("SingleTool" :: Text)
             , "contents" .= val
             ]
+    toJSON (Capability val) =
+        Aeson.object
+            [ "tag" .= ("Capability" :: Text)
+            , "contents" .= val
+            ]
 
 instance FromJSON BashToolboxDescription where
     parseJSON = Aeson.withObject "BashToolboxDescription" $ \v -> do
@@ -391,7 +462,9 @@ instance FromJSON BashToolboxDescription where
                 FileSystemDirectory <$> v .: "contents"
             "SingleTool" ->
                 SingleTool <$> v .: "contents"
-            _ -> fail "expecting 'FileSystemDirectory' or 'SingleTool' tag"
+            "Capability" ->
+                Capability <$> v .: "contents"
+            _ -> fail "expecting 'FileSystemDirectory', 'SingleTool' or 'Capability' tag"
 
 -------------------------------------------------------------------------------
 -- OpenAPI Toolbox Configuration

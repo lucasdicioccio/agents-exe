@@ -1441,6 +1441,14 @@ parseToolRuntimeOptions =
                     <> help "How bash tools declaring runtime.sandbox are confined (auto: bwrap where it works, else landlock)"
                 )
             )
+        <*> many
+            ( option
+                (eitherReader ScriptRuntime.parseBackendOverride)
+                ( long "backend"
+                    <> metavar "CAPABILITY=BACKEND"
+                    <> help "Try this backend of a capability first (its file name, e.g. web_read=read-curl); repeatable; an unknown name is ignored"
+                )
+            )
 
 {- | Parse @--set@/@--set-json@/@--pin@/@--pin-json@ (all repeatable) into
 'ProcessParams'. The @-json@ variant accepts any JSON value; the plain
