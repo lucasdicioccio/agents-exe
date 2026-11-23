@@ -1477,11 +1477,34 @@ registerDeveloperTool box =
         -- Build parameter properties based on enabled capabilities
         paramProps = buildDeveloperToolParams box
 
+        -- Say up front that this is also the file read/edit tool, so a model
+        -- looking for "read a file" or "edit a file" finds it on the first try.
+        hasCap c = c `elem` box.toolboxCapabilities
+        fileToolsHint =
+            if hasCap DevToolReadFileRange || hasCap DevToolWriteFileRange || hasCap DevToolPatchFile
+                then
+                    "Also the tool to read and edit files: "
+                        <> Text.intercalate
+                            "; "
+                            ( [ "read-file-range reads a few lines (ranges='120-180'), so read only the part you need"
+                              | hasCap DevToolReadFileRange
+                              ]
+                                ++ [ "write-file-range replaces, inserts or deletes line ranges (contentBlocks: one string per range), so change a few lines without rewriting the file"
+                                   | hasCap DevToolWriteFileRange
+                                   ]
+                                ++ [ "patch-file applies a unified diff"
+                                   | hasCap DevToolPatchFile
+                                   ]
+                            )
+                        <> ". "
+                else ""
+
         toolDescription =
             ToolDescription
                 { toolDescriptionName = llmName
                 , toolDescriptionText =
                     "Developer tools for writing and validating agents and tools. "
+                        <> fileToolsHint
                         <> "Use the 'help' capability to get detailed documentation for all available capabilities. "
                         <> box.toolboxDescription
                 , toolDescriptionParamProperties = paramProps
@@ -1558,20 +1581,13 @@ buildDeveloperToolParams box =
                 { propertyKey = "ranges"
                 , propertyType = StringParamType
                 , propertyDescription =
-                    "Line ranges for file operations. "
-                        <> "Range formats: 'N' (replace line N), 'N-M' (replace lines N-M), 'N+' (insert AFTER line N), 'head' (prepend before line 1, use to CREATE new files), 'tail' (append after last line), 'whole' (replace entire file). "
-                        <> "WARNING: 'N' replaces line N; 'N+' inserts after line N. Use '54+' to insert after line 54; using '54' will replace line 54. "
-                        <> "IMPORTANT: To CREATE a new file, use ranges='head'. "
-                        <> "For read-file-range: Omit ranges to read entire file. "
-                        <> "For write-file-range: Use contentBlocks array with one block per range."
-                , propertyRequired = False
-                }
-            , ParamProperty
-                { propertyKey = "session_id"
-                , propertyType = StringParamType
-                , propertyDescription =
-                    "For read-file-range: Read from an in-progress write-file-range session's staged buffer instead of disk. "
-                        <> "When provided, 'path' is still required for sandbox validation but the content is served from the session."
+                    "1-based line ranges, comma-separated (e.g. '10-20,40'). "
+                        <> "For read-file-range: 'N' reads line N, 'N-M' reads lines N to M; omit to read the whole file "
+                        <> "(on a large file, read with metadata_only=true first to get totalLineCount, then read the range you need). "
+                        <> "For write-file-range: 'N' REPLACES line N, 'N-M' REPLACES lines N to M, 'N+' INSERTS after line N, "
+                        <> "'head' inserts before line 1 (use it to CREATE a new file), 'tail' appends after the last line, 'whole' replaces the entire file. "
+                        <> "Use '54+' to insert after line 54; '54' would replace line 54. "
+                        <> "Give contentBlocks one string per range."
                 , propertyRequired = False
                 }
             , ParamProperty
@@ -1589,7 +1605,10 @@ buildDeveloperToolParams box =
             [ ParamProperty
                 { propertyKey = "contentBlocks"
                 , propertyType = OpaqueParamType "array"
-                , propertyDescription = "For write-file-range: Array of content blocks, where each block corresponds to one range. Use empty strings to delete lines."
+                , propertyDescription =
+                    "For write-file-range (required): a JSON array of strings, one per range in 'ranges', e.g. [\"new line 5\"] or [\"a\\nb\", \"c\"]. "
+                        <> "A block may hold several lines separated by \\n. Use an empty string to delete the range's lines. "
+                        <> "Pass an array even for a single range, not a bare string."
                 , propertyRequired = False
                 }
             , ParamProperty
@@ -1602,7 +1621,9 @@ buildDeveloperToolParams box =
                 { propertyKey = "session_id"
                 , propertyType = StringParamType
                 , propertyDescription =
-                    "For write-file-range: Continue a multi-turn edit session (from a previous call's sessionId). "
+                    "For read-file-range: read from an in-progress write-file-range session's staged buffer instead of disk "
+                        <> "('path' is still required). "
+                        <> "For write-file-range: Continue a multi-turn edit session (from a previous call's sessionId). "
                         <> "While a session is active, 'ranges' always refers to line numbers in the ORIGINAL file "
                         <> "(the snapshot the session started from), even after earlier edits in the session have "
                         <> "shifted line numbers around. This avoids line-number drift when making several edits to "
@@ -1627,7 +1648,11 @@ buildDeveloperToolParams box =
             [ ParamProperty
                 { propertyKey = "patch"
                 , propertyType = StringParamType
-                , propertyDescription = "For patch-file: Unified diff patch content to apply"
+                , propertyDescription =
+                    "For patch-file: a unified diff. Each hunk starts with '@@ -START,COUNT +START,COUNT @@', where START is the exact 1-based "
+                        <> "line number of the hunk's first context or removed line (read it with read-file-range first; the hunk is not searched for). "
+                        <> "Then one line per file line: ' ' (a space) + text for unchanged context, '-' + text for a removed line, '+' + text for an added line. "
+                        <> "Context and removed lines must match the file exactly, including indentation and blank lines."
                 , propertyRequired = False
                 }
             ]
@@ -2400,11 +2425,27 @@ executeDeveloperCapability tracer box cap params = case cap of
                 let ranges = case KeyMap.lookup (AesonKey.fromText "ranges") params of
                         Just (Aeson.String r) -> r
                         _ -> ""
-                -- Parse contentBlocks directly as an array of text values
-                let contentBlocks = case KeyMap.lookup (AesonKey.fromText "contentBlocks") params of
-                        Just (Aeson.Array arr) ->
-                            Maybe.mapMaybe parseTextValue (toList arr)
-                        _ -> []
+                -- Parse contentBlocks as an array of strings. Anything else is
+                -- refused: falling back to no blocks would blank the range (or,
+                -- with no ranges, the whole file) instead of writing anything.
+                let mContentBlocks = case KeyMap.lookup (AesonKey.fromText "contentBlocks") params of
+                        Just (Aeson.Array arr)
+                            | all (Maybe.isJust . parseTextValue) (toList arr) ->
+                                Right (Maybe.mapMaybe parseTextValue (toList arr))
+                            | otherwise ->
+                                Left "'contentBlocks' must be an array of strings (one per range), e.g. [\"new text\"]; it contains a non-string element"
+                        Just (Aeson.String _) ->
+                            Left "'contentBlocks' must be an array of strings (one per range), e.g. [\"new text\"], not a bare string"
+                        Just Aeson.Null -> missingBlocks
+                        Just _ ->
+                            Left "'contentBlocks' must be an array of strings (one per range), e.g. [\"new text\"]"
+                        Nothing -> missingBlocks
+                    -- Continuing a session may omit contentBlocks; a one-shot
+                    -- edit or a session start must say what to write.
+                    missingBlocks = case mSessionId of
+                        Just _ -> Right []
+                        Nothing ->
+                            Left "Missing 'contentBlocks': an array of strings, one per range, e.g. {\"ranges\": \"5\", \"contentBlocks\": [\"new line 5\"]}. Use [\"\"] to delete the lines of a range"
                 -- Parse optional expected_snapshot_ref for optimistic locking
                 let mExpectedSnapshotRef = case KeyMap.lookup (AesonKey.fromText "expected_snapshot_ref") params of
                         Just (Aeson.String ref) -> Just (DeveloperTools.SnapshotRef ref)
@@ -2412,10 +2453,13 @@ executeDeveloperCapability tracer box cap params = case cap of
                 let mCommit = case KeyMap.lookup (AesonKey.fromText "commit") params of
                         Just (Aeson.Bool c) -> Just c
                         _ -> Nothing
-                result <- DeveloperTools.executeWriteFileRangeWith (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef mSessionId mCommit
-                case result of
-                    Left err -> pure $ DeveloperToolError () err
-                    Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
+                case mContentBlocks of
+                    Left msg -> pure $ DeveloperToolError () (DeveloperTools.ValidationError msg)
+                    Right contentBlocks -> do
+                        result <- DeveloperTools.executeWriteFileRangeWith (Prod.contramap DeveloperToolsTrace tracer) box (Text.unpack filePath) ranges contentBlocks mExpectedSnapshotRef mSessionId mCommit
+                        case result of
+                            Left err -> pure $ DeveloperToolError () err
+                            Right writeResult -> pure $ DeveloperToolWriteFileRangeResult () writeResult
     "patch-file" -> do
         case KeyMap.lookup (AesonKey.fromText "path") params of
             Just (Aeson.String filePath) -> do
@@ -2654,9 +2698,8 @@ formatCapabilityHelp DevToolReadFileRange =
         , "                    - 'N'       - Single line (e.g., '5')"
         , "                    - 'N-M'     - Line range (e.g., '1-10')"
         , "                    - 'N,M,P'   - Multiple lines (e.g., '2,5,8')"
-        , "                    - 'head'    - From beginning (no-op for read)"
-        , "                    - 'tail'    - To end (no-op for read)"
-        , "                    - Omit      - Read entire file"
+        , "                    - Omit      - Read entire file (on a large file, ask"
+        , "                                  metadata_only first and read a range)"
         , "  - session_id    (string, optional): Read from an in-progress write-file-range"
         , "                    session's staged buffer instead of disk. The path is still"
         , "                    required for sandbox validation."
@@ -2724,8 +2767,10 @@ formatCapabilityHelp DevToolWriteFileRange =
         , "                   - 'whole'   - Replace entire file"
         , "                   WARNING: 'N' and 'N+' are different. Use '54+' to insert"
         , "                   after line 54; using '54' will replace line 54."
-        , "  - contentBlocks (array, required): Array of content strings, one per range."
-        , "                   Use empty string '' to delete lines."
+        , "  - contentBlocks (array of strings, required): one string per range, even"
+        , "                   for a single range (a bare string is refused). A string"
+        , "                   may hold several lines separated by \\n. Use an empty"
+        , "                   string '' to delete the range's lines."
         , "  - expected_snapshot_ref (string, optional): MD5 hash for optimistic locking."
         , "                   Operation fails if current file content doesn't match."
         , ""
@@ -2847,17 +2892,24 @@ formatCapabilityHelp DevToolPatchFile =
         , "                   Operation fails if current file content doesn't match."
         , ""
         , "Patch Format (Unified Diff):"
-        , "  - File headers (--- and +++) are ignored"
-        , "  - Hunk headers start with @@ (e.g., @@ -10,5 +11,6 @@)"
-        , "  - Context lines have no prefix"
+        , "  - File headers (--- and +++) are optional and ignored"
+        , "  - Each hunk starts with @@ -START,COUNT +START,COUNT @@ (e.g., @@ -10,3 +10,4 @@)"
+        , "    START must be the exact 1-based line number of the hunk's first context"
+        , "    or removed line: the hunk is applied there and is not searched for."
+        , "    Read the lines with read-file-range first to get the numbers."
+        , "  - Context lines start with a single space, then the file's text unchanged"
+        , "    (keep the space even when the line itself is indented)"
         , "  - Removed lines start with -"
         , "  - Added lines start with +"
+        , "  - Context and removed lines must match the file exactly (indentation,"
+        , "    trailing text, blank lines)"
         , ""
-        , "Usage:"
+        , "Usage (file lines 10-12 are 'import Foo', 'import Bar', '' and we add a line"
+        , "after 'import Bar'):"
         , "  {"
         , "    \"capability\": \"patch-file\","
         , "    \"path\": \"./src/File.hs\","
-        , "    \"patch\": \"--- a/src/File.hs\\n+++ b/src/File.hs\\n@@ -10,5 +10,6 @@ import Foo\\n+import Data.Text (Text)\\n@@ -100,5 +101,5 @@ func1 x =\\n-  oldBody\\n+  newBody\""
+        , "    \"patch\": \"@@ -10,3 +10,4 @@\\n import Foo\\n import Bar\\n+import Data.Text (Text)\\n \""
         , "  }"
         , ""
         , "Features:"

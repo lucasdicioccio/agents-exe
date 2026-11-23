@@ -9,7 +9,7 @@ atomically with context validation.
 
 The patch format follows standard unified diff conventions:
 * @@ -oldStart,oldCount +newStart,newCount @@ header
-* Context lines (no prefix)
+* Context lines (a single leading space)
 * Removed lines (- prefix)
 * Added lines (+ prefix)
 
@@ -78,7 +78,7 @@ the allowed paths.
 
 The patch format follows standard unified diff conventions:
 * @@ -oldStart,oldCount +newStart,newCount @@ header
-* Context lines have no prefix
+* Context lines start with a single space
 * Removed lines (- prefix)
 * Added lines (+ prefix)
 
@@ -384,7 +384,7 @@ applyHunk hunk lines' =
 The parser handles standard unified diff format:
 * File headers (--- and +++ lines) are ignored
 * Hunk headers start with @@
-* Context lines have no prefix
+* Context lines start with a single space
 * Removed lines (- prefix)
 * Added lines (+ prefix)
 

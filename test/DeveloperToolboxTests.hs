@@ -154,6 +154,7 @@ tests =
         , multiRangeTests
         , indentationTests
         , directoryTests
+        , fileEditDispatchTests
         ]
 
 -------------------------------------------------------------------------------
@@ -1269,3 +1270,126 @@ testTraverseDirectoryDispatch = withTestDirectoryTree $ \root -> do
             let paths = map Text.pack $ map entryPath (listingEntries listing)
             assertBool "Dispatch should list nested file2.txt" $ any ("file2.txt" `Text.isInfixOf`) paths
         other -> assertFailure $ "Expected DeveloperToolDirectoryListingResult, got: " ++ show other
+
+-------------------------------------------------------------------------------
+-- File edit dispatch: what a model sees and the shapes it gets wrong
+-------------------------------------------------------------------------------
+
+fileEditDispatchTests :: TestTree
+fileEditDispatchTests =
+    testGroup
+        "File edit dispatch"
+        [ testCase "contentBlocks as a bare string is refused, file unchanged" testContentBlocksBareString
+        , testCase "missing contentBlocks is refused, file unchanged" testContentBlocksMissing
+        , testCase "contentBlocks as an array still writes" testContentBlocksArray
+        , testCase "patch with space-prefixed context on indented lines applies" testPatchIndentedContext
+        , testCase "schema declares session_id once and names the file capabilities" testFileToolDeclaration
+        ]
+
+fileEditToolbox :: IO Toolbox
+fileEditToolbox = do
+    let desc =
+            DeveloperToolboxDescription
+                { developerToolboxName = "test-file-edit"
+                , developerToolboxDescription = "Test file edit toolbox"
+                , developerToolboxCapabilities =
+                    [ DevToolReadFileRange
+                    , DevToolWriteFileRange
+                    , DevToolPatchFile
+                    ]
+                , developerToolboxActivation = Nothing
+                , developerToolboxBuildCommand = Nothing
+                , developerToolboxFileSandbox = Just $ InlineFileSandbox FileSandboxConfig
+                    { fsbPredicate = AlwaysAllow
+                    , fsbMaxFileSize = Nothing
+                    , fsbName = Nothing
+                    }
+                }
+    result <- DeveloperToolbox.initializeToolbox silent desc
+    case result of
+        Left err -> error $ "Failed to initialize file edit toolbox: " ++ err
+        Right toolbox -> pure toolbox
+
+withEditFile :: Text -> (Toolbox -> FilePath -> IO a) -> IO a
+withEditFile content action = withTempDir $ \tmpDir -> do
+    let fp = tmpDir </> "edit.txt"
+    Text.writeFile fp content
+    toolbox <- fileEditToolbox
+    action toolbox fp
+
+writeArgs :: FilePath -> [(KeyMap.Key, Aeson.Value)] -> Aeson.Object
+writeArgs fp extra =
+    KeyMap.fromList $
+        [ ("capability", Aeson.String "write-file-range")
+        , ("path", Aeson.String (Text.pack fp))
+        ]
+            ++ extra
+
+assertRefusedUnchanged :: FilePath -> Text -> CallResult ToolCall -> Text -> IO ()
+assertRefusedUnchanged fp original result needle = do
+    case result of
+        DeveloperToolError _ err ->
+            assertBool ("error should mention " <> Text.unpack needle <> ": " <> show err) $
+                needle `Text.isInfixOf` Text.pack (show err)
+        other -> assertFailure $ "Expected DeveloperToolError, got: " ++ show other
+    after <- Text.readFile fp
+    after @?= original
+
+testContentBlocksBareString :: Assertion
+testContentBlocksBareString = withEditFile testFileContent $ \toolbox fp -> do
+    result <- runDeveloperToolCapability toolbox $
+        writeArgs fp [("ranges", Aeson.String "2"), ("contentBlocks", Aeson.String "replaced")]
+    assertRefusedUnchanged fp testFileContent result "not a bare string"
+
+testContentBlocksMissing :: Assertion
+testContentBlocksMissing = withEditFile testFileContent $ \toolbox fp -> do
+    result <- runDeveloperToolCapability toolbox $
+        writeArgs fp [("ranges", Aeson.String "2"), ("content", Aeson.String "replaced")]
+    assertRefusedUnchanged fp testFileContent result "Missing 'contentBlocks'"
+    -- no ranges at all used to mean 'whole' with an empty block: the file was emptied
+    result' <- runDeveloperToolCapability toolbox $ writeArgs fp []
+    assertRefusedUnchanged fp testFileContent result' "Missing 'contentBlocks'"
+
+testContentBlocksArray :: Assertion
+testContentBlocksArray = withEditFile testFileContent $ \toolbox fp -> do
+    result <- runDeveloperToolCapability toolbox $
+        writeArgs fp
+            [ ("ranges", Aeson.String "2")
+            , ("contentBlocks", Aeson.toJSON ["replaced" :: Text])
+            ]
+    case result of
+        DeveloperToolWriteFileRangeResult _ _ -> pure ()
+        other -> assertFailure $ "Expected DeveloperToolWriteFileRangeResult, got: " ++ show other
+    after <- Text.readFile fp
+    (Text.lines after !! 1) @?= "replaced"
+
+testPatchIndentedContext :: Assertion
+testPatchIndentedContext =
+    withEditFile (Text.unlines ["main = do", "    foo", "    bar", ""]) $ \toolbox fp -> do
+        -- The shape the help text documents: '@@' with the exact start line,
+        -- context lines prefixed by one space, even when indented.
+        let patch = "@@ -1,3 +1,4 @@\n main = do\n     foo\n+    baz\n     bar\n"
+        result <- runDeveloperToolCapability toolbox $
+            KeyMap.fromList
+                [ ("capability", Aeson.String "patch-file")
+                , ("path", Aeson.String (Text.pack fp))
+                , ("patch", Aeson.String patch)
+                ]
+        case result of
+            DeveloperToolPatchResult _ _ -> pure ()
+            other -> assertFailure $ "Expected DeveloperToolPatchResult, got: " ++ show other
+        after <- Text.readFile fp
+        after @?= Text.unlines ["main = do", "    foo", "    baz", "    bar", ""]
+
+testFileToolDeclaration :: Assertion
+testFileToolDeclaration = do
+    toolbox <- fileEditToolbox
+    registrations <- ToolReg.registerDeveloperTools toolbox
+    case registrations of
+        Right (reg : _) -> do
+            let decl = ToolReg.declareTool reg
+                keys = map ToolSchema.propertyKey (ToolSchema.toolDescriptionParamProperties decl)
+            length (filter (== "session_id") keys) @?= 1
+            assertBool "description names read-file-range" $
+                "read-file-range" `Text.isInfixOf` ToolSchema.toolDescriptionText decl
+        _ -> assertFailure "Expected one developer tool registration"
