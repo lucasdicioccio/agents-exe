@@ -428,6 +428,10 @@ data ReadFileRangeResult = ReadFileRangeResult
     -- ^ Session id if the read was served from a session's staged buffer
     , readFileMetadataOnly :: Bool
     -- ^ True when the caller requested only metadata (no content)
+    , readFileTruncated :: Bool
+    -- ^ True when a whole-file read hit the toolbox's cap and was cut short
+    , readFileHint :: Maybe Text
+    -- ^ How to read the rest, set when the read was truncated
     }
     deriving (Show)
 
@@ -444,6 +448,8 @@ instance ToJSON ReadFileRangeResult where
             , "snapshotRef" .= readFileSnapshotRef result
             , "sessionId" .= readFileSessionId result
             , "metadataOnly" .= readFileMetadataOnly result
+            , "truncated" .= readFileTruncated result
+            , "hint" .= readFileHint result
             ]
 
 -- | Per-range edit result providing detailed feedback for each edit operation.

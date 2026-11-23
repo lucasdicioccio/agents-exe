@@ -123,6 +123,8 @@ defaultDeveloperToolbox =
             , developerToolboxActivation = Nothing -- Uses default: AlwaysActivated
             , developerToolboxFileSandbox = Just (NamedFileSandbox workspaceSandboxName)
             , developerToolboxBuildCommand = Nothing
+            , developerToolboxWholeReadMaxLines = Nothing
+            , developerToolboxWholeReadMaxBytes = Nothing
             }
 
 -- | Default system toolbox for new agents: listing the workspace's directories.

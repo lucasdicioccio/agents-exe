@@ -1571,6 +1571,12 @@ buildDeveloperToolParams box =
             ]
 
         hasCapability cap = cap `elem` box.toolboxCapabilities
+        wholeReadCapText =
+            let cap = DeveloperTools.toolboxWholeReadCap box
+                parts =
+                    [Text.pack (show n) <> " lines" | Just n <- [DeveloperTools.capMaxLines cap]]
+                        <> [Text.pack (show n) <> " bytes" | Just n <- [DeveloperTools.capMaxBytes cap]]
+             in if null parts then "no limit" else Text.intercalate " / " parts
         needsPath =
             hasCapability DevToolReadFileRange
                 || hasCapability DevToolWriteFileRange
@@ -1596,8 +1602,10 @@ buildDeveloperToolParams box =
                 , propertyType = StringParamType
                 , propertyDescription =
                     "1-based line ranges, comma-separated (e.g. '10-20,40'). "
-                        <> "For read-file-range: 'N' reads line N, 'N-M' reads lines N to M; omit to read the whole file "
-                        <> "(on a large file, read with metadata_only=true first to get totalLineCount, then read the range you need). "
+                        <> "For read-file-range: 'N' reads line N, 'N-M' reads lines N to M; omit to read the whole file, capped at "
+                        <> wholeReadCapText
+                        <> " (past the cap the result has truncated=true and a hint naming the next range; explicit ranges are never capped). "
+                        <> "On a large file, read with metadata_only=true first to get totalLineCount, then read the range you need. "
                         <> "For write-file-range: 'N' REPLACES line N, 'N-M' REPLACES lines N to M, 'N+' INSERTS after line N, "
                         <> "'head' inserts before line 1 (use it to CREATE a new file), 'tail' appends after the last line, 'whole' replaces the entire file. "
                         <> "Use '54+' to insert after line 54; '54' would replace line 54. "
@@ -2712,8 +2720,9 @@ formatCapabilityHelp DevToolReadFileRange =
         , "                    - 'N'       - Single line (e.g., '5')"
         , "                    - 'N-M'     - Line range (e.g., '1-10')"
         , "                    - 'N,M,P'   - Multiple lines (e.g., '2,5,8')"
-        , "                    - Omit      - Read entire file (on a large file, ask"
-        , "                                  metadata_only first and read a range)"
+        , "                    - Omit      - Read entire file (capped, see below; on a"
+        , "                                  large file, ask metadata_only first and"
+        , "                                  read a range)"
         , "  - session_id    (string, optional): Read from an in-progress write-file-range"
         , "                    session's staged buffer instead of disk. The path is still"
         , "                    required for sandbox validation."
@@ -2758,6 +2767,14 @@ formatCapabilityHelp DevToolReadFileRange =
         , ""
         , "Returns: File content with line numbers in format 'N\\t<content>', or"
         , "         metadata only when metadata_only is true."
+        , ""
+        , "Whole-file cap: when ranges is omitted, empty or 'whole', the read returns"
+        , "at most the toolbox's WholeReadMaxLines (default 400) lines and"
+        , "WholeReadMaxBytes (default 32768) bytes. Past the cap the result has"
+        , "truncated: true and a hint such as \"file has 2134 lines; showing lines"
+        , "1-400 ... Pass ranges='401-800' to read more\". Explicit ranges are never"
+        , "capped: page through a large file with them, or check totalLineCount"
+        , "first with metadata_only."
         ]
 formatCapabilityHelp DevToolWriteFileRange =
     Text.unlines

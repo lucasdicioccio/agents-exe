@@ -14,12 +14,21 @@ module System.Agents.Tools.DeveloperToolbox.Read (
     extractLines,
     extractRange,
     formatLineWithNumber,
+
+    -- * Whole-file read cap
+    WholeReadCap (..),
+    defaultWholeReadMaxLines,
+    defaultWholeReadMaxBytes,
+    toolboxWholeReadCap,
+    capLines,
+    truncationHint,
 ) where
 
 import Control.Concurrent.STM (atomically, modifyTVar', readTVarIO)
 import Control.Exception (SomeException, try)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
@@ -27,6 +36,7 @@ import System.Directory (doesFileExist)
 
 import Prod.Tracer (Tracer (..))
 
+import System.Agents.Base (DeveloperToolboxDescription (..))
 import System.Agents.FileSandbox (AccessResult (..), validateFileRead)
 import System.Agents.Tools.DeveloperToolbox.Range (parseRanges)
 import System.Agents.Tools.DeveloperToolbox.Types (
@@ -62,6 +72,9 @@ Parameters:
 - path: Path to the file to read
 - ranges: Comma-separated line ranges (e.g., "1-10", "5", "head", "tail", "whole").
           If omitted or empty, defaults to reading the entire file (equivalent to "whole").
+          A whole-file read is capped (see 'WholeReadCap'): past the cap it
+          returns the first lines, @truncated: true@ and a hint naming the
+          range to read next. Explicit line ranges are never capped.
 
 Returns Right with ReadFileRangeResult on success, Left with error on failure.
 
@@ -189,12 +202,22 @@ buildReadResult tracer toolbox filePath rangesTxt allLines mSessionId metadataOn
             let totalLineCount = length allLines
                 totalFileSize = sum (map (BS.length . Text.encodeUtf8) allLines)
                     + if totalLineCount > 0 then totalLineCount - 1 else 0
-                resultLines = extractLines allLines ranges
+                extracted = extractLines allLines ranges
+                -- Only a whole-file read is capped; explicit ranges are the
+                -- way to page, so they are returned as asked.
+                cap = toolboxWholeReadCap toolbox
+                (resultLines, truncated)
+                    | metadataOnly = (extracted, False)
+                    | Whole `elem` ranges = capLines cap extracted
+                    | otherwise = (extracted, False)
                 output
                     | metadataOnly = ""
                     | otherwise = Text.unlines $ map formatLineWithNumber resultLines
                 linesRead = if metadataOnly then 0 else length resultLines
                 rangesParsed = map rangeSpecToText ranges
+                hint
+                    | truncated = Just (truncationHint cap totalLineCount (map fst resultLines))
+                    | otherwise = Nothing
 
             -- Snapshot is taken from the raw bytes of the lines we just read.
             mSnapshotRef <- takeSnapshot tracer toolbox filePath allLines
@@ -213,7 +236,89 @@ buildReadResult tracer toolbox filePath rangesTxt allLines mSessionId metadataOn
                         , readFileSnapshotRef = mSnapshotRef
                         , readFileSessionId = mSessionId
                         , readFileMetadataOnly = metadataOnly
+                        , readFileTruncated = truncated
+                        , readFileHint = hint
                         }
+
+{- | Limits on what a whole-file read returns. A field of 'Nothing' means
+that limit is off.
+-}
+data WholeReadCap = WholeReadCap
+    { capMaxLines :: Maybe Int
+    , capMaxBytes :: Maybe Int
+    }
+    deriving (Show, Eq)
+
+-- | Lines a whole-file read returns when the toolbox does not say.
+defaultWholeReadMaxLines :: Int
+defaultWholeReadMaxLines = 400
+
+-- | Bytes of content a whole-file read returns when the toolbox does not say.
+defaultWholeReadMaxBytes :: Int
+defaultWholeReadMaxBytes = 32768
+
+{- | The toolbox's whole-file read cap: the configured values, the defaults
+when absent, and no limit for a value of 0 (or less).
+-}
+toolboxWholeReadCap :: Toolbox -> WholeReadCap
+toolboxWholeReadCap toolbox =
+    WholeReadCap
+        { capMaxLines = limit defaultWholeReadMaxLines cfg.developerToolboxWholeReadMaxLines
+        , capMaxBytes = limit defaultWholeReadMaxBytes cfg.developerToolboxWholeReadMaxBytes
+        }
+  where
+    cfg = toolboxConfig toolbox
+    limit def Nothing = Just def
+    limit _ (Just n)
+        | n <= 0 = Nothing
+        | otherwise = Just n
+
+{- | Keep the leading lines that fit the cap. Each line counts its UTF-8
+bytes plus one for its newline. Returns the kept lines and whether any
+were dropped.
+-}
+capLines :: WholeReadCap -> [(Int, Text)] -> ([(Int, Text)], Bool)
+capLines cap xs = go 0 0 xs []
+  where
+    go _ _ [] acc = (reverse acc, False)
+    go n bytes (l@(_, txt) : rest) acc
+        | maybe False (n >=) (capMaxLines cap) = (reverse acc, True)
+        | maybe False (bytes' >) (capMaxBytes cap) = (reverse acc, True)
+        | otherwise = go (n + 1) bytes' rest (l : acc)
+      where
+        bytes' = bytes + BS.length (Text.encodeUtf8 txt) + 1
+
+{- | The hint returned with a truncated read: how big the file is, what was
+shown, and the @ranges@ value that reads the next page.
+-}
+truncationHint :: WholeReadCap -> Int -> [Int] -> Text
+truncationHint cap totalLines shown =
+    "file has "
+        <> tshow totalLines
+        <> " lines; "
+        <> shownTxt
+        <> " (whole-file reads are capped at "
+        <> capTxt
+        <> "). Pass ranges='"
+        <> tshow nextStart
+        <> "-"
+        <> tshow nextEnd
+        <> "' to read more, or a narrower range around what you need; explicit ranges are not capped."
+  where
+    tshow :: Int -> Text
+    tshow = Text.pack . show
+    (firstShown, lastShown) = case shown of
+        [] -> (0, 0)
+        (x : _) -> (x, foldl (\_ y -> y) x shown)
+    shownTxt
+        | null shown = "no line fit the cap"
+        | otherwise = "showing lines " <> tshow firstShown <> "-" <> tshow lastShown
+    nextStart = lastShown + 1
+    pageSize = max 1 (fromMaybe (length shown) (capMaxLines cap))
+    nextEnd = min totalLines (nextStart + pageSize - 1)
+    capTxt = Text.intercalate " / " $
+        [tshow n <> " lines" | Just n <- [capMaxLines cap]]
+            <> [tshow n <> " bytes" | Just n <- [capMaxBytes cap]]
 
 -- | Create and store a snapshot of the file content.
 -- Returns the snapshot reference if a snapshot store is configured.
