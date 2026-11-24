@@ -188,7 +188,10 @@ key allows:
 * A key that allows several classes (a server with sessions of several
   grades, or children of a lower class, §7.2) needs `class` (the default
   for every run) and `agentClasses` (a class per agent slug, for the agents
-  that differ). Each named class must be one the key allows.
+  that differ). Each named class must be one the key allows. A slug has
+  one class per process, wherever that agent runs: a helper that should
+  spend as its caller in one place and as `batch` in another is given a
+  second slug (decision Q16).
 * A key with no class limit (one trust domain) works the same way, but
   nothing outside the process checks the choice (§5).
 
@@ -542,6 +545,8 @@ same server:
   (`{"render_seconds": 7}`): the MCP counterpart of
   `AGENT_RESOURCE_REPORT`. A result without it falls back as in §6.1.
   `actual: "measured"` offers `calls` and `wall_seconds` only.
+* This section is the reference for the convention: there is no separate
+  page in buckette's documentation for now (decision Q17).
 * The convention is only a declaration and a report. It says nothing of
   buckets, classes or keys, and a server that uses it learns none of them.
 * A declaration that does not parse is ignored for that tool, with a
@@ -725,8 +730,13 @@ carve is the caller's reservation and spends as the caller's class.
   `protected` is the expected outcome for a batch child at a busy hour, and
   is told apart from `exhausted` as everywhere (§4.4).
 * **Only lower, never higher.** A helper is never a way up: a class that is
-  not lower than its caller's (how "lower" is decided is open question Q15) is a
-  configuration error at load and in `check --probe`. The same class means
+  not lower than its caller's is a configuration error at load and in
+  `check --probe`. "Lower" is read from the class floors (decision Q15):
+  class C is lower than class P when, on every dimension the child's
+  reservation names, C's base floor is at least P's (C leaves at least as
+  much behind), read from the bucket's `class-config` at start and in
+  `check --probe`; equal floors are not "lower", and there is no separate
+  class order in the process configuration. The same class means
   a carve (§7.1). An explicit `"carve": "hold"` on a child the process gives
   a lower class is a load error too: the two cannot both hold.
 * **The key.** The child's class must be one the process's key allows, so
@@ -891,8 +901,8 @@ Each is one PR. "→" is a dependency.
    `documentation/binary-tool.md`. → 7
 9. **Tool budgets from MCP `_meta`.** §6.2: keep `_meta` in the MCP client
    (`tools/list` and `tools/call`), read `buckette/resources` from both,
-   merge with wrappers, `budget.meta_ignored`, a page documenting the
-   convention for MCP server authors. → 7
+   merge with wrappers, `budget.meta_ignored`; §6.2 is the reference for
+   MCP server authors (no separate page, Q17). → 7
 10. **Delegation by carving.** §7.1, nesting, the enforced share for a child
     without `budget`. → 5
 11. **Delegation to a lower class.** §7.2: the child's own reservation, the
@@ -947,7 +957,9 @@ the tool and sub-agent halves and can go in parallel after 5.
 
 The owner answered the fourteen open questions of the first draft (chat,
 2026-11-24). Eleven confirm the proposal; Q10, Q12 and Q13 changed the
-design, and the sections they touch were revised.
+design, and the sections they touch were revised. Those three decisions
+raised Q15 to Q17, which the owner answered the same day (chat,
+2026-11-24). No question is open.
 
 | # | Question | Decision | Where |
 |---|---|---|---|
@@ -965,30 +977,6 @@ design, and the sections they touch were revised.
 | Q12 | Where the class lives | **Process only.** The class-limited key is the single source of truth; agent files carry no class. | §2.2, §2.3, §5 |
 | Q13 | Sub-agents and classes | **A child may have a lower class of its own**, which takes a reservation of its own instead of a carve. | §7, §7.2 |
 | Q14 | Naming | `budget` (agent field, CLI command) and `buckette` (connection), with `report.cost.perMillion` in the agent description (as proposed). | §2, §3 |
-
-## Open questions raised by the decisions
-
-* **Q15. What "lower class" means (from Q13).** buckette gives classes
-  floors, not an order. Proposed: class C is lower than class P when, on
-  every dimension the child's reservation names, C's base floor is at least
-  P's (C must leave at least as much behind), read from the bucket's
-  `class-config` at start and in `check --probe`; equal floors are not
-  "lower". Alternative: an explicit order in the process configuration
-  (`"classOrder": ["interactive", "batch", "backfill"]`), simpler but a
-  second source of truth beside buckette's floors.
-* **Q16. Where a child's lower class is named (from Q12 and Q13).** With no
-  class in agent files, this spec puts it in the process's `agentClasses`
-  (per agent slug, wherever that agent runs). That means one slug has one
-  class per process: a helper cannot be `batch` when called from one agent
-  and spend as its caller when called from another. Proposed: accept that
-  (a second slug is the workaround). Alternative: let the caller's
-  `delegation` entry ask for `"ownClass": true` and the process map caller
-  slug and child slug to a class, which keeps the class out of agent files
-  but makes the process configuration larger.
-* **Q17. A shared name for the MCP convention (from Q10).** Should the
-  `buckette/resources` shape (the declaration in `tools/list` and the
-  actual amounts in a `tools/call` result's `_meta`) be written up as a
-  short standalone page, in buckette's documentation rather than in
-  agents-exe's, so other harnesses and MCP server authors have one
-  reference? Proposed: yes, agents-exe ships a draft with slice 9 and the
-  owner decides where it lives.
+| Q15 | What "lower class" means for a child (from Q13) | From the class floors: C is lower than P when C's base floor is at least P's on every dimension the child's reservation names, read from `class-config`; equal floors are not lower; no `classOrder` in the process configuration (as proposed). | §7.2 |
+| Q16 | Where a child's lower class is named (from Q12, Q13) | Per agent slug in the process's `agentClasses`: one class per helper per process; a second slug is the workaround (as proposed). | §2.2, §7.2 |
+| Q17 | A standalone page for the `buckette/resources` `_meta` convention (from Q10) | No: this spec (§6.2) is the reference for now; no page in buckette's documentation. | §6.2, slice 9 |
