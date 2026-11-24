@@ -1,6 +1,7 @@
 # Spec: optional buckette integration (a fleet of agents under one budget)
 
-Status: proposal, 2026-11-23, asked for by the owner in the project chat.
+Status: proposal, 2026-11-23, asked for by the owner in the project chat;
+revised 2026-11-24 with the owner's answers (see "Decisions (2026-11-24)").
 Nothing here is implemented. The whole mechanism is **optional and off by
 default**: an agent description without a `budget` field, run by a process
 without buckette configuration, behaves exactly as today (§8).
@@ -28,8 +29,8 @@ The three things the owner listed are framed in those terms:
 | Asked for | Here |
 |---|---|
 | (a) monitor or gate turns and tokens | reporting per completion (§3); the run reservation, its grows and its refusals (§4); under a class (§5) |
-| (b) tools report, reserve, consume resources, declared in the tool description | the same reporting and reservation, per call, declared in `describe` or by the agent (§6) |
-| (c) sub-agents with a delegated budget | a share carved out of the caller's hold, or a real child bucket for a child that runs elsewhere (§7) |
+| (b) tools report, reserve, consume resources, declared in the tool description | the same reporting and reservation, per call, declared in `describe`, in an MCP tool's `_meta` (`buckette/resources`), or by the agent (§6) |
+| (c) sub-agents with a delegated budget | a share carved out of the caller's hold; a reservation of its own for a child of a lower class; or a real child bucket for a child that runs elsewhere (§7) |
 
 Adoption follows buckette's own three steps for workflows: **monitored**
 (`mode: "report"`, every dimension in reporting mode), **controlled**
@@ -154,6 +155,7 @@ In `agents-exe.cfg.json`, or as flags that win over it:
     "key": {"tag": "ApiKeySource", "contents": "buckette"},
     "bucket": "5f0c...",
     "class": "batch",
+    "agentClasses": {"re-index": "backfill", "web-search": "batch"},
     "labels": {"fleet": "nightly", "host": "worker-3"},
     "onUnreachable": "closed",
     "timeoutMs": 2000,
@@ -165,10 +167,34 @@ In `agents-exe.cfg.json`, or as flags that win over it:
 Flags: `--buckette-url URL`, `--buckette-key ID` (an id in the `--api-keys`
 file), `--budget-bucket BUCKET`, `--budget-class CLASS`,
 `--budget-on-unreachable open|closed`, `--budget-dry-run` (§8.3),
-`--no-budget` (§8.1). They are global to the process, like `--envdir-root`,
+`--no-budget` (§8.1), `--agent-class SLUG=CLASS` (repeatable, as
+`agentClasses`). They are global to the process, like `--envdir-root`,
 and shared by `agents-exe-server`, which adds `--owner-budget
 OWNER=BUCKET[:CLASS]` (repeatable, needs `--auth-tokens`) in the spirit of
 `--owner-api-keys`.
+
+**The class is process configuration only** (decision Q12). It is a
+deployment fact, not agent behaviour: the same agent file is `interactive`
+in a TUI and `batch` under cron. Agent files carry no class, and a `class`
+key in a `budget` field is a load error that points here. The
+**class-limited key is the single source of truth**: it says which classes
+this machine may spend as, and buckette enforces it (`403
+class_not_allowed`). The settings above only choose among the classes the
+key allows:
+
+* A key limited to exactly one class needs nothing else: `class` may be
+  left out, no class is sent, and buckette applies the key's class. If
+  `class` is set it must be that class.
+* A key that allows several classes (a server with sessions of several
+  grades, or children of a lower class, §7.2) needs `class` (the default
+  for every run) and `agentClasses` (a class per agent slug, for the agents
+  that differ). Each named class must be one the key allows.
+* A key with no class limit (one trust domain) works the same way, but
+  nothing outside the process checks the choice (§5).
+
+`check --probe` compares every configured class with the key's
+`akiClasses` before any run (§2.4); at run time a mismatch is a
+configuration error, never a shortfall.
 
 **Credentials.** `key` is a `SecretSource`: `ApiKeySource` (an entry of the
 `--api-keys` file, the default way), `FileSystem`, `EnvVar` or `Command`.
@@ -190,7 +216,6 @@ One new optional field on `Agent`:
 { "slug": "nightly-digest",
   "budget": {
     "mode": "reserve",
-    "class": "batch",
     "report": { "...": "§3" },
     "run":    { "...": "§4" },
     "tools":  { "...": "§6" },
@@ -203,11 +228,19 @@ One new optional field on `Agent`:
 |---|---|
 | `mode` | `"report"` (default): reporting only, nothing is ever refused. `"reserve"`: runs and gated tool calls take reservations. |
 | `bucket` | Optional: `{"id": "..."}` or `{"param": "name"}` (an agent parameter, `todos/tool-partial-application.md`). Absent: the process's bucket. A bucket id is not a secret. |
-| `class` | Optional. The class every consume, check and reserve of this agent names. Absent: the process's `class`; absent there too: none is sent, and buckette applies the key's single class or the bucket's `default_class`. |
 
-Precedence for bucket and class: a helper agent called under §7 uses what
-its caller gives it; else the agent's own; else `--owner-budget`; else the
+There is no `class` field (§2.2, decision Q12).
+
+Precedence for the bucket: a helper agent called under §7 uses what its
+caller gives it; else the agent's own; else `--owner-budget`; else the
 process's. An agent that needs a bucket and finds none fails to load (§8.1).
+
+Precedence for the class of a run, all of it process configuration: a
+helper carved from its caller's hold spends as its caller (§7.1), and a
+helper given a lower class of its own uses that class (§7.2); otherwise, on
+the server, the owner's `--owner-budget` class; else `agentClasses[slug]`;
+else `class`; else none is sent, and buckette applies the key's single
+class or the bucket's `default_class`.
 
 Dimension names in `budget` are dimension names of that bucket.
 
@@ -245,10 +278,10 @@ only):
 | Probe | Failure it names |
 |---|---|
 | `GET /health`, then an authenticated read | unreachable; `wrong_key_kind` ("a console key was configured where a tenant key is needed"); `401`; `tenant_on_hold` with its reason; `tenant_moved` |
-| the key's scopes and limits | missing `ScopeConsume`; a key that is not confined to a bucket (warning); the key's `akiClasses` against each agent's `class` (`class_not_allowed` before any run) |
+| the key's scopes and limits | missing `ScopeConsume`; a key that is not confined to a bucket (warning); a key with no class limit (warning: classes are then whatever the process says); every configured class (`class`, `agentClasses`, `--owner-budget`) against the key's `akiClasses` (`class_not_allowed` before any run) |
 | each agent's bucket | not found; a named dimension missing |
 | modes | a warning for `mode: "reserve"` on a `Reporting` dimension (it will never refuse) and for `mode: "report"` on a `Locking` one (reports may be clamped) |
-| classes | the agent's class is not declared on the bucket (`unknown_class`); a class with a `linear`/`step` floor on a bucket without a schedule |
+| classes | a configured class is not declared on the bucket (`unknown_class`); a class with a `linear`/`step` floor on a bucket without a schedule; a helper given a class of its own that is not lower than the class of every caller that may delegate to it (§7.2) |
 | reservation policy | none on the bucket: a crashed run's hold relies only on the expiry agents-exe sets (warning) |
 
 `check --probe --json` prints the same as data, for a fleet's deployment
@@ -408,7 +441,8 @@ What classes ask of agents-exe is small, and it is everywhere:
 
 * **Name the class on every request** that can be refused or clamped:
   `crClass` on consume and check, `rrvClass` on reserve (a grow and a commit
-  inherit the hold's class). §2.3 says where the class comes from.
+  inherit the hold's class). §2.2 and §2.3 say where the class comes from:
+  the process, never the agent file.
 * **Treat `protected` as its own outcome** (§4.4), with its own trace, pause
   reason and exit message, so that a fleet operator reading "batch refused"
   does not conclude the allowance is too small. buckette's shortfall
@@ -421,12 +455,15 @@ What classes ask of agents-exe is small, and it is everywhere:
   has no classes and a split applies no floor, so a per-run or per-sub-agent
   child bucket would take the protected share out from under the floor.
   This is why the run's budget is a **reservation on the fleet bucket**
-  (§4), and why delegation defaults to carving from the caller's hold (§7)
-  rather than to a split.
-* **Let the key bind it.** With a class-limited fleet key, an agent file
-  that claims `interactive` on a batch machine is refused by buckette
-  (`403 class_not_allowed`). Without one, a class is what the agent says it
-  is, which is enough inside one trust domain and not across teams.
+  (§4), and why delegation carves from the caller's hold, or, for a child
+  of a lower class, takes a reservation of its own on the same bucket (§7),
+  rather than splitting.
+* **Let the key bind it.** The process chooses the class among those its
+  key allows (§2.2); an agent file cannot name one at all. A process
+  misconfigured as `interactive` on a batch machine is refused by buckette
+  (`403 class_not_allowed`). Without a class-limited key, the class is what
+  the process says it is, which is enough inside one trust domain and not
+  across teams.
 
 Declaring classes and floors is the bucket owner's job, in buckette, with
 buckette's own help (`GET /buckets/:id/class-floor-suggestion`, fed by the
@@ -475,12 +512,46 @@ file and the tool writes one JSON object there before exiting (`{"usd":
 0.12}`). A missing report falls back to the declared amount for `reserve`
 (the bound, the safe side) and to nothing for `report`, with a
 `budget.report_missing` trace. `stream`/`service` tools will instead carry
-`"resources": {...}` in output events (slice 10).
+`"resources": {...}` in output events (slice 12).
 
 A v1 tool, or a v2 tool without `resources`, is unchanged.
 `agents-exe describe-tool` shows the parsed `resources`.
 
-### 6.2 What the agent declares: mapping, and rules for any tool
+### 6.2 What an MCP tool declares: `_meta["buckette/resources"]`
+
+An MCP server declares the same list in a tool's `_meta`, in its
+`tools/list` answer, under the key **`buckette/resources`** (decision Q10).
+The key is named after buckette, not after agents-exe, so that any agent
+harness that integrates buckette can read the same declaration from the
+same server:
+
+```json
+{ "name": "render_pdf",
+  "inputSchema": { "...": "..." },
+  "_meta": { "buckette/resources": [
+      { "name": "render_seconds", "kind": "reserve",
+        "amount": {"arg": "pages", "scale": 2, "default": 10}, "actual": "reported" },
+      { "name": "renderer_slots", "kind": "hold", "amount": 1 } ] } }
+```
+
+* Entries have the shape of §6.1, with `"arg"` read from the call's
+  `arguments`. The names are the server's own, mapped by `tools.map` like
+  any tool's (§6.3).
+* `actual: "reported"` reads the call result's
+  `_meta["buckette/resources"]`, an object of actual amounts
+  (`{"render_seconds": 7}`): the MCP counterpart of
+  `AGENT_RESOURCE_REPORT`. A result without it falls back as in §6.1.
+  `actual: "measured"` offers `calls` and `wall_seconds` only.
+* The convention is only a declaration and a report. It says nothing of
+  buckets, classes or keys, and a server that uses it learns none of them.
+* A declaration that does not parse is ignored for that tool, with a
+  load-time warning naming the server and the tool: an MCP server is
+  outside the agent author's control, so this is not a `LoadingError`.
+  Agent-side wrappers (§6.3) still apply.
+* agents-exe's MCP client has to keep `_meta` from `tools/list` and from
+  `tools/call` results; today it drops both.
+
+### 6.3 What the agent declares: mapping, and rules for any tool
 
 ```json
 "tools": {
@@ -497,9 +568,10 @@ bucket lacks is ignored with a load-time warning, or is a `LoadingError`
 under `"unmapped": "error"`. Under `mode: "report"` every kind behaves as
 `report`: amounts are reported, nothing is held or refused.
 
-Tools without a `describe` (builtin toolboxes, MCP, OpenAPI, PostgREST,
-Lua, helper agents), and bash tools whose author declared nothing, get
-resources from the agent through a **new decorator** in the existing
+Tools without a declaration of their own (builtin toolboxes, OpenAPI,
+PostgREST, Lua, helper agents, bash tools whose author declared nothing,
+MCP tools without `_meta`), and any tool whose declaration the agent wants
+to change, get resources from the agent through a **new decorator** in the existing
 `toolCallPolicyConfig.wrappers`, matched by the existing `WrapperMatch`:
 
 ```json
@@ -510,16 +582,18 @@ resources from the agent through a **new decorator** in the existing
 ]
 ```
 
-Entries have the shape of §6.1 (`actual: "reported"` for bash tools only).
-When `describe` and wrappers name the same resource, the last matching
-wrapper wins for that name; `"kind": "none"` silences one. The agent author
-has the last word. MCP tools could carry the list in `_meta` (Q10).
+Entries have the shape of §6.1 (`actual: "reported"` for bash and MCP
+tools only). For MCP tools both sources apply (decision Q10): the server's
+`_meta` declaration first, then the agent's wrappers. When a tool's own
+declaration (`describe` or `_meta`) and wrappers name the same resource,
+the last matching wrapper wins for that name; `"kind": "none"` silences
+one. The agent author has the last word.
 
-### 6.3 The lifecycle around one call
+### 6.4 The lifecycle around one call
 
 1. **Before.** After before-hooks (a denied call costs nothing) and after
    the cache (a hit costs nothing), all held amounts of the call go in
-   **one** reservation: atomic across dimensions, with the agent's
+   **one** reservation: atomic across dimensions, with the run's
    `rrvClass`, `rrvExpiresAt = now + max(holdTtlSeconds, the call's
    timeout)`, `rrvTransactionId = "<sessionId>:<toolCallId>"`, and metadata
    adding `tool` and `kind: "tool"` to §3's.
@@ -539,7 +613,7 @@ A tool resource that is a dimension the **run** already holds (a tool that
 spends `tokens`) is debited from the run's hold in memory instead of taking
 a hold of its own, and grows it when needed (§4.2).
 
-### 6.4 Refusal
+### 6.5 Refusal
 
 A refused reservation means the call **does not run**. `tools.onRefused`
 (overridable per decorator):
@@ -579,6 +653,15 @@ Per child slug, or `default`: `allocation` (amounts per dimension), or
 own; also what happens when `delegation` is absent, so a budgeted caller is
 never escaped through a child), or `"none"` (explicitly unbudgeted).
 
+How the share is taken depends on where the child runs and on its class,
+and the class comes from the process (§2.2), never from either agent file:
+
+| The child | `carve` | § |
+|---|---|---|
+| runs in the process, spends as its caller (no `agentClasses` entry, or the caller's own class) | `"hold"` (default) | 7.1 |
+| runs in the process, and the process gives it a **lower class** of its own | `"reserve"` (implied by that class) | 7.2 |
+| runs outside the process, or must be its own bucket | `"split"` (explicit) | 7.3 |
+
 ### 7.1 `carve: "hold"` (default): a share of the run's reservation
 
 The child's allocation is taken **out of the caller's hold**, in the
@@ -598,7 +681,7 @@ completion.
 * Grandchildren carve from the child's share: budgets nest along the call
   stack.
 * The child spends as the **caller's class**: it is the caller's
-  reservation. A helper cannot be a way to change class.
+  reservation. A child that must spend as another class takes §7.2.
 * A child with no `budget` field of its own is still held to its share:
   **a delegated budget is always enforced.**
 * This works with class-limited keys and keeps everything on the bucket
@@ -608,7 +691,54 @@ Under `mode: "report"` there is nothing to carve: the child reports on the
 caller's bucket and class, and `allocation` is ignored with a load-time
 note.
 
-### 7.2 `carve: "split"`: a real child bucket
+### 7.2 `carve: "reserve"`: a lower class, a reservation of its own
+
+An interactive agent may hand a side task to a helper that does not need
+interactive priority: a re-indexing pass, a long web search, a digest
+nobody waits on (decision Q13). The process gives that helper a lower class
+(`"agentClasses": {"web-search": "batch"}`, §2.2), and the helper then
+**takes a reservation of its own** on the same fleet bucket, under its own
+class, instead of a carve from the caller's hold. A carve cannot do it: a
+carve is the caller's reservation and spends as the caller's class.
+
+* **Size.** The delegation entry sizes it exactly as for a carve
+  (`allocation`, or `fraction` of what the caller has left, capped by
+  `max`). That is the child's `hold`, and also its limit: like a carved
+  child it does not grow, and stops or wraps up when it runs out (§7.1).
+* **Request.** `POST /buckets/<b>/reservations` with `rrvAmounts` = the
+  share, `rrvClass` = the child's class, `rrvExpiresAt` as in §4.1,
+  `rrvTransactionId = "<callerSessionId>:<toolCallId>:child"` (a retried
+  call finds the same hold) and metadata `agent: <child>`, `parent:
+  <caller>`. It is checked under the **lower class's floor**: the child can
+  only take what that class may take, so the protected share of the
+  caller's class is never used by its side tasks.
+* **The caller's hold is untouched.** Nothing is debited from the caller's
+  local account and nothing is credited back. The child's usage goes to the
+  ledger under its own class, which is what makes the per-class breakdown
+  and buckette's floor suggestions right.
+* **Settle.** The child commits its own reservation when the call ends,
+  however it ends (§4.3). A crash leaves it to the hold's expiry, like any
+  run.
+* **Refusal.** A refused reservation is a refused helper call:
+  `delegation.onRefused`, with the values of §6.5 (default `tell`:
+  `sub-agent not started: held back for higher-priority work until ...`).
+  `protected` is the expected outcome for a batch child at a busy hour, and
+  is told apart from `exhausted` as everywhere (§4.4).
+* **Only lower, never higher.** A helper is never a way up: a class that is
+  not lower than its caller's (how "lower" is decided is open question Q15) is a
+  configuration error at load and in `check --probe`. The same class means
+  a carve (§7.1). An explicit `"carve": "hold"` on a child the process gives
+  a lower class is a load error too: the two cannot both hold.
+* **The key.** The child's class must be one the process's key allows, so
+  a fleet that uses this mints its key with both classes
+  (`cakreClasses: ["interactive", "batch"]`). The key stays the single
+  source of truth for what the machine may spend as.
+* **Nesting.** The child's own helpers carve from the child's reservation
+  (§7.1, at the child's class) or take a still lower class of their own.
+* Under `mode: "report"` nothing is held: the child reports per completion
+  under its own class.
+
+### 7.3 `carve: "split"`: a real child bucket
 
 For a child that runs **outside the process** (`runIsolated`, a remote
 deployment) or that must be visible as its own bucket in the Console:
@@ -631,7 +761,9 @@ deployment) or that must be visible as its own bucket in the Console:
 Limits, stated by buckette and therefore refused at load here: a
 class-limited key cannot split, and a split child has no classes and is
 carved without regard to floors. `carve: "split"` is for fleets that do not
-use classes on that bucket, or whose caller is of the top class.
+use classes on that bucket, or whose caller is of the top class. A child
+that needs a lower class and must also run outside the process is not
+supported: a split child has no classes to spend as.
 
 ## 8. Off by default, and failure
 
@@ -660,10 +792,11 @@ policy at run time.
 | Step | `open` | `closed` |
 |---|---|---|
 | report (always `open`) | dropped and counted (`budget.report_dropped`) | not available |
-| reserve at run start, or for a tool call | the run or call proceeds unreserved, traced `unreserved`; its usage is reported afterwards if buckette is back | as a refusal with reason `budget_unreachable`: §4.4 / §6.4 |
+| reserve at run start, or for a tool call | the run or call proceeds unreserved, traced `unreserved`; its usage is reported afterwards if buckette is back | as a refusal with reason `budget_unreachable`: §4.4 / §6.5 |
 | grow | the run continues on what it holds, then unreserved | as a refused grow |
 | refresh | retried; the hold may lapse, the settle then reports instead | same |
 | settle | retried in the background, then reported `Partial`, then left to the hold's expiry; always traced | same: work done is never undone |
+| a lower-class child's reserve (§7.2) | the helper runs unreserved, under its own class, traced `unreserved` | the helper call is refused |
 | split / reclaim | the child inherits the caller's budget / left to `srExpiresAt` | the helper call is refused / same |
 
 Default: **`closed` for reservations** (a gate that opens when the network
@@ -695,6 +828,8 @@ JSON log (`agentsLogs`), with session, turn and tool-call ids and the class:
 | `budget.refused` | `exhausted` or `protected`, requested, shortfall, available, floor, eta, the action taken |
 | `budget.settled`, `budget.released` | reservation id, committed, freed |
 | `budget.carved`, `budget.returned` | caller, child, allocation, returned |
+| `budget.delegated_reserved` | caller and child with their classes, reservation id, allocation (§7.2; the settle is an ordinary `budget.settled`) |
+| `budget.meta_ignored` | MCP server and tool, why its `buckette/resources` did not parse (§6.2) |
 | `budget.split`, `budget.reclaimed` | parent and child buckets, allocation, returned |
 | `budget.unreachable`, `budget.report_dropped` | error class, policy applied |
 | `budget.would_refuse`, `budget.disabled`, `budget.report_missing` | as above |
@@ -726,17 +861,19 @@ the system toolbox gives a read-only `budget_status` tool (amounts only).
 
 Each is one PR. "→" is a dependency.
 
-1. **Configuration and types.** `budget` on `Agent` (mode, class, report,
-   run, tools, delegation), the `budget` decorator, the `buckette` block
-   and flags, the key as a `SecretSource` with `Given` refused, plain
-   `check` validation, `documentation/budgets.md` with the setup runbook
+1. **Configuration and types.** `budget` on `Agent` (mode, report, run,
+   tools, delegation; a `class` key refused with a message pointing to the
+   process configuration), the `budget` decorator, the `buckette` block
+   and flags (`class`, `agentClasses`, `--agent-class`), the key as a
+   `SecretSource` with `Given` refused, plain `check` validation, `documentation/budgets.md` with the setup runbook
    (§2.4). Parsed and validated, never acted on.
 2. **Ledger and client.** A `Ledger` record (check, consume, reserve, grow,
    refresh, commit, release, eta, split, reclaim) with the buckette HTTP
    client (class on every request, error classification of §8.2,
    idempotency keys, redaction) and an in-memory implementation with floors
    for tests. `BudgetTrace`. → 1
-3. **`check --probe`.** The table of §2.4. → 2
+3. **`check --probe`.** The table of §2.4, including every configured
+   class against the key's `akiClasses`. → 2
 4. **Reporting.** §3 in both step functions, class and fleet metadata,
    estimated usage, the background sender. The monitored stage is usable
    from here. → 2
@@ -747,28 +884,35 @@ Each is one PR. "→" is a dependency.
 6. **Waiting and the other actions.** `waitSeconds` with ETA, `ask` (TUI
    and server), `degrade` with the wrap-up. → 5
 7. **Tool budgets from the agent.** The `budget` decorator for every tool
-   kind: §6.3 and §6.4, `declared` and `measured` actuals. → 2 (and 5 for
+   kind: §6.4 and §6.5, `declared` and `measured` actuals. → 2 (and 5 for
    resources shared with the run's hold)
 8. **Tool budgets from `describe`.** `resources`, `tools.map`,
    `AGENT_RESOURCE_REPORT`, merge with wrappers, `describe-tool`,
    `documentation/binary-tool.md`. → 7
-9. **Delegation by carving.** §7.1, nesting, the enforced share for a child
-   without `budget`. → 5
-10. **Long calls.** Refresh for async calls, settle on durable restart,
+9. **Tool budgets from MCP `_meta`.** §6.2: keep `_meta` in the MCP client
+   (`tools/list` and `tools/call`), read `buckette/resources` from both,
+   merge with wrappers, `budget.meta_ignored`, a page documenting the
+   convention for MCP server authors. → 7
+10. **Delegation by carving.** §7.1, nesting, the enforced share for a child
+    without `budget`. → 5
+11. **Delegation to a lower class.** §7.2: the child's own reservation, the
+    "lower than its caller" check at load and in `check --probe`,
+    `budget.delegated_reserved`. → 10, 3
+12. **Long calls.** Refresh for async calls, settle on durable restart,
     resources of `stream`/`service` tools (waits for those bash-tools-v2
     modes), `settleEvery`. → 5, 7
-11. **Fleet surface.** `agents-exe budget status`, server events and
+13. **Fleet surface.** `agents-exe budget status`, server events and
     session JSON, `--owner-budget`, `announce`, `budget_status`. → 4
-12. **Delegation by split.** §7.2 with scoped keys for isolated children.
-    → 9
-13. **`agents-exe budget init`.** Tenant-side setup from an admin key
+14. **Delegation by split.** §7.3 with scoped keys for isolated children.
+    → 10
+15. **`agents-exe budget init`.** Tenant-side setup from an admin key
     (bucket, dimensions, reservation policy, class-config, the run-time
     key). → 3
 
-Slices 1 to 4 put a fleet under monitoring; 5 and 6 pace it; 7 to 9 are the
-tool and sub-agent halves and can go in parallel after 5.
+Slices 1 to 4 put a fleet under monitoring; 5 and 6 pace it; 7 to 11 are
+the tool and sub-agent halves and can go in parallel after 5.
 
-## Decisions (proposed)
+## Design principles
 
 * **D1. Three mechanisms, nothing else:** reporting (`consume`, `Partial`),
   reservation (reserve, grow, refresh, commit), class named on every
@@ -778,59 +922,73 @@ tool and sub-agent halves and can go in parallel after 5.
   turns debited locally, so a gated run costs a handful of requests.
 * **D3. The fleet spends from the bucket that declares the classes.**
   Per-run budgets are reservations, sub-agent budgets are carved from the
-  hold; a split is the exception, for children outside the process.
+  hold or, for a child of a lower class, reserved on the same bucket under
+  that class; a split is the exception, for children outside the process.
 * **D4. `protected` is not `exhausted`,** in traces, statuses, messages and
   exit output.
 * **D5. Tools speak their own resource names;** the agent maps them. A tool
-  never sees buckette, a bucket id, a class or a key.
+  never sees buckette, a bucket id, a class or a key. MCP servers declare
+  them under `_meta["buckette/resources"]`, a key any harness can read.
 * **D6. Tool budgets are a decorator** of the existing wrapper rules, one
-  code path for every tool kind; `describe.resources` produces the same
-  decorator.
+  code path for every tool kind; `describe.resources` and MCP `_meta`
+  produce the same decorator, and the agent's wrappers have the last word.
 * **D7. A delegated budget is always enforced,** and absent `delegation`
   means `inherit`, never "unbudgeted".
 * **D8. Reservations fail closed, reporting fails open.**
 * **D9. The key is process configuration:** a tenant key, never inline,
   never in an agent description, never passed to a tool. The console API is
   for setup by a person, not for the run time.
+* **D10. The class is process configuration too,** chosen among the
+  classes the key allows; the class-limited key is the single source of
+  truth. Agent files carry no class, and a helper may only go down a class,
+  never up.
 
-## Open questions for the owner
+## Decisions (2026-11-24)
 
-* **Q1. Is the run the right paced unit?** One reservation per run with
-  local per-turn accounting (proposed), or a reservation per LLM turn
-  (simpler to reason about, a round trip or two per turn, per-turn records
-  in buckette)?
-* **Q2. A budgeted agent on a process without buckette:** load error unless
-  `--no-budget` (proposed), or a warning and run unbudgeted?
-* **Q3. Unreachable buckette under `reserve`:** `closed` by default
-  (proposed), or `open`?
-* **Q4. Providers that return no `usage`:** estimate from bytes and flag it
-  (proposed), or refuse to load a token rule for such a model?
-* **Q5. `degrade`:** is the wrap-up turn the right meaning, or do you want a
-  cheaper-model fallback (another `modelName`, possibly another class) in
-  the first version?
-* **Q6. Unsettled usage of a crashed long run:** accept it (the hold
-  expires, the usage is not booked), add `settleEvery`, or also report held
-  dimensions per turn on separate `Reporting` dimensions?
-* **Q7. Status and exit code on refusal:** `StatusPaused` with a reason and
-  exit 75 (proposed), or a new status and other codes, perhaps different
-  for `protected` and `exhausted`?
-* **Q8. Retries:** a tool call is paid once whatever the number of attempts
-  (proposed), or once per attempt?
-* **Q9. Setup:** is the runbook plus an optional `agents-exe budget init`
-  (tenant side only) right, or should agents-exe also drive the console's
-  device flow and create the tenant?
-* **Q10. MCP tools:** read `resources` from a tool's `_meta` (key to agree,
-  e.g. `agents-exe/resources`), or agent-side wrappers only?
-* **Q11. Server tenancy:** one tenant key for the server with
-  `--owner-budget OWNER=BUCKET[:CLASS]` (proposed), or a key per owner so a
-  bug in agents-exe cannot charge one owner's bucket for another's session?
-* **Q12. Where the class lives:** agent description with a process default
-  (proposed), or process-only, so that agent files stay free of deployment
-  concerns and the class-limited key is the single source of truth?
-* **Q13. Sub-agents and classes:** a carved child always spends as its
-  caller's class (proposed). Should a child be allowed a *lower* class of
-  its own (an interactive agent delegating a batch-grade side task), which
-  needs a reservation of its own instead of a carve?
-* **Q14. Naming:** `budget` (agent field, CLI command) and `buckette`
-  (connection), and `report.cost.perMillion` in the agent description versus a
-  process-level price table per model.
+The owner answered the fourteen open questions of the first draft (chat,
+2026-11-24). Eleven confirm the proposal; Q10, Q12 and Q13 changed the
+design, and the sections they touch were revised.
+
+| # | Question | Decision | Where |
+|---|---|---|---|
+| Q1 | The paced unit | One reservation per run, with local per-turn accounting (as proposed). | §4 |
+| Q2 | A budgeted agent on a process without buckette | Load error unless `--no-budget` (as proposed). | §8.1 |
+| Q3 | buckette unreachable under `reserve` | `closed` by default; reporting always open (as proposed). | §8.2 |
+| Q4 | A provider that returns no `usage` | Estimate from bytes and flag it (as proposed). | §3 |
+| Q5 | `degrade` | The wrap-up turn; no cheaper-model fallback in the first version (as proposed). | §4.4 |
+| Q6 | Unsettled usage of a crashed long run | Accepted: the hold expires and the usage is not booked; `settleEvery` stays available (as proposed). | §4.3 |
+| Q7 | Status and exit code on refusal | `StatusPaused` with a reason, exit 75 (as proposed). | §4.4 |
+| Q8 | Retries | A tool call is paid once, whatever the number of attempts (as proposed). | §6.4 |
+| Q9 | Setup | The runbook plus an optional `agents-exe budget init`, tenant side only (as proposed). | §2.4 |
+| Q10 | MCP tools | **Both**: `resources` read from the tool's `_meta` under **`buckette/resources`** (not `agents-exe/...`, so other agent harnesses can share the convention), and agent-side wrappers as well. | §6.2, §6.3 |
+| Q11 | Server tenancy | One tenant key with `--owner-budget OWNER=BUCKET[:CLASS]` (as proposed). | §2.2 |
+| Q12 | Where the class lives | **Process only.** The class-limited key is the single source of truth; agent files carry no class. | §2.2, §2.3, §5 |
+| Q13 | Sub-agents and classes | **A child may have a lower class of its own**, which takes a reservation of its own instead of a carve. | §7, §7.2 |
+| Q14 | Naming | `budget` (agent field, CLI command) and `buckette` (connection), with `report.cost.perMillion` in the agent description (as proposed). | §2, §3 |
+
+## Open questions raised by the decisions
+
+* **Q15. What "lower class" means (from Q13).** buckette gives classes
+  floors, not an order. Proposed: class C is lower than class P when, on
+  every dimension the child's reservation names, C's base floor is at least
+  P's (C must leave at least as much behind), read from the bucket's
+  `class-config` at start and in `check --probe`; equal floors are not
+  "lower". Alternative: an explicit order in the process configuration
+  (`"classOrder": ["interactive", "batch", "backfill"]`), simpler but a
+  second source of truth beside buckette's floors.
+* **Q16. Where a child's lower class is named (from Q12 and Q13).** With no
+  class in agent files, this spec puts it in the process's `agentClasses`
+  (per agent slug, wherever that agent runs). That means one slug has one
+  class per process: a helper cannot be `batch` when called from one agent
+  and spend as its caller when called from another. Proposed: accept that
+  (a second slug is the workaround). Alternative: let the caller's
+  `delegation` entry ask for `"ownClass": true` and the process map caller
+  slug and child slug to a class, which keeps the class out of agent files
+  but makes the process configuration larger.
+* **Q17. A shared name for the MCP convention (from Q10).** Should the
+  `buckette/resources` shape (the declaration in `tools/list` and the
+  actual amounts in a `tools/call` result's `_meta`) be written up as a
+  short standalone page, in buckette's documentation rather than in
+  agents-exe's, so other harnesses and MCP server authors have one
+  reference? Proposed: yes, agents-exe ships a draft with slice 9 and the
+  owner decides where it lives.
